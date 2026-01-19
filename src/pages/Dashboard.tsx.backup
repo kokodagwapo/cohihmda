@@ -1,0 +1,3128 @@
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '@/lib/api';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Phone, FileCheck, AlertTriangle, TrendingUp, Users, DollarSign, Clock, BarChart3, ArrowUp, ArrowDown, Target, MessageSquare, X, FileSpreadsheet, FileText, Presentation, Bell, BellOff, Activity, CheckCircle2, Info, Zap, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Newspaper, Building2, ExternalLink, Pause, Play, Minimize2, Maximize2, KeyRound, CalendarDays, Pin, Archive, Medal, Award, Star, Crown, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Settings, Check, RefreshCw, MoreVertical, Search, Database, Loader2 } from 'lucide-react';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { format } from 'date-fns';
+import { DateRange } from 'react-day-picker';
+import { SeedDataButton } from '@/components/dashboard/SeedDataButton';
+import { useToast } from '@/hooks/use-toast';
+import { DashboardLayout } from '@/components/dashboard/DashboardLayout';
+import { DashboardContainer } from '@/components/dashboard/DashboardContainer';
+import { useDashboardState } from '@/hooks/useDashboardState';
+import { useDashboardFilters } from '@/hooks/useDashboardFilters';
+import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
+import { UsageDisplay } from '@/components/billing/UsageDisplay';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Area, AreaChart } from 'recharts';
+import { Copy, Code2, Sparkles } from 'lucide-react';
+import { AletheiaVoiceAssistant } from '@/components/aletheia/AletheiaVoiceAssistant';
+import { AilethiaPodcast } from '@/components/aletheia/AilethiaPodcast';
+import { motion, AnimatePresence } from 'framer-motion';
+import { generatePDF } from '@/utils/pdfExport';
+import { ReportsSidebar, DashboardVisibility } from '@/components/dashboard/ReportsSidebar';
+import { ReportModal } from '@/components/dashboard/ReportModal';
+import { ReportData, allReports } from '@/data/reportSimulations';
+import { useEdit } from '@/contexts/EditContext';
+import { EditableText, EditableNumber } from '@/components/ui/EditableText';
+import { LOSFunnelData, LOSApiResponse, mapLOSDataToUniversalSchema } from '@/lib/losSchema';
+import { FunnelVisualization } from '@/components/FunnelVisualization';
+import { FunnelDataPoint } from '@/types/funnel';
+import { useTheme } from '@/components/theme-provider';
+import { formatCompactNumber, formatCompactNumberNoCurrency } from '@/utils/formatting';
+import { getUrgencyColor, getUrgencyDot, getAnimatedValue, getSmoothProgress, getFilteredKPI } from '@/utils/dashboardHelpers';
+import { useDashboardMetrics } from '@/hooks/useDashboardMetrics';
+import { IndustryNewsCard } from '@/components/dashboard/IndustryNewsCard';
+import { BusinessDataTable } from '@/components/dashboard/BusinessDataTable';
+import { DashboardCard } from '@/components/dashboard/DashboardCard';
+import { DataTable } from '@/components/dashboard/DataTable';
+import { ExecutiveDashboard } from '@/components/dashboard/ExecutiveDashboard';
+import { AletheiaPromptsCard } from '@/components/dashboard/AletheiaPromptsCard';
+import { LeaderBoardSection } from '@/components/dashboard/LeaderBoardSection';
+import { LoanFunnelView } from '@/components/dashboard/views/LoanFunnelView';
+import { TopTieringModal } from '@/components/dashboard/modals/TopTieringModal';
+import { TrendsModal } from '@/components/dashboard/modals/TrendsModal';
+import { ForecastingModal } from '@/components/dashboard/modals/ForecastingModal';
+import { ContactModal } from '@/components/dashboard/modals/ContactModal';
+import { MetricModal } from '@/components/dashboard/modals/MetricModal';
+import { RiskModal } from '@/components/dashboard/modals/RiskModal';
+import { PullThroughModal } from '@/components/dashboard/modals/PullThroughModal';
+import { ExportModal } from '@/components/dashboard/modals/ExportModal';
+import { ShareModal } from '@/components/dashboard/modals/ShareModal';
+import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
+import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
+
+
+
+// CompanyDetailView, SalesView, and OpsView have been extracted to:
+// - src/components/dashboard/views/CompanyDetailView.tsx
+// - src/components/dashboard/views/SalesView.tsx
+// - src/components/dashboard/views/OpsView.tsx
+
+const Dashboard = () => {
+  const navigate = useNavigate();
+  const {
+    toast
+  } = useToast();
+  const {
+    isAuthenticated: contextAuthenticated,
+    setIsAuthenticated: setContextAuthenticated
+  } = useEdit();
+  // Use custom hooks for state management
+  const dashboardState = useDashboardState();
+  const dashboardFilters = useDashboardFilters();
+  const { dashboardVisibility, isLoadingVisibility, handleVisibilityChange } = useDashboardVisibility();
+  
+  // Local state for authentication and error handling
+  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-authenticate by default
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loading, setLoading] = useState(false); // No loading needed since we're auto-authenticating
+  const [pageError, setPageError] = useState<Error | null>(null);
+  
+  // Briefing context state
+  const [briefingContext, setBriefingContext] = useState<{
+    dialogues?: Array<{ message: string; type: string; priority: string }>;
+    funnelStory?: {
+      conversionRates: any;
+      falloutData: any;
+      lostRevenue: any;
+    };
+    userName?: string;
+  } | null>(null);
+
+  // Catch any unhandled errors
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      console.error('Unhandled error:', event.error);
+      setPageError(event.error);
+    };
+    
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  // Destructure state from hooks for easier access
+  const {
+    stats, setStats,
+    recentCalls, setRecentCalls,
+    animationCycle, setAnimationCycle,
+    isAnimating, setIsAnimating,
+    selectedTier, setSelectedTier,
+    visibleCount, setVisibleCount,
+    itemsPerPage,
+    mobileMenuOpen, setMobileMenuOpen,
+    currentWarningIndex, setCurrentWarningIndex,
+    visibleWarnings, setVisibleWarnings,
+    showNotifications, setShowNotifications,
+    contactModal, setContactModal,
+    metricModal, setMetricModal,
+    falloutModal, setFalloutModal,
+    pullThroughModal, setPullThroughModal,
+    riskModal, setRiskModal,
+    exportModal, setExportModal,
+    shareModal, setShareModal,
+    embedModal, setEmbedModal,
+    topTieringModal, setTopTieringModal,
+    topTieringTab, setTopTieringTab,
+    funnelView, setFunnelView,
+    funnelYear, setFunnelYear,
+    selectedBranch, setSelectedBranch,
+    selectedStaff, setSelectedStaff,
+    staffFilter, setStaffFilter,
+    trendsModal, setTrendsModal,
+    forecastingModal, setForecastingModal,
+    trendsSelectedMetric, setTrendsSelectedMetric,
+    forecastSelectedScenario, setForecastSelectedScenario,
+    selectedReport, setSelectedReport,
+    reportModalOpen, setReportModalOpen
+  } = dashboardState;
+
+  const {
+    dateFilter, setDateFilter,
+    customDateRange, setCustomDateRange,
+    customDateLabel,
+    customDatePopoverOpen, setCustomDatePopoverOpen,
+    currentYear,
+    handleCustomRangeSelect
+  } = dashboardFilters;
+
+  // Helper function to get filter-based KPI values for reports
+  // Now imported from utils/dashboardHelpers.ts
+  
+  // Report sidebar and modal - state is now managed by useDashboardState hook
+  const totalEmployees = 100;
+
+  // Tier percentages: Top 20%, Middle 30%, Bottom 50%
+  const tierPercentages = {
+    top: 20,
+    middle: 30,
+    bottom: 50
+  };
+
+  // Check if user is authenticated via API
+  useEffect(() => {
+    const checkAuth = async () => {
+      // Auto-authenticate - no PIN required
+      setIsAuthenticated(true);
+      setContextAuthenticated(true);
+      sessionStorage.setItem('dashboard_auth', 'authenticated');
+      setLoading(false);
+      setAuthChecked(true);
+
+      // Try to get user info if API is available (optional)
+      try {
+        await api.getCurrentUser();
+      } catch (error) {
+        // API not available - that's fine, continue without it
+      }
+    };
+    checkAuth();
+  }, [setContextAuthenticated]);
+
+  // Fetch briefing context data (insights and funnel data)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const fetchBriefingContext = async () => {
+      try {
+        // Fetch insights/dialogues
+        const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}`);
+        const dialogues = insightsData?.insights?.map((insight: any) => ({
+          message: insight.message || '',
+          type: insight.type || 'info',
+          priority: insight.priority || 'standard'
+        })) || [];
+
+        // Fetch funnel data
+        let funnelStory = null;
+        try {
+          const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}`);
+          if (funnelData) {
+            funnelStory = {
+              conversionRates: funnelData.conversionRates || {},
+              falloutData: funnelData.falloutData || {},
+              lostRevenue: funnelData.lostRevenue || {}
+            };
+          }
+        } catch (error) {
+          console.warn('Error fetching funnel data for briefing:', error);
+        }
+
+        setBriefingContext({
+          dialogues,
+          funnelStory,
+          userName: undefined // Can be set from user profile if available
+        });
+      } catch (error) {
+        console.error('Error fetching briefing context:', error);
+        // Set empty context on error - briefing will still work
+        setBriefingContext({
+          dialogues: [],
+          funnelStory: null,
+          userName: undefined
+        });
+      }
+    };
+
+    fetchBriefingContext();
+  }, [isAuthenticated, dateFilter]);
+
+  // Animation cycle: 5 seconds animating, 30 seconds pause (35 second loop)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let animationInterval: NodeJS.Timeout | null = null;
+    let cycleTimeout: NodeJS.Timeout;
+    const startAnimationCycle = () => {
+      // Start animation
+      setIsAnimating(true);
+      setAnimationCycle(0);
+
+      // Animation runs for 5 seconds
+      animationInterval = setInterval(() => {
+        setAnimationCycle(prev => {
+          const newCycle = prev + 0.1;
+          if (newCycle >= 5) {
+            // Stop animation after 5 seconds
+            setIsAnimating(false);
+            if (animationInterval) clearInterval(animationInterval);
+            return 5;
+          }
+          return newCycle;
+        });
+      }, 100);
+
+      // After 5 seconds of animation, wait 30 seconds before restarting
+      cycleTimeout = setTimeout(() => {
+        startAnimationCycle();
+      }, 35000); // 5 sec animation + 30 sec pause = 35 sec total
+    };
+
+    // Start the first cycle
+    startAnimationCycle();
+    return () => {
+      if (animationInterval) clearInterval(animationInterval);
+      if (cycleTimeout) clearTimeout(cycleTimeout);
+    };
+  }, [isAuthenticated]);
+  // Helper functions now imported from utils/dashboardHelpers.ts
+
+  // PIN authentication removed - auto-authenticate instead
+  // const handlePinSubmit = (e: React.FormEvent) => { ... }
+
+  // Generate diverse, realistic name pool and shuffle to ensure no duplicates
+  // Use useMemo to ensure names are stable across renders
+  const {
+    namePool,
+    realTopPerformers,
+    realMiddlePerformers,
+    realBottomPerformers,
+    branchLOs
+  } = useMemo(() => {
+    const generateNamePool = () => {
+      const firstNames = ['Marcus', 'Priya', 'Derek', 'Sophia', 'Brandon', 'Aisha', 'Tyler', 'Hannah', 'Rafael', 'Megan', 'Vincent', 'Courtney', 'Jamal', 'Elena', 'Christopher', 'Brianna', 'Nathan', 'Jasmine', 'Ethan', 'Olivia', 'Jordan', 'Fatima', 'Trevor', 'Carmen', 'Austin', 'Destiny', 'Blake', 'Yuki', 'Cameron', 'Aaliyah', 'Dylan', 'Samantha', 'Connor', 'Gabriella', 'Ian', 'Melanie', 'Zachary', 'Natasha', 'Joshua', 'Taylor', 'Ricardo', 'Brittany', 'Andre', 'Michelle', 'Gregory', 'Vanessa', 'Keith', 'Jessica', 'Dominic', 'Stephanie', 'Kyle', 'Shaniqua', 'Patrick', 'Rosa', 'Bradley', 'Tameka', 'Scott', 'Lucia', 'Drew', 'Keisha', 'Ryan', 'Diana', 'Chad', 'Monique', 'Seth', 'Alicia', 'Derrick', 'Leila', 'Troy', 'Candace', 'Mitchell', 'Jasmin', 'Corey', 'Tiffany', 'Wesley', 'Renee', 'Brett', 'Latoya', 'Gavin', 'Simone', 'Rodney', 'Denise', 'Craig', 'Veronica', 'Spencer', 'Monica', 'Terrence', 'Heather', 'Reginald', 'Crystal', 'Valentina', 'Benjamin', 'Naomi', 'Lawrence', 'Ingrid', 'Marcus', 'Sarah', 'Michael', 'Emily', 'James', 'Lisa', 'David', 'Jennifer', 'Robert', 'Amanda', 'Chris', 'Nicole', 'Mark', 'Daniel', 'Rachel', 'Kevin', 'Michelle', 'Brian', 'Ashley', 'Justin', 'Stephanie', 'Eric', 'Lauren', 'Jonathan', 'Amanda', 'Ryan', 'Melissa', 'Nicholas', 'Kimberly', 'Jason', 'Michelle', 'Thomas', 'Angela', 'Timothy', 'Brenda', 'Jose', 'Emma', 'William', 'Olivia', 'Alexander', 'Isabella', 'Anthony', 'Sophia', 'David', 'Ava', 'Joseph', 'Mia', 'Charles', 'Emily', 'Daniel', 'Abigail', 'Matthew', 'Madison', 'Mark', 'Elizabeth'];
+      const lastNames = ['Wellington', 'Patel', 'Nakamura', 'Reyes', 'Mitchell', 'Johnson', 'Okonkwo', 'Bergstrom', 'Santos', 'O\'Brien', 'Zhao', 'Williams', 'Thompson', 'Kowalski', 'Huang', 'Foster', 'Gupta', 'Rivera', 'Christiansen', 'Yamamoto', 'Blackwell', 'Al-Hassan', 'Lindqvist', 'Delgado', 'Porter', 'Jackson', 'Rasmussen', 'Tanaka', 'Fields', 'Brown', 'Moreno', 'Nguyen', 'O\'Sullivan', 'Cruz', 'Johansson', 'Turner', 'Obi', 'Volkov', 'Hernandez', 'Kim', 'Fernandez', 'Walsh', 'Williams', 'Sato', 'Paulsen', 'Romero', 'Andersson', 'Chung', 'Rossi', 'Okafor', 'Morrison', 'Davis', 'O\'Malley', 'Gutierrez', 'Stone', 'Robinson', 'Nielsen', 'Mendoza', 'Campbell', 'Harris', 'Petersen', 'Castellanos', 'Larsen', 'Baptiste', 'Magnusson', 'Vazquez', 'Hayes', 'Amini', 'Jensen', 'Freeman', 'Burke', 'Ortega', 'Sullivan', 'Washington', 'Olsen', 'Dominguez', 'Hoffman', 'Carter', 'Murray', 'Beaumont', 'Fischer', 'Ramos', 'Lindberg', 'Silva', 'Collins', 'Espinoza', 'Boyd', 'Jacobsen', 'Watts', 'Duarte', 'Rossi', 'Kowalczyk', 'Takahashi', 'Fitzgerald', 'Johansson', 'Oyelaran', 'Martinez', 'Chen', 'Rodriguez', 'Wilson', 'Anderson', 'Kim', 'Brown', 'Taylor', 'White', 'Johnson', 'Davis', 'Thompson', 'Miller', 'Garcia', 'Martinez', 'Rodriguez', 'Lewis', 'Lee', 'Walker', 'Hall', 'Allen', 'Young', 'King', 'Wright', 'Lopez', 'Hill', 'Scott', 'Green', 'Adams', 'Baker', 'Gonzalez', 'Nelson', 'Carter', 'Mitchell', 'Perez', 'Roberts', 'Turner', 'Phillips', 'Campbell', 'Parker', 'Evans', 'Edwards', 'Collins', 'Stewart', 'Sanchez', 'Morris', 'Rogers', 'Reed', 'Cook', 'Morgan', 'Bell', 'Murphy', 'Bailey', 'Rivera', 'Cooper', 'Richardson', 'Cox', 'Howard', 'Ward', 'Torres', 'Peterson', 'Gray', 'Ramirez', 'James'];
+
+      // Create all combinations and shuffle
+      const allNames: string[] = [];
+      for (let i = 0; i < firstNames.length; i++) {
+        for (let j = 0; j < lastNames.length; j++) {
+          allNames.push(`${firstNames[i]} ${lastNames[j]}`);
+        }
+      }
+
+      // Shuffle using Fisher-Yates algorithm
+      for (let i = allNames.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allNames[i], allNames[j]] = [allNames[j], allNames[i]];
+      }
+      return allNames;
+    };
+    const pool = generateNamePool();
+    let idx = 0;
+    const getNext = () => pool[idx++ % pool.length];
+
+    // Real data for the 6 key reports - All tiers (representing 100 employees)
+    const top = [{
+      name: getNext(),
+      role: 'LO',
+      score: 94,
+      loans: 28,
+      revenue: 1250000,
+      trend: 'up',
+      rank: 1
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 91,
+      loans: 45,
+      revenue: 980000,
+      trend: 'up',
+      rank: 2
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 89,
+      loans: 32,
+      revenue: 1120000,
+      trend: 'up',
+      rank: 3
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 87,
+      loans: 38,
+      revenue: 1050000,
+      trend: 'up',
+      rank: 4
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 85,
+      loans: 24,
+      revenue: 890000,
+      trend: 'up',
+      rank: 5
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 83,
+      loans: 40,
+      revenue: 870000,
+      trend: 'up',
+      rank: 6
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 81,
+      loans: 26,
+      revenue: 840000,
+      trend: 'up',
+      rank: 7
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 79,
+      loans: 22,
+      revenue: 820000,
+      trend: 'up',
+      rank: 8
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 77,
+      loans: 35,
+      revenue: 800000,
+      trend: 'up',
+      rank: 9
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 75,
+      loans: 20,
+      revenue: 780000,
+      trend: 'up',
+      rank: 10
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 74,
+      loans: 38,
+      revenue: 760000,
+      trend: 'up',
+      rank: 11
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 73,
+      loans: 24,
+      revenue: 740000,
+      trend: 'up',
+      rank: 12
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 72,
+      loans: 19,
+      revenue: 720000,
+      trend: 'up',
+      rank: 13
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 71,
+      loans: 33,
+      revenue: 700000,
+      trend: 'up',
+      rank: 14
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 70,
+      loans: 36,
+      revenue: 680000,
+      trend: 'up',
+      rank: 15
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 69,
+      loans: 18,
+      revenue: 660000,
+      trend: 'up',
+      rank: 16
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 68,
+      loans: 23,
+      revenue: 640000,
+      trend: 'up',
+      rank: 17
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 67,
+      loans: 31,
+      revenue: 620000,
+      trend: 'up',
+      rank: 18
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 66,
+      loans: 34,
+      revenue: 600000,
+      trend: 'up',
+      rank: 19
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 65,
+      loans: 17,
+      revenue: 580000,
+      trend: 'up',
+      rank: 20
+    }];
+    const middle = [{
+      name: getNext(),
+      role: 'LO',
+      score: 64,
+      loans: 18,
+      revenue: 560000,
+      trend: 'up',
+      rank: 21
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 63,
+      loans: 28,
+      revenue: 540000,
+      trend: 'down',
+      rank: 22
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 62,
+      loans: 20,
+      revenue: 520000,
+      trend: 'up',
+      rank: 23
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 61,
+      loans: 22,
+      revenue: 500000,
+      trend: 'down',
+      rank: 24
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 60,
+      loans: 16,
+      revenue: 480000,
+      trend: 'down',
+      rank: 25
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 59,
+      loans: 26,
+      revenue: 460000,
+      trend: 'up',
+      rank: 26
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 58,
+      loans: 19,
+      revenue: 440000,
+      trend: 'down',
+      rank: 27
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 57,
+      loans: 15,
+      revenue: 420000,
+      trend: 'down',
+      rank: 28
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 56,
+      loans: 21,
+      revenue: 400000,
+      trend: 'down',
+      rank: 29
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 55,
+      loans: 25,
+      revenue: 380000,
+      trend: 'down',
+      rank: 30
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 54,
+      loans: 14,
+      revenue: 370000,
+      trend: 'down',
+      rank: 31
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 53,
+      loans: 18,
+      revenue: 360000,
+      trend: 'up',
+      rank: 32
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 52,
+      loans: 24,
+      revenue: 350000,
+      trend: 'down',
+      rank: 33
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 51,
+      loans: 20,
+      revenue: 340000,
+      trend: 'down',
+      rank: 34
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 50,
+      loans: 13,
+      revenue: 330000,
+      trend: 'down',
+      rank: 35
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 49,
+      loans: 23,
+      revenue: 320000,
+      trend: 'down',
+      rank: 36
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 48,
+      loans: 17,
+      revenue: 310000,
+      trend: 'down',
+      rank: 37
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 47,
+      loans: 12,
+      revenue: 300000,
+      trend: 'down',
+      rank: 38
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 46,
+      loans: 19,
+      revenue: 290000,
+      trend: 'down',
+      rank: 39
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 45,
+      loans: 22,
+      revenue: 280000,
+      trend: 'down',
+      rank: 40
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 44,
+      loans: 16,
+      revenue: 270000,
+      trend: 'down',
+      rank: 41
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 43,
+      loans: 11,
+      revenue: 260000,
+      trend: 'down',
+      rank: 42
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 42,
+      loans: 18,
+      revenue: 250000,
+      trend: 'down',
+      rank: 43
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 41,
+      loans: 21,
+      revenue: 240000,
+      trend: 'down',
+      rank: 44
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 40,
+      loans: 15,
+      revenue: 230000,
+      trend: 'down',
+      rank: 45
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 39,
+      loans: 10,
+      revenue: 220000,
+      trend: 'down',
+      rank: 46
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 38,
+      loans: 17,
+      revenue: 210000,
+      trend: 'down',
+      rank: 47
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 37,
+      loans: 20,
+      revenue: 200000,
+      trend: 'down',
+      rank: 48
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 36,
+      loans: 14,
+      revenue: 190000,
+      trend: 'down',
+      rank: 49
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 35,
+      loans: 9,
+      revenue: 180000,
+      trend: 'down',
+      rank: 50
+    }];
+    const bottom = [{
+      name: getNext(),
+      role: 'LO',
+      score: 34,
+      loans: 10,
+      revenue: 170000,
+      trend: 'down',
+      rank: 51
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 33,
+      loans: 15,
+      revenue: 165000,
+      trend: 'down',
+      rank: 52
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 32,
+      loans: 12,
+      revenue: 160000,
+      trend: 'down',
+      rank: 53
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 31,
+      loans: 14,
+      revenue: 155000,
+      trend: 'down',
+      rank: 54
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 30,
+      loans: 8,
+      revenue: 150000,
+      trend: 'down',
+      rank: 55
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 29,
+      loans: 13,
+      revenue: 145000,
+      trend: 'down',
+      rank: 56
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 28,
+      loans: 11,
+      revenue: 140000,
+      trend: 'down',
+      rank: 57
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 27,
+      loans: 13,
+      revenue: 135000,
+      trend: 'down',
+      rank: 58
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 26,
+      loans: 7,
+      revenue: 130000,
+      trend: 'down',
+      rank: 59
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 25,
+      loans: 12,
+      revenue: 125000,
+      trend: 'down',
+      rank: 60
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 24,
+      loans: 10,
+      revenue: 120000,
+      trend: 'down',
+      rank: 61
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 23,
+      loans: 12,
+      revenue: 115000,
+      trend: 'down',
+      rank: 62
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 22,
+      loans: 6,
+      revenue: 110000,
+      trend: 'down',
+      rank: 63
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 21,
+      loans: 11,
+      revenue: 105000,
+      trend: 'down',
+      rank: 64
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 20,
+      loans: 9,
+      revenue: 100000,
+      trend: 'down',
+      rank: 65
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 19,
+      loans: 11,
+      revenue: 95000,
+      trend: 'down',
+      rank: 66
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 18,
+      loans: 5,
+      revenue: 90000,
+      trend: 'down',
+      rank: 67
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 17,
+      loans: 10,
+      revenue: 85000,
+      trend: 'down',
+      rank: 68
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 16,
+      loans: 8,
+      revenue: 80000,
+      trend: 'down',
+      rank: 69
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 15,
+      loans: 10,
+      revenue: 75000,
+      trend: 'down',
+      rank: 70
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 14,
+      loans: 4,
+      revenue: 70000,
+      trend: 'down',
+      rank: 71
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 13,
+      loans: 9,
+      revenue: 65000,
+      trend: 'down',
+      rank: 72
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 12,
+      loans: 7,
+      revenue: 60000,
+      trend: 'down',
+      rank: 73
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 11,
+      loans: 9,
+      revenue: 55000,
+      trend: 'down',
+      rank: 74
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 10,
+      loans: 3,
+      revenue: 50000,
+      trend: 'down',
+      rank: 75
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 9,
+      loans: 8,
+      revenue: 45000,
+      trend: 'down',
+      rank: 76
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 8,
+      loans: 6,
+      revenue: 40000,
+      trend: 'down',
+      rank: 77
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 7,
+      loans: 8,
+      revenue: 35000,
+      trend: 'down',
+      rank: 78
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 6,
+      loans: 2,
+      revenue: 30000,
+      trend: 'down',
+      rank: 79
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 5,
+      loans: 7,
+      revenue: 25000,
+      trend: 'down',
+      rank: 80
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 4,
+      loans: 5,
+      revenue: 20000,
+      trend: 'down',
+      rank: 81
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 3,
+      loans: 7,
+      revenue: 15000,
+      trend: 'down',
+      rank: 82
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 2,
+      loans: 1,
+      revenue: 10000,
+      trend: 'down',
+      rank: 83
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 1,
+      loans: 6,
+      revenue: 5000,
+      trend: 'down',
+      rank: 84
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 1,
+      loans: 4,
+      revenue: 4000,
+      trend: 'down',
+      rank: 85
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 1,
+      loans: 6,
+      revenue: 3000,
+      trend: 'down',
+      rank: 86
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 1,
+      loans: 1,
+      revenue: 2000,
+      trend: 'down',
+      rank: 87
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 1,
+      loans: 5,
+      revenue: 1500,
+      trend: 'down',
+      rank: 88
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 1,
+      loans: 3,
+      revenue: 1200,
+      trend: 'down',
+      rank: 89
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 1,
+      loans: 5,
+      revenue: 1000,
+      trend: 'down',
+      rank: 90
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 1,
+      loans: 0,
+      revenue: 900,
+      trend: 'down',
+      rank: 91
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 1,
+      loans: 4,
+      revenue: 800,
+      trend: 'down',
+      rank: 92
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 1,
+      loans: 2,
+      revenue: 700,
+      trend: 'down',
+      rank: 93
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 1,
+      loans: 4,
+      revenue: 600,
+      trend: 'down',
+      rank: 94
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 1,
+      loans: 0,
+      revenue: 500,
+      trend: 'down',
+      rank: 95
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 1,
+      loans: 3,
+      revenue: 400,
+      trend: 'down',
+      rank: 96
+    }, {
+      name: getNext(),
+      role: 'UW',
+      score: 1,
+      loans: 1,
+      revenue: 300,
+      trend: 'down',
+      rank: 97
+    }, {
+      name: getNext(),
+      role: 'Closer',
+      score: 1,
+      loans: 3,
+      revenue: 200,
+      trend: 'down',
+      rank: 98
+    }, {
+      name: getNext(),
+      role: 'LO',
+      score: 1,
+      loans: 0,
+      revenue: 100,
+      trend: 'down',
+      rank: 99
+    }, {
+      name: getNext(),
+      role: 'Processor',
+      score: 1,
+      loans: 2,
+      revenue: 50,
+      trend: 'down',
+      rank: 100
+    }];
+
+    // Branch detail LOs (12 unique names)
+    const branchLOs: Array<{
+      name: string;
+      revenue: string;
+      loans: number;
+      pullThrough: string;
+      tier: 'top' | 'middle' | 'bottom';
+      score: number;
+    }> = [{
+      name: getNext(),
+      revenue: '$412K',
+      loans: 18,
+      pullThrough: '92%',
+      tier: 'top' as const,
+      score: 94
+    }, {
+      name: getNext(),
+      revenue: '$385K',
+      loans: 16,
+      pullThrough: '89%',
+      tier: 'top' as const,
+      score: 91
+    }, {
+      name: getNext(),
+      revenue: '$342K',
+      loans: 15,
+      pullThrough: '87%',
+      tier: 'top' as const,
+      score: 88
+    }, {
+      name: getNext(),
+      revenue: '$298K',
+      loans: 13,
+      pullThrough: '85%',
+      tier: 'middle' as const,
+      score: 82
+    }, {
+      name: getNext(),
+      revenue: '$276K',
+      loans: 12,
+      pullThrough: '84%',
+      tier: 'middle' as const,
+      score: 80
+    }, {
+      name: getNext(),
+      revenue: '$254K',
+      loans: 11,
+      pullThrough: '82%',
+      tier: 'middle' as const,
+      score: 78
+    }, {
+      name: getNext(),
+      revenue: '$232K',
+      loans: 10,
+      pullThrough: '80%',
+      tier: 'middle' as const,
+      score: 75
+    }, {
+      name: getNext(),
+      revenue: '$198K',
+      loans: 9,
+      pullThrough: '76%',
+      tier: 'bottom' as const,
+      score: 68
+    }, {
+      name: getNext(),
+      revenue: '$176K',
+      loans: 8,
+      pullThrough: '74%',
+      tier: 'bottom' as const,
+      score: 65
+    }, {
+      name: getNext(),
+      revenue: '$154K',
+      loans: 7,
+      pullThrough: '71%',
+      tier: 'bottom' as const,
+      score: 62
+    }, {
+      name: getNext(),
+      revenue: '$143K',
+      loans: 6,
+      pullThrough: '68%',
+      tier: 'bottom' as const,
+      score: 58
+    }, {
+      name: getNext(),
+      revenue: '$132K',
+      loans: 5,
+      pullThrough: '65%',
+      tier: 'bottom' as const,
+      score: 55
+    }];
+    return {
+      namePool: pool,
+      realTopPerformers: top,
+      realMiddlePerformers: middle,
+      realBottomPerformers: bottom,
+      branchLOs
+    };
+  }, []); // Empty dependency array - generate once on mount
+
+  const realFalloutData = [{
+    type: 'Withdrawals',
+    predicted: 12,
+    actual: 10,
+    risk: 'medium'
+  }, {
+    type: 'Declinations',
+    predicted: 8,
+    actual: 9,
+    risk: 'high'
+  }, {
+    type: 'Rate-Driven',
+    predicted: 15,
+    actual: 14,
+    risk: 'high'
+  }, {
+    type: 'Ops-Driven',
+    predicted: 6,
+    actual: 5,
+    risk: 'low'
+  }, {
+    type: 'Borrower Behavior',
+    predicted: 9,
+    actual: 11,
+    risk: 'medium'
+  }];
+  const realProfitabilityData = [{
+    month: 'Jan',
+    margin: 3.2,
+    productivity: 85,
+    revenue: 2.1
+  }, {
+    month: 'Feb',
+    margin: 3.5,
+    productivity: 88,
+    revenue: 2.3
+  }, {
+    month: 'Mar',
+    margin: 3.8,
+    productivity: 92,
+    revenue: 2.5
+  }, {
+    month: 'Apr',
+    margin: 4.1,
+    productivity: 89,
+    revenue: 2.4
+  }, {
+    month: 'May',
+    margin: 4.3,
+    productivity: 94,
+    revenue: 2.7
+  }, {
+    month: 'Jun',
+    margin: 4.5,
+    productivity: 96,
+    revenue: 2.9
+  }];
+  const realCycleTimeData = [{
+    role: 'LO',
+    avgDays: 12,
+    targetDays: 10,
+    efficiency: 83
+  }, {
+    role: 'Processor',
+    avgDays: 18,
+    targetDays: 15,
+    efficiency: 78
+  }, {
+    role: 'UW',
+    avgDays: 22,
+    targetDays: 20,
+    efficiency: 91
+  }, {
+    role: 'Closer',
+    avgDays: 8,
+    targetDays: 7,
+    efficiency: 88
+  }];
+  const realPullThroughData = [{
+    stage: 'Application',
+    count: 100,
+    percentage: 100
+  }, {
+    stage: 'Processing',
+    count: 78,
+    percentage: 78
+  }, {
+    stage: 'Underwriting',
+    count: 65,
+    percentage: 65
+  }, {
+    stage: 'Closing',
+    count: 58,
+    percentage: 58
+  }, {
+    stage: 'Funded',
+    count: 52,
+    percentage: 52
+  }];
+
+  // Select the correct performer list based on tier (Top 20%, Middle 30%, Bottom 50%)
+  const getAllPerformersByTier = () => {
+    switch (selectedTier) {
+      case 'top':
+        return realTopPerformers;
+      // 20 employees (top 20%)
+      case 'middle':
+        return realMiddlePerformers;
+      // 30 employees (middle 30%)
+      case 'bottom':
+        return realBottomPerformers;
+      // 50 employees (bottom 50%)
+      default:
+        return realTopPerformers;
+    }
+  };
+  const allPerformers = getAllPerformersByTier();
+
+  // Reset visible count when tier changes
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [selectedTier]);
+
+  // Get visible performers
+  const getVisiblePerformers = () => {
+    return allPerformers.slice(0, visibleCount);
+  };
+  const hasMore = visibleCount < allPerformers.length;
+
+  // Generate employee data for fallout categories
+  const getFalloutEmployees = (category: string) => {
+    const baseEmployees = [...realTopPerformers.slice(15, 20), ...realMiddlePerformers.slice(0, 10), ...realBottomPerformers.slice(0, 15)];
+    return baseEmployees.slice(0, 10).map((emp, idx) => ({
+      ...emp,
+      falloutReason: category === 'Withdrawals' ? 'Customer withdrew application' : category === 'Declinations' ? 'Did not meet underwriting criteria' : category === 'Rate-Driven' ? 'Found better rate elsewhere' : category === 'Ops-Driven' ? 'Processing delays caused withdrawal' : 'Changed financing plans',
+      daysInPipeline: Math.floor(Math.random() * 30) + 10,
+      lastContact: `${Math.floor(Math.random() * 7) + 1} days ago`
+    }));
+  };
+
+  // Generate employee data for pull-through stages
+  const getPullThroughEmployees = (stage: string, count: number) => {
+    const allEmployees = [...realTopPerformers, ...realMiddlePerformers, ...realBottomPerformers];
+    return allEmployees.slice(0, Math.min(count, 15)).map((emp, idx) => ({
+      ...emp,
+      stage: stage,
+      status: stage === 'Application' ? 'New Application' : stage === 'Processing' ? 'Documents Under Review' : stage === 'Underwriting' ? 'Credit Analysis' : stage === 'Closing' ? 'Final Review' : 'Funded',
+      daysInStage: Math.floor(Math.random() * 14) + 1,
+      nextAction: stage === 'Application' ? 'Await documentation' : stage === 'Processing' ? 'Complete verification' : stage === 'Underwriting' ? 'Final approval' : stage === 'Closing' ? 'Schedule signing' : 'Disbursement'
+    }));
+  };
+
+  // Animated data with realistic fluctuations
+  const topPerformers = getVisiblePerformers().map((p, idx) => {
+    const timeOffset = idx * 200; // Stagger animations
+    const baseProgress = getSmoothProgress(animationCycle, isAnimating);
+    const variation = Math.sin((animationCycle * 100 + timeOffset) / 300) * 0.1;
+    return {
+      ...p,
+      score: isAnimating ? Math.max(70, Math.min(100, Math.floor(p.score * (0.75 + baseProgress * 0.25 + variation)))) : p.score,
+      loans: getAnimatedValue(p.loans, animationCycle, isAnimating, 0.2),
+      revenue: getAnimatedValue(p.revenue, animationCycle, isAnimating, 0.15),
+      trend: isAnimating ? Math.random() > 0.5 ? 'up' : 'down' // Randomly flicker during animation
+      : p.trend
+    };
+  });
+  const falloutData = realFalloutData.map((d, idx) => {
+    const variation = Math.sin((animationCycle * 100 + idx * 150) / 400) * 0.15;
+    const baseProgress = getSmoothProgress(animationCycle, isAnimating);
+    return {
+      ...d,
+      predicted: isAnimating ? Math.max(0, Math.floor(d.predicted * (0.6 + baseProgress * 0.4 + variation))) : d.predicted,
+      actual: isAnimating ? Math.max(0, Math.floor(d.actual * (0.6 + baseProgress * 0.4 + variation * 0.8))) : d.actual
+    };
+  });
+  const profitabilityData = realProfitabilityData.map((d, idx) => {
+    const timeOffset = idx * 100;
+    const wave = Math.sin((animationCycle * 100 + timeOffset) / 500) * 0.1;
+    const baseProgress = getSmoothProgress(animationCycle, isAnimating);
+    return {
+      ...d,
+      margin: isAnimating ? Math.max(0, d.margin * (0.7 + baseProgress * 0.3 + wave)) : d.margin,
+      productivity: isAnimating ? Math.max(0, d.productivity * (0.7 + baseProgress * 0.3 + wave)) : d.productivity,
+      revenue: isAnimating ? Math.max(0, d.revenue * (0.7 + baseProgress * 0.3 + wave * 0.8)) : d.revenue
+    };
+  });
+  const cycleTimeData = realCycleTimeData.map((d, idx) => {
+    const variation = Math.sin((animationCycle * 100 + idx * 200) / 400) * 0.1;
+    const baseProgress = getSmoothProgress(animationCycle, isAnimating);
+    return {
+      ...d,
+      avgDays: isAnimating ? Math.max(0, d.avgDays * (0.8 + baseProgress * 0.2 + variation)) : d.avgDays,
+      targetDays: isAnimating ? Math.max(0, d.targetDays * (0.8 + baseProgress * 0.2 + variation * 0.7)) : d.targetDays,
+      efficiency: isAnimating ? Math.max(0, Math.min(100, d.efficiency * (0.7 + baseProgress * 0.3 + variation))) : d.efficiency
+    };
+  });
+  const pullThroughData = realPullThroughData.map((d, idx) => {
+    const variation = Math.sin((animationCycle * 100 + idx * 180) / 450) * 0.12;
+    const baseProgress = getSmoothProgress(animationCycle, isAnimating);
+    return {
+      ...d,
+      count: isAnimating ? Math.max(0, Math.floor(d.count * (0.6 + baseProgress * 0.4 + variation))) : d.count,
+      percentage: isAnimating ? Math.max(0, Math.min(100, Math.floor(d.percentage * (0.6 + baseProgress * 0.4 + variation)))) : d.percentage
+    };
+  });
+  const riskCases = [{
+    id: 1,
+    borrower: 'John Smith',
+    loanAmount: 450000,
+    risk: 'high',
+    reason: 'Rate lock expiring',
+    daysOverdue: 3,
+    breakdown: {
+      rateLockExpiry: '2 days remaining',
+      currentRate: '6.75%',
+      marketRate: '7.25%',
+      estimatedLoss: '$45,000',
+      actions: ['Contact borrower immediately', 'Expedite underwriting', 'Prepare rate extension'],
+      timeline: [{
+        date: '3 days ago',
+        event: 'Application received',
+        status: 'completed'
+      }, {
+        date: '2 days ago',
+        event: 'Initial docs submitted',
+        status: 'completed'
+      }, {
+        date: '1 day ago',
+        event: 'Underwriting started',
+        status: 'in-progress'
+      }, {
+        date: 'Today',
+        event: 'Rate lock warning issued',
+        status: 'flagged'
+      }]
+    }
+  }, {
+    id: 2,
+    borrower: 'Maria Garcia',
+    loanAmount: 320000,
+    risk: 'medium',
+    reason: 'Documentation delay',
+    daysOverdue: 2,
+    breakdown: {
+      missingDocs: ['W2 (2023)', 'Bank statements (last 2 months)', 'Property insurance'],
+      lastContact: '2 days ago',
+      processorAssigned: 'Valentina Rossi',
+      estimatedDelay: '5-7 business days',
+      actions: ['Follow up with borrower', 'Request doc upload reminder', 'Consider conditional approval'],
+      timeline: [{
+        date: '5 days ago',
+        event: 'Application received',
+        status: 'completed'
+      }, {
+        date: '4 days ago',
+        event: 'Initial review',
+        status: 'completed'
+      }, {
+        date: '2 days ago',
+        event: 'Documentation requested',
+        status: 'pending'
+      }, {
+        date: 'Today',
+        event: 'Follow-up sent',
+        status: 'in-progress'
+      }]
+    }
+  }, {
+    id: 3,
+    borrower: 'Robert Johnson',
+    loanAmount: 580000,
+    risk: 'high',
+    reason: 'Underwriting review',
+    daysOverdue: 5,
+    breakdown: {
+      issues: ['DTI ratio at 48% (target: 43%)', 'Employment gap 3 months', 'Credit inquiry spike'],
+      underwriterAssigned: 'Benjamin Kowalczyk',
+      probabilityApproval: '62%',
+      estimatedLoss: '$87,000',
+      actions: ['Request compensating factors', 'Review credit report with borrower', 'Consider manual underwrite'],
+      timeline: [{
+        date: '7 days ago',
+        event: 'Application received',
+        status: 'completed'
+      }, {
+        date: '5 days ago',
+        event: 'Sent to underwriting',
+        status: 'completed'
+      }, {
+        date: '3 days ago',
+        event: 'Conditions issued',
+        status: 'pending'
+      }, {
+        date: 'Today',
+        event: 'Escalated to senior UW',
+        status: 'flagged'
+      }]
+    }
+  }, {
+    id: 4,
+    borrower: 'Emily Davis',
+    loanAmount: 275000,
+    risk: 'medium',
+    reason: 'Appraisal pending',
+    daysOverdue: 1,
+    breakdown: {
+      appraiserAssigned: 'ABC Appraisal Co.',
+      scheduledDate: 'Tomorrow',
+      propertyType: 'Single Family Home',
+      estimatedValue: '$290,000',
+      actions: ['Confirm appraisal appointment', 'Prepare for potential low appraisal', 'Review comparable sales'],
+      timeline: [{
+        date: '4 days ago',
+        event: 'Application received',
+        status: 'completed'
+      }, {
+        date: '3 days ago',
+        event: 'Appraisal ordered',
+        status: 'completed'
+      }, {
+        date: '1 day ago',
+        event: 'Appraisal scheduled',
+        status: 'in-progress'
+      }, {
+        date: 'Today',
+        event: 'Reminder sent to borrower',
+        status: 'pending'
+      }]
+    }
+  }];
+
+  // Generate warnings based on actual dashboard data
+  const generateDashboardWarnings = () => {
+    const warnings = [];
+
+    // Risk Cases warnings
+    if (riskCases.length > 3) {
+      warnings.push({
+        id: 'risk-high',
+        message: `${riskCases.length} flagged cases require immediate attention`,
+        urgency: 'critical',
+        code: 'RISK-001'
+      });
+    }
+    if (riskCases.filter(c => c.risk === 'high').length > 2) {
+      warnings.push({
+        id: 'risk-critical',
+        message: 'Multiple high-risk loans pending review',
+        urgency: 'critical',
+        code: 'RISK-002'
+      });
+    }
+
+    // Performance warnings
+    const lowPerformers = realBottomPerformers.filter(p => p.score < 70);
+    if (lowPerformers.length > 5) {
+      warnings.push({
+        id: 'perf-low',
+        message: 'Below-target performance detected across team',
+        urgency: 'high',
+        code: 'PERF-001'
+      });
+    }
+
+    // Cycle time warnings
+    const highCycleTime = realCycleTimeData.find(d => d.avgDays > d.targetDays * 1.3);
+    if (highCycleTime) {
+      warnings.push({
+        id: 'cycle-time',
+        message: `${highCycleTime.role} exceeding target by ${Math.round((highCycleTime.avgDays / highCycleTime.targetDays - 1) * 100)}%`,
+        urgency: 'high',
+        code: 'TIME-001'
+      });
+    }
+
+    // Fallout warnings
+    const highFallout = realFalloutData.filter(d => d.actual > 15);
+    if (highFallout.length > 0) {
+      warnings.push({
+        id: 'fallout-high',
+        message: `High fallout in ${highFallout[0].type}: ${highFallout[0].actual}%`,
+        urgency: 'medium',
+        code: 'FALL-001'
+      });
+    }
+
+    // Volume warnings
+    if (stats.callsToday > 1500) {
+      warnings.push({
+        id: 'volume-high',
+        message: 'Call volume exceeding capacity - consider staffing adjustment',
+        urgency: 'medium',
+        code: 'VOL-001'
+      });
+    }
+
+    // Compliance warnings (time-based)
+    const currentHour = new Date().getHours();
+    if (currentHour >= 9 && currentHour <= 17) {
+      warnings.push({
+        id: 'compliance',
+        message: 'Compliance deadline approaching - quarterly review due',
+        urgency: 'high',
+        code: 'COMP-001'
+      });
+    }
+    return warnings.slice(0, 10); // Max 10 warnings
+  };
+  const managementWarnings = generateDashboardWarnings();
+
+  // Calculate key metrics for Command Center - now using useDashboardMetrics hook
+
+  // Prepare Action Items from warnings and risk cases
+  const prepareActionItems = () => {
+    const critical: any[] = [];
+    const review: any[] = [];
+
+    // Add critical risk cases
+    riskCases.filter(rc => rc.risk === 'high').slice(0, 3).forEach(rc => {
+      critical.push({
+        id: `risk-${rc.id}`,
+        title: `${rc.borrower} - ${rc.reason}`,
+        description: `$${(rc.loanAmount / 1000).toFixed(0)}K loan, ${rc.daysOverdue} days overdue`,
+        action: 'Review case details',
+        urgency: 'critical',
+        data: rc
+      });
+    });
+
+    // Add critical warnings
+    managementWarnings.filter(w => w.urgency === 'critical').slice(0, 3 - critical.length).forEach(w => {
+      critical.push({
+        id: w.id,
+        title: w.message,
+        description: `Code: ${w.code}`,
+        action: 'Take action',
+        urgency: 'critical',
+        data: w
+      });
+    });
+
+    // Add high priority items to review
+    managementWarnings.filter(w => w.urgency === 'high').slice(0, 5).forEach(w => {
+      review.push({
+        id: w.id,
+        title: w.message,
+        description: `Code: ${w.code}`,
+        action: 'Review',
+        urgency: 'high',
+        data: w
+      });
+    });
+
+    // Add medium risk cases
+    riskCases.filter(rc => rc.risk === 'medium').slice(0, 5 - review.length).forEach(rc => {
+      review.push({
+        id: `risk-${rc.id}`,
+        title: `${rc.borrower} - ${rc.reason}`,
+        description: `$${(rc.loanAmount / 1000).toFixed(0)}K loan needs attention`,
+        action: 'Review case',
+        urgency: 'medium',
+        data: rc
+      });
+    });
+    return {
+      critical,
+      review
+    };
+  };
+  const actionItems = prepareActionItems();
+
+  // Calculate key metrics using hook (extracted from Dashboard.tsx)
+  const { commandMetrics, financialHealth, operationalHealth } = useDashboardMetrics({
+    realTopPerformers,
+    realMiddlePerformers,
+    realBottomPerformers,
+    topPerformers,
+    cycleTimeData,
+    pullThroughData,
+    managementWarnings
+  });
+
+  // Auto-hide warnings after 10 seconds, cycle every 3 seconds
+  useEffect(() => {
+    if (!isAuthenticated || managementWarnings.length === 0 || !showNotifications) return;
+
+    // Auto-hide after 10 seconds
+    const hideTimer = setTimeout(() => {
+      setShowNotifications(false);
+    }, 10000);
+
+    // Cycle warnings every 3 seconds - remove top, add new at bottom
+    const cycleInterval = setInterval(() => {
+      setVisibleWarnings(prev => {
+        if (prev.length === 0) return [0, 1, 2];
+
+        // Get the last warning index and calculate next
+        const lastIdx = prev[prev.length - 1];
+        const nextIdx = (lastIdx + 1) % managementWarnings.length;
+
+        // Remove first (top), add new at end (bottom) - always keep 3
+        const newWarnings = [...prev.slice(1), nextIdx];
+        return newWarnings.length > 3 ? newWarnings.slice(-3) : newWarnings;
+      });
+    }, 3000);
+    return () => {
+      clearTimeout(hideTimer);
+      clearInterval(cycleInterval);
+    };
+  }, [isAuthenticated, managementWarnings.length, showNotifications]);
+
+  // Auto-hide notifications after 15 seconds
+  useEffect(() => {
+    if (!showNotifications) return;
+    const timer = setTimeout(() => {
+      setShowNotifications(false);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [showNotifications]);
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadDashboardData();
+    }
+  }, [isAuthenticated]);
+  const loadDashboardData = async () => {
+    try {
+      // Fetch call sessions
+      const calls = await api.getCallSessions(5);
+      if (calls && calls.length > 0) {
+        setRecentCalls(calls);
+
+        // Calculate stats
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const callsToday = calls.filter(c => new Date(c.started_at) >= today).length;
+        const flaggedCases = calls.filter(c => c.status === 'flagged').length;
+        setStats({
+          callsToday,
+          documentsVerified: calls.length * 2,
+          // Mock calculation
+          flaggedCases
+        });
+      }
+    } catch (error) {
+      console.error('Error loading dashboard:', error);
+    }
+  };
+  const handleLogout = async () => {
+    try {
+      await api.signOut();
+    } catch (error) {
+      // Continue with logout even if API call fails
+    }
+    setIsAuthenticated(false);
+    sessionStorage.removeItem('dashboard_auth');
+    toast({
+      title: 'Logged out',
+      description: 'Successfully signed out.'
+    });
+    navigate('/');
+  };
+
+  // PIN auto-submit removed - no longer needed
+
+  // PIN authentication screen removed - dashboard is now accessible without PIN
+
+  const handleReportClick = (report: ReportData) => {
+    setSelectedReport(report);
+    setReportModalOpen(true);
+  };
+
+  return (
+    <DashboardContainer
+      loading={loading}
+      pageError={pageError}
+      isAuthenticated={isAuthenticated}
+    >
+      <DashboardLayout
+        isAuthenticated={isAuthenticated}
+        mobileMenuOpen={mobileMenuOpen}
+        onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
+        dashboardVisibility={dashboardVisibility}
+        onVisibilityChange={handleVisibilityChange}
+        onReportClick={handleReportClick}
+      >
+        {/* Report Modal */}
+        <ReportModal open={reportModalOpen} onClose={() => {
+          setReportModalOpen(false);
+          setSelectedReport(null);
+        }} report={selectedReport} />
+
+      {/* TopTiering Story Detail Modal - Enhanced with Drill-Down */}
+      <TopTieringModal
+        open={topTieringModal}
+        onOpenChange={setTopTieringModal}
+        selectedBranch={selectedBranch}
+        setSelectedBranch={setSelectedBranch}
+        selectedStaff={selectedStaff}
+        setSelectedStaff={setSelectedStaff}
+        topTieringTab={topTieringTab}
+        setTopTieringTab={setTopTieringTab}
+        staffFilter={staffFilter}
+        setStaffFilter={setStaffFilter}
+        setTrendsModal={setTrendsModal}
+        setForecastingModal={setForecastingModal}
+        funnelView={funnelView}
+        setFunnelView={setFunnelView}
+        funnelYear={funnelYear}
+        setFunnelYear={setFunnelYear}
+        selectedTier={selectedTier}
+        setSelectedTier={setSelectedTier}
+        branchLOs={branchLOs}
+      />
+
+      {/* Trends Modal with Drill-Down - Enhanced */}
+      <TrendsModal
+        open={trendsModal}
+        onOpenChange={(open) => {
+          setTrendsModal(open);
+          if (!open) setTrendsSelectedMetric(null);
+        }}
+        trendsSelectedMetric={trendsSelectedMetric}
+        setTrendsSelectedMetric={setTrendsSelectedMetric}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
+        setTopTieringModal={setTopTieringModal}
+        setForecastingModal={setForecastingModal}
+      />
+
+      {/* Forecasting Modal with Drill-Down - Modern Minimalist */}
+      <ForecastingModal
+        open={forecastingModal}
+        onOpenChange={(open) => {
+          setForecastingModal(open);
+          if (!open) setForecastSelectedScenario(null);
+        }}
+        forecastSelectedScenario={forecastSelectedScenario}
+        setForecastSelectedScenario={setForecastSelectedScenario}
+        setTopTieringModal={setTopTieringModal}
+        setTrendsModal={setTrendsModal}
+      />
+
+      <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-20 sm:pt-24 md:pt-28 pb-4 sm:pb-8 md:pb-12 relative z-10">
+        {/* Insights Section - Minimalist */}
+        {isAuthenticated && <div className="mb-16 md:mb-20">
+            {/* Business Overview */}
+            {dashboardVisibility.executiveDashboard && <ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} />}
+            {/* Industry News Card */}
+            {dashboardVisibility.industryNews && <IndustryNewsCard />}
+            {/* Ailethia Prompts Card - After Industry News */}
+            {dashboardVisibility.aletheiaInsights && (
+              <div className="mb-8 md:mb-12">
+                <AletheiaPromptsCard 
+                  dateFilter={dateFilter} 
+                  briefingContext={briefingContext || undefined}
+                  onDataAvailabilityChange={(hasData) => {
+                    if (!hasData && dashboardVisibility.aletheiaInsights) {
+                      handleVisibilityChange({
+                        ...dashboardVisibility,
+                        aletheiaInsights: false
+                      });
+                    }
+                  }}
+                />
+              </div>
+            )}
+            {/* Leader Board Section */}
+            {dashboardVisibility.leaderboard && <LeaderBoardSection dateFilter={dateFilter} />}
+
+            {/* TopTiering Loan Funnel - Full Width Section */}
+            {dashboardVisibility.topTiering && <div className="mt-12 sm:mt-16 mb-4 sm:mb-8">
+                <LoanFunnelView view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} />
+              </div>}
+          </div>}
+      </div>
+
+      {/* Contact Modal */}
+      <ContactModal
+        open={contactModal.open}
+        type={contactModal.type}
+        performer={contactModal.performer}
+        onClose={() => setContactModal({ open: false, type: null, performer: null })}
+      />
+
+      {/* Metric Breakdown Modal */}
+      <MetricModal
+        open={metricModal.open}
+        type={metricModal.type}
+                try {
+                  const dashboardData = {
+                    topPerformers: topPerformers,
+                    falloutData: falloutData,
+                    profitabilityData: profitabilityData,
+                    cycleTimeData: cycleTimeData,
+                    pullThroughData: pullThroughData,
+                    riskCases: riskCases
+                  };
+                  generatePDF(dashboardData);
+                  toast({
+                    title: 'Success',
+                    description: 'PDF ready for download'
+                  });
+                } catch (error) {
+                  console.error('PDF export error:', error);
+                  toast({
+                    title: 'Error',
+                    description: 'Failed to generate PDF',
+                    variant: 'destructive'
+                  });
+                }
+              }} className="text-xs font-light h-8 px-3 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400" title="Export to PDF">
+                <FileText className="w-3.5 h-3.5 mr-1.5" />
+                PDF
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => {
+                toast({
+                  title: 'PowerPoint Export',
+                  description: 'Generating presentation...'
+                });
+                setTimeout(() => toast({
+                  title: 'Success',
+                  description: 'PowerPoint ready for download'
+                }), 2000);
+              }} className="text-xs font-light h-8 px-3 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400" title="Export to PowerPoint">
+                <Presentation className="w-3.5 h-3.5 mr-1.5" />
+                PPT
+              </Button>
+            </div>
+
+            <div className="border-l border-slate-200 dark:border-slate-800 h-6"></div>
+
+            <SeedDataButton />
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-xs font-light h-8 px-3 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400">
+              Sign Out
+            </Button>
+          </div>
+        </div>
+
+        {/* Auto-hide Minimalist Warning Notifications - Max 3 */}
+        {showNotifications && <div className="fixed top-24 right-8 z-40 space-y-2 w-64">
+            <AnimatePresence mode="popLayout">
+              {visibleWarnings.slice(0, 3).map((warningIdx, idx) => {
+              const warning = managementWarnings[warningIdx];
+              if (!warning) return null;
+              return <motion.div key={`${warning.id}-${warningIdx}`} initial={{
+                opacity: 0,
+                x: 100,
+                scale: 0.9
+              }} animate={{
+                opacity: 1,
+                x: 0,
+                scale: 1
+              }} exit={{
+                opacity: 0,
+                x: 100,
+                scale: 0.9,
+                height: 0
+              }} transition={{
+                duration: 0.25,
+                delay: idx * 0.05,
+                ease: [0.4, 0.0, 0.2, 1]
+              }} className={`${getUrgencyColor(warning.urgency)} backdrop-blur-sm rounded-lg shadow-sm overflow-hidden border-l-2 hover:shadow transition-all cursor-pointer`}>
+                    <div className="px-3 py-2 flex items-center gap-2">
+                      <motion.div className={`w-1 h-1 rounded-full ${getUrgencyDot(warning.urgency)} flex-shrink-0`} animate={{
+                    scale: warning.urgency === 'critical' ? [1, 1.4, 1] : 1
+                  }} transition={{
+                    duration: 1.5,
+                    repeat: warning.urgency === 'critical' ? Infinity : 0,
+                    ease: "easeInOut"
+                  }} />
+                      <div className="flex-1 min-w-0 mr-1">
+                        <div className="text-[9px] font-mono text-slate-400 dark:text-slate-500 tracking-wider mb-0.5 uppercase">
+                          {warning.code}
+                        </div>
+                        <div className="text-[11px] font-normal text-slate-700 dark:text-slate-300 leading-tight line-clamp-2">
+                          {warning.message}
+                        </div>
+                      </div>
+                      <button onClick={e => {
+                    e.stopPropagation();
+                    if (visibleWarnings.length === 1) {
+                      setShowNotifications(false);
+                    } else {
+                      setVisibleWarnings(prev => prev.filter((_, i) => i !== idx));
+                    }
+                  }} className="text-slate-300 hover:text-slate-600 dark:hover:text-slate-100 transition-colors flex-shrink-0" title="Dismiss">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </motion.div>;
+            })}
+            </AnimatePresence>
+
+            {/* Drilldown for selected insight - DISABLED */}
+            {/* <AnimatePresence>
+              {insightDetail && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
+                  className="mt-4 rounded-xl border border-slate-200/60 dark:border-slate-800/50 bg-white/60 dark:bg-slate-900/40 p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${priorityStyles[insightDetail.priority].chip} ${priorityStyles[insightDetail.priority].chipText}`}>
+                          {insightDetail.priority === 'critical' ? 'Executive alert' : insightDetail.priority === 'high' ? 'High priority' : insightDetail.priority === 'medium' ? 'Important' : 'Insight'}
+                        </span>
+                        <span className={`text-[11px] font-medium ${typeStyles[insightDetail.type].text}`}>
+                          {insightDetail.type === 'success' ? 'Positive' : insightDetail.type === 'warning' ? 'Risk' : 'Signal'}
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">{insightDetail.confidence}</span>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-relaxed">
+                        {insightDetail.title}
+                      </p>
+                      <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                        {insightDetail.why}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setInsightDetail(null)}
+                      className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                      aria-label="Close insight drilldown"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {insightDetail.actions.map((action, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-2 text-[13px] text-slate-700 dark:text-slate-200"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5" />
+                        <span>{action}</span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+             </AnimatePresence> */}
+          </div>}
+
+        {/* Compact Toggle Button */}
+        <motion.button onClick={() => {
+          setShowNotifications(true);
+          setVisibleWarnings([0, 1, 2]);
+        }} className={`fixed top-24 right-8 z-40 p-2 rounded-lg backdrop-blur-sm shadow-sm transition-all ${showNotifications ? 'bg-white/10 border border-white/20 hover:bg-white/20' : 'bg-blue-500/20 border border-blue-500/40 hover:bg-blue-500/30'}`} style={{
+          transform: showNotifications ? 'translateX(270px)' : 'translateX(0)'
+        }} title={showNotifications ? 'Hide alerts' : 'Show alerts'} whileHover={{
+          scale: 1.05
+        }} whileTap={{
+          scale: 0.95
+        }}>
+          {showNotifications ? <BellOff className="w-4 h-4 text-slate-600 dark:text-slate-400" /> : <div className="relative">
+              <Bell className="w-4 h-4 text-blue-500" />
+              <motion.span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" animate={{
+              scale: [1, 1.2, 1]
+            }} transition={{
+              duration: 2,
+              repeat: Infinity
+            }} />
+            </div>}
+        </motion.button>
+
+        {/* Section 1: Executive Command Center - Minimalist */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 10
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.3
+        }} className="mb-8">
+          <Card className="border border-slate-200/30 dark:border-slate-800/20 bg-white/30 dark:bg-slate-900/20 backdrop-blur-sm rounded-lg shadow-sm">
+            <CardContent className="p-4 sm:p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
+                {/* Today's Pulse */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Activity className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                    <h2 className="text-sm font-light text-slate-900 dark:text-slate-50 tracking-tight">Today's Pulse</h2>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl sm:text-3xl font-light text-slate-900 dark:text-slate-50">
+                          ${(commandMetrics.todayRevenue / 1000000).toFixed(1)}M
+                        </span>
+                        <span className={`text-xs font-light ${commandMetrics.revenueChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                          {commandMetrics.revenueChange >= 0 ? '↑' : '↓'} {Math.abs(commandMetrics.revenueChange).toFixed(1)}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-light">Revenue Today</p>
+                    </div>
+                    <div className="flex items-center gap-4 pt-3 border-t border-slate-200/50 dark:border-slate-800/50">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-lg font-light text-red-600 dark:text-red-500">
+                            {commandMetrics.criticalAlerts}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-light">Critical</p>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-lg font-light text-amber-600 dark:text-amber-500">
+                            {commandMetrics.highPriorityAlerts}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-light">High Priority</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Month Status */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Target className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                    <h2 className="text-sm font-light text-slate-900 dark:text-slate-50 tracking-tight">Month Status</h2>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl sm:text-3xl font-light text-slate-900 dark:text-slate-50">
+                          {commandMetrics.monthProgress.toFixed(0)}%
+                        </span>
+                        <span className={`text-xs font-light ${commandMetrics.monthChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                          {commandMetrics.monthChange >= 0 ? '↑' : '↓'} {Math.abs(commandMetrics.monthChange).toFixed(1)}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-light">of Target</p>
+                    </div>
+                    <div className="pt-3 border-t border-slate-200/50 dark:border-slate-800/50 space-y-2">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500 dark:text-slate-400 font-light">Month-to-Date:</span>
+                        <span className="font-light text-slate-900 dark:text-slate-50">
+                          ${(commandMetrics.monthToDate / 1000000).toFixed(1)}M
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500 dark:text-slate-400 font-light">Loans Closed Today:</span>
+                        <span className="font-light text-slate-900 dark:text-slate-50">
+                          {Math.round(commandMetrics.loansClosedToday)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Section 2: Action Items - Minimalist */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 10
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.3,
+          delay: 0.05
+        }} className="mb-8">
+          <Card className="border border-slate-200/30 dark:border-slate-800/20 bg-white/30 dark:bg-slate-900/20 backdrop-blur-sm rounded-lg shadow-sm">
+            <CardHeader className="p-4 sm:p-6 pb-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                <CardTitle className="text-sm font-light tracking-tight text-slate-900 dark:text-slate-50">
+                  Action Items
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6 pt-0">
+              {/* Critical Actions */}
+              {actionItems.critical.length > 0 && <div className="mb-8">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                    <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                      Act Now ({actionItems.critical.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-3">
+                    {actionItems.critical.map((item, idx) => <motion.div key={item.id} initial={{
+                    opacity: 0,
+                    y: 10
+                  }} animate={{
+                    opacity: 1,
+                    y: 0
+                  }} transition={{
+                    duration: 0.3,
+                    delay: idx * 0.05
+                  }} className="group relative p-5 bg-gradient-to-br from-red-50/50 to-red-100/30 dark:from-red-950/10 dark:to-red-900/5 rounded-2xl border border-red-100/50 dark:border-red-900/20 hover:border-red-200 dark:hover:border-red-800/40 transition-all cursor-pointer hover:shadow-md" onClick={() => {
+                    if (item.data && item.data.breakdown) {
+                      setRiskModal({
+                        open: true,
+                        case: item.data
+                      });
+                    }
+                  }}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-slate-900 dark:text-slate-50 mb-1.5 group-hover:text-red-700 dark:group-hover:text-red-300 transition-colors">
+                              {item.title}
+                            </p>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                              {item.description}
+                            </p>
+                          </div>
+                          <span className="text-xs font-medium text-red-600 dark:text-red-400 whitespace-nowrap">
+                            {item.action}
+                          </span>
+                        </div>
+                      </motion.div>)}
+                  </div>
+                </div>}
+
+              {/* Review Items */}
+              {actionItems.review.length > 0 && <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                    <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                      Review Today ({actionItems.review.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-3">
+                    {actionItems.review.map((item, idx) => <motion.div key={item.id} initial={{
+                    opacity: 0,
+                    y: 10
+                  }} animate={{
+                    opacity: 1,
+                    y: 0
+                  }} transition={{
+                    duration: 0.3,
+                    delay: (actionItems.critical.length + idx) * 0.05
+                  }} className="group relative p-5 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-200/50 dark:border-slate-700/30 hover:border-slate-300 dark:hover:border-slate-600/50 transition-all cursor-pointer hover:shadow-md" onClick={() => {
+                    if (item.data && item.data.breakdown) {
+                      setRiskModal({
+                        open: true,
+                        case: item.data
+                      });
+                    }
+                  }}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-slate-900 dark:text-slate-50 mb-1.5 group-hover:text-orange-700 dark:group-hover:text-orange-300 transition-colors">
+                              {item.title}
+                            </p>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                              {item.description}
+                            </p>
+                          </div>
+                          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            {item.action}
+                          </span>
+                        </div>
+                      </motion.div>)}
+                  </div>
+                </div>}
+
+              {actionItems.critical.length === 0 && actionItems.review.length === 0 && <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+                  <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-green-500" />
+                  <p className="text-lg font-medium">All clear! No action items at this time.</p>
+                </div>}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Section 3: Health Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Financial Health */}
+          <motion.div initial={{
+            opacity: 0,
+            y: 20
+          }} animate={{
+            opacity: 1,
+            y: 0
+          }} transition={{
+            duration: 0.5,
+            delay: 0.2
+          }}>
+            <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl shadow-lg h-full">
+              <CardHeader className="p-6 pb-4">
+                <div className="flex items-center gap-3">
+                  <DollarSign className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  <CardTitle className="text-xl font-semibold text-slate-900 dark:text-slate-50">
+                    Profitability
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6 pt-0 space-y-4">
+                <div>
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <span className="text-2xl font-bold text-slate-900 dark:text-slate-50">
+                      {financialHealth.netMargin.toFixed(1)}%
+                    </span>
+                    <span className="text-sm text-slate-500 dark:text-slate-400">Net Margin</span>
+                  </div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1 mt-3">
+                    <div className="flex justify-between">
+                      <span>Revenue per Loan:</span>
+                      <span className="font-semibold">${(financialHealth.revenuePerLoan / 1000).toFixed(0)}K</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Cost per Loan:</span>
+                      <span className="font-semibold">${(financialHealth.costPerLoan / 1000).toFixed(0)}K</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                    Forecast Month-End
+                  </p>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Revenue:</span>
+                      <span className="font-semibold text-slate-900 dark:text-slate-50">
+                        ${(financialHealth.monthEndRevenue / 1000000).toFixed(1)}M
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Profit:</span>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                        ${(financialHealth.monthEndProfit / 1000000).toFixed(2)}M
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600 dark:text-slate-400">Margin:</span>
+                      <span className="font-semibold text-slate-900 dark:text-slate-50">
+                        {financialHealth.netMargin.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* Operational Health */}
+          <motion.div initial={{
+            opacity: 0,
+            y: 20
+          }} animate={{
+            opacity: 1,
+            y: 0
+          }} transition={{
+            duration: 0.5,
+            delay: 0.3
+          }}>
+            <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl shadow-lg h-full">
+              <CardHeader className="p-6 pb-4">
+                <div className="flex items-center gap-3">
+                  <Clock className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  <CardTitle className="text-xl font-semibold text-slate-900 dark:text-slate-50">
+                    Operations
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6 pt-0 space-y-4">
+                <div>
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <span className="text-2xl font-bold text-slate-900 dark:text-slate-50">
+                      {operationalHealth.avgCycleTime.toFixed(0)} days
+                    </span>
+                    <span className="text-sm text-slate-500 dark:text-slate-400">Avg Cycle Time</span>
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Target: {operationalHealth.targetCycleTime.toFixed(0)} days
+                  </div>
+                </div>
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm text-slate-600 dark:text-slate-400">Pull-Through Rate:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-slate-900 dark:text-slate-50">
+                        {operationalHealth.pullThroughRate}%
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        (Industry: {operationalHealth.industryPullThrough}%)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                    Top Bottleneck
+                  </p>
+                  <div className="text-sm">
+                    <div className="font-semibold text-slate-900 dark:text-slate-50 mb-1">
+                      {operationalHealth.bottleneck.role}
+                    </div>
+                    <div className="text-slate-600 dark:text-slate-400">
+                      {operationalHealth.bottleneck.avgDays.toFixed(0)} days avg
+                      <span className="text-red-600 dark:text-red-400 ml-2">
+                        ({Math.round((operationalHealth.bottleneck.avgDays / operationalHealth.bottleneck.targetDays - 1) * 100)}% over target)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+
+        {/* Report 1: TopTiering Performance Report */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 20
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.5
+        }}>
+          <Card className="mb-12 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl hover:shadow-lg transition-all">
+            <CardHeader className="p-6 sm:p-8 pb-4 sm:pb-6">
+              <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-4">
+                <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0">
+                  <TrendingUp className="h-5 w-5 text-slate-700 dark:text-slate-300" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-xl sm:text-2xl md:text-3xl font-light text-slate-900 dark:text-slate-50 tracking-tight mb-2">
+                    TopTiering<sup className="text-xs">®</sup> Performance
+                  </CardTitle>
+                  <CardDescription className="text-sm sm:text-base md:text-lg text-slate-500 dark:text-slate-400 font-light">
+                    Real-time ranking by productivity, profitability, complexity, cycle time, and pull-through
+                  </CardDescription>
+                </div>
+              </div>
+
+              {/* Filter Display - Show Only Selected */}
+              <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                {/* Selected Tier Display */}
+                <div className="inline-flex items-center gap-2">
+                  <span className="text-xs font-light text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tier:</span>
+                  <select value={selectedTier} onChange={e => setSelectedTier(e.target.value as 'top' | 'middle' | 'bottom')} className="px-3 py-1.5 text-sm font-light border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900 dark:focus:ring-slate-100">
+                    <option value="top">Top Tier</option>
+                    <option value="middle">Middle Tier</option>
+                    <option value="bottom">Bottom Tier</option>
+                  </select>
+                </div>
+
+                {/* Stats Summary */}
+                <div className="inline-flex items-center gap-2 text-xs font-light text-slate-500 dark:text-slate-400 sm:ml-auto">
+                  <span>{allPerformers.length} employees ({tierPercentages[selectedTier]}%)</span>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-3 sm:p-10 md:p-12 pt-0">
+              <div className="space-y-1.5 sm:space-y-3">
+                {topPerformers.map((performer, idx) => <div key={idx} className="flex flex-col gap-2.5 p-3 sm:p-6 border-b border-slate-100/50 dark:border-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-all last:border-0 rounded-lg">
+                    <div className="flex items-center gap-2.5 sm:gap-4 flex-1 min-w-0">
+                      <div className="flex flex-col items-center justify-center w-9 h-9 sm:w-12 sm:h-12 rounded-full bg-slate-50/80 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 flex-shrink-0 backdrop-blur-sm">
+                        <div className="font-light text-sm sm:text-lg leading-none">#{performer.rank}</div>
+                        <div className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5">of 100</div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-normal text-sm sm:text-lg truncate text-slate-900 dark:text-slate-100 leading-snug">{performer.name}</div>
+                        <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light truncate">{performer.role}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 pl-11 sm:pl-16">
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div className="text-left">
+                          <motion.div className="font-light text-lg sm:text-2xl tabular-nums text-slate-900 dark:text-slate-100 leading-none" key={performer.score} initial={{
+                          scale: 1
+                        }} animate={isAnimating ? {
+                          scale: [1, 1.1, 1]
+                        } : {}} transition={{
+                          duration: 0.3
+                        }}>
+                            {performer.score}
+                          </motion.div>
+                          <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-light uppercase tracking-wider mt-0.5">Score</div>
+                        </div>
+                        <div className="text-left">
+                          <motion.div className="font-light text-base sm:text-xl tabular-nums text-slate-900 dark:text-slate-100 leading-none" key={performer.loans} initial={{
+                          scale: 1
+                        }} animate={isAnimating ? {
+                          scale: [1, 1.1, 1]
+                        } : {}} transition={{
+                          duration: 0.3
+                        }}>
+                            {performer.loans}
+                          </motion.div>
+                          <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-light uppercase tracking-wider mt-0.5">Loans</div>
+                        </div>
+                        <div className="text-left">
+                          <motion.div className="font-light text-base sm:text-xl tabular-nums text-slate-900 dark:text-slate-100 leading-none" key={performer.revenue} initial={{
+                          scale: 1
+                        }} animate={isAnimating ? {
+                          scale: [1, 1.1, 1]
+                        } : {}} transition={{
+                          duration: 0.3
+                        }}>
+                            ${(performer.revenue / 1000).toFixed(0)}K
+                          </motion.div>
+                          <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-light uppercase tracking-wider mt-0.5">Rev</div>
+                        </div>
+                      </div>
+                      <motion.div className="flex-shrink-0" animate={isAnimating ? {
+                      scale: [1, 1.2, 1],
+                      opacity: [0.7, 1, 0.7]
+                    } : {}} transition={{
+                      duration: 0.8,
+                      repeat: isAnimating ? Infinity : 0,
+                      ease: "easeInOut"
+                    }}>
+                        {performer.trend === 'up' ? <ArrowUp className="h-4 w-4 sm:h-5 sm:w-5 text-green-500" /> : <ArrowDown className="h-4 w-4 sm:h-5 sm:w-5 text-red-500" />}
+                      </motion.div>
+                    </div>
+                  </div>)}
+
+              </div>
+
+              {/* Show More Button */}
+              {hasMore && <div className="flex items-center justify-center px-3 sm:px-6 py-4 sm:py-6 border-t border-slate-100 dark:border-slate-800">
+                  <Button variant="ghost" size="sm" onClick={() => setVisibleCount(prev => prev + itemsPerPage)} className="font-light text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100">
+                    Show more... ({allPerformers.length - visibleCount} remaining)
+                  </Button>
+                </div>}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+
+        {/* Report 2: Fallout Prediction Report */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 20
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.5,
+          delay: 0.1
+        }}>
+          <Card className="mb-12 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl hover:shadow-lg transition-all">
+            <CardHeader className="p-6 sm:p-8 pb-4 sm:pb-6">
+              <div className="flex items-start gap-4 mb-2">
+                <div className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <AlertTriangle className="h-5 w-5 text-slate-700 dark:text-slate-300" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg sm:text-2xl md:text-3xl font-light text-slate-900 dark:text-slate-50 tracking-tight mb-1 sm:mb-2">
+                    Fallout Prediction Report
+                  </CardTitle>
+                  <CardDescription className="text-sm sm:text-base md:text-lg text-slate-500 dark:text-slate-400 font-light">
+
+                    Predicted vs actual withdrawals, declinations, and fallout by category
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-1 sm:p-2 pt-0">
+              <div className="space-y-10">
+                <ChartContainer config={{
+                  predicted: {
+                    label: "Predicted",
+                    color: "#3b82f6"
+                  },
+                  actual: {
+                    label: "Actual",
+                    color: "#ef4444"
+                  }
+                }} className="h-[400px] md:h-[500px] lg:h-[550px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={falloutData} margin={{
+                      top: 15,
+                      right: 5,
+                      left: -5,
+                      bottom: 70
+                    }}>
+                      <CartesianGrid strokeDasharray="2 2" stroke="#e2e8f0" opacity={0.15} vertical={false} />
+                      <XAxis dataKey="type" angle={-35} textAnchor="end" height={120} tick={{
+                        fill: '#64748b',
+                        fontSize: 14,
+                        fontWeight: 500
+                      }} stroke="#cbd5e1" interval={0} />
+                      <YAxis tick={{
+                        fill: '#64748b',
+                        fontSize: 11,
+                        fontWeight: 400
+                      }} stroke="#cbd5e1" width={60} />
+                      <ChartTooltip content={<ChartTooltipContent />} cursor={{
+                        fill: 'rgba(59, 130, 246, 0.1)'
+                      }} />
+                      <Bar dataKey="predicted" fill="#60a5fa" radius={[12, 12, 0, 0]} opacity={0.9} animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} barSize={60} />
+                      <Bar dataKey="actual" fill="#f87171" radius={[12, 12, 0, 0]} opacity={0.9} animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} barSize={60} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+                <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-5">
+                  {falloutData.map((item, idx) => <button key={idx} onClick={() => setFalloutModal({
+                    open: true,
+                    category: item.type,
+                    data: getFalloutEmployees(item.type)
+                  })} className="text-center p-5 glass dark:glass-dark border-0 rounded-2xl cursor-pointer hover:shadow-lg transition-all group">
+                      <div className="font-semibold text-sm mb-2 text-slate-900 dark:text-slate-50 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{item.type}</div>
+                      <div className="text-xs text-slate-600 dark:text-slate-400 mb-3 space-y-1">
+                        <div>Pred: <span className="font-semibold text-slate-900 dark:text-slate-50">{item.predicted}</span></div>
+                        <div>Act: <span className="font-semibold text-slate-900 dark:text-slate-50">{item.actual}</span></div>
+                      </div>
+                      <div className={`text-[10px] sm:text-xs px-2 sm:px-3 py-1 sm:py-1.5 rounded-full font-medium ${item.risk === 'high' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : item.risk === 'medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
+                        {item.risk.toUpperCase()}
+
+                      </div>
+                    </button>)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Report 3: Profitability Analysis */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 20
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.5,
+          delay: 0.2
+        }}>
+          <Card className="mb-4 sm:mb-6 glass-card dark:glass-card-dark border-0 rounded-2xl shadow-xl hover:shadow-2xl transition-all">
+            <CardHeader className="p-6 sm:p-8">
+              <div className="flex items-start gap-3 sm:gap-4 mb-2">
+                <div className="p-2 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-100 dark:border-green-900/50">
+                  <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg sm:text-2xl md:text-3xl font-light text-slate-900 dark:text-slate-50 tracking-tight mb-1 sm:mb-2">
+                    Profitability Analysis
+                  </CardTitle>
+                  <CardDescription className="text-sm sm:text-base md:text-lg text-slate-500 dark:text-slate-400 font-light">
+                    Margin, productivity, and revenue correlation over time
+                  </CardDescription>
+                </div>
+              </div>
+
+            </CardHeader>
+            <CardContent className="p-1 sm:p-2 pt-0">
+              <ChartContainer config={{
+                margin: {
+                  label: "Margin %",
+                  color: "#22c55e"
+                },
+                productivity: {
+                  label: "Productivity",
+                  color: "#3b82f6"
+                },
+                revenue: {
+                  label: "Revenue (M)",
+                  color: "#f59e0b"
+                }
+              }} className="h-[350px] md:h-[450px] lg:h-[500px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={profitabilityData} margin={{
+                    top: 10,
+                    right: 0,
+                    left: -20,
+                    bottom: 0
+                  }}>
+                    <defs>
+                      <linearGradient id="colorMargin" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorProductivity" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.3} />
+                    <XAxis dataKey="month" tick={{
+                      fill: '#64748b',
+                      fontSize: 10,
+                      fontWeight: 400
+                    }} stroke="#cbd5e1" height={40} />
+                    <YAxis yAxisId="left" tick={{
+                      fill: '#64748b',
+                      fontSize: 13,
+                      fontWeight: 500
+                    }} stroke="#cbd5e1" width={60} label={{
+                      value: 'Margin % / Productivity',
+                      angle: -90,
+                      position: 'insideLeft',
+                      style: {
+                        textAnchor: 'middle',
+                        fill: '#64748b',
+                        fontSize: 12
+                      }
+                    }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{
+                      fill: '#64748b',
+                      fontSize: 13,
+                      fontWeight: 500
+                    }} stroke="#cbd5e1" width={60} label={{
+                      value: 'Revenue (M)',
+                      angle: 90,
+                      position: 'insideRight',
+                      style: {
+                        textAnchor: 'middle',
+                        fill: '#64748b',
+                        fontSize: 12
+                      }
+                    }} />
+                    <ChartTooltip content={<ChartTooltipContent />} cursor={{
+                      stroke: '#3b82f6',
+                      strokeWidth: 1,
+                      strokeDasharray: '5 5'
+                    }} />
+                    <Area yAxisId="left" type="monotone" dataKey="margin" stroke="#34d399" strokeWidth={2.5} fill="url(#colorMargin)" animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} />
+                    <Area yAxisId="left" type="monotone" dataKey="productivity" stroke="#60a5fa" strokeWidth={2.5} fill="url(#colorProductivity)" animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} />
+                    <Area yAxisId="right" type="monotone" dataKey="revenue" stroke="#fbbf24" strokeWidth={2.5} fill="url(#colorRevenue)" animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Report 4: Cycle Time & Efficiency */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 20
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.5,
+          delay: 0.3
+        }}>
+          <Card className="mb-4 sm:mb-6 glass-card dark:glass-card-dark border-0 rounded-2xl shadow-xl hover:shadow-2xl transition-all">
+            <CardHeader className="p-6 sm:p-8">
+              <div className="flex items-start gap-3 sm:gap-4 mb-2">
+                <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50">
+                  <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg sm:text-2xl md:text-3xl font-light text-slate-900 dark:text-slate-50 tracking-tight mb-1 sm:mb-2">
+                    Cycle Time & Efficiency Report
+                  </CardTitle>
+                  <CardDescription className="text-sm sm:text-base md:text-lg text-slate-500 dark:text-slate-400 font-light">
+                    Average processing days vs targets by role
+                  </CardDescription>
+                </div>
+              </div>
+
+            </CardHeader>
+            <CardContent className="p-1 sm:p-2 pt-0">
+              <ChartContainer config={{
+                avgDays: {
+                  label: "Avg Days",
+                  color: "#3b82f6"
+                },
+                targetDays: {
+                  label: "Target Days",
+                  color: "#22c55e"
+                }
+              }} className="h-[350px] md:h-[450px] lg:h-[500px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={cycleTimeData} margin={{
+                    top: 10,
+                    right: 0,
+                    left: -20,
+                    bottom: 0
+                  }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.3} />
+                    <XAxis dataKey="role" tick={{
+                      fill: '#64748b',
+                      fontSize: 10,
+                      fontWeight: 400
+                    }} stroke="#cbd5e1" height={40} />
+                    <YAxis tick={{
+                      fill: '#64748b',
+                      fontSize: 10,
+                      fontWeight: 400
+                    }} stroke="#cbd5e1" width={50} label={{
+                      value: 'Days',
+                      angle: -90,
+                      position: 'insideLeft',
+                      style: {
+                        textAnchor: 'middle',
+                        fill: '#64748b',
+                        fontSize: 12
+                      }
+                    }} />
+                    <ChartTooltip content={<ChartTooltipContent />} cursor={{
+                      fill: 'rgba(59, 130, 246, 0.1)'
+                    }} />
+                    <Bar dataKey="avgDays" fill="#60a5fa" radius={[12, 12, 0, 0]} opacity={0.9} animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} />
+                    <Bar dataKey="targetDays" fill="#34d399" radius={[12, 12, 0, 0]} opacity={0.9} animationDuration={isAnimating ? 300 : 0} isAnimationActive={isAnimating} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+              <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                {cycleTimeData.map((item, idx) => <div key={idx} className="text-center p-3 sm:p-4 bg-slate-50/50 dark:bg-slate-800/30 border-0 rounded-2xl backdrop-blur-sm">
+                    <div className="font-semibold text-xs sm:text-sm text-slate-700 dark:text-slate-300 mb-2 truncate">{item.role}</div>
+                    <motion.div className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums" key={item.efficiency} initial={{
+                    scale: 1
+                  }} animate={isAnimating ? {
+                    scale: [1, 1.1, 1]
+                  } : {}} transition={{
+                    duration: 0.3
+                  }}>
+                      {Math.round(item.efficiency)}%
+                    </motion.div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Efficiency</div>
+                  </div>)}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Report 5: Pull-Through Rate */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 20
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.5,
+          delay: 0.4
+        }}>
+          <Card className="mb-4 sm:mb-6 glass-card dark:glass-card-dark border-0 rounded-2xl shadow-xl hover:shadow-2xl transition-all">
+            <CardHeader className="p-6 sm:p-8">
+              <div className="flex items-start gap-3 sm:gap-4 mb-2">
+                <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/50">
+                  <Target className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg sm:text-2xl md:text-3xl font-light text-slate-900 dark:text-slate-50 tracking-tight mb-1 sm:mb-2">
+                    Pull-Through Rate Report
+                  </CardTitle>
+                  <CardDescription className="text-sm sm:text-base md:text-lg text-slate-500 dark:text-slate-400 font-light">
+                    Conversion funnel from application to funding
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-3 sm:p-10 md:p-12 pt-0">
+              {/* Desktop: Show progress bars */}
+              <div className="hidden lg:block">
+                <div className="max-w-4xl mx-auto space-y-5">
+                  {pullThroughData.map((item, idx) => <div key={idx} className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-base font-semibold text-slate-900 dark:text-slate-50">{item.stage}</span>
+                        <motion.span className="text-xl font-bold text-slate-900 dark:text-slate-50 tabular-nums" key={item.percentage} initial={{
+                        scale: 1
+                      }} animate={isAnimating ? {
+                        scale: [1, 1.1, 1]
+                      } : {}} transition={{
+                        duration: 0.3
+                      }}>
+                          {item.percentage}%
+                        </motion.span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800/50 rounded-full h-3">
+                        <motion.div className="bg-gradient-to-r from-purple-400 to-purple-500 h-3 rounded-full shadow-sm" initial={{
+                        width: 0
+                      }} animate={{
+                        width: `${item.percentage}%`
+                      }} transition={{
+                        duration: isAnimating ? 0.5 : 0.3,
+                        ease: "easeOut"
+                      }} />
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        {item.count} loans
+                      </div>
+                    </div>)}
+                </div>
+              </div>
+
+              {/* Mobile & Tablet: Show only progress bars for cleaner layout */}
+              <div className="lg:hidden space-y-4">
+                {pullThroughData.map((item, idx) => <div key={idx} className="space-y-2 p-4 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">{item.stage}</span>
+                      <motion.span className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-50 tabular-nums" key={item.percentage} initial={{
+                      scale: 1
+                    }} animate={isAnimating ? {
+                      scale: [1, 1.1, 1]
+                    } : {}} transition={{
+                      duration: 0.3
+                    }}>
+                        {item.percentage}%
+                      </motion.span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-800/70 rounded-full h-3">
+                      <motion.div className="bg-gradient-to-r from-purple-400 to-purple-500 h-3 rounded-full shadow-sm" initial={{
+                      width: 0
+                    }} animate={{
+                      width: `${item.percentage}%`
+                    }} transition={{
+                      duration: isAnimating ? 0.5 : 0.3,
+                      ease: "easeOut"
+                    }} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        {item.count} loans
+                      </div>
+                </div>
+                  </div>)}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Report 6: Risk & Flagged Cases */}
+        <motion.div initial={{
+          opacity: 0,
+          y: 20
+        }} animate={{
+          opacity: 1,
+          y: 0
+        }} transition={{
+          duration: 0.5,
+          delay: 0.5
+        }}>
+          <Card className="mb-8 sm:mb-12 border-0 bg-white dark:bg-slate-900 rounded-3xl shadow-sm hover:shadow-md transition-all">
+            <CardHeader className="p-4 sm:p-10 md:p-12 pb-4 sm:pb-6">
+              <div className="flex items-start gap-3 sm:gap-4 mb-2">
+                <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/50 flex-shrink-0">
+                  <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-slate-700 dark:text-slate-300" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg sm:text-2xl md:text-3xl font-light text-slate-900 dark:text-slate-50 tracking-tight mb-1 sm:mb-2">
+                    Risk & Flagged Cases Report
+                  </CardTitle>
+                  <CardDescription className="text-sm sm:text-base md:text-lg text-slate-500 dark:text-slate-400 font-light">
+
+                    High-priority cases requiring immediate attention
+                  </CardDescription>
+                </div>
+                <motion.span className="text-xl sm:text-2xl font-bold text-red-500 tabular-nums" key={riskCases.length} initial={{
+                  scale: 1
+                }} animate={isAnimating ? {
+                  scale: [1, 1.2, 1]
+                } : {}} transition={{
+                  duration: 0.3
+                }}>
+                  {riskCases.length}
+                </motion.span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 sm:p-8 pt-0">
+              <div className="space-y-3 sm:space-y-4">
+                {riskCases.map(riskCase => <motion.button key={riskCase.id} onClick={() => setRiskModal({
+                  open: true,
+                  case: riskCase
+                })} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-4 glass dark:glass-dark border-0 rounded-xl hover:shadow-md transition-all w-full text-left cursor-pointer" whileHover={{
+                  scale: 1.01
+                }}>
+                    <div className="flex items-start gap-2.5 sm:gap-3 flex-1 min-w-0">
+                      <motion.div className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full flex-shrink-0 mt-1 ${riskCase.risk === 'high' ? 'bg-red-500' : 'bg-yellow-500'}`} animate={isAnimating ? {
+                      scale: [1, 1.3, 1],
+                      opacity: [0.7, 1, 0.7]
+                    } : {}} transition={{
+                      duration: 1.5,
+                      repeat: isAnimating ? Infinity : 0,
+                      ease: "easeInOut"
+                    }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm sm:text-base text-slate-900 dark:text-slate-50">{riskCase.borrower}</div>
+                        <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">{riskCase.reason}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pl-5 sm:pl-6">
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div className="text-left">
+                          <motion.div className="font-semibold text-xs sm:text-sm md:text-base text-slate-900 dark:text-slate-50 tabular-nums" key={riskCase.loanAmount} initial={{
+                          scale: 1
+                        }} animate={isAnimating ? {
+                          scale: [1, 1.1, 1]
+                        } : {}} transition={{
+                          duration: 0.3
+                        }}>
+                            ${(riskCase.loanAmount / 1000).toFixed(0)}K
+                          </motion.div>
+                          <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400">Loan</div>
+                        </div>
+                        <div className="text-left">
+                          <motion.div className={`font-semibold text-xs sm:text-sm md:text-base tabular-nums ${riskCase.daysOverdue > 3 ? 'text-red-500' : 'text-yellow-500'}`} key={riskCase.daysOverdue} initial={{
+                          scale: 1
+                        }} animate={isAnimating ? {
+                          scale: [1, 1.1, 1]
+                        } : {}} transition={{
+                          duration: 0.3
+                        }}>
+                            {riskCase.daysOverdue}d
+                          </motion.div>
+                          <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400">Overdue</div>
+                        </div>
+
+                      </div>
+                      <Button variant="outline" size="sm" className="text-xs sm:text-sm">
+                        Review
+                      </Button>
+                    </div>
+                  </motion.button>)}
+              </div>
+              <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600 dark:text-slate-400">Total Flagged Cases</span>
+                  <motion.span className="text-xl sm:text-2xl font-bold text-red-500 tabular-nums" key={riskCases.length} initial={{
+                    scale: 1
+                  }} animate={isAnimating ? {
+                    scale: [1, 1.2, 1]
+                  } : {}} transition={{
+                    duration: 0.3
+                  }}>
+                    {riskCases.length}
+                  </motion.span>
+                </div>
+              </div>
+
+            </CardContent>
+          </Card>
+        </motion.div>
+        </>}
+      </div>
+
+      {/* Contact Modal */}
+      <ContactModal
+        open={contactModal.open}
+        type={contactModal.type}
+        performer={contactModal.performer}
+        onClose={() => setContactModal({ open: false, type: null, performer: null })}
+      />
+
+      {/* Metric Breakdown Modal */}
+      <MetricModal
+        open={metricModal.open}
+        type={metricModal.type}
+        performer={metricModal.performer}
+        onClose={() => setMetricModal({ open: false, type: null, performer: null })}
+      />
+
+      {/* Risk Case Breakdown Modal */}
+      <RiskModal
+        open={riskModal.open}
+        case={riskModal.case}
+        onClose={() => setRiskModal({ open: false, case: null })}
+      />
+
+      {/* Pull-Through Stage Modal */}
+      <PullThroughModal
+        open={pullThroughModal.open}
+        onOpenChange={(open) => !open && setPullThroughModal({
+          open: false,
+          stage: null,
+          data: []
+        })}
+        stage={pullThroughModal.stage}
+        data={pullThroughModal.data}
+      />
+
+      {/* Export to Excel Modal */}
+      <ExportModal
+        open={exportModal}
+        onOpenChange={setExportModal}
+      />
+
+      {/* Share via Messenger Modal */}
+      <ShareModal
+        open={shareModal}
+        onOpenChange={setShareModal}
+      />
+
+      {/* Embed Code Modal */}
+      <EmbedModal
+        open={embedModal}
+        onOpenChange={setEmbedModal}
+      />
+
+      {/* Fallout Analysis Modal */}
+      <FalloutModal
+        open={falloutModal.open}
+        category={falloutModal.category}
+        data={falloutModal.data}
+        onClose={() => setFalloutModal({ open: false, category: null, data: [] })}
+      />
+
+      {/* Hidden for now - Ailethia Avatar
+       <AletheiaVoiceAssistant dashboardContext={{
+        stats,
+        riskCases,
+        topPerformers: topPerformers.slice(0, 5), // Top 5 for context
+        cycleTimeData,
+        falloutData,
+        profitabilityData: profitabilityData[profitabilityData.length - 1] // Latest month
+       }} />
+       */}
+      </DashboardLayout>
+    </DashboardContainer>
+  );
+};
+export default Dashboard;

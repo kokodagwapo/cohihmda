@@ -1,0 +1,4 @@
+## Ensure files that EB/Linux parses are checked out with LF line endings
+server/Procfile text eol=lf
+server/**/*.sh text eol=lf
+

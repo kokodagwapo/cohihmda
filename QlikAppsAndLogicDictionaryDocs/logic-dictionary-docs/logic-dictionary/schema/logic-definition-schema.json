@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Logic Definition Schema",
+  "description": "Schema for documenting Qlik business logic definitions for PostgreSQL migration",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Name of the field/formula"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "Date Flags",
+        "Turn Time",
+        "Pull Through",
+        "Revenue",
+        "Complexity",
+        "Status",
+        "Channel",
+        "Stratification",
+        "Year/Month Fields",
+        "Multi-Channel Logic",
+        "Validation Flags",
+        "Other Calculated Fields",
+        "Variables"
+      ],
+      "description": "Category of the logic definition"
+    },
+    "definition": {
+      "type": "string",
+      "description": "Clear description of what this field/formula represents"
+    },
+    "qlikExpression": {
+      "type": "string",
+      "description": "Original Qlik expression/code"
+    },
+    "sqlEquivalent": {
+      "type": "string",
+      "description": "PostgreSQL/SQL equivalent expression"
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of fields/variables this logic depends on"
+    },
+    "usedIn": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "All apps",
+          "Sales",
+          "DataPilot",
+          "Performance",
+          "Operations",
+          "Contribution to Profit",
+          "Incremental Builder"
+        ]
+      },
+      "description": "Which apps use this logic"
+    },
+    "businessRules": {
+      "type": "string",
+      "description": "Business logic explanation"
+    },
+    "migrationNotes": {
+      "type": "string",
+      "description": "Considerations for PostgreSQL migration"
+    },
+    "sourceFile": {
+      "type": "string",
+      "description": "Source file path where this logic is defined"
+    },
+    "sourceLine": {
+      "type": "number",
+      "description": "Line number in source file (approximate)"
+    },
+    "qlikFunctions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Qlik functions used in this expression"
+    },
+    "postgresqlFunctions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "PostgreSQL functions/operators used in SQL equivalent"
+    }
+  },
+  "required": [
+    "name",
+    "category",
+    "definition",
+    "qlikExpression",
+    "sqlEquivalent",
+    "dependencies",
+    "usedIn",
+    "sourceFile"
+  ]
+}

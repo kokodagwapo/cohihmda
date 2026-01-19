@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: coheus-postgres-dev
+    environment:
+      POSTGRES_DB: ${DB_NAME:-coheus}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coheus-dev-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: coheus-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coheus-dev-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/dev/Dockerfile.backend.dev
+      args:
+        - NODE_ENV=development
+    container_name: coheus-backend-dev
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-coheus}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-100}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-coheus:tenant:}
+      - REDIS_TTL=${REDIS_TTL:-3600}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-min-32-characters-long-change-in-production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TENANT_ISOLATION_ENABLED=${TENANT_ISOLATION_ENABLED:-true}
+      - TENANT_DEFAULT_ID=${TENANT_DEFAULT_ID:-}
+      - MAX_TENANTS=${MAX_TENANTS:-100}
+      - TENANT_RESOURCE_QUOTAS_ENABLED=${TENANT_RESOURCE_QUOTAS_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../../server:/app/server
+      - /app/server/node_modules
+    networks:
+      - coheus-dev-network
+    restart: unless-stopped
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: docker/dev/Dockerfile.frontend.dev
+      args:
+        - NODE_ENV=development
+    container_name: coheus-frontend-dev
+    ports:
+      - "8080:5174"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
+      - NODE_ENV=development
+    volumes:
+      - ../../src:/app/src
+      - ../../public:/app/public
+      - ../../index.html:/app/index.html
+      - ../../vite.config.ts:/app/vite.config.ts
+      - ../../tsconfig.json:/app/tsconfig.json
+      - ../../tsconfig.app.json:/app/tsconfig.app.json
+      - ../../package.json:/app/package.json
+      - /app/node_modules
+    networks:
+      - coheus-dev-network
+    restart: unless-stopped
+    command: npm run dev -- --host 0.0.0.0 --port 5174
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  coheus-dev-network:
+    driver: bridge

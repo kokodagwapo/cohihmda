@@ -1,0 +1,15 @@
+{
+  "name": "coheus-seed-demo-data",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.10.0",
+    "typescript": "^5.8.3"
+  }
+}

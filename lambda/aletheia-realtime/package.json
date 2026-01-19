@@ -1,0 +1,17 @@
+{
+  "name": "coheus-aletheia-realtime",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.958.0",
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.958.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.8.3",
+    "ws": "^8.18.0"
+  }
+}

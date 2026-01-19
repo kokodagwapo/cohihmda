@@ -1,0 +1,23 @@
+FROM node:20-alpine
+
+WORKDIR /app/server
+
+# Install dependencies for development
+RUN apk add --no-cache git
+
+# Copy package files
+COPY server/package*.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm ci
+
+# Copy server source (will be mounted as volume in docker-compose)
+# This is here for cases where volume mount is not used
+COPY server/ ./
+
+# Expose port
+EXPOSE 3001
+
+# Run development server with hot-reload
+CMD ["npm", "run", "dev"]
+

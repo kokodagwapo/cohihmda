@@ -1,0 +1,43 @@
+# Multi-stage build for production backend
+FROM node:20-alpine AS builder
+
+WORKDIR /app/server
+
+# Copy package files first for better layer caching
+COPY server/package*.json ./
+
+# Install all dependencies (including dev dependencies for build)
+RUN npm ci
+
+# Copy server source
+COPY server/ ./
+
+# Build TypeScript to JavaScript
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine
+
+WORKDIR /app/server
+
+# Install only production dependencies
+COPY server/package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy built files from builder stage
+COPY --from=builder /app/server/dist ./dist
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app/server
+
+USER nodejs
+
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+CMD ["npm", "start"]

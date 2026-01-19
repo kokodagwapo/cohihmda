@@ -1,0 +1,187 @@
+LET vAppID = DocumentName(); // This is the App ID of the app that executes the script.
+TRACE App ID: $(vAppID);
+
+LET vCompName = ComputerName(); // This is the name of the computer that the app resides on. This is used in the URL used for REST Connector calls in the script
+TRACE Computer Name: $(vCompName);
+
+let System.BaseURL = 'https://$(vCompName).3vue-cloud.local:4242';
+
+// Generate an Xrf Key
+[XRF]:
+Load
+	concat(XRF_DATA) as XRF;
+Load
+	Mid('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', ceil(Rand() * 62), 1) as XRF_DATA
+AutoGenerate 16;
+
+let System.XRFKey = Peek('XRF');
+
+TRACE Onetime System.XRFKey = $(System.XRFKey);
+
+drop table XRF;
+
+/*------------------------------------------------------------------------------------------------------------------------*/
+
+LIB CONNECT TO 'QMC API';
+
+RestConnectorMasterTable:
+SQL SELECT 
+	"id" AS "id_u1",
+	"name" AS "name_u1",
+	"__KEY_root",
+	(SELECT 
+		"id" AS "id_u0",
+		"value",
+		"__KEY_customProperties",
+		"__FK_customProperties",
+		(SELECT 
+			"name",
+			"__KEY_definition",
+			"__FK_definition"
+		FROM "definition" PK "__KEY_definition" FK "__FK_definition")
+	FROM "customProperties" PK "__KEY_customProperties" FK "__FK_customProperties"),
+	(SELECT 
+		"id" AS "streamId",
+		"name" AS "name_u0",
+		"__FK_stream"
+	FROM "stream" FK "__FK_stream")
+FROM JSON (wrap on) "root" PK "__KEY_root"
+WITH CONNECTION (
+		URL "$(System.BaseURL)/qrs/app/full",
+        QUERY "Xrfkey" "$(System.XRFKey)",
+		HTTPHEADER "X-Qlik-Xrfkey" "$(System.XRFKey)",
+        HTTPHEADER "X-Qlik-User" "UserDirectory=internal; UserId=sa_api",
+        HTTPHEADER "Response-Type" "application/json"
+);
+
+#App.KeyToID:
+mapping load
+    [__KEY_root],
+	[id_u1]
+resident RestConnectorMasterTable
+where not isnull([__KEY_root]);
+
+[qmc_app]:
+LOAD
+	[id_u1] AS [app_id],
+    [name_u1] AS [App Name]
+RESIDENT RestConnectorMasterTable
+WHERE MATCH([id_u1], '$(vAppID)'); // 
+
+LEFT JOIN([qmc_app])
+LOAD
+	[streamId],
+    [name_u0] AS [Stream Name],
+	applymap('#App.KeyToID', [__FK_stream]) as [app_id]
+RESIDENT RestConnectorMasterTable
+WHERE NOT ISNULL([__FK_stream]);
+
+LEFT JOIN([qmc_app])
+LOAD
+	applymap('#App.KeyToID', [__FK_customProperties]) as [app_id],
+    [value] AS [Property Value],
+    [__KEY_customProperties]
+RESIDENT RestConnectorMasterTable
+WHERE NOT IsNull([__FK_customProperties]);
+
+LEFT JOIN([qmc_app])
+LOAD
+	[name] AS [Property Name],
+    [__FK_definition] AS [__KEY_customProperties]
+RESIDENT RestConnectorMasterTable
+WHERE NOT IsNull([__FK_definition]);
+
+DROP TABLE RestConnectorMasterTable;
+
+[Properties]:
+GENERIC LOAD
+	[app_id],
+    [Property Name],
+    [Property Value]
+RESIDENT [qmc_app]
+WHERE [Property Name] = 'SectionAccess'; // Only grab SectionAccess property
+
+Let vSectionAccess = ''; // Intiialize as empty to ensure any previously saved values are overwritten.
+Let vSectionAccess = Peek('SectionAccess', 0, 'Properties.SectionAccess');
+
+IF Match(vSectionAccess, 'Yes') THEN
+	TRACE @SectionAccess: Yes (RUNNING SCRIPT);
+    DROP TABLE [Properties.SectionAccess];
+ELSEIF Match(vSectionAccess, 'No') THEN
+	TRACE @SectionAccess: NO (SKIPPING SCRIPT);
+    DROP TABLE [Properties.SectionAccess];
+ELSE
+	TRACE @SectionAccess App Property not configured in QMC. Defaulting to 'No'. (This can be overriden in the OVERRIDE VARIABLES Block in the load script);
+	Let vSectionAccess = 'No';
+ENDIF
+/*------------------------------------------------------------------------------------------------------------------------*/
+RestConnectorMasterTable:
+SQL SELECT 
+	"id" AS "id_u3",
+	"name" AS "name_u2",
+	"__KEY_root",
+	(SELECT 
+		"value",
+		"__KEY_customProperties",
+		"__FK_customProperties",
+		(SELECT 
+			"name",
+			"__KEY_definition",
+			"__FK_definition"
+		FROM "definition" PK "__KEY_definition" FK "__FK_definition")
+	FROM "customProperties" PK "__KEY_customProperties" FK "__FK_customProperties")
+FROM JSON (wrap on) "root" PK "__KEY_root"
+WITH CONNECTION (
+		URL "$(System.BaseURL)/qrs/stream/full",
+        QUERY "Xrfkey" "$(System.XRFKey)",
+		HTTPHEADER "X-Qlik-Xrfkey" "$(System.XRFKey)",
+        HTTPHEADER "X-Qlik-User" "UserDirectory=internal; UserId=sa_api",
+        HTTPHEADER "Response-Type" "application/json"
+);
+
+[Stream]:
+LOAD	
+	[id_u3] AS [Stream ID],
+	[name_u2] AS [Stream Name (TEST)],
+	[__KEY_root] AS [STREAMKEY]
+RESIDENT RestConnectorMasterTable
+WHERE NOT IsNull([__KEY_root]) and exists (streamId, id_u3); // Only stream of this app
+
+
+LEFT JOIN([Stream])
+// [customProperties]:
+LOAD	
+	[value] AS [Stream Property Value],
+	[__KEY_customProperties] AS [PROPERTYKEY],
+	[__FK_customProperties] AS [STREAMKEY]
+RESIDENT RestConnectorMasterTable
+WHERE NOT IsNull([__FK_customProperties]);
+
+INNER JOIN([Stream])
+// [definition]:
+LOAD	
+	[name] AS [Stream Property Name],
+	[__FK_definition] AS [PROPERTYKEY]
+RESIDENT RestConnectorMasterTable
+WHERE NOT IsNull([__FK_definition]) AND match(name, 'QVDDirectory'); // Only grabs QVDDirectory property
+
+[Properties]:
+GENERIC LOAD
+	[Stream ID] AS [streamId],
+    [Stream Property Name],
+    [Stream Property Value]
+RESIDENT [Stream];
+
+DROP TABLES RestConnectorMasterTable, [Stream];
+
+LET vSource = ''; // Intiialize as empty to ensure any previously saved values are overwritten.
+LET vSource = Peek('QVDDirectory', 0, 'Properties.QVDDirectory');
+
+IF LEN(TRIM('$(vSource)')) > 0 THEN
+	TRACE vSource: $(vSource);
+    DROP TABLE [Properties.QVDDirectory];
+ELSE
+	TRACE @QVDDirectory Stream Property not configured in QMC or app is in work stream. Using value declared in LOAD EDITOR VARIABLE OVERRIDES.;
+ENDIF
+
+DROP TABLE [qmc_app];

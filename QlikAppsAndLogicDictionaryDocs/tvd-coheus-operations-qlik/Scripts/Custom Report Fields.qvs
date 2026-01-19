@@ -1,0 +1,357 @@
+TableDimensions:
+Load * Inline [
+TableDimensions
+Loan Number
+Channel
+Branch
+Property Street
+Property City
+Property County
+Property Zip
+Loan Term
+Current Loan Status
+Current Milestone
+Loan Folder
+Loan Type
+Loan Program
+Loan Purpose
+Loan Source
+Encompass Instance
+Occupancy Type
+Property Type
+Lien Position
+Lock Days
+Loan Officer
+Processor
+Underwriter
+Closer
+Investor
+Broker Lender Name
+Account Executive
+TPO Company Name
+Warehouse Co Name
+Originator Loan Officer Name
+Sales Rep/AE
+Started Date
+Credit Pull Date
+Application Date
+Loan Estimate Sent Date
+Loan Estimate Received Date
+UW Final Approval Date
+UW Suspended Date
+UW Denied Date
+Investor Lock Date
+Lock Expiration Date
+Estimated Closing Date
+CTC Date
+Closing Disclosure Sent Date
+Closing Disclosure Received Date
+Closing Date
+Closing Projection Status
+Funding Date
+Investor Purchase Date
+Shipped Date
+Investor Status
+Borr Position
+Borr Yrs on Job
+Co-Borr Employer
+Co-Borr Position
+Co-Borr Self Employed
+DU/LP Case ID
+Underwriting AUS Source
+Underwriting Risk Assess Type
+AU Decision Date
+Fannie AU Decision
+Underwriting Risk Assess AUS Recomm
+CU Risk Source
+Property State
+Number of Units
+Sales Price
+Appraised Value
+Property Type
+Property Valuation Method Type
+Fannie Property Valuation Form Type
+Freddie Property Valuation Form Type
+Property Valuation Effective Date
+Freddie AVM Model Name Type Other Description
+Property Rights
+Appraisal Ordered Date
+Started Year
+Started YearMonth
+Credit Pull Year
+Credit Pull YearMonth
+Application Year
+Application YearMonth
+Submitted to Processing Year
+Submitted to Processing YearMonth
+Submitted to Underwriting Year
+Submitted to Underwriting YearMonth
+UW Suspended Year
+UW Suspended YearMonth
+Estimated Closing Year
+Estimated Closing YearMonth
+Loan Estimate Sent Year
+Loan Estimate Send YearMonth
+Loan Estimate Received Year
+Loan Estimate Received YearMonth
+Closing Disclosure Sent Year
+Closing Disclosure Sent YearMonth
+Closing Disclosure Received Year
+Closing Disclosure Received YearMonth
+CTC Year
+CTC YearMonth
+Funds Sent Date
+Funds Sent Year
+Funds Sent YearMonth
+Investor Purchase Year
+Investor Purchase YearMonth
+Shipped Year
+Shipped YearMonth
+Funding Year
+Funding YearMonth
+Closing Year
+Closing YearMonth
+];
+
+TableMeasures:
+Load * Inline [
+TableMeasures
+Total Volume
+Total Units
+WAC_All Loans
+WAFICO_All Loans
+WALTV_All Loans
+WADTI_All Loans
+Average App To Fund
+Average App To Close
+Average Balance
+];
+
+CoheusTableDimensions:
+Load * Inline [
+CoheusTableDimensions
+W-H Days
+W-H Days Range
+Interest Rate Range
+Lock Expire Days Range
+Borr Yrs on Job Grouping
+Income Total Mo Income Grouping
+Assets Subtotal Liquid Assets Grouping
+Channel Group
+Loan Type Group
+Loan Purpose Group
+LE Sent Flag
+App-LE Sent Days Grouping
+Interest Rate Range_50
+FICO Range_Std
+LTV Range_Std
+DTI Range_Std
+Original Balance Range
+Original Term to Maturity
+Product Type
+Property Type
+Document Type
+FNMA Flag
+Appraisal Ordered Flag
+CTC Flag
+Interest Rate Out of Range Flag
+FICO Out of Range Flag
+LTV Out of Range Flag
+DTI Out of Range Flag
+];
+
+CoheusTableMeasures:
+Load * Inline [
+CoheusTableMeasures
+Avg Days Active
+Units_Active Files
+Units_EstimatedClosings
+Units_Funded
+Units_InRange
+Units_OutOfRange
+Volume_Active Files
+Volume_EstimatedClosings
+Volume_Funded
+Volume_InRange
+Volume_OutOfRange
+WAC_InRange
+WAC_OutOfRange
+WAFICO_InRange
+WAFICO_OutOfRange
+WADTI_InRange
+WADTI_OutOfRange
+WALTV_InRange
+WALTV_OutOfRange
+Current Month Projected Closings
+Current Month Projected Closings $
+Avg App-LE Sent Days
+Approval %
+Withdrawn %
+Denied %
+First Turn Time
+Second Turn Time
+Third Turn Time
+Fourth Turn Time
+Fifth Turn Time
+Sixth Turn Time
+Seventh Turn Time
+Eighth Turn Time
+Ninth Turn Time
+Tenth Turn Time
+Submitted to Initial UW Count
+Resubmit to UW Count
+Count of CDs
+Count of LEs
+Concession Dollars
+Concession Percent
+];
+
+CoheusReportFilter:
+Load * Inline [
+CoheusReportFilter
+Loan Number
+Channel
+Branch
+Property Street
+Property City
+Property County
+Property Zip
+Loan Term
+Current Loan Status
+Current Milestone
+Loan Folder
+Loan Type
+Loan Program
+Loan Purpose
+Loan Source
+Encompass Instance
+Occupancy Type
+Property Type
+Lien Position
+Lock Days
+Loan Officer
+Processor
+Underwriter
+Closer
+Investor
+Broker Lender Name
+Account Executive
+TPO Company Name
+Warehouse Co Name
+Originator Loan Officer Name
+Sales Rep/AE
+Started Date
+Credit Pull Date
+Application Date
+Loan Estimate Sent Date
+Loan Estimate Received Date
+UW Final Approval Date
+UW Suspended Date
+UW Denied Date
+Investor Lock Date
+Lock Expiration Date
+Estimated Closing Date
+CTC Date
+Closing Disclosure Sent Date
+Closing Disclosure Received Date
+Closing Date
+Closing Projection Status
+Funding Date
+Investor Purchase Date
+Shipped Date
+Investor Status
+Borr Position
+Borr Yrs on Job
+Co-Borr Employer
+Co-Borr Position
+Co-Borr Self Employed
+DU/LP Case ID
+Underwriting AUS Source
+Underwriting Risk Assess Type
+AU Decision Date
+Fannie AU Decision
+Underwriting Risk Assess AUS Recomm
+CU Risk Source
+Property State
+Number of Units
+Sales Price
+Appraised Value
+Property Type
+Property Valuation Method Type
+Fannie Property Valuation Form Type
+Freddie Property Valuation Form Type
+Property Valuation Effective Date
+Freddie AVM Model Name Type Other Description
+Property Rights
+Appraisal Ordered Date
+Started Year
+Started YearMonth
+Credit Pull Year
+Credit Pull YearMonth
+Application Year
+Application YearMonth
+Submitted to Processing Year
+Submitted to Processing YearMonth
+Submitted to Underwriting Year
+Submitted to Underwriting YearMonth
+UW Suspended Year
+UW Suspended YearMonth
+Estimated Closing Year
+Estimated Closing YearMonth
+Loan Estimate Sent Year
+Loan Estimate Send YearMonth
+Loan Estimate Received Year
+Loan Estimate Received YearMonth
+Closing Disclosure Sent Year
+Closing Disclosure Sent YearMonth
+Closing Disclosure Received Year
+Closing Disclosure Received YearMonth
+CTC Year
+CTC YearMonth
+Funds Sent Date
+Funds Sent Year
+Funds Sent YearMonth
+Investor Purchase Year
+Investor Purchase YearMonth
+Shipped Year
+Shipped YearMonth
+Funding Year
+Funding YearMonth
+Closing Year
+Closing YearMonth
+W-H Days
+W-H Days Range
+Interest Rate Range
+Lock Expire Days Range
+Borr Yrs on Job Grouping
+Income Total Mo Income Grouping
+Assets Subtotal Liquid Assets Grouping
+Channel Group
+Loan Type Group
+Loan Purpose Group
+LE Sent Flag
+App-LE Sent Days Grouping
+Interest Rate Range_50
+FICO Range_Std
+LTV Range_Std
+DTI Range_Std
+Original Balance Range
+Original Term to Maturity
+Product Type
+Property Type
+Document Type
+FNMA Flag
+Appraisal Ordered Flag
+CTC Flag
+Interest Rate Out of Range Flag
+FICO Out of Range Flag
+LTV Out of Range Flag
+DTI Out of Range Flag
+Application MTD
+Application QTD
+Application YTD Flag
+Funding MTD
+Funding QTD
+Funding YTD Flag
+];
+LET vCustomReportView = 'Default';

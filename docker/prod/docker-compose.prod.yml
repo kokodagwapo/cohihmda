@@ -1,0 +1,166 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: coheus-postgres-prod
+    environment:
+      POSTGRES_DB: ${DB_NAME:-coheus}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - coheus-prod-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    container_name: coheus-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-2gb}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
+      --save 60 1000
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - coheus-prod-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/prod/Dockerfile.backend.prod
+    container_name: coheus-backend-prod
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-coheus}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-200}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-50}
+      - DB_SSL=${DB_SSL:-false}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-coheus:tenant:}
+      - REDIS_TTL=${REDIS_TTL:-3600}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
+      - JWT_SECRET=${JWT_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TENANT_ISOLATION_ENABLED=${TENANT_ISOLATION_ENABLED:-true}
+      - TENANT_DEFAULT_ID=${TENANT_DEFAULT_ID:-}
+      - MAX_TENANTS=${MAX_TENANTS:-1000}
+      - TENANT_RESOURCE_QUOTAS_ENABLED=${TENANT_RESOURCE_QUOTAS_ENABLED:-true}
+      - TENANT_MAX_USERS=${TENANT_MAX_USERS:-200}
+      - TENANT_MAX_LOANS=${TENANT_MAX_LOANS:-10000}
+      - TENANT_MAX_STORAGE_GB=${TENANT_MAX_STORAGE_GB:-100}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - S3_BUCKET=${S3_BUCKET:-}
+      - RDS_ENDPOINT=${RDS_ENDPOINT:-}
+      - ELASTICACHE_ENDPOINT=${ELASTICACHE_ENDPOINT:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - coheus-prod-network
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: docker/prod/Dockerfile.frontend.prod
+    container_name: coheus-frontend-prod
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
+    networks:
+      - coheus-prod-network
+    restart: always
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  coheus-prod-network:
+    driver: bridge

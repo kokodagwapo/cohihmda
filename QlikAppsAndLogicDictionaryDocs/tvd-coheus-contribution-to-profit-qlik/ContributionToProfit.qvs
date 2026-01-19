@@ -1,0 +1,23 @@
+$(Must_Include=$(vAppScripts)/Main.qvs);
+$(Must_Include=$(vAppScripts)/CCA for TVI.qvs);
+$(Must_Include=$(vAppScripts)/Versioning.qvs);
+$(Must_Include=$(vAppScripts)/Custom Report Fields.qvs);
+$(Must_Include=$(vAppScripts)/ODAG Binding.qvs);
+$(Must_Include=$(vAppScripts)/ODAG LoanData.qvs);
+$(Must_Include=$(vAppScripts)/Variables.qvs);
+$(Must_Include=$(vAppScripts)/Configuration Data.qvs);
+$(Must_Include=$(vAppScripts)/REVENUE.qvs);
+$(Must_Include=$(vAppScripts)/Script-Additions.qvs);
+$(Must_Include=$(vAppScripts)/Calendar-Subroutine.qvs);
+$(Must_Include=$(vAppScripts)/Calendar-Link Table.qvs);
+$(Must_Include=$(vAppScripts)/Ad Hoc-Turn Times-Self Serv.qvs);
+$(Must_Include=$(vAppScripts)/Data Dictionary Addons.qvs);
+$(Must_Include=$(vAppScripts)/Ranges.qvs);
+$(Must_Include=$(vAppScripts)/QSS Files.qvs);
+
+IF Match(vSectionAccess, 'Yes') THEN
+    TRACE Running SectionAccess Script.;
+    $(Must_Include=$(vAppScripts)/SectionAccess.qvs);
+ELSEIF Match(vSectionAccess, 'No') THEN
+    TRACE Skipping SectionAccess Script.;
+END IF

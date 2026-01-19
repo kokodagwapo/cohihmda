@@ -1,0 +1,898 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Coheus Platform Stack for Per-Lender AWS Deployment - S3, CloudFront, Elastic Beanstalk, RDS, KMS'
+
+Parameters:
+  TenantId:
+    Type: String
+    Description: Unique tenant identifier
+    MinLength: 1
+  
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+    Description: Environment name
+  
+  LenderName:
+    Type: String
+    Description: Lender/tenant name for resource naming
+    Default: CoheusLender
+    MinLength: 1
+
+  DatabaseEngineVersion:
+    Type: String
+    Default: '15.14'
+    Description: PostgreSQL engine version (must be >= existing version for updates)
+    AllowedValues:
+      - '15.4'
+      - '15.14'
+      - '16.1'
+      - '16.2'
+
+  IAMUser1ForKMSAccess:
+    Type: String
+    Default: ''
+    Description: Optional IAM user name to automatically attach KMS access policy to (e.g., 'Ailethia'). Leave empty to attach manually via script.
+  
+  IAMUser2ForKMSAccess:
+    Type: String
+    Default: ''
+    Description: Optional second IAM user name for KMS access policy attachment.
+  
+  IAMUser3ForKMSAccess:
+    Type: String
+    Default: ''
+    Description: Optional third IAM user name for KMS access policy attachment.
+
+  BackendEndpointURL:
+    Type: String
+    Description: Elastic Beanstalk environment endpoint URL (e.g., coheus-backend-dev-tenant-002-staging.us-east-1.elasticbeanstalk.com). Leave empty to create new EB environment.
+    Default: ''
+    # If empty, will create ElasticBeanstalkEnvironment resource. If provided, will connect to existing EB environment.
+
+Conditions:
+  HasIAMUser1: !Not [!Equals [!Ref IAMUser1ForKMSAccess, '']]
+  HasIAMUser2: !Not [!Equals [!Ref IAMUser2ForKMSAccess, '']]
+  HasIAMUser3: !Not [!Equals [!Ref IAMUser3ForKMSAccess, '']]
+  UseExistingBackend: !Not [!Equals [!Ref BackendEndpointURL, '']]
+  CreateEBEnvironment: !Equals [!Ref BackendEndpointURL, '']
+
+Resources:
+  # ============================================================================
+  # KMS Key for Encryption
+  # ============================================================================
+  EncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'KMS key for ${LenderName} tenant encryption'
+      KeyPolicy:
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow CloudFormation
+            Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
+          - Sid: Allow IAM Users and Roles
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:GenerateDataKey'
+              - 'kms:GenerateDataKeyWithoutPlaintext'
+              - 'kms:ReEncryptFrom'
+              - 'kms:ReEncryptTo'
+            Resource: '*'
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Environment
+          Value: !Ref Environment
+
+  EncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/coheus-${TenantId}'
+      TargetKeyId: !Ref EncryptionKey
+
+  # ============================================================================
+  # S3 Bucket for Frontend
+  # ============================================================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'coheus-frontend-${TenantId}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref EncryptionKey
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Environment
+          Value: !Ref Environment
+
+  # FrontendBucketPolicy must be created after CloudFrontDistribution
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: CloudFrontDistribution
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontAccess
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  # ============================================================================
+  # CloudFront Distribution
+  # ============================================================================
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        # OAC names must be alphanumeric with hyphens, lowercase recommended
+        Name: !Sub 'coheus-${TenantId}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+        Description: !Sub 'Origin Access Control for ${LenderName} frontend'
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn:
+      - FrontendBucket
+      - CloudFrontOriginAccessControl
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'CloudFront distribution for ${LenderName}'
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
+          - Id: BackendOrigin
+            DomainName: !If 
+              - UseExistingBackend
+              - !Ref BackendEndpointURL
+              - !GetAtt ElasticBeanstalkEnvironment.EndpointURL
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+              OriginSSLProtocols:
+                - TLSv1.2
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 5
+              OriginConnectTimeout: 10
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - DELETE
+            - GET
+            - HEAD
+            - OPTIONS
+            - PATCH
+            - POST
+            - PUT
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+          MinTTL: 0
+          DefaultTTL: 3600
+          MaxTTL: 86400
+          Compress: true
+        CacheBehaviors:
+          - PathPattern: '/api/*'
+            TargetOriginId: BackendOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+            CachedMethods:
+              - GET
+              - HEAD
+            ForwardedValues:
+              QueryString: true
+              Headers:
+                - Authorization
+                - Content-Type
+            MinTTL: 0
+            DefaultTTL: 0
+            MaxTTL: 0
+            Compress: true
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 300
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 300
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        # Note: Tags are not supported directly on CloudFront Distribution
+        # Tags can be applied via AWS Console or CLI after distribution creation
+
+  # ============================================================================
+  # RDS PostgreSQL Database
+  # ============================================================================
+  # VPC and Subnets (created separately or via parent stack)
+  # These should be created before this stack or passed as parameters
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-VPC'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-PrivateSubnet1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-PrivateSubnet2'
+
+  # Public subnets for Elastic Beanstalk load balancer
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.10.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-PublicSubnet1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.11.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-PublicSubnet2'
+
+  # Internet Gateway for public subnets
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-IGW'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-PublicRT'
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  # NAT Gateway for private subnets (required for EC2 instances to communicate with AWS services)
+  # Note: NAT Gateway costs ~$32/month + data transfer costs
+  # Alternative: Use public subnets for instances (less secure but simpler)
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-NAT-EIP'
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: NatGatewayEIP
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-NAT-Gateway'
+
+  # Private route table for EC2 instances
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-PrivateRT'
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${LenderName} RDS instance'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+
+  # Load Balancer Security Group - reference only
+  # Note: Elastic Beanstalk creates its own load balancer security group for Classic Load Balancers
+  # This security group is kept for reference or if switching to Application Load Balancer
+  # Classic Load Balancers don't use security groups in the same way as ALBs
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${TenantId}-elb-sg'
+      GroupDescription: !Sub 'Security group for ${LenderName} Elastic Beanstalk load balancer (reference only)'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP from internet
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS from internet
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow outbound HTTP to instances
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-ELB-SG'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # BackendSecurityGroup must be created before DatabaseSecurityGroup to avoid circular dependency
+  # Backend Instance Security Group - accepts traffic from load balancer
+  # Note: Elastic Beanstalk creates its own load balancer security group
+  # Instances accept traffic on port 80 (load balancer forwards from port 80 to instance port 8081)
+  # Allowing from VPC CIDR ensures load balancer can reach instances
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'Security group for ${LenderName} backend instances'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 10.0.0.0/16
+          Description: Allow HTTP from VPC CIDR (load balancer will forward traffic)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic (required for AWS service communication via NAT Gateway)
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-Backend-SG'
+        - Key: Environment
+          Value: !Ref Environment
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'Security group for ${LenderName} RDS instance'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref BackendSecurityGroup
+          Description: Allow PostgreSQL from backend
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Name
+          Value: !Sub '${LenderName}-RDS-SG'
+
+  DatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub 'coheus-${TenantId}'
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !Ref EncryptionKey
+      MasterUsername: coheusadmin
+      # Note: In production, use AWS Secrets Manager or Parameter Store
+      # For now, generate a secure password (should be stored in Secrets Manager)
+      MasterUserPassword: !Sub 'CoheusDB${TenantId}${AWS::AccountId}!Secure'
+      DBName: coheus
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      PubliclyAccessible: false
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================================================
+  # IAM Policy for KMS Access (for IAM users)
+  # ============================================================================
+  KMSAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Retain
+    Properties:
+      ManagedPolicyName: !Sub 'CoheusKMSAccess-${TenantId}-${AWS::AccountId}'
+      Description: !Sub 'Allows IAM users to use KMS key for S3 encryption - ${LenderName}'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:GenerateDataKey'
+              - 'kms:GenerateDataKeyWithoutPlaintext'
+              - 'kms:ReEncryptFrom'
+              - 'kms:ReEncryptTo'
+            Resource: !GetAtt EncryptionKey.Arn
+
+  # Automatically attach KMS policy to specified IAM users (if provided)
+  # Note: IAM users must exist before stack creation/update
+  # If users are created later, use scripts/attach-kms-policy.sh instead
+  KMSPolicyAttachmentUser1:
+    Type: AWS::IAM::UserPolicyAttachment
+    Condition: HasIAMUser1
+    Properties:
+      PolicyArn: !Ref KMSAccessPolicy
+      UserName: !Ref IAMUser1ForKMSAccess
+
+  KMSPolicyAttachmentUser2:
+    Type: AWS::IAM::UserPolicyAttachment
+    Condition: HasIAMUser2
+    Properties:
+      PolicyArn: !Ref KMSAccessPolicy
+      UserName: !Ref IAMUser2ForKMSAccess
+
+  KMSPolicyAttachmentUser3:
+    Type: AWS::IAM::UserPolicyAttachment
+    Condition: HasIAMUser3
+    Properties:
+      PolicyArn: !Ref KMSAccessPolicy
+      UserName: !Ref IAMUser3ForKMSAccess
+
+  # ============================================================================
+  # Elastic Beanstalk Application
+  # ============================================================================
+  # IAM Roles for Elastic Beanstalk
+  # Note: RoleName includes TenantId to ensure uniqueness across multiple deployments
+  # DeletionPolicy: Retain prevents accidental deletion of IAM resources
+  ElasticBeanstalkServiceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    Properties:
+      RoleName: !Sub '${LenderName}-${TenantId}-eb-service-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: elasticbeanstalk.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkManagedUpdatesCustomerRolePolicy
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Name
+          Value: !Sub '${LenderName}-eb-service-role-${Environment}'
+
+  ElasticBeanstalkInstanceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    Properties:
+      RoleName: !Sub '${LenderName}-${TenantId}-eb-instance-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+      Policies:
+        - PolicyName: KMSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'kms:Decrypt'
+                  - 'kms:DescribeKey'
+                  - 'kms:Encrypt'
+                  - 'kms:GenerateDataKey'
+                Resource: !GetAtt EncryptionKey.Arn
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Name
+          Value: !Sub '${LenderName}-eb-instance-role-${Environment}'
+
+  ElasticBeanstalkInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DeletionPolicy: Retain
+    Properties:
+      InstanceProfileName: !Sub '${LenderName}-${TenantId}-eb-instance-profile-${Environment}'
+      Roles:
+        - !Ref ElasticBeanstalkInstanceRole
+      # Note: IAM Instance Profile name must be used in OptionSettings, not ARN
+
+  ElasticBeanstalkApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Condition: CreateEBEnvironment
+    Properties:
+      ApplicationName: !Sub 'coheus-backend-${TenantId}'
+      Description: !Sub 'Coheus backend application for ${LenderName}'
+
+  # Note: ApplicationVersion should be created separately or via CI/CD
+  # For initial deployment, this can be omitted and version specified manually
+  # ElasticBeanstalkApplicationVersion:
+  #   Type: AWS::ElasticBeanstalk::ApplicationVersion
+  #   Properties:
+  #     ApplicationName: !Ref ElasticBeanstalkApplication
+  #     SourceBundle:
+  #       S3Bucket: !Sub 'coheus-deployments-${AWS::AccountId}'
+  #       S3Key: 'backend-latest.zip'
+  #     Description: 'Latest backend deployment'
+
+  ElasticBeanstalkEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Condition: CreateEBEnvironment
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    DependsOn:
+      - ElasticBeanstalkApplication
+      - DatabaseInstance
+      - ElasticBeanstalkServiceRole
+      - ElasticBeanstalkInstanceProfile
+      - LoadBalancerSecurityGroup
+      - BackendSecurityGroup
+    Properties:
+      ApplicationName: !Ref ElasticBeanstalkApplication
+      EnvironmentName: !Sub 'coheus-backend-${TenantId}-${Environment}'
+      SolutionStackName: '64bit Amazon Linux 2023 v6.7.1 running Node.js 22'
+      # VersionLabel will be set after first deployment
+      # VersionLabel: !Ref ElasticBeanstalkApplicationVersion
+      OptionSettings:
+        # Environment settings - Use LoadBalanced (Classic Load Balancer by default)
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: LoadBalanced
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: ServiceRole
+          Value: !GetAtt ElasticBeanstalkServiceRole.Arn
+        
+        # EC2 instance settings
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: t3.micro
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Sub '${LenderName}-${TenantId}-eb-instance-profile-${Environment}'
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: SecurityGroups
+          Value: !Ref BackendSecurityGroup
+        
+        # Load Balancer Configuration - Classic Load Balancer (default)
+        # Note: Classic Load Balancers don't support security groups via OptionSettings
+        # Security is handled via instance security groups and load balancer listener configuration
+        - Namespace: aws:elb:loadbalancer
+          OptionName: LoadBalancerHTTPPort
+          Value: '80'
+        - Namespace: aws:elb:loadbalancer
+          OptionName: LoadBalancerPortProtocol
+          Value: HTTP
+        
+        # VPC Configuration - Load balancer in public subnets, instances in private subnets
+        - Namespace: aws:ec2:vpc
+          OptionName: VPCId
+          Value: !Ref VPC
+        - Namespace: aws:ec2:vpc
+          OptionName: Subnets
+          Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+        - Namespace: aws:ec2:vpc
+          OptionName: ELBSubnets
+          Value: !Join [',', [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+        - Namespace: aws:ec2:vpc
+          OptionName: AssociatePublicIpAddress
+          Value: 'false'
+        
+        # Application environment variables
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: NODE_ENV
+          Value: !Ref Environment
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: PORT
+          Value: '8081'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_HOST
+          Value: !GetAtt DatabaseInstance.Endpoint.Address
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_PORT
+          Value: '5432'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_NAME
+          Value: coheus
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_USER
+          Value: coheusadmin
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: KMS_KEY_ID
+          Value: !Ref EncryptionKey
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: ENABLE_ENCRYPTION
+          Value: 'true'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: AWS_REGION
+          Value: !Ref 'AWS::Region'
+        # Note: FRONTEND_URL removed to break circular dependency
+        # The backend can determine the frontend URL from request headers
+        # or this can be set via a stack update after initial deployment
+      Tags:
+        - Key: TenantId
+          Value: !Ref TenantId
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  InfrastructureUrl:
+    Description: Main application URL (CloudFront)
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-InfrastructureUrl'
+
+  AdminUrl:
+    Description: Admin panel URL
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}/admin'
+    Export:
+      Name: !Sub '${AWS::StackName}-AdminUrl'
+
+  BackendUrl:
+    Description: Backend API URL (via CloudFront)
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}/api'
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendUrl'
+
+  CloudFrontDomain:
+    Description: CloudFront distribution domain name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomain'
+
+  DatabaseEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseEndpoint'
+
+  KMSKeyId:
+    Description: KMS encryption key ID
+    Value: !Ref EncryptionKey
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyId'
+  LoadBalancerSecurityGroupId:
+    Description: Load balancer security group ID
+    Value: !Ref LoadBalancerSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerSecurityGroup'
+
+  BackendSecurityGroupId:
+    Description: Backend instance security group ID
+    Value: !Ref BackendSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendSecurityGroup'
+
+  BackendApplicationName:
+    Description: Elastic Beanstalk application name
+    Value: !If 
+      - UseExistingBackend
+      - !Sub 'coheus-backend-${TenantId}'
+      - !Ref ElasticBeanstalkApplication
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendAppName'
+
+  BackendEnvironmentName:
+    Description: Elastic Beanstalk environment name
+    Value: !If 
+      - UseExistingBackend
+      - !Sub 'coheus-backend-${TenantId}-${Environment}'
+      - !Ref ElasticBeanstalkEnvironment
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendEnvName'
+
+  BackendEndpoint:
+    Description: Backend API endpoint (Elastic Beanstalk)
+    Value: !If 
+      - UseExistingBackend
+      - !Ref BackendEndpointURL
+      - !GetAtt ElasticBeanstalkEnvironment.EndpointURL
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendEndpoint'
+
+  FrontendBucketName:
+    Description: S3 bucket name for frontend
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-FrontendBucket'
+
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC'
+
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1'
+
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet2'
+
+  DatabaseSecurityGroupId:
+    Description: Database security group ID
+    Value: !Ref DatabaseSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseSecurityGroup'
+
+  KMSAccessPolicyArn:
+    Description: IAM Managed Policy ARN for KMS access (attach to IAM users who need S3 upload access)
+    Value: !Ref KMSAccessPolicy
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSAccessPolicy'
+
+

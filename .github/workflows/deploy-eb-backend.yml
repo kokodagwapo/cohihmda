@@ -1,0 +1,228 @@
+name: Deploy backend to Elastic Beanstalk
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        type: choice
+        options:
+          - dev
+          - production
+
+concurrency:
+  group: eb-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      # Mirror deploy-aws.yml: keep region constant and pull env/app names from secrets
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine Elastic Beanstalk target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Manual trigger only - use the chosen input environment
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+
+          if [ "${ENVIRONMENT}" = "production" ]; then
+            EB_APP_NAME="${{ secrets.EB_APP_NAME_PROD }}"
+            EB_ENV_NAME="${{ secrets.EB_ENV_NAME_PROD }}"
+          else
+            EB_APP_NAME="${{ secrets.EB_APP_NAME_DEV }}"
+            EB_ENV_NAME="${{ secrets.EB_ENV_NAME_DEV }}"
+          fi
+
+          : "${EB_APP_NAME:?Missing secret EB_APP_NAME_DEV/EB_APP_NAME_PROD}"
+          : "${EB_ENV_NAME:?Missing secret EB_ENV_NAME_DEV/EB_ENV_NAME_PROD}"
+
+          echo "environment=${ENVIRONMENT}" >> "$GITHUB_OUTPUT"
+          echo "eb_app_name=${EB_APP_NAME}" >> "$GITHUB_OUTPUT"
+          echo "eb_env_name=${EB_ENV_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install & build backend
+        working-directory: server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create Elastic Beanstalk bundle (server root)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd server
+          rm -f ../coheus-eb.zip
+          # Keep the bundle small and deterministic: EB will run `npm install` on-instance.
+          # Include .platform for nginx configuration (e.g., increased body size limits)
+          if [ -d ".platform" ]; then
+            zip -r -q ../coheus-eb.zip dist package.json package-lock.json Procfile .platform
+          else
+            zip -r -q ../coheus-eb.zip dist package.json package-lock.json Procfile
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Wait for Elastic Beanstalk environment to be Ready
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ENV_NAME="${{ steps.target.outputs.eb_env_name }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
+
+          echo "Waiting for EB environment '${ENV_NAME}' to be Ready..."
+          TIMEOUT_SECONDS=900  # 15 minutes
+          SLEEP_SECONDS=15
+          START_TS=$(date +%s)
+
+          while true; do
+            STATUS=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'Environments[0].Status' \
+              --output text 2>/dev/null || echo "Unknown")
+
+            HEALTH=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'Environments[0].Health' \
+              --output text 2>/dev/null || echo "Unknown")
+
+            NOW_TS=$(date +%s)
+            ELAPSED=$((NOW_TS - START_TS))
+
+            echo "  Status=${STATUS} Health=${HEALTH} Elapsed=${ELAPSED}s"
+
+            if [ "${STATUS}" = "Ready" ]; then
+              echo "✓ Environment is Ready"
+              break
+            fi
+
+            if [ "${ELAPSED}" -ge "${TIMEOUT_SECONDS}" ]; then
+              echo "::error::Timed out waiting for EB environment to become Ready"
+              echo "::error::Check Elastic Beanstalk events/health in AWS Console."
+              exit 1
+            fi
+
+            sleep "${SLEEP_SECONDS}"
+          done
+
+      - name: Sync Elastic Beanstalk DB environment variables
+        shell: bash
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          : "${DB_HOST:?Missing required secret: DB_HOST}"
+          : "${DB_NAME:?Missing required secret: DB_NAME}"
+          : "${DB_USER:?Missing required secret: DB_USER}"
+          : "${DB_PASSWORD:?Missing required secret: DB_PASSWORD}"
+
+          json_file="$(mktemp)"
+          jq -n \
+            --arg envName "${{ steps.target.outputs.eb_env_name }}" \
+            --arg dbHost "${DB_HOST}" \
+            --arg dbName "${DB_NAME}" \
+            --arg dbUser "${DB_USER}" \
+            --arg dbPassword "${DB_PASSWORD}" \
+            --arg dbPort "5432" \
+            '{
+              EnvironmentName: $envName,
+              OptionSettings: [
+                { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_HOST", Value: $dbHost },
+                { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_NAME", Value: $dbName },
+                { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_USER", Value: $dbUser },
+                { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_PASSWORD", Value: $dbPassword },
+                { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_PORT", Value: $dbPort }
+              ]
+            }' > "${json_file}"
+
+          aws elasticbeanstalk update-environment \
+            --region "${{ env.AWS_REGION }}" \
+            --cli-input-json "file://${json_file}"
+
+      - name: Wait for Elastic Beanstalk environment to be Ready (after env var sync)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ENV_NAME="${{ steps.target.outputs.eb_env_name }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
+
+          echo "Waiting for EB environment '${ENV_NAME}' to be Ready after env var sync..."
+          TIMEOUT_SECONDS=900  # 15 minutes
+          SLEEP_SECONDS=15
+          START_TS=$(date +%s)
+
+          while true; do
+            STATUS=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'Environments[0].Status' \
+              --output text 2>/dev/null || echo "Unknown")
+
+            HEALTH=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'Environments[0].Health' \
+              --output text 2>/dev/null || echo "Unknown")
+
+            NOW_TS=$(date +%s)
+            ELAPSED=$((NOW_TS - START_TS))
+
+            echo "  Status=${STATUS} Health=${HEALTH} Elapsed=${ELAPSED}s"
+
+            if [ "${STATUS}" = "Ready" ]; then
+              echo "✓ Environment is Ready"
+              break
+            fi
+
+            if [ "${ELAPSED}" -ge "${TIMEOUT_SECONDS}" ]; then
+              echo "::error::Timed out waiting for EB environment to become Ready after env var sync"
+              echo "::error::Check Elastic Beanstalk events/health in AWS Console."
+              exit 1
+            fi
+
+            sleep "${SLEEP_SECONDS}"
+          done
+
+      - name: Deploy to Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          region: ${{ env.AWS_REGION }}
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: ${{ steps.target.outputs.eb_app_name }}
+          environment_name: ${{ steps.target.outputs.eb_env_name }}
+          version_label: backend-${{ steps.target.outputs.environment }}-${{ github.sha }}-${{ github.run_number }}
+          deployment_package: coheus-eb.zip
+

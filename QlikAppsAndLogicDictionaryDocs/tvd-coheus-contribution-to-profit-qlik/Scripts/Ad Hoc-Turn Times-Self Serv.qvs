@@ -1,0 +1,162 @@
+//To reset AdHoc variables
+For i=1 to 50
+Let vCustName$(i)=;
+Next i;
+Let vCustField=;
+//To reset TurnTime variables
+For i=1 to 10
+Let vTurnTimeStart$(i)=;
+
+Let vTurnTimeEnd$(i)=;
+
+Next i;
+
+LET vTTDate = 'All Time';
+LET vTTGroup = 'Loan Officer';
+LET vTTDist = 'Turn Time 1';
+LET vTurnTimeFormula = 'Avg';
+
+
+
+Let vFieldListing=;
+
+IF '$(vFileExists)'=1 THEN
+	For vInstanceRecord = 0 To $(vNumofInstances)
+		Drop Table ConfigurationData;
+		
+		LET vSetupURL =  Pick(vUseDEVAPI + 1, 'https://api.coheus1.com/config/$(vEncInstance$(vInstanceRecord))/fullxml', 'https://dev-api.coheus1.com/config/$(vEncInstance$(vInstanceRecord))/fullxml');
+
+    	ConfigurationData:
+		LOAD
+    		Concat("@1:n",'',RecNo()) as full_xml
+		FROM [lib://Web Setup XML V2 (azure_devang.ghela@3vuellc.com)]
+        (URL is [$(vSetupURL)],fix, codepage is 1252, no labels)
+        ;
+		
+		DataDictionary:
+		LOAD
+    	If(Left(Trim(Id),6)='Fields',Text(Right(Trim(Id),Len(Trim(Id))-7)),Text(Id)) as [Encompass Field ID],
+    	If("Alias"='TPO Flag','Encompass TPO Flag',"Alias") as [Coheus Field Name]
+		From_Field(ConfigurationData,full_xml)
+		(XmlSimple, table is [$(vConfigDictionary)]);
+
+		Set ErrorMode=0;
+		AdHoc:
+		LOAD Distinct
+    		"Alias"
+		From_Field(ConfigurationData,full_xml)
+		(XmlSimple, table is [$(vConfigAdHoc)]);
+     Next vInstanceRecord; 
+        
+	For i = 1 to NoOfRows('AdHoc')
+	Let vFieldCount = NoOfRows('AdHoc');
+	Let vCustField = Peek('Alias',$(i)-1,'AdHoc');
+	Let vCustName$(i) = Peek('Alias',$(i)-1,'AdHoc');
+    Let vFieldListing = '$(vFieldListing)'&'<li>'&Peek('Alias',$(i)-1,'AdHoc')&'</li>';
+	Next i;
+    
+    	IF NoOfRows('AdHoc') = 0 THEN
+    		Let vFieldListing='No Additional Fields Listed';
+    	END IF
+    
+    Concatenate(CoheusReportFilter)
+    CoheusReportFilter:
+    Load Distinct
+    Alias as CoheusReportFilter
+    Resident AdHoc;
+
+	For vInstanceRecord = 0 To $(vNumofInstances)
+		Drop Table ConfigurationData;
+		
+		LET vSetupURL =  Pick(vUseDEVAPI + 1, 'https://api.coheus1.com/config/$(vEncInstance$(vInstanceRecord))/fullxml', 'https://dev-api.coheus1.com/config/$(vEncInstance$(vInstanceRecord))/fullxml');
+
+    	ConfigurationData:
+		LOAD
+    		Concat("@1:n",'',RecNo()) as full_xml
+		FROM [lib://Web Setup XML V2 (azure_devang.ghela@3vuellc.com)]
+        (URL is [$(vSetupURL)],fix, codepage is 1252, no labels)
+        ;
+        
+		TurnTimeFields:
+		LOAD Distinct
+    	"Alias" as TurnTimeAlias
+		From_Field(ConfigurationData,full_xml)
+		(XmlSimple, table is [$(vConfigTurnTimes)]);
+
+     Next vInstanceRecord; 
+     
+    NoConcatenate
+	TurnTimes:
+	Load Concat(Alias,'|',RecNo()) as Alias
+	;
+	LOAD Distinct
+    	TurnTimeAlias as "Alias"
+	Resident TurnTimeFields;
+    Drop Table TurnTimeFields;
+    
+    	IF NoOfRows('TurnTimes') > 0 THEN
+			LET vTurnTimeList = Peek('Alias',0,'TurnTimes');
+			For i = 1 to 10 //However many turntimes we decide on
+    		Let vTurnTimeStart$(i) = '$(vTurnTimeList)';
+			Let vTurnTimeEnd$(i) = '$(vTurnTimeList)';
+    		Next i;
+    
+    	ELSE
+    		SET vTurnTimeList = 'Application Date|Conditional Approval Date|Loan Estimate Sent Date|Estimated Closing Date|Closing Date|Funding Date|Investor Purchase Date';
+			For i = 1 to 10 //However many turntimes we decide on
+			Let vTurnTimeStart$(i) = '$(vTurnTimeList)';
+			Let vTurnTimeEnd$(i) = '$(vTurnTimeList)';
+   		 	Next i;
+            Drop Table TurnTimes;
+    	END IF
+    
+   
+ELSE
+	SET vTurnTimeList = 'Application Date|Conditional Approval Date|Loan Estimate Sent Date|Estimated Closing Date|Closing Date|Funding Date|Investor Purchase Date';
+	For i = 1 to 10 //However many turntimes we decide on
+	Let vTurnTimeStart$(i) = '$(vTurnTimeList)';
+	Let vTurnTimeEnd$(i) = '$(vTurnTimeList)';
+    Next i;
+    Let vFieldListing='No Additional Fields Listed';
+    
+    DataDictionary:
+	LOAD
+    If(Left(Trim(Id),6)='Fields',Text(Right(Trim(Id),Len(Trim(Id))-7)),Text(Id)) as [Encompass Field ID],
+    "Alias" as [Coheus Field Name]
+	FROM [lib://QlikShare/CoheusConfigs/DefaultFiles/default_config.xml]
+	(XmlSimple, table is [CoheusConfig/Dictionary/Field]);
+    
+    Concatenate(DataDictionary)
+	Load Distinct 
+    If(Left(Trim(DefaultFieldId),6)='Fields',Text(Right(Trim(DefaultFieldId),Len(Trim(DefaultFieldId))-7)),Text(DefaultFieldId)) as [Encompass Field ID],
+    "Alias" as [Coheus Field Name]
+	FROM [lib://QlikShare/CoheusConfigs/DefaultFiles/default_config.xml]
+	(XmlSimple, table is [CoheusConfig/FieldSwap/Field]);
+
+
+END IF;
+
+Drop Table SourceList;
+Set ErrorMode=1;
+
+
+
+IF '$(vFieldListing)'='No Additional Fields Listed' Then
+NoConcatenate
+TableAdditional:
+Load * Inline [
+TableAdditional
+PlaceHolder
+];
+Else
+
+NoConcatenate
+TableAdditional:
+Load Alias as TableAdditional
+Resident AdHoc;
+
+Concatenate (CoheusReportFilter)
+TableAdditional:
+Load Alias as CoheusReportFilter
+Resident AdHoc;
+End If;

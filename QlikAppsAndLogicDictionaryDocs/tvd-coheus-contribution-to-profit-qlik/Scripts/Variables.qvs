@@ -1,0 +1,268 @@
+$(must_include=lib://QlikShare - SharedData/Include Files/Global.FederalHolidays.qss);
+
+/*
+1.REVENUE[wip]
+2.Ad Hoc | Turn Times | Self Serv
+3.Data Dictionary Addons
+4.Ranges
+5.Section Access
+
+Look over field count
+*/
+LET vCurrentSetupFlag = Peek('Coheus Setup Flag',0,'$(vWriteTableName)');
+If $(vCurrentSetupFlag) = 1 Then
+	
+    LET vXMLName = '30'&Text(Num(Replace('$(vClientID)','BE',''),00000000));
+     
+    EncInstances:
+	Load distinct [Encompass Instance]
+	Resident [$(vWriteTableName)];
+	
+    Let vNumofInstances = NoOfRows('EncInstances')-1;
+	For vInstanceRecord = 0 To $(vNumofInstances)
+		Let vFileName$(vInstanceRecord) = 'lib://QlikShare/CoheusConfigs/30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000))&'_cohuessetup.xml';
+        Let vEncInstance$(vInstanceRecord) = '30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000));
+        TRACE '$(vEncInstance$(vInstanceRecord))';
+//         Exit Script
+	Next vInstanceRecord; Drop Table EncInstances;
+    
+	SET vFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_cohuessetup.xml';
+    LET vConfigDictionary = 'Setup/DataDictionary/Field';
+    LET vConfigAdHoc = 'Setup/CoheusConfig/AdHoc/Field';
+    LET vConfigTurnTimes = 'Setup/CoheusConfig/TurnTimes/Field';
+    SET vRevFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_profit_config.xml';
+    LET vConfigProfitDictionary = 'ProfitabilityConfig/Dictionary/Field';
+    LET vConfigProfitSwap = 'Setup/ProfitabilityConfig/FieldSwap/Field';
+    LET vConfigSwap = 'Setup/CoheusConfig/FieldSwap/Field';
+    LET vConfigRange = 'Setup/CoheusConfig/FieldRanges/Range';
+    LET vLevelOneEntry = 'Setup/CoheusConfig/SectionAccess/LevelOne/Entry';
+    LET vLevelOneAccess = 'Setup/CoheusConfig/SectionAccess/LevelOne';
+    LET vLevelTwoEntry = 'Setup/CoheusConfig/SectionAccess/LevelTwo/Entry';
+    LET vLevelTwoAccess = 'Setup/CoheusConfig/SectionAccess/LevelTwo';
+    LET vLevelThreeEntry = 'Setup/CoheusConfig/SectionAccess/LevelThree/Entry';
+    LET vLevelThreeAccess = 'Setup/CoheusConfig/SectionAccess/LevelThree';
+    
+    Drop Fields Revenue_Ops,Revenue_Sales,Revenue_Exec,Revenue,[Margin (BPS)],[Margin (BPS)_Ops],[Margin (BPS)_Exec];
+    Rename Fields Revenue_Contribution To Revenue,[Margin (BPS)_Contribution] To [Margin (BPS)];
+
+ELSE
+	LET vXMLName = '30'&Text(Num(Replace('$(vClientID)','BE',''),00000000));
+    
+    EncInstances:
+	Load distinct [Encompass Instance]
+	Resident [$(vWriteTableName)];
+
+	Let vNumofInstances = NoOfRows('EncInstances')-1;
+	For vInstanceRecord = 0 To $(vNumofInstances)
+		Let vFileName$(vInstanceRecord) = 'lib://QlikShare/CoheusConfigs/30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000))&'_config.xml';
+        Let vEncInstance$(vInstanceRecord) = '30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000));
+	Next vInstanceRecord; Drop Table EncInstances;
+    
+	SET vFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_config.xml';
+    LET vConfigDictionary = 'CoheusConfig/Dictionary/Field';
+    LET vConfigAdHoc = 'CoheusConfig/AdHoc/Field';
+    LET vConfigTurnTimes = 'CoheusConfig/TurnTimes/Field';
+    SET vRevFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_profit_config.xml';
+    LET vConfigProfitDictionary = 'ProfitabilityConfig/Dictionary/Field';
+    LET vConfigProfitSwap = 'ProfitabilityConfig/FieldSwap/Field';
+    LET vConfigSwap = 'CoheusConfig/FieldSwap/Field';
+    LET vConfigRange = 'CoheusConfig/FieldRanges/Range';
+    LET vLevelOneEntry = 'CoheusConfig/SectionAccess/LevelOne/Entry';
+    LET vLevelOneAccess = 'CoheusConfig/SectionAccess/LevelOne';
+    LET vLevelTwoEntry = 'CoheusConfig/SectionAccess/LevelTwo/Entry';
+    LET vLevelTwoAccess = 'CoheusConfig/SectionAccess/LevelTwo';
+    LET vLevelThreeEntry = 'CoheusConfig/SectionAccess/LevelThree/Entry';
+    LET vLevelThreeAccess = 'CoheusConfig/SectionAccess/LevelThree';
+End If;
+
+//Variables for alternative method to dynamically resize fonts when resizing browser window. NOT DEPLOYED IN GOLD 2020 apps.
+LET vSheetWidth = 1920;
+LET vSheetHeight = 1080;
+//Adjust the baseline to your targeted screen resolution.
+LET vSheetWidthBaseline = 1920;
+LET vSheetHeightBaseline = 1080;
+SET vScalingFactor = '=pow((vSheetWidth * vSheetHeight),0.5) / pow((vSheetWidthBaseline*vSheetHeightBaseline), 0.5)';
+SET vLoanStatus = 'Active';
+//Variables for App Information Tooltips & Coheus Logo
+LET vAppName='Contribution to Profit'; 						//create variable to capture App Name to use for information button.
+LET vAppID=DocumentName(); 							//create variable to capture app id/guid to resolve sheet menu not dynamically assigning the app ID/guid to Coheus logo file. 
+LET vCopyright='© TVMA, Inc. All rights reserved.';
+LET vLogoPath = '../content/coheus/Coheus Logo (transparent)_small.png';
+
+//Variables for selector buttions/dropdowns
+LET vEstFallout = '';
+LET vEstBps = '';
+LET vMeasure='Revenue';
+LET vProgramMeasure='Volume';
+LET vProgramDimension='Loan Program';
+LET vDimension='Branch'; 							//added 2/7/2020 for use in Dimension selector buttons
+LET vStratDim='[Current Loan Status]'; 				//added 2/11/2020 for use as dimension selector on strats sheet
+LET vAllLoans='Exclude Out of Range Loans'; 		//added 2/16/2020 to toggle btw ALL Loans vs Loans excluding Out of Range Values
+LET vOverviewDim='Credit Pulls';					//added 3/2/2020 to toggle charts on Overview
+LET vOverviewMeasure='';							
+LET vOverviewToggle='Volume';
+LET vToDate='MTD';
+LET vLoanMixMeasure='Volume';
+LET vOutOfRange='[FICO Range_Std]';
+LET vStratToggle=0;
+// LET vChannel='Retail';
+LET vProjection=1;
+LET vActor='Processor';
+LET vOrigScoreMeaure='Volume';
+LET vOrigScore=0;
+LET vRevenueMethod='Buy';
+SET vLock = 'No';
+SET vExp = '*';
+LET vDateToggle1='Funding';
+LET vFieldType = 'Crucial Fields';
+LET vSwapFieldType = 'Standard';//Profitability
+LET vRevenueTrends = 'Overview';
+//Variable for Navigation. Not deployed in Gold 2020 apps.
+LET vNavSheetActive = '';
+LET vNavFirstSheet = '';
+LET vNavLastSheet = '';
+Set vRevDateRange = 'YTD Flag';
+
+SET vMarginToDate = 'All Time';
+//Colors - Teraverde and Headers
+LET vTVGreen = RGB(76,140,43); //#4C8C2B
+LET vTVBlue = RGB(14,108,139); //#0e6c8b
+LET vTVBlueLight = RGB(208,239,251); //#d0effb
+LET vTVAccent = RGB(173,220,145); //#addc91
+LET vTVAccentLight = RGB(240, 249, 236); //#f0f9ec
+LET vErrorLightRed = RGB(255,199,206);
+
+LET vTableType = 'Straight Table';
+LET vChartType = 'Table';
+LET vMeasureToggle = 'Standard Measures';
+
+//Blue Hover Color in Tables
+SET vTVBlueHover = '#e7f0f3';
+
+//Red/Green indicator colors
+SET vErrorColor='#B00020'; //Red text
+SET vErrorColorBKGD='#F7E6E9'; //Red background
+
+//Colors - Credit Box Color Gradient 2019
+// LET vColorMixDark = RGB(20,30,70);
+// LET vColorMixLight = RGB(255,0,255);
+// LET vColorMixMiddle = RGB(0,102,204);
+
+//Colors - Credit Box Color Gradient 2020 - added 3/20/2020 
+LET vColorMixDark = RGB(6,43,45);
+LET vColorMixLight = RGB(255,255,0);
+LET vColorMixMiddle = RGB(101,211,218);
+
+//Creates variable to present datetime of last qvd reload - USED FOR DEVELOPMENT/TESTING PURPOSES
+Let vQVDReloadTime = Num(QvdCreateTime('$(vReadLibraryFolder)/$(vSource).$(vReadTableName).L2.qvd'));
+
+//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE
+// Let vQVDReloadTime = Num(QvdCreateTime('$(vReadLibraryFolder)/$(vSource).$(vReadTableName).L2.qvd'));
+
+Trace vQVDReloadTime: $(vQVDReloadTime);
+
+//REVISE IN TEMPLATE APPS TO REFERENCE CONFIGURATION VARIABLES
+DateList:
+Load
+	If(Len(Trim(Min("Last Modified Date")))=0,AddYears(Today(),-5),Min("Last Modified Date")) as MinDate,
+    If(Len(Trim(Max("Last Modified Date")))=0,Today(),Max("Last Modified Date")) as MaxDate
+    
+//Creates variable to present datetime of last qvd reload - USED FOR DEVELOPMENT/TESTING PURPOSES
+FROM [$(vMainFilePath)] (qvd);
+
+//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE
+// FROM [$(vReadLibraryFolder)/$(vSource).$(vReadTableName).L2.qvd] (qvd);
+
+Let vMinDate = Num(Peek('MinDate', 0, 'MinMax')); 
+Let vMaxDate = Num(Peek('MaxDate', 0, 'MinMax'));
+
+Let vCurrentDate = Num(Peek('MaxDate', 0, 'MinMax'));
+Let vCurrentDateAsDate = Date(vCurrentDate, 'M/D/YYYY');
+
+Trace vCurrentDate: $(vCurrentDate);
+Trace vCurrentDateAsDate: $(vCurrentDateAsDate);
+Trace vMaxDate: $(vMaxDate);
+
+LET vCurrentMTDWorkDays = If(NetWorkDays(MonthStart($(vMaxDate)), $(vMaxDate), $(vHolidays)) = 0, 1, NetWorkDays(MonthStart($(vMaxDate)), $(vMaxDate), $(vHolidays)));
+LET vCurrentYTDWorkDays = If(NetWorkDays(YearStart($(vMaxDate)), $(vMaxDate), $(vHolidays)) = 0, 1, NetWorkDays(YearStart($(vMaxDate)), $(vMaxDate), $(vHolidays)));
+
+Trace vCurrentMTDWorkDays: $(vCurrentMTDWorkDays);
+Trace vCurrentYTDWorkDays: $(vCurrentYTDWorkDays);
+
+DROP TABLE DateList;
+
+//REVISE IN TEMPLATE APPS TO REFERENCE CONFIGURATION VARIABLES - NOT USED IN GOLD 2020 APPS (FUTURE DEVELOPMENT)
+InterestRateList:
+Load
+	Min("Interest Rate") as MinInterestRate,
+    Max("Interest Rate") as MaxInterestRate
+
+//Creates variable to present datetime of last qvd reload - USED FOR DEVELOPMENT/TESTING PURPOSES
+FROM [$(vMainFilePath)] (qvd);
+
+//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE
+// FROM [$(vReadLibraryFolder)/$(vSource).$(vReadTableName).L2.qvd] (qvd);
+
+Let vMinInterestRate = Num(Peek('MinInterestRate', 0, 'MinMax')); 
+Let vMaxInterestRate = Num(Peek('MaxInterestRate', 0, 'MinMax'));
+
+Trace vMinInterestRate: $(vMinInterestRate);
+Trace vMaxInterestRate: $(vMaxInterestRate);
+
+DROP TABLE InterestRateList;
+
+ChannelList:
+Load Distinct
+Concat(distinct '<mark>'&Channel&'</mark>',' | ') as ChannelList,
+Concat(distinct Channel,'|') as ScorecardChannelList,
+Concat(distinct Channel,' | ') as StandardChannelList
+Resident $(vWriteTableName)
+Where Channel<>'99-Missing';
+
+Let vChannelList = Peek('ChannelList',0,'ChannelList');
+Let vStandardChannelList = Peek('StandardChannelList',0,'ChannelList');
+
+ChannelGrouping:
+Load
+	Channel as Channels,
+    Sum([Loan Amount]) as ChannelLoanAmount
+Resident $(vWriteTableName)
+WHERE WildMatch(Channel,'99-Missing')=0 AND [Started Date] >= Date(MonthStart(AddMonths('$(vCurrentDateAsDate)',-12)))
+Group By Channel;
+
+
+
+DefaultChannel:
+Load Channels as DefaultChannel
+Resident ChannelGrouping
+Order By ChannelLoanAmount desc;
+
+// *** MAY 2022 ADDED Variable and List for Vital Signs ***
+Let vChannel=Peek('DefaultChannel',0,'DefaultChannel');
+Let vScorecardChannel=Peek('DefaultChannel',0,'DefaultChannel');
+Let vConsolidatedChannels = if(WildMatch('$(vChannel)','*Retail*','*Brok*')>=1,'Retail',
+						if(Wildmatch('$(vChannel)','*Whole*', '*Corresp*')>=1, 'TPO',
+    						'$(vChannel)'));
+Let vChannelGroup = if(WildMatch('$(vChannel)','*Retail*','*Brok*')>=1,'Retail',
+						if(Wildmatch('$(vChannel)','*Whole*', '*Corresp*')>=1, 'TPO',
+    						'$(vChannel)'));    
+Drop Tables ChannelGrouping,DefaultChannel;
+
+ChannelGroupList:
+Load
+	Concat(DISTINCT [Consolidated Channels],'|') as ConsolidatedChannelList_Temp
+Resident $(vWriteTableName);
+
+Let vChannelGroupList=Peek('ConsolidatedChannelList_Temp', 0, 'ChannelGroupList');
+
+Drop Table ChannelGroupList;
+
+//Margin Dashboard Variables
+SET vScorecardActorList='Loan Officer|Account Executive';
+SET vScorecardEntityList='Branch|Broker Lender Name|Channel|Investor';
+SET vScorecardActor='Loan Officer';
+SET vScorecardEntity='Branch';
+// SET vScorecardChannel='Banked - Retail';
+Let vScorecardChannelList=Peek('ScorecardChannelList', 0, 'ChannelList');
+LET vCorrespondent='No';
+Drop Table ChannelList;

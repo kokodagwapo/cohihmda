@@ -1,0 +1,43 @@
+// // CCA = Coheus Component Architecture
+// // 2024-01-11 JRR added this script tab to make TVI calculations consistent accross different apps.
+// //Reference:https://teraverde.atlassian.net/browse/CRR-37
+
+SET vScriptPath ='lib://QlikShare/Include/';
+
+SET vCCA_TestMode = 0;      // PROD, not DEV or TEST
+//		SET vCCA_TestMode = 1;// DEV or TEST
+
+IF $(vCCA_TestMode) = 1 THEN 
+    Trace 'vCCA_TestMode = 1, running in Test Mode.';
+    set vCCA_ScriptPath='lib://QlikShare/DEV/JRR/TSEEQtest/Source Documents/CCA/Include/';			//	TSEEQtest
+//set vCCA_ScriptPath='lib://QlikShare/Include/TSEEQ/Source Documents/CCA/Include/';
+//    SET vCCA_TestFilePostfix = '';
+    SET vCCA_TestFilePostfix = '_JRR_test_99';
+    //         SET vCCA_TestFilePostfix = '_with_variable_load';
+     SET vCCA_TestClient   = 'Meridian';
+//     SET vCCA_TestAppName = 'Contr 1.6.0';
+     SET vCCA_TestAppName = 'Ops 3.1.1';
+    //SET vCCA_TestAppName = 'Exec 3.2.0_small';
+    //     SET vCCA_TestAppName = '_Ops';  
+ElseIF $(vCCA_TestMode) = 0 THEN
+    Trace 'vCCA_TestMode = 0, running in PROD mode.';
+    set vCCA_ScriptPath='lib://QlikShare/Include/TSEEQ/Source Documents/CCA/Include/';
+    SET vCCA_TestFilePostfix = '';
+    SET vCCA_TestClient=;
+    set vCCA_TestAppName=;
+    SET vCCA_TestMode =;
+EndIf
+
+// // CCA will use, where possible, general-purpose code shared by muliple apps via INCLUDE statements.
+// // vCCA_App can be used in this general-purpose code where app-specific behavior is required, for example, where 
+// // behavior for EXEC should differ for behavior from OPS:
+// //  SET vCCA_App = 'Exec';
+// //    SET vCCA_App = 'Contribution';
+	SET vCCA_App = 'Operations';
+// //   SET vCCA_App = 'Sales';
+
+// Include file for all apps (Exec, Sales, Ops, Contribution):
+$(Must_Include=$(vCCA_ScriptPath)CCA_AppInclude$(vCCA_TestFilePostfix).qvs);
+
+// // Include file for just Operations (vCCA_App was set to Operations above):
+$(Must_Include=$(vCCA_ScriptPath)CCA_$(vCCA_App)AppInclude$(vCCA_TestFilePostfix).qvs);

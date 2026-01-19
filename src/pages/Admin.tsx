@@ -1,0 +1,400 @@
+import { useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { Navigation } from '@/components/layout/Navigation';
+import { AdminPreloader } from '@/components/admin/AdminPreloader';
+import { AdminContainer } from '@/components/admin/AdminContainer';
+import { AdminLayout } from '@/components/admin/AdminLayout';
+import { OverviewSection } from '@/components/admin/OverviewSection';
+import { TenantsSection } from '@/components/admin/TenantsSection';
+import { SystemSection } from '@/components/admin/SystemSection';
+import { SecuritySection } from '@/components/admin/SecuritySection';
+import { LOSSettingsSection } from '@/components/admin/LOSSettingsSection';
+import { SynapseSection } from '@/components/admin/SynapseSection';
+import { DeploymentSection } from '@/components/admin/DeploymentSection';
+import { RAGVoiceSection } from '@/components/admin/RAGVoiceSection';
+import { UserManagementSection } from '@/components/admin/UserManagementSection';
+import { SOC2ComplianceSection } from '@/components/admin/SOC2ComplianceSection';
+import { StripeSection } from '@/components/admin/StripeSection';
+import { AWSHostingSection } from '@/components/admin/AWSHostingSection';
+import { DemoDataSection } from '@/components/admin/DemoDataSection';
+import { Button } from '@/components/ui/button';
+import { Menu, Settings } from 'lucide-react';
+import { useAdminState } from '@/hooks/admin/useAdminState';
+import { useAdminStats } from '@/hooks/admin/useAdminStats';
+import { useSystemInfo } from '@/hooks/admin/useSystemInfo';
+import { useTenants } from '@/hooks/admin/useTenants';
+import { useSecurityInfo } from '@/hooks/admin/useSecurityInfo';
+import { useLOSConnections } from '@/hooks/admin/useLOSConnections';
+import { useSynapseConnections } from '@/hooks/admin/useSynapseConnections';
+import { useDeployments } from '@/hooks/admin/useDeployments';
+import { useRAGSettings } from '@/hooks/admin/useRAGSettings';
+import { useUsers } from '@/hooks/admin/useUsers';
+import { useStripeData } from '@/hooks/admin/useStripeData';
+import { useState } from 'react';
+
+export const Admin = () => {
+  // State management
+  const {
+    activeSection,
+    setActiveSection,
+    mobileMenuOpen,
+    setMobileMenuOpen,
+    initialLoad,
+    setInitialLoad,
+    markSectionLoaded,
+    isSectionLoaded,
+  } = useAdminState();
+
+  // Data hooks
+  const { stats, loading: statsLoading, refetch: refetchStats } = useAdminStats();
+  const { systemInfo, loading: systemLoading, loadSystemInfo } = useSystemInfo();
+  const { 
+    tenants, 
+    loading: tenantsLoading, 
+    loadTenants,
+    createTenant,
+    updateTenant,
+    deleteTenant,
+  } = useTenants();
+  const { securityInfo, loading: securityLoading, loadSecurityInfo } = useSecurityInfo();
+  const { 
+    losConnections, 
+    losTypes, 
+    loading: losLoading, 
+    loadLosData,
+    testConnection: testLosConnection,
+    syncConnection: syncLosConnection,
+    toggleConnection: toggleLosConnection,
+    createConnection: createLosConnection,
+  } = useLOSConnections();
+  const {
+    vendorConnections,
+    vendorCatalog,
+    loading: synapseLoading,
+    loadSynapseData,
+    testConnection: testSynapseConnection,
+    createConnection: createSynapseConnection,
+  } = useSynapseConnections();
+  const {
+    deployments,
+    syncEvents,
+    deploymentsLoading,
+    syncEventsLoading,
+    loadDeployments,
+    loadSyncEvents,
+    provision,
+    register,
+    startSync,
+    failover,
+  } = useDeployments();
+  const {
+    ragVoiceSettings,
+    ragVoiceCosts,
+    loading: ragVoiceLoading,
+    loadRagVoiceData,
+    saveRagVoiceSettings,
+    saveApiKeys,
+  } = useRAGSettings();
+  const {
+    users,
+    loading: usersLoading,
+    loadUsers,
+    createUser,
+    updateUser,
+    deleteUser,
+  } = useUsers();
+  const {
+    subscriptionPlans,
+    subscriptions,
+    loading: stripeLoading,
+    loadStripeData,
+  } = useStripeData();
+
+  // Local state for search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check admin status
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      try {
+        // Simple admin check - in reality this would come from an auth hook
+        setIsAdmin(true);
+        setInitialLoad(false);
+      } catch (error) {
+        console.error('Error checking admin status:', error);
+        setIsAdmin(false);
+        setInitialLoad(false);
+      }
+    };
+
+    checkAdminStatus();
+  }, [setInitialLoad]);
+
+  // Lazy load section data
+  useEffect(() => {
+    const loadSectionData = async () => {
+      if (isSectionLoaded(activeSection)) {
+        return;
+      }
+
+      try {
+        switch (activeSection) {
+          case 'tenants':
+            await loadTenants();
+            break;
+          case 'users':
+            await loadUsers();
+            break;
+          case 'system':
+            await loadSystemInfo();
+            break;
+          case 'security':
+            await loadSecurityInfo();
+            break;
+          case 'los':
+            await loadLosData();
+            break;
+          case 'synapse':
+            await loadSynapseData();
+            break;
+          case 'deployment':
+            await loadDeployments();
+            await loadSyncEvents();
+            break;
+          case 'rag-voice':
+            await loadRagVoiceData(false);
+            break;
+        }
+        markSectionLoaded(activeSection);
+      } catch (error) {
+        console.error(`Error loading ${activeSection} data:`, error);
+      }
+    };
+
+    if (!initialLoad && activeSection !== 'overview') {
+      loadSectionData();
+    }
+  }, [
+    activeSection,
+    initialLoad,
+    isSectionLoaded,
+    markSectionLoaded,
+    loadTenants,
+    loadSystemInfo,
+    loadSecurityInfo,
+    loadLosData,
+    loadSynapseData,
+    loadDeployments,
+    loadSyncEvents,
+    loadRagVoiceData,
+  ]);
+
+  // Get current section name for mobile header
+  const getCurrentSectionLabel = () => {
+    const sections = [
+      { id: 'overview', label: 'Overview' },
+      { id: 'tenants', label: 'Tenants' },
+      { id: 'users', label: 'Users' },
+      { id: 'los', label: 'LOS Settings' },
+      { id: 'synapse', label: 'Synapse Connect' },
+      { id: 'rag-voice', label: 'RAG & Voice Agentic' },
+      { id: 'demo', label: 'Demo Data' },
+      { id: 'system', label: 'System' },
+      { id: 'security', label: 'Security' },
+      { id: 'soc2', label: 'SOC 2 Compliance' },
+      { id: 'deployment', label: 'Deployment' },
+      { id: 'stripe', label: 'Stripe Payments' },
+      { id: 'aws-hosting', label: 'AWS Hosting' },
+    ];
+    return sections.find(s => s.id === activeSection)?.label || 'Overview';
+  };
+
+  return (
+    <AdminContainer isAdmin={isAdmin}>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50/30 via-white to-blue-50/20 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/50">
+        {/* Preloader */}
+        <AdminPreloader show={initialLoad} />
+        
+        <Navigation />
+        
+        {/* Background pattern */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none" />
+        
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-20 sm:pt-24 pb-8 sm:pb-12 relative z-10">
+          {/* Header */}
+          <div className="mb-6 sm:mb-10">
+            <div className="flex items-center gap-3 sm:gap-4 mb-3">
+              <div className="h-10 sm:h-12 w-1 bg-gradient-to-b from-blue-500 to-purple-500 dark:from-white dark:to-slate-400 rounded-full shadow-lg flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <h1 className="text-3xl sm:text-5xl lg:text-6xl font-thin text-slate-900 dark:text-white tracking-tight">
+                  Admin Settings
+                </h1>
+                <p className="text-sm sm:text-base lg:text-lg text-slate-600 dark:text-slate-400 font-extralight tracking-wide mt-2 sm:mt-2.5">
+                  Manage system settings, users, and monitor platform health
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Mobile Hamburger Menu Button */}
+          <div className="lg:hidden mb-4 sm:mb-6 flex items-center justify-between">
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => setMobileMenuOpen(true)}
+              className="h-11 sm:h-12 px-4 border-slate-200/60 dark:border-slate-700/50 bg-white/90 dark:bg-slate-800/70 shadow-sm hover:shadow-md transition-all duration-300 rounded-xl touch-manipulation"
+              aria-label="Open navigation menu"
+            >
+              <Menu className="h-5 w-5 sm:h-5 sm:w-5 mr-2 text-slate-700 dark:text-slate-300" strokeWidth={1.5} />
+              <span className="text-base font-extralight text-slate-700 dark:text-slate-300">Menu</span>
+            </Button>
+            {/* Show current section on mobile */}
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/90 dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700/50">
+              <Settings className="h-4 w-4 text-blue-600 dark:text-blue-400" strokeWidth={1.5} />
+              <span className="text-sm sm:text-base font-extralight text-slate-700 dark:text-slate-300 truncate max-w-[120px] sm:max-w-none">
+                {getCurrentSectionLabel()}
+              </span>
+            </div>
+          </div>
+
+          <AdminLayout
+            activeSection={activeSection}
+            mobileMenuOpen={mobileMenuOpen}
+            onSectionChange={setActiveSection}
+            onMobileMenuChange={setMobileMenuOpen}
+          >
+            {/* Overview Section */}
+            {activeSection === 'overview' && (
+              <OverviewSection stats={stats} overviewLoading={statsLoading} />
+            )}
+
+            {/* Tenants Section */}
+            {activeSection === 'tenants' && (
+              <TenantsSection
+                tenants={tenants}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onCreateTenant={createTenant}
+                onUpdateTenant={updateTenant}
+                onDeleteTenant={deleteTenant}
+                onRefresh={loadTenants}
+              />
+            )}
+
+            {/* Users Section */}
+            {activeSection === 'users' && (
+              <UserManagementSection
+                users={users}
+                tenants={tenants}
+                onCreateUser={createUser}
+                onUpdateUser={updateUser}
+                onDeleteUser={deleteUser}
+              />
+            )}
+
+            {/* System Section */}
+            {activeSection === 'system' && (
+              <SystemSection systemInfo={systemInfo} loading={systemLoading} />
+            )}
+
+            {/* Security Section */}
+            {activeSection === 'security' && (
+              <SecuritySection
+                securityInfo={securityInfo}
+                loading={securityLoading}
+                onNavigate={setActiveSection}
+              />
+            )}
+
+            {/* SOC 2 Compliance Section */}
+            {activeSection === 'soc2' && (
+              <SOC2ComplianceSection />
+            )}
+
+            {/* LOS Settings Section */}
+            {activeSection === 'los' && (
+              <LOSSettingsSection
+                losConnections={losConnections}
+                losTypes={losTypes}
+                loading={losLoading}
+                onTest={testLosConnection}
+                onSync={syncLosConnection}
+                onToggle={toggleLosConnection}
+                onCreate={createLosConnection}
+              />
+            )}
+
+            {/* Synapse Connect Section */}
+            {activeSection === 'synapse' && (
+              <SynapseSection
+                vendorConnections={vendorConnections}
+                vendorCatalog={vendorCatalog}
+                loading={synapseLoading}
+                onTest={testSynapseConnection}
+                onCreate={createSynapseConnection}
+                onRefresh={loadSynapseData}
+              />
+            )}
+
+            {/* Demo Data Section */}
+            {activeSection === 'demo' && (
+              <DemoDataSection />
+            )}
+
+            {/* Deployment Section */}
+            {activeSection === 'deployment' && (
+              <DeploymentSection
+                deployments={deployments}
+                syncEvents={syncEvents}
+                deploymentsLoading={deploymentsLoading}
+                syncEventsLoading={syncEventsLoading}
+                onProvision={provision}
+                onRegister={register}
+                onSync={startSync}
+                onFailover={failover}
+              />
+            )}
+
+            {/* Stripe Payments Section */}
+            {activeSection === 'stripe' && (
+              <StripeSection
+                subscriptionPlans={subscriptionPlans}
+                subscriptions={subscriptions}
+                loading={stripeLoading}
+                onRefresh={loadStripeData}
+              />
+            )}
+
+            {/* AWS Hosting Section */}
+            {activeSection === 'aws-hosting' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <AWSHostingSection />
+              </motion.div>
+            )}
+
+            {/* RAG & Voice Section */}
+            {activeSection === 'rag-voice' && (
+              <RAGVoiceSection
+                ragVoiceSettings={ragVoiceSettings}
+                ragVoiceCosts={ragVoiceCosts}
+                loading={ragVoiceLoading}
+                isSuperAdmin={stats?.isSuperAdmin ?? false}
+                tenants={tenants ?? []}
+                onSave={saveRagVoiceSettings}
+                onRefresh={loadRagVoiceData}
+                onSaveApiKeys={saveApiKeys}
+              />
+            )}
+          </AdminLayout>
+        </div>
+      </div>
+    </AdminContainer>
+  );
+};
+
+export default Admin;

@@ -1,0 +1,70 @@
+//===================================================
+// Subroutine to Generate Calendar. 
+//===================================================
+//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce
+//on-going maintenance effort.  
+//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI
+
+$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ContributionCalendarSubRoutine.qvs);	
+
+// Longer term, there will be a unified calendar generation function.  For now, we take the 1st step in that direction by
+// extenalizing this single script tab.
+
+//vScriptPath and vCCA_ScriptPath were set on the script tab named "CCA for TVI".
+
+// Below is the original (now external) scritp on this tab as of 2024-01-07:
+// SUB CalendarFromField(_field, _calendar, _prefix)
+// [$(_calendar)]:
+// // Generate Final Calendar
+// LOAD
+// 	[$(_field)]
+// 	,year([$(_field)]) as [$(_prefix)Year]
+// 	,month([$(_field)]) as [$(_prefix)Month]
+// 	,day([$(_field)]) as [$(_prefix)Day]
+// 	,weekday([$(_field)]) as [$(_prefix)Weekday]
+//     ,Dual(Year([$(_field)])&'-'&Month([$(_field)]), monthstart([$(_field)])) as [$(_prefix)YearMonth]
+    
+//     //**NEW** Build YearMonth groups/buckets for 2 months and prior to and for 2 months beyond the Current Month based - use in drill down master dimension
+//     ,If([$(_field)]<AddMonths(MonthStart($(vMaxDate)),-2), Dual(chr(60)&chr(61)& Year(AddMonths($(vMaxDate),-2))&'-'&Month(AddMonths($(vMaxDate),-2)), monthstart(AddMonths($(vMaxDate),-2))),
+//         If([$(_field)]>=AddMonths(MonthStart($(vMaxDate)),2), Dual(chr(62)&chr(61)& Year(AddMonths($(vMaxDate),2))&'-'&Month(AddMonths($(vMaxDate),2)), monthstart(AddMonths($(vMaxDate),2))),
+// 			Dual(Year([$(_field)])&'-'&Month([$(_field)]), monthstart([$(_field)])))) as [$(_prefix)YearMonth2MonthRange]
+    
+//     ,Dual(Year([$(_field)])&'-Q'&Num(Ceil(Num(Month([$(_field)]))/3)),QuarterStart([$(_field)])) as [$(_prefix)YearQuarter]
+    
+//     /*
+    
+//     2024-01-08 JRR changed definition for Rolling 2, 4 and 13 months, in order increase consistency and reduce on-going maintenance effort.  
+// 	Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI
+
+// 	old definitions:
+//     ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=AddMonths(MonthEnd($(vMaxDate)),-13,1),'Yes','No')) as [$(_prefix)Rolling13MonthFlag]
+//     ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=Floor(AddMonths(MonthEnd($(vMaxDate)),-4,1)),'Yes','No')) as [$(_prefix)Rolling4MonthFlag]
+//     ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=Floor(AddMonths(MonthEnd($(vMaxDate)),-2,1)),'Yes','No')) as [$(_prefix)Rolling2MonthFlag]
+//     */
+//     // new definitions:
+//     ,if([$(_field)] >= MonthStart($(vMaxDate),-1) AND [$(_field)] <= MonthEnd($(vMaxDate),0), 'Yes', 'No') as [$(_prefix)Rolling2MonthFlag]
+//     ,if([$(_field)] >= MonthStart($(vMaxDate),-3) AND [$(_field)] <= MonthEnd($(vMaxDate),0), 'Yes', 'No') as [$(_prefix)Rolling4MonthFlag]
+//     ,if([$(_field)] >= MonthStart($(vMaxDate),-12) AND [$(_field)] <= MonthEnd($(vMaxDate),0), 'Yes', 'No') as [$(_prefix)Rolling13MonthFlag]
+    
+//     ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=Date($(vMaxDate)-30),'Yes','No')) as [$(_prefix)CurrentProductionFlag]
+//     ,if([$(_field)]>$(vMaxDate),'No', if([$(_field)] >= QuarterStart($(vMaxDate),-4) AND [$(_field)] <= QuarterEnd($(vMaxDate),0), 'Yes', 'No')) as [$(_prefix)Rolling4QtrFlag]
+//     ,If(InYear([$(_field)],$(vMaxDate),-2),'Yes','No') as [$(_prefix)2YearPrevious]
+// ;
+// // Generate range of dates between min and max.
+// LOAD
+// 	date(DateMin + IterNo()) as [$(_field)]		// Link Field
+// WHILE DateMin + IterNo() <= DateMax	
+// ;
+// // Find min and max of date field values.
+// LOAD
+// 	min(datefield)-1 as DateMin
+// 	,max(datefield) as DateMax
+// ;
+// // Load date field values.
+// LOAD 
+// 	FieldValue('$(_field)', RecNo()) as datefield
+// AutoGenerate FieldValueCount('$(_field)');	
+
+// END SUB
+
+

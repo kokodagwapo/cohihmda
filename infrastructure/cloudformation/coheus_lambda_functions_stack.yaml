@@ -1,0 +1,870 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Coheus Lambda Functions Stack - HTTP and WebSocket APIs with DynamoDB
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment stage (dev or prod)
+
+  DBHost:
+    Type: String
+    Description: RDS database hostname (leave empty if using SSM Parameter Store)
+    Default: ''
+    NoEcho: false
+
+  DBName:
+    Type: String
+    Description: RDS database name (leave empty if using SSM Parameter Store)
+    Default: ''
+    NoEcho: false
+
+  DBUser:
+    Type: String
+    Description: RDS database username (leave empty if using SSM Parameter Store)
+    Default: ''
+    NoEcho: false
+
+  DBPassword:
+    Type: String
+    Description: RDS database password (leave empty if using SSM Parameter Store)
+    Default: ''
+    NoEcho: true
+
+  DBPort:
+    Type: Number
+    Default: 5432
+    Description: RDS database port
+
+  SecurityGroupId:
+    Type: String
+    Description: Security group ID for Lambda VPC access (leave empty if using SSM Parameter Store)
+    Default: ''
+
+  SubnetId1:
+    Type: String
+    Description: First subnet ID for Lambda VPC access (leave empty if using SSM Parameter Store)
+    Default: ''
+
+  SubnetId2:
+    Type: String
+    Description: Second subnet ID for Lambda VPC access (leave empty if using SSM Parameter Store)
+    Default: ''
+
+  KMSKeyId:
+    Type: String
+    Default: alias/coheus-encryption
+    Description: KMS key ID or alias for encryption
+
+  SiteUrl:
+    Type: String
+    Default: https://d2wvs4i87rs881.cloudfront.net
+    Description: Site URL for CORS
+
+  FrontendUrl:
+    Type: String
+    Default: https://d2wvs4i87rs881.cloudfront.net
+    Description: Frontend URL for CORS
+
+  AiGatewayUrl:
+    Type: String
+    Default: https://api.openai.com/v1/chat/completions
+    Description: AI Gateway API URL for generating briefings
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, 'prod']
+
+Resources:
+  # ============================================================================
+  # IAM Role for Lambda Functions
+  # ============================================================================
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'coheus-lambda-execution-role-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:*:secret:coheus/*'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                Resource:
+                  - !Sub 'arn:aws:kms:${AWS::Region}:*:key/*'
+                  - !Sub 'arn:aws:kms:${AWS::Region}:*:alias/coheus-encryption'
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource:
+                  - !Sub 'arn:aws:execute-api:${AWS::Region}:*:*/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt WebSocketConnectionsTable.Arn
+                  - !Sub '${WebSocketConnectionsTable.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/coheus-*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/coheus-*:*'
+
+  # ============================================================================
+  # S3 Bucket for Lambda Deployment Packages
+  # ============================================================================
+  LambdaDeploymentBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'coheus-lambda-deployments-${AWS::AccountId}-${Stage}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+
+  # ============================================================================
+  # API Gateway REST API for HTTP Lambda Functions
+  # ============================================================================
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub 'coheus-rest-api-${Stage}'
+      Description: REST API for Coheus Lambda functions
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Amz-Date
+          - X-Api-Key
+          - X-Amz-Security-Token
+        MaxAge: 3600
+
+  RestApiCorsGatewayResponse:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
+  RestApiCorsGatewayResponse5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref RestApi
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
+  # ============================================================================
+  # API Gateway WebSocket API for WebSocket Lambda Functions
+  # ============================================================================
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'coheus-websocket-api-${Stage}'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: '$request.body.action'
+      Description: WebSocket API for Coheus real-time Lambda functions
+
+  # ============================================================================
+  # DynamoDB Table for WebSocket Connections
+  # ============================================================================
+  WebSocketConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: coheus-websocket-connections
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      Tags:
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: Service
+          Value: coheus-lambda
+
+  # ============================================================================
+  # Lambda Functions - HTTP (REST API)
+  # ============================================================================
+  AilethiaBriefingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-ailethia-briefing-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/ailethia-briefing-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+          AI_GATEWAY_URL: !Ref AiGatewayUrl
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+
+  StripeCheckoutFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-stripe-checkout-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/stripe-checkout-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+
+  StripeWebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-stripe-webhook-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/stripe-webhook-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+
+  SeedDemoDataFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-seed-demo-data-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/seed-demo-data-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+
+  GeminiTtsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-gemini-tts-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/gemini-tts-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+
+  # ============================================================================
+  # Lambda Functions - WebSocket
+  # ============================================================================
+  GeminiLiveVoiceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-gemini-live-voice-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/gemini-live-voice-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+
+  AletheiaRealtimeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-aletheia-realtime-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/aletheia-realtime-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+
+  MaylinRealtimeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'coheus-maylin-realtime-${Stage}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaDeploymentBucket
+        S3Key: !Sub 'lambda/maylin-realtime-${Stage}.zip'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref KMSKeyId
+          DB_HOST: !Ref DBHost
+          DB_NAME: !Ref DBName
+          DB_USER: !Ref DBUser
+          DB_PASSWORD: !Ref DBPassword
+          DB_PORT: !Ref DBPort
+          DB_SSL: 'true'
+          SITE_URL: !Ref SiteUrl
+          FRONTEND_URL: !Ref FrontendUrl
+
+  # ============================================================================
+  # API Gateway Integrations - REST API
+  # ============================================================================
+  RestApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - AilethiaBriefingMethod
+      - AilethiaBriefingOptionsMethod
+      - StripeCheckoutMethod
+      - StripeWebhookMethod
+      - SeedDemoDataMethod
+      - GeminiTtsMethod
+    Properties:
+      RestApiId: !Ref RestApi
+      StageName: !Ref Stage
+
+  # Resource and Method for Ailethia Briefing
+  AilethiaBriefingResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: ailethia-briefing
+
+  AilethiaBriefingMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref AilethiaBriefingResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AilethiaBriefingFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+
+  AilethiaBriefingOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref AilethiaBriefingResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+
+  AilethiaBriefingPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AilethiaBriefingFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*'
+
+  # Stripe Checkout
+  StripeCheckoutResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: stripe-checkout
+
+  StripeCheckoutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref StripeCheckoutResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StripeCheckoutFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  StripeCheckoutPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StripeCheckoutFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*'
+
+  # Stripe Webhook
+  StripeWebhookResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: stripe-webhook
+
+  StripeWebhookMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref StripeWebhookResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StripeWebhookFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  StripeWebhookPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StripeWebhookFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*'
+
+  # Seed Demo Data
+  SeedDemoDataResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: seed-demo-data
+
+  SeedDemoDataMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref SeedDemoDataResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SeedDemoDataFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  SeedDemoDataPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SeedDemoDataFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*'
+
+  # Gemini TTS
+  GeminiTtsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: gemini-tts
+
+  GeminiTtsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref GeminiTtsResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GeminiTtsFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  GeminiTtsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GeminiTtsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*'
+
+  # ============================================================================
+  # API Gateway Integrations - WebSocket API
+  # Note: Each WebSocket function gets its own routes. In practice, you may want
+  # separate WebSocket APIs or use route selection expressions to differentiate.
+  # ============================================================================
+  
+  # Gemini Live Voice WebSocket Integration
+  WebSocketGeminiConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GeminiLiveVoiceFunction.Arn}/invocations'
+
+  WebSocketGeminiConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: gemini-$connect
+      Target: !Sub 'integrations/${WebSocketGeminiConnectIntegration}'
+
+  WebSocketGeminiDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: gemini-$disconnect
+      Target: !Sub 'integrations/${WebSocketGeminiConnectIntegration}'
+
+  WebSocketGeminiDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: gemini-$default
+      Target: !Sub 'integrations/${WebSocketGeminiConnectIntegration}'
+
+  GeminiLiveVoiceWebSocketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GeminiLiveVoiceFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
+
+  # Aletheia Realtime WebSocket Integration
+  WebSocketAletheiaConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AletheiaRealtimeFunction.Arn}/invocations'
+
+  WebSocketAletheiaConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: aletheia-$connect
+      Target: !Sub 'integrations/${WebSocketAletheiaConnectIntegration}'
+
+  WebSocketAletheiaDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: aletheia-$disconnect
+      Target: !Sub 'integrations/${WebSocketAletheiaConnectIntegration}'
+
+  WebSocketAletheiaDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: aletheia-$default
+      Target: !Sub 'integrations/${WebSocketAletheiaConnectIntegration}'
+
+  AletheiaRealtimeWebSocketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AletheiaRealtimeFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
+
+  # Maylin Realtime WebSocket Integration
+  WebSocketMaylinConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MaylinRealtimeFunction.Arn}/invocations'
+
+  WebSocketMaylinConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: maylin-$connect
+      Target: !Sub 'integrations/${WebSocketMaylinConnectIntegration}'
+
+  WebSocketMaylinDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: maylin-$disconnect
+      Target: !Sub 'integrations/${WebSocketMaylinConnectIntegration}'
+
+  WebSocketMaylinDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: maylin-$default
+      Target: !Sub 'integrations/${WebSocketMaylinConnectIntegration}'
+
+  MaylinRealtimeWebSocketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MaylinRealtimeFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*'
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref Stage
+      AutoDeploy: true
+
+  # ============================================================================
+  # CloudWatch Log Groups
+  # ============================================================================
+  AilethiaBriefingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-ailethia-briefing-${Stage}'
+      RetentionInDays: 14
+
+  StripeCheckoutLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-stripe-checkout-${Stage}'
+      RetentionInDays: 14
+
+  StripeWebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-stripe-webhook-${Stage}'
+      RetentionInDays: 14
+
+  SeedDemoDataLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-seed-demo-data-${Stage}'
+      RetentionInDays: 14
+
+  GeminiTtsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-gemini-tts-${Stage}'
+      RetentionInDays: 14
+
+  GeminiLiveVoiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-gemini-live-voice-${Stage}'
+      RetentionInDays: 14
+
+  AletheiaRealtimeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-aletheia-realtime-${Stage}'
+      RetentionInDays: 14
+
+  MaylinRealtimeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/coheus-maylin-realtime-${Stage}'
+      RetentionInDays: 14
+
+Outputs:
+  RestApiId:
+    Description: REST API Gateway ID
+    Value: !Ref RestApi
+    Export:
+      Name: !Sub '${AWS::StackName}-RestApiId'
+
+  RestApiUrl:
+    Description: REST API Gateway URL
+    Value: !Sub 'https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+    Export:
+      Name: !Sub '${AWS::StackName}-RestApiUrl'
+
+  ApiGatewayRestUrl:
+    Description: API Gateway REST URL for Lambda functions (alias for RestApiUrl)
+    Value: !Sub 'https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayRestUrl'
+
+  WebSocketApiId:
+    Description: WebSocket API Gateway ID
+    Value: !Ref WebSocketApi
+    Export:
+      Name: !Sub '${AWS::StackName}-WebSocketApiId'
+
+  WebSocketApiUrl:
+    Description: WebSocket API Gateway URL
+    Value: !Sub 'wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+    Export:
+      Name: !Sub '${AWS::StackName}-WebSocketApiUrl'
+
+  DynamoDBTableName:
+    Description: DynamoDB table name for WebSocket connections
+    Value: !Ref WebSocketConnectionsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-DynamoDBTableName'
+
+  LambdaDeploymentBucketName:
+    Description: S3 bucket name for Lambda deployment packages
+    Value: !Ref LambdaDeploymentBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaDeploymentBucket'
+

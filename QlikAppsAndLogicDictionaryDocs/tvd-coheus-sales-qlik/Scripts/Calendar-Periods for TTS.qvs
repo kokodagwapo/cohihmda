@@ -1,0 +1,29 @@
+LEFT JOIN([Coheus_Input])
+LOAD DISTINCT
+	[Sent To Underwriting],
+	$(Calendar.Key([Sent To Underwriting]))		AS %STUuid
+RESIDENT [Coheus_Input];
+
+LEFT JOIN([Coheus_Input])
+LOAD DISTINCT
+	[Sent To Closing],
+	$(Calendar.Key([Sent To Closing]))		AS %STCuid
+RESIDENT [Coheus_Input];
+
+LEFT JOIN([Coheus_Input])
+LOAD DISTINCT
+	[End Date to indicate Loan Closed/Funded],
+	$(Calendar.Key([End Date to indicate Loan Closed/Funded]))		AS %EDTCFuid
+RESIDENT [Coheus_Input];
+
+
+LEFT JOIN([DateLink])
+LOAD DISTINCT
+	[Date],
+    $(Calendar.Key([Date]))		AS %Dateuid
+RESIDENT [DateLink];
+
+Call Calendar.Create('Processor','Coheus_Input', '%STUuid');
+Call Calendar.Create('Underwriter','Coheus_Input', '%STCuid');
+Call Calendar.Create('Closer','Coheus_Input', '%EDTCFuid');
+Call Calendar.Create('Date','DateLink', '%Dateuid');

@@ -1,0 +1,55 @@
+//** NEW VARIABLES **/////////////////////////////////////////
+
+//TPO Check Flag
+NoConcatenate
+TPOSort:
+Load [TPO Check]
+Resident $(vWriteTableName)
+Order By [TPO Check] asc
+;
+
+LET vTPOCheck= Peek('TPO Check',0,'TPOSort');
+Drop Table TPOSort;
+
+//Actor List used on Actors Sheet/////////////////////////////
+/* Set vActorList based on vTPOCheck. Thus, load list for TPO clients and separate list for Retail Only clients */
+// $(vTPOCheck) /*-1=True (multi-channel); 0=False (Retail ONLY)*/
+
+If $(vTPOCheck)=-1 then
+// Actor List for multi-channel clients
+SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Account Executive|Account Manager|Broker Lender Name|Branch|TPO Company Name|Investor|Retail Branch ID|Retail LO|Originator Loan Officer Name|Originator Loan Processor Name|Correspondent Sales Rep/AE|Correspondent Lender Name|Sales Rep/AE|Warehouse Co Name|Warehouse Bank Name';
+Rename Field [Sale Rep/AE] TO [Sales Rep/AE];
+else
+// Actor list for Retail Only clients
+SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Branch|Investor|Warehouse Co Name';
+end if
+
+//Actor List Variables
+For i = 1 to 4
+//LET vActor$(i)='';
+LET vActorList$(i)='$(vActorList)';
+Next i;
+
+//Actor Picker Variables
+LET vActor1='Loan Officer';
+LET vActor2='Processor';
+LET vActor3='Underwriter';
+LET vActor4='Closer';
+
+//Scorecard Actor List & Entity List/////////////////////////////
+If $(vTPOCheck)=-1 then
+// Scorecard Actor List for multi-channel clients
+SET vScorecardActorList='Loan Officer|Underwriter|Account Executive|Account Manager|Originator Loan Officer Name|Sales Rep/AE';
+else
+// Scorecard Actor list for Retail Only clients
+SET vScorecardActorList='Loan Officer|Underwriter';
+end if
+
+If $(vTPOCheck)=-1 then
+// Scorecard Entity List for multi-channel clients
+SET vScorecardList='Branch|Broker Lender Name|TPO Company Name|Channel|Investor';
+else
+// Scorecard Entity list for Retail Only clients
+SET vScorecardList='Branch|Channel|Investor';
+end if
+

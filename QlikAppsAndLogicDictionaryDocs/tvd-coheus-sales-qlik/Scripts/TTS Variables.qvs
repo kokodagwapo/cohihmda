@@ -1,0 +1,37 @@
+// Set ErrorMode = 0;
+MockConfig:
+LOAD
+    Concat("@1:n",'',RecNo()) as xml
+/*
+FROM [lib://QlikShare/CoheusConfigs/MockXML2.xml]
+(XmlSimple, fix, codepage is 1252, no labels)
+;
+*/
+FROM [lib://Web Setup XML (teraverde_dcapone)]
+(URL is [$(vSetupURL)],fix, codepage is 1252, no labels)
+;
+// Set ErrorMode = 1;
+Let vFileExists = if( NoOfRows('ConfigurationData') > 0, 1, 0);
+
+TTSVariables:
+LOAD
+    'Sales'&Name as Variable,
+    Value as Weight
+From_Field(MockConfig,xml)
+(XmlSimple, table is [Setup/ScoreCards/Sales/Weight]);
+
+LET vPeekVal = 0;
+
+FOR EACH vScoreCardWeight in FieldValueList('Variable')
+
+	TRACE $(vScoreCardWeight);
+    
+    LET $(vScoreCardWeight)Weight = Peek('Weight', $(vPeekVal), 'TTSVariables');
+    LET vPeekVal = $(vPeekVal) + 1;
+
+NEXT vScoreCardWeight;
+
+LET vPeekVal = 0;
+LET vScoreCardWeight = Null();
+
+DROP TABLES [MockConfig], [TTSVariables];

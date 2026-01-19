@@ -1,0 +1,16 @@
+// CCA = Coheus Component Architecture
+
+// 2024-01-11 JRR added this script tab to make TVI calculations consistent accross different apps.
+//	Reference:	https://teraverde.atlassian.net/browse/CRR-37
+
+SET vCCA_TestMode = 0;		// PROD, not DEV or TEST
+//		SET vCCA_TestMode = 1;			// DEV or TEST
+set vCCA_ScriptPath='lib://QlikShare/Include/TSEEQ/Source Documents/CCA/Include/';
+
+set vScriptPath='lib://QlikShare/Include/';
+
+$(Must_Include=$(vCCA_ScriptPath)CCA_AppInclude.qvs);
+
+set vCCA_ScriptPath='';
+SET vCCA_TestMode =;
+

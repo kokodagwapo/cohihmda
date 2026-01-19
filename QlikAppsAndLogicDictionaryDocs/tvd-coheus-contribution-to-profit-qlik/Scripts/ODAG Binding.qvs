@@ -1,0 +1,257 @@
+/*** ODAG Binding Script ***/
+/* add section in qlik script before ODAG LoanData Script */
+
+// DO NOT ALTER THIS SUBROUTINE
+SUB ExtendQVDWhere(Name, ValVarName)
+  LET T = Name & '_COLNAME';
+  LET ColName = $(T);
+  LET Values = $(ValVarName);
+  IF (len(Values) > 0) THEN
+        IF len(WHERE_PART) > 0 THEN
+        LET WHERE_PART = '$(WHERE_PART) AND mixmatch([$(ColName)],$(Values) )';
+    ELSE
+        LET WHERE_PART = ' WHERE mixmatch([$(ColName)],$(Values))';
+    ENDIF
+  ENDIF
+END SUB;
+
+// DO NOT ALTER THIS SUBROUTINE
+SUB ExtendSQLWhere(Name, ValVarName)
+  LET T = Name & '_COLNAME';
+  LET ColName = $(T);
+  LET Values = $(ValVarName);
+  IF (len(Values) > 0) THEN
+  	IF len(WHERE_PART) > 0 THEN
+    	LET WHERE_PART = '$(WHERE_PART) AND $(ColName) IN ( $(Values) )';
+    ELSE
+    	LET WHERE_PART = ' WHERE $(ColName) IN ( $(Values) )';
+    ENDIF
+  ENDIF
+END SUB;
+
+// DO NOT ALTER THIS SUBROUTINE
+SUB BuildValueList(VarName, TableName, ColName, QuoteChrNum)
+  IF ($(QuoteChrNum) = 0) THEN
+    LET LOADEXPR = 'Concat($(ColName),' & chr(39) & ',' & chr(39) & ') AS CombinedData';
+  ELSE
+    LET CHREXPR = ' chr(' & '$(QuoteChrNum)' & ') ';
+    LET LOADEXPR = 'Concat( $(CHREXPR) & $(ColName) & $(CHREXPR)' & ',' & chr(39) & ',' & chr(39) & ') AS CombinedData';
+  ENDIF
+  _TempTable:
+  LOAD $(LOADEXPR) Resident $(TableName);
+  Let vNoOfRows = NoOfRows('_TempTable');
+  IF $(vNoOfRows)> 0 THEN
+    LET $(VarName) = Peek('CombinedData',0,'_TempTable');
+  ENDIF
+  drop table _TempTable;
+  drop table '$(TableName)';
+END SUB;
+
+// CHANGE 1: Update these blocks of INLINE table loads to correspond to the names of the fields from your
+//           selection app.  The contents inside the $() in the record body of the INLINE load statements
+//           must match the names of the fields from your selection app that the user makes selections on.
+//           If the database column name (lor QVD field name) for any of the selection fields has a different
+//           name, you need to alter the right hand side of the SET xxxx_COLNAME statement to reflect that
+//		     field's corresponding database column (or QVD field) name;
+//
+//            All fields for On Demand are prefixed with od and the following to indicate selected or associated
+//            values
+//              ods = Selected values
+//              odo  = Associated values
+//              odso = Selected/associated values
+//              od = ods = Selected values
+//
+// With the INLINE table form of ODAG binding, the "quote" and "delimiter" options are used to suppress the OagService's
+// default behavior of wrapping each value with single quotation marks and inserting a comma between each value because
+// we want the values to be injected into the INLINE tables as a literal list only separated by newlines.  This is
+// because the local BuildValueList subroutine takes care of comma separating the values and quote wrapping in those
+// cases that need it (passing 39 for the 4th parameter of BuildValueList causes it to wrap each value with single
+// quotes whereas passing 0 suppresses quote wrapping which is what we do in the case of numeric values since SQL
+// doesn't require numbers to be quoted).$(odso_Source){"quote": "", "delimiter": ""}
+//Norcom
+// DGHELA 05/21/25 - Place client QVD folder name under where it says 'VAL'
+SET Source='';
+OdagBinding:
+LOAD * INLINE [
+VAL
+'$(vSource)'
+];
+SET SOURCE_COLNAME='Source';
+// SET ORIGIN_COLNAME='ORIGIN';     // SQL version
+CALL BuildValueList('Source', 'OdagBinding', 'VAL', 39);		// 39 is for single quote wrapping values
+
+
+
+// CHANGE # 2: Insert your SQL connection's CONNECT statement here if using a SQL database source. Note that if you switch
+//             to using a SQL source, the call to ExtendQVDWhere in the FOR EACH loop below should be replaced with
+//             a call to the ExtendSQLWhere subroutine. The LOAD statements must also be changed to use SELECT.
+
+
+// CHANGE #3:  Alter this with a leading 'WHERE <condition>' if you want your main FLIGHT table load statement (below)
+//             to have a non-changing WHERE clause in addition to the clauses that will be inserted
+//             by the selection app (it is fine to leave it as is).
+
+SET WHERE_PART = '';
+
+// CHANGE 4: Update the list of field names here in the FOR EACH list below to reflect the names of the fields that are
+//           bound to your selection app in the INLINE binding above.
+//           Note that in this case we're using ExtendQVDWhere which uses Qlik's "mixmatch" function to build a
+//           WHERE clause to test whether the inbound records match the conditions.  If modifying this template to
+//           to filter on a SQL SELECT statement, you will need to replace the call to ExtendQVDWhere with a call to
+//           ExtendSQLWhere (for more details on converting to using SQL, see "Note" in "Change # 5" below).
+
+FOR EACH fldname IN 'Source'
+  LET vallist = $(fldname);
+  LET vSource = $(vallist);
+  TRACE $(vallist);
+  IF (IsNull(vallist)) THEN
+    LET vallist = '';
+  ENDIF
+  IF (len(vallist) > 0) THEN
+    CALL ExtendQVDWhere('$(fldname)','vallist');
+//    CALL ExtendSQLWhere('$(fldname)','vallist');  // use this version for SQL
+  ENDIF
+NEXT fldname
+
+//LET vAppNameLower = lower('$(vAppName)');
+
+TRACE Generated WHERE clause: ;
+TRACE $(WHERE_PART);
+TRACE $(vSource);
+
+
+
+// // CHANGE # 5: Create a new folder connection pointing to the QVD location (by default stored in
+// // C:\ProgramData\Qlik\Examples\OnDemandApp) and then change this setting to refer to that folder location.
+// LET FOLDER='lib://odag_apps';
+
+// LET FLIGHTS_QVD='[$(FOLDER)/FlightsUnder100k.qvd] (qvd)';
+// LET AIRLINES_QVD='[$(FOLDER)/AirlinesUnder100k.qvd] (qvd) WHERE Exists("Ticket Carrier Code","Ticket Carrier Code")';
+// LET ORIGINS_QVD='[$(FOLDER)/OriginAirportsUnder100k.qvd] (qvd) WHERE Exists("Origin Code","Origin Code")';
+// LET DESTS_QVD='[$(FOLDER)/DestAirportsUnder100k.qvd] (qvd) WHERE Exists("Destination Code","Destination Code")' ;
+// LET FARES_QVD='[$(FOLDER)/FaresUnder100k.qvd] (qvd) WHERE Exists("Fare Class","Fare Class")';
+
+// // Note:  If you want to convert this script to reading data from a SQL source instead of QVDs, do the following:
+// //
+// //        a.  Comment out each of the SET xxxx_COLNAME statements above and remove the comment on the 'Sql version' of
+// //            each that follows on the next line
+// //
+// //        b.  Comment out the above LET statements
+// //
+// //        c.  Change the line in the FOR EACH loop above that reads:
+// //              CALL ExtendQVDWhere('$(fldname)','vallist');
+// //            to use the following instead:
+// //              CALL ExtendSQLWhere('$(fldname)','vallist');
+// //
+// //        d.  Comment out all of the LOAD QVD statements below and uncomment the 'SQL version's LOAD SQL statements that are
+// //            below each LOAD QVD statement
+// //
+// //        e.  Replace the following commented-out LIB CONNECT statement with a LIB CONNECT statement using a connection
+// //            to a database that contains the flight tables.
+// //
+// // LIB CONNECT TO 'MYSQL_CONNECTION (dom_user)';
+
+// // CHANGE # 6: Modify the list of columns (or QVD fields) you wish to load from your database table (or QVD)
+// //             but leave the the $(WHERE_PART) portion of SQL (or LOAD) statement alone at the end.
+// //
+// //             Note that you can have more than one of these dynamically modified SELECT (or LOAD) statements
+// //             by replicating the sections from CHANGE #2 thru this change #5 and customize which WHERE clauses
+// //             will be inserted by altering the list of fields in the FOR EACH statement in Change #3.
+
+// // QVD version:
+// LOAD *
+// FROM $(FLIGHTS_QVD)
+// $(WHERE_PART);
+
+// // SQL version:
+// // Flights:
+// // LOAD  "FARE_CLASS" as "Fare Class",
+// //       "ORIGIN_STATE_ABR" as "Origin State",
+// //       "DEST_STATE_ABR" as "Destination State",
+// //       "QUARTER" as "Quarter",
+// //       "ORIGIN" as "Origin Code",
+// //       "DEST" as "Destination Code",
+// //       "TICKET_CARRIER" as "Ticket Carrier Code",
+// //       "YEAR" as "Year",
+// //       "FLIGHT_COUNT",
+// //       "PASSENGERS",
+// //       "DISTANCE",
+// //       "MKT_ID";
+// // SQL SELECT
+// //   "MKT_ID",
+// //   "YEAR",
+// //   "QUARTER",
+// //   "ORIGIN",
+// //   "ORIGIN_STATE_ABR",
+// //   "DEST",
+// //   "DEST_STATE_ABR",
+// //   "TICKET_CARRIER",
+// //   "FARE_CLASS",
+// //   "PASSENGERS",
+// //   "DISTANCE",
+// //   1 AS "FLIGHT_COUNT"
+// // FROM  SAPH7T."/QT/AIRPORT_FACT"
+// // $(WHERE_PART);
+
+
+// // Replace with dimension extraction script
+// // QVD version:
+// Airlines:
+// LOAD *
+// FROM $(AIRLINES_QVD);
+
+// // SQL version:
+// // Airlines:
+// // LOAD TICKET_CARRIER as "Ticket Carrier Code",
+// //     "Description" as Airline
+// // WHERE Exists("Ticket Carrier Code","TICKET_CARRIER");
+// // SQL SELECT
+// //     "TICKET_CARRIER",
+// //     "Description"
+// // FROM "SAPH7T"."/QT/CARRIERS";
+
+// // QVD version:
+// OriginAirports:
+// LOAD *
+// FROM $(ORIGINS_QVD);
+
+// // SQL version:
+// // OriginAirports:
+// // LOAD "Code" as "Origin Code",
+// //     "Description" as "Origin Name"
+// // WHERE Exists("Origin Code","Code");
+// // SQL SELECT "Code",
+// //     "Description"
+// // FROM "SAPH7T"."/QT/AIRPORT_CODE";
+
+// // QVD version:
+// DestAirports:
+// LOAD *
+// FROM $(DESTS_QVD);
+
+// // SQL version:
+// // DestAirports:
+// // LOAD "Code" as "Destination Code",
+// //     "Description" as "Destination Name"
+// // WHERE Exists("Destination Code","Code");
+// // SQL SELECT "Code",
+// //     "Description"
+// // FROM "SAPH7T"."/QT/AIRPORT_CODE";
+
+// // QVD version:
+// Fares:
+// LOAD *
+// FROM $(FARES_QVD);
+
+// // SQL version:
+// // Fares:
+// // LOAD FARE_CLASS as "Fare Class",
+// //     "Fare_Class_Description" as "Fare Class Name"
+// // WHERE Exists("Fare Class","FARE_CLASS");
+// // SQL SELECT "FARE_CLASS",
+// //     "Fare_Class_Description"
+// // FROM "SAPH7T"."/QT/FARE_CLASS";
+
+
+// // CHANGE # 7 (optional):  This optional change is to add any additional fixed data load or script code
+// // your application may need.

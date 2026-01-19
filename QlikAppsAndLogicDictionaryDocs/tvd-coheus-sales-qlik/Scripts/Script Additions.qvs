@@ -1,0 +1,150 @@
+LET fRolling13MonthFlag = 'If($1 > '& CHR(39) & '$(vMaxDate)' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ', If($1 >= AddMonths(MonthEnd(' & CHR(39) & '$(vMaxDate)' & CHR(39) & '),-13,1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & '))';
+If $(vTPOCheck)=-1 THEN
+NoConcatenate
+Coheus_InputTEMP:
+Load *
+  ,$(fRolling12MonthFlag("Registration Date")) as [Registration Date Rolling 12 Month Flag] // dghela 05/07: Added as alternative to date picker
+  ,$(fRolling13MonthFlag("Registration Date")) as [Registration Date Rolling 13 Month Flag]
+	,If([Active Loan Flag] = 'Yes',
+       Floor($(vCurrentDate)-"Application Date"),Null()) as [Active Aging Days]
+        
+     ,If([Active Loan Flag] = 'Yes',
+        If($(vCurrentDate)-"Application Date"<=15,Dual('0-15',1),
+          If($(vCurrentDate)-"Application Date"<=30,Dual('16-30',2),
+            If($(vCurrentDate)-"Application Date"<=45,Dual('31-45',3),
+              If($(vCurrentDate)-"Application Date"<=60,Dual('46-60',4),
+                If($(vCurrentDate)-"Application Date"<=90,Dual('61-90',5),
+                  Dual('> 90',6)))))),Null()) as [Active Aging Range]
+                            
+    ,If([Active Loan Flag] = 'Yes',
+      If($(vCurrentDate)-"Application Date">90 AND $(vCurrentDate)-"Application Date"<=120,Dual('91-120',1),
+        If($(vCurrentDate)-"Application Date">120 AND $(vCurrentDate)-"Application Date"<=150,Dual('121-150',2),
+          If($(vCurrentDate)-"Application Date">150 AND $(vCurrentDate)-"Application Date"<=180,Dual('151-180',3),
+            If($(vCurrentDate)-"Application Date">180 AND $(vCurrentDate)-"Application Date"<=210,Dual('181-210',4),
+              If($(vCurrentDate)-"Application Date">210 AND $(vCurrentDate)-"Application Date"<=240,Dual('211-240',5),
+                If($(vCurrentDate)-"Application Date">240 AND $(vCurrentDate)-"Application Date"<=270,Dual('241-270',6),
+                  If($(vCurrentDate)-"Application Date">270,Dual('> 270',7),Null()))))))))as [Active Aging Days > 90]
+                  
+                  
+    ,If(Len(Trim([Lock Expiration Date]))=0, Dual('Lock Expiration Date Blank',8), 
+      If([Lock Expiration Date] - $(vCurrentDate)<0,Dual('Expired',7),
+        If([Lock Expiration Date] - $(vCurrentDate)=0,Dual('Expiring Today',1),
+          If([Lock Expiration Date] - $(vCurrentDate)<=7,Dual('1-7 Days',2),
+            If([Lock Expiration Date] - $(vCurrentDate)<=14,Dual('8-14 Days',3),
+              If([Lock Expiration Date] - $(vCurrentDate)<=21,Dual('15-21 Days',4),
+                If([Lock Expiration Date] - $(vCurrentDate)<=30,Dual('22-30 Days',5),
+                  Dual('>30 Days',6))))))))  as [Lock Expire Days Range (Main)]
+	
+    ,If([Lock Expiration Date] - $(vCurrentDate)>0 AND [Lock Expiration Date] - $(vCurrentDate)<=10,'Yes','No') as [Lock Expire 10 Days Flag]
+    ,If([Lock Expiration Date] - $(vCurrentDate)>10 AND [Lock Expiration Date] - $(vCurrentDate)<=30,'Yes','No') as [Lock Expire 11-30 Days Flag]
+    ,If([Lock Expiration Date] - $(vCurrentDate)>30,'Yes','No') as [Lock Expire >30 Days Flag]
+    
+    ,If(Len(Trim([Lock Expiration Date]))=0,Dual('Not Locked',4),
+      If([Lock Expiration Date] - $(vCurrentDate)<0,Dual('Lock Expired',5),
+        If([Lock Expiration Date] - $(vCurrentDate)>0 AND [Lock Expiration Date] - $(vCurrentDate)<=10,Dual('Today - 10 Days',1),
+          If([Lock Expiration Date] - $(vCurrentDate)>10 AND [Lock Expiration Date] - $(vCurrentDate)<=30,Dual('11 - 30 Days',2),
+            If([Lock Expiration Date] - $(vCurrentDate)>30,Dual('>30 Days',3),
+              Null()))))) as [Lock Expire Days Range (Revised)]
+    
+    ,IF(IsNull([FICO Score])=-1,'99-Missing',
+    IF([FICO Score] < 300, 'Values<300',
+    IF([FICO Score] > 850, 'Values>850',
+    IF([FICO Score] <= 499, '300-499',
+    IF([FICO Score] <= 699, '500-699',
+    IF([FICO Score] <= 799, '700-799',
+    '800-850')))))) as [FICO Range_Std_NEW]
+    
+    ,If(IsNull([LTV Ratio])=-1, '99-Missing',
+    If([LTV Ratio] <= 0, '0-Values',
+  	If([LTV Ratio] <= 60, '0.01-60.00',
+    If([LTV Ratio] <= 70, '60.01-70.00',
+    If([LTV Ratio] <= 80, '70.01-80.00',
+    If([LTV Ratio] <= 97, '80.01-97.00',
+				'97.00>')))))) as [LTV Range_Std_NEW]
+    
+    ,[DTI Range_Std] as [DTI Range_Std_NEW]
+                
+    ,If([Funding MTD] = 'Yes', NetWorkDays(MonthStart([Funding Date]), [Funding Date], $(vHolidays)), If([Funding Previous Month Flag] = 'Yes', NetWorkDays(MonthStart([Funding Date]), [Funding Date], $(vHolidays)))) as [Funding Network Day Compare]
+
+	,Date([Sent To Processing]) as [Sent To Processing.Temp]
+
+Resident Coheus_Input;
+
+ELSE
+
+NoConcatenate
+Coheus_InputTEMP:
+Load *
+	,If([Active Loan Flag] = 'Yes',
+       Floor($(vCurrentDate)-"Application Date"),Null()) as [Active Aging Days]
+        
+     ,If([Active Loan Flag] = 'Yes',
+        If($(vCurrentDate)-"Application Date"<=15,Dual('0-15',1),
+          If($(vCurrentDate)-"Application Date"<=30,Dual('16-30',2),
+            If($(vCurrentDate)-"Application Date"<=45,Dual('31-45',3),
+              If($(vCurrentDate)-"Application Date"<=60,Dual('46-60',4),
+                If($(vCurrentDate)-"Application Date"<=90,Dual('61-90',5),
+                  Dual('> 90',6)))))),Null()) as [Active Aging Range]
+                            
+    ,If([Active Loan Flag] = 'Yes',
+      If($(vCurrentDate)-"Application Date">90 AND $(vCurrentDate)-"Application Date"<=120,Dual('91-120',1),
+        If($(vCurrentDate)-"Application Date">120 AND $(vCurrentDate)-"Application Date"<=150,Dual('121-150',2),
+          If($(vCurrentDate)-"Application Date">150 AND $(vCurrentDate)-"Application Date"<=180,Dual('151-180',3),
+            If($(vCurrentDate)-"Application Date">180 AND $(vCurrentDate)-"Application Date"<=210,Dual('181-210',4),
+              If($(vCurrentDate)-"Application Date">210 AND $(vCurrentDate)-"Application Date"<=240,Dual('211-240',5),
+                If($(vCurrentDate)-"Application Date">240 AND $(vCurrentDate)-"Application Date"<=270,Dual('241-270',6),
+                  If($(vCurrentDate)-"Application Date">270,Dual('> 270',7),Null()))))))))as [Active Aging Days > 90]
+                  
+                  
+    ,If(Len(Trim([Lock Expiration Date]))=0, Dual('Lock Expiration Date Blank',8), 
+      If([Lock Expiration Date] - $(vCurrentDate)<0,Dual('Expired',7),
+        If([Lock Expiration Date] - $(vCurrentDate)=0,Dual('Expiring Today',1),
+          If([Lock Expiration Date] - $(vCurrentDate)<=7,Dual('1-7 Days',2),
+            If([Lock Expiration Date] - $(vCurrentDate)<=14,Dual('8-14 Days',3),
+              If([Lock Expiration Date] - $(vCurrentDate)<=21,Dual('15-21 Days',4),
+                If([Lock Expiration Date] - $(vCurrentDate)<=30,Dual('22-30 Days',5),
+                  Dual('>30 Days',6))))))))  as [Lock Expire Days Range (Main)]
+	
+    ,If([Lock Expiration Date] - $(vCurrentDate)>0 AND [Lock Expiration Date] - $(vCurrentDate)<=10,'Yes','No') as [Lock Expire 10 Days Flag]
+    ,If([Lock Expiration Date] - $(vCurrentDate)>10 AND [Lock Expiration Date] - $(vCurrentDate)<=30,'Yes','No') as [Lock Expire 11-30 Days Flag]
+    ,If([Lock Expiration Date] - $(vCurrentDate)>30,'Yes','No') as [Lock Expire >30 Days Flag]
+    
+    ,If(Len(Trim([Lock Expiration Date]))=0,Dual('Not Locked',4),
+      If([Lock Expiration Date] - $(vCurrentDate)<0,Dual('Lock Expired',5),
+        If([Lock Expiration Date] - $(vCurrentDate)>0 AND [Lock Expiration Date] - $(vCurrentDate)<=10,Dual('Today - 10 Days',1),
+          If([Lock Expiration Date] - $(vCurrentDate)>10 AND [Lock Expiration Date] - $(vCurrentDate)<=30,Dual('11 - 30 Days',2),
+            If([Lock Expiration Date] - $(vCurrentDate)>30,Dual('>30 Days',3),
+              Null()))))) as [Lock Expire Days Range (Revised)]
+    
+    ,IF(IsNull([FICO Score])=-1,'99-Missing',
+    IF([FICO Score] < 300, 'Values<300',
+    IF([FICO Score] > 850, 'Values>850',
+    IF([FICO Score] <= 499, '300-499',
+    IF([FICO Score] <= 699, '500-699',
+    IF([FICO Score] <= 799, '700-799',
+    '800-850')))))) as [FICO Range_Std_NEW]
+    
+    ,If(IsNull([LTV Ratio])=-1, '99-Missing',
+    If([LTV Ratio] <= 0, '0-Values',
+  	If([LTV Ratio] <= 60, '0.01-60.00',
+    If([LTV Ratio] <= 70, '60.01-70.00',
+    If([LTV Ratio] <= 80, '70.01-80.00',
+    If([LTV Ratio] <= 97, '80.01-97.00',
+				'97.00>')))))) as [LTV Range_Std_NEW]
+    
+    ,[DTI Range_Std] as [DTI Range_Std_NEW]
+                
+    ,If([Funding MTD] = 'Yes', NetWorkDays(MonthStart([Funding Date]), [Funding Date], $(vHolidays)), If([Funding Previous Month Flag] = 'Yes', NetWorkDays(MonthStart([Funding Date]), [Funding Date], $(vHolidays)))) as [Funding Network Day Compare]
+
+	,Date([Sent To Processing]) as [Sent To Processing.Temp]
+
+Resident Coheus_Input;
+
+END IF;
+
+
+Drop Fields [Sent To Processing];
+Rename Fields [Sent To Processing.Temp] to [Sent To Processing];
+
+Drop Table Coheus_Input;
+Rename Table Coheus_InputTEMP To Coheus_Input;

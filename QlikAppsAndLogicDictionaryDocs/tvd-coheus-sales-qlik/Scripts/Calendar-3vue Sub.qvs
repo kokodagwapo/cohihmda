@@ -1,0 +1,122 @@
+/// Calendar key generation:
+///
+set Calendar.Key=floor(num(date($1)));
+
+/// Calendar date fields:
+///
+set Calendar.Year=dual(year($1), yearstart($1));
+set Calendar.Quarter=dual('Q' & num(ceil(num(month($1))/3)), num(ceil(num(month($1))/3), 00));
+set Calendar.Month=month($1);
+set Calendar.Week=dual('W' & num(week($1), 00), num(week($1), 00));
+set Calendar.Day=day($1);
+set Calendar.YearQuarter=dual('Q' & num(ceil(num(month($1))/3)) & ' ' & year($1), quarterstart($1));
+set Calendar.YearMonth=dual(year($1) & '-' & month($1), monthstart($1));
+set Calendar.YearWeek=dual('Wk ' & Date(weekstart($1), 'MMM-DD-YYYY'), weekstart($1));
+set Calendar.Date=date(floor($1));
+set Calendar.YearsAgo=num(year(today()) - year($1));
+set Calendar.QuartersAgo=num(4 * year(today()) + ceil(month(today())/3) - 4 * year($1) - ceil(month($1)/3));
+set Calendar.MonthsAgo=num(12 * (year(today()) - year($1)) + month(today()) - month($1));
+set Calendar.WeeksAgo=num((weekstart(today()) - weekstart($1)) / 7);
+set Calendar.DaysAgo=num(interval(floor(today()) - floor($1), 'd'));
+
+sub Calendar.Create(prefix, table, key)
+    tempCalendarDates:
+    load
+        min($(key)) as MIN_DATE,
+        max($(key)) as MAX_DATE
+    resident [$(table)];
+
+    let Calendar.Start=num(if(isnull(Peek('MIN_DATE',0,'tempCalendarDates')), Today(), Peek('MIN_DATE',0,'tempCalendarDates')));
+    let Calendar.End=num(if(isnull(Peek('MAX_DATE',0,'tempCalendarDates')), Today(), Peek('MAX_DATE',0,'tempCalendarDates')));
+
+    [$(prefix) Calendar]:
+        load
+            i                                               as [$(key)],
+            $(Calendar.YearsAgo(i))                         as [$(prefix) YearsAgo],
+            $(Calendar.MonthsAgo(i))                        as [$(prefix) MonthsAgo],
+            $(Calendar.QuartersAgo(i))                      as [$(prefix) QuartersAgo],
+            $(Calendar.WeeksAgo(i))                         as [$(prefix) WeeksAgo],
+            $(Calendar.DaysAgo(i))                          as [$(prefix) DaysAgo],
+            $(Calendar.Year(i))                             as [$(prefix) Year],
+            $(Calendar.Quarter(i))                          as [$(prefix) Quarter],
+            $(Calendar.Month(i))                            as [$(prefix) Month],
+            $(Calendar.Week(i))                             as [$(prefix) Week],
+            $(Calendar.Day(i))                              as [$(prefix) Day],
+            $(Calendar.YearQuarter(i))                      as [$(prefix) YearQuarter],
+            $(Calendar.YearMonth(i))                        as [$(prefix) YearMonth],
+            $(Calendar.YearWeek(i))                         as [$(prefix) YearWeek],
+            $(Calendar.Date(i))                             as [$(prefix) Calendar];
+        /*********************************************/ load
+        num(date($(Calendar.Start) + (recno() - 1)))    as i
+
+    autogenerate ($(Calendar.End) - $(Calendar.Start)) + 1;
+
+    /// Create Intervals
+    [$(prefix) Interval]:
+        load
+            t                                               as [$(key)],
+            t                                               as [$(prefix) Interval];
+        load * inline[t];
+
+    /// Current Year, Quarter, Month, and Week:
+    for each period in 'Year', 'Quarter', 'Month', 'Week'
+        concatenate ([$(prefix) Interval])
+            load
+                [$(key)]                    		        as [$(key)],
+                'Current $(period)'					        as [$(prefix) Interval]
+            resident [$(prefix) Calendar]
+            where [$(prefix) $(period)sAgo] = 0;
+    next period;
+
+    /// Last Year, Quarter, Month, and Week:
+    for each period in 'Year', 'Quarter', 'Month', 'Week'
+        concatenate ([$(prefix) Interval])
+            load
+                [$(key)]                    		        as [$(key)],
+                'Last $(period)'					        as [$(prefix) Interval]
+            resident [$(prefix) Calendar]
+            where [$(prefix) $(period)sAgo] = 1;
+    next period;
+
+    /// Rolling "Last X Months":
+    ///
+    for each x in 2, 3, 4, 6, 12, 18, 24
+        concatenate ([$(prefix) Interval])
+            load
+                [$(key)]                    		        as [$(key)],
+                'Last $(x) Months'					        as [$(prefix) Interval]
+            resident [$(prefix) Calendar]
+            where [$(prefix) MonthsAgo] > 0
+            and [$(prefix) MonthsAgo] <= $(x);
+    next x;
+
+    /// Last 90 Days:
+    concatenate([$(prefix) Interval])
+        load
+            [$(key)]                                        as [$(key)],
+            'Last 90 Days'                                  as [$(prefix) Interval]
+        resident [$(prefix) Calendar]
+        where [$(prefix) DaysAgo] <= 90
+        and [$(prefix) DaysAgo] > 0;
+
+    // Next 90 Days:
+    concatenate([$(prefix) Interval])
+        load
+            [$(key)]                                        as [$(key)],
+            'Next 90 Days'                                  as [$(prefix) Interval]
+        resident [$(prefix) Calendar]
+        where [$(prefix) DaysAgo] >= -90
+        and [$(prefix) DaysAgo] < 0;
+
+    /// Rolling 5 years
+    ///
+    concatenate([$(prefix) Interval])
+        load
+            [$(key)]                                        as [$(key)],
+            'Last 5 Years'                                  as [$(prefix) Interval]
+        resident [$(prefix) Calendar]
+        where [$(prefix) YearsAgo] >= 0
+        and [$(prefix) YearsAgo] < 6;
+
+    drop table tempCalendarDates;
+end sub

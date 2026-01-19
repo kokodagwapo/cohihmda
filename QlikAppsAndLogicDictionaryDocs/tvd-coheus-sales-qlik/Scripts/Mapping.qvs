@@ -1,0 +1,27 @@
+USRegionMap:
+MAPPING LOAD
+    UPPER(SourceName) as SourceName,
+    TransformName
+FROM [lib://QlikShare/SharedData\Misc. Data\DEMO\Coheus_2.0\Coheus2019_2.0_Mapping_20190218.xlsx]
+(ooxml, embedded labels, table is USRegion);
+
+//'Yesterday' Removed on 07.17.20
+KPI_TimeRange:
+Load * Inline [
+KPI_TimeRange
+'Month to Date'
+'Quarter to Date'
+'Year to Date'
+];
+
+ClosingProjectionGroupList:
+Mapping Load * Inline [
+ClosingProjectionGroup, ClosingProjectionGroupSort
+'Funded', 1
+'CTC', 2
+'Approved', 3
+'Conditional Approved', 4
+'Locked', 5
+'In Processing', 6
+'Not Yet In Processing', 7
+];

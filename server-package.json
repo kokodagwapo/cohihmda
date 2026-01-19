@@ -1,0 +1,53 @@
+{
+  "name": "coheus-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc || true",
+    "start": "node dist/index.js",
+    "migrate": "node dist/migrations/run.js",
+    "create-admin": "node scripts/create-admin-user.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.958.0",
+    "@aws-sdk/client-organizations": "^3.958.0",
+    "@aws-sdk/client-ses": "^3.958.0",
+    "@aws-sdk/client-kms": "^3.958.0",
+    "@sentry/node": "^10.32.1",
+    "@types/uuid": "^10.0.0",
+    "axios": "^1.13.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.11.0",
+    "morgan": "^1.10.1",
+    "multer": "^1.4.5-lts.1",
+    "papaparse": "^5.5.3",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.11.3",
+    "rss-parser": "^3.13.0",
+    "stripe": "^14.0.0",
+    "uuid": "^13.0.0",
+    "ws": "^8.14.2",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/csv-parse": "^1.1.12",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/morgan": "^1.9.10",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.10.0",
+    "@types/papaparse": "^5.5.2",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

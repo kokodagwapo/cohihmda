@@ -1,0 +1,137 @@
+service: coheus-lambda-functions
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION, 'us-east-1'}
+  stage: ${env:STAGE, 'prod'}
+  environment:
+    KMS_KEY_ID: ${env:KMS_KEY_ID, 'alias/coheus-encryption'}
+    DB_HOST: ${env:DB_HOST}
+    DB_NAME: ${env:DB_NAME}
+    DB_USER: ${env:DB_USER}
+    DB_PASSWORD: ${env:DB_PASSWORD}
+    DB_PORT: ${env:DB_PORT, '5432'}
+    DB_SSL: ${env:DB_SSL, 'true'}
+    SITE_URL: ${env:SITE_URL, 'https://d2wvs4i87rs881.cloudfront.net'}
+    FRONTEND_URL: ${env:FRONTEND_URL, 'https://d2wvs4i87rs881.cloudfront.net'}
+    AI_GATEWAY_URL: ${env:AI_GATEWAY_URL, 'https://api.openai.com/v1/chat/completions'}
+  vpc:
+    securityGroupIds:
+      - ${env:SECURITY_GROUP_ID}
+    subnetIds:
+      - ${env:SUBNET_ID_1}
+      - ${env:SUBNET_ID_2}
+  iam:
+    # IMPORTANT: We use a pre-created execution role so CI/CD users don't need iam:CreateRole.
+    # Provide this via env var (e.g. from GitHub Secrets in the deploy workflow).
+    role: ${env:LAMBDA_EXECUTION_ROLE_ARN}
+
+functions:
+  ailethiaBriefing:
+    handler: ailethia-briefing/index.handler
+    events:
+      - http:
+          path: ailethia-briefing
+          method: post
+          cors: true
+    timeout: 30
+    memorySize: 512
+
+  stripeCheckout:
+    handler: stripe-checkout/index.handler
+    events:
+      - http:
+          path: stripe-checkout
+          method: post
+          cors: true
+    timeout: 30
+    memorySize: 512
+
+  stripeWebhook:
+    handler: stripe-webhook/index.handler
+    events:
+      - http:
+          path: stripe-webhook
+          method: post
+    timeout: 30
+    memorySize: 512
+
+  seedDemoData:
+    handler: seed-demo-data/index.handler
+    events:
+      - http:
+          path: seed-demo-data
+          method: post
+          cors: true
+    timeout: 30
+    memorySize: 512
+
+  geminiTts:
+    handler: gemini-tts/index.handler
+    events:
+      - http:
+          path: gemini-tts
+          method: post
+          cors: true
+    timeout: 30
+    memorySize: 512
+
+  geminiLiveVoice:
+    handler: gemini-live-voice/index.handler
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+      - websocket:
+          route: $default
+    timeout: 900  # 15 minutes for WebSocket
+    memorySize: 1024
+
+  aletheiaRealtime:
+    handler: aletheia-realtime/index.handler
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+      - websocket:
+          route: $default
+    timeout: 900
+    memorySize: 1024
+
+  maylinRealtime:
+    handler: maylin-realtime/index.handler
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+      - websocket:
+          route: $default
+    timeout: 900
+    memorySize: 1024
+
+resources:
+  Resources:
+    WebSocketConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: coheus-websocket-connections
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: ttl
+
+plugins:
+  - serverless-plugin-typescript
+  - serverless-offline

@@ -1,0 +1,396 @@
+/*
+Questions for Rob:
+1. Are the Range names fixed or can they change client to client?
+2. Is it possible for a client to create a new range without us being made aware?
+*/
+Set ErrorMode = 0;
+Drop Table ConfigurationData;
+
+LET vSetupURL =  Pick(vUseDEVAPI + 1, 'https://api.coheus1.com/config/$(vXMLName)/fullxml', 'https://dev-api.coheus1.com/config/$(vXMLName)/fullxml');
+
+ConfigurationData:
+LOAD
+    Concat("@1:n",'',RecNo()) as full_xml
+FROM [lib://Web Setup XML V2 (azure_devang.ghela@3vuellc.com)]
+(URL is [$(vSetupURL)],fix, codepage is 1252, no labels)
+;
+
+Set ErrorMode = 1;
+
+Let vFICOCreditMax =;
+Let vFICOCreditMin =;
+
+Let vLTVCreditMax =;
+Let vLTVCreditMin =;
+
+Let vDTICreditMax =;
+Let vDTICreditMin =;
+
+If '$(vFileExists)'=1 THEN
+
+CreditRanges:
+LOAD
+    Name,
+    "Max",
+    "Min"
+From_Field(ConfigurationData,full_xml)
+(XmlSimple, table is [$(vConfigRange)]);
+
+Let vCreditRangeRows = NoOfRows('CreditRanges');
+
+Else
+
+Let vCreditRangeRows = 0;
+
+End If;
+
+If $(vCreditRangeRows) = 0 Then
+
+Let vFICOCreditMax = 580;
+Let vFICOCreditMin = 350;
+
+Let vLTVCreditMax = 97;
+Let vLTVCreditMin = 0;
+
+Let vDTICreditMax = 70;
+Let vDTICreditMin = 50;
+
+Else
+
+For r = 0 to NoOfRows('CreditRanges')-1
+
+Let vCreditRange = Peek('Name',$(i),'CreditRanges');
+
+Let v$(vCreditRange)CreditMax = Peek('Max',$(i),'CreditRanges');
+Let v$(vCreditRange)CreditMin = Peek('Min',$(i),'CreditRanges');
+
+Next r;
+
+End If;
+
+Let vFICOCreditMax = If(Len(Trim('$(vFICOCreditMax)'))=0,580,$(vFICOCreditMax));
+Let vFICOCreditMin = If(Len(Trim('$(vFICOCreditMin)'))=0,350,$(vFICOCreditMin));
+
+Let vLTVCreditMax = If(Len(Trim('$(vLTVCreditMax)'))=0,97,$(vLTVCreditMax));
+Let vLTVCreditMin = If(Len(Trim('$(vLTVCreditMin)'))=0,0,$(vLTVCreditMin));
+
+Let vDTICreditMax = If(Len(Trim('$(vDTICreditMax)'))=0,70,$(vDTICreditMax));
+Let vDTICreditMin = If(Len(Trim('$(vDTICreditMin)'))=0,50,$(vDTICreditMin));
+
+
+
+/////////////////////////////////Eventually incorporate Logic from Editor/////////////////////////////////
+
+Let vFICOMax = 900;
+Let vFICOMin = 350;
+
+Let vLTVMax = 110;
+Let vLTVMin = 0;
+
+Let vDTIMax = 70;
+Let vDTIMin = 0;
+
+Let vInterestMax = 15;
+Let vInterestMin = 0;
+
+Processor_Production:
+Mapping Load Distinct
+[Processor],
+'Yes' as [Processor_Production]
+Resident $(vWriteTableName)
+Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));
+
+Underwriter_Production:
+Mapping Load Distinct
+[Underwriter],
+'Yes' as [Underwriter_Production]
+Resident $(vWriteTableName)
+Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));
+
+Closer_Production:
+Mapping Load Distinct
+[Closer],
+'Yes' as [Closer_Production]
+Resident $(vWriteTableName)
+Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));
+
+IF FieldNumber('UW Approval Date', 'Coheus_Input') > 0 THEN
+    LET vUWAppField = 'UW Approval Date';
+ELSE
+    LET vUWAppField = 'UW Final Approval Date'; 
+END IF
+
+DROP FIELD [Lock Expire Days Range];
+
+//Load Flags onto Fact Table
+RangesLoanData:
+LOAD *,
+    /*If(Len(Trim([Current Status Date]))=0, Dual('Current Status Date Empty',6),*/ 
+          If(date($(vCurrentDate)) - [Current Status Date] <=7,Dual('1-7 Days',1),
+            If(date($(vCurrentDate)) - [Current Status Date] <=14,Dual('8-14 Days',2),
+              If(date($(vCurrentDate)) - [Current Status Date] <=21,Dual('15-21 Days',3),
+                If(date($(vCurrentDate)) - [Current Status Date] <=30,Dual('22-30 Days',4),
+                  Dual('>30 Days',5)))))/*)*/  as [Current Status Range]
+
+    ,If(Len(Trim([Lock Expiration Date]))=0, Dual('Lock Expiration Date Blank',8), 
+      If([Lock Expiration Date] - $(vCurrentDate)<0,Dual('Expired',7),
+        If([Lock Expiration Date] - $(vCurrentDate)=0,Dual('Expiring Today',1),
+          If([Lock Expiration Date] - $(vCurrentDate)<=7,Dual('1-7 Days',2),
+            If([Lock Expiration Date] - $(vCurrentDate)<=14,Dual('8-14 Days',3),
+              If([Lock Expiration Date] - $(vCurrentDate)<=21,Dual('15-21 Days',4),
+                If([Lock Expiration Date] - $(vCurrentDate)<=30,Dual('22-30 Days',5),
+                  Dual('>30 Days',6))))))))  as [Lock Expire Days Range];
+
+LOAD *,
+    If([Pull Through Originated Flag]='Yes',
+    If([Funding YearMonth]=[Current Status Date Year Month],'Funding Month matches HMDA Status Month',
+    If([Funding YearMonth]<[Current Status Date Year Month],'Funding Month prior to HMDA Status Month',
+    If([Funding YearMonth]>[Current Status Date Year Month],'Funding Month after HMDA Status Month',
+    Null())))) as [Funding Month vs. HMDA Status Month],
+    
+    If([Active Loan Flag]='No' AND Len(Trim([Current Status Date]))=0, 1,0) as [Final Disposition Current Status Date Missing],
+    If([Active Loan Flag]='Yes' AND (Len(Trim([UW Final Approval Date])) + Len(Trim([Conditional Approval Date])) =0), 1,0) as [Active But Approval Missing]
+;
+LOAD *,
+    if([Interest Rate]<3.000, 'Values<3.000',
+
+        if([Interest Rate]>=$(vFloorMaxInterestRate) AND [Interest Rate]<=$(vMaxInterestRate), 'Values>=$(vFloorMaxInterestRate)',
+        
+            Text(Num(3.000+(Div([Interest Rate]-3.000,.125)*.125),'#,##0.000')) & ' - ' & Text(Num(3.125+(Div([Interest Rate]-3.000,.125)*.125),'#,##0.000'))
+            
+                )
+            
+                ) as [Interest Rate Group (.125)],
+
+
+    if([Interest Rate]<3.000, 'Values<3.000',
+
+        if([Interest Rate]>=$(vFloorMaxInterestRate) AND [Interest Rate]<=$(vMaxInterestRate), 'Values>=$(vFloorMaxInterestRate)',
+        
+            Text(Num(3.000+(Div([Interest Rate]-3.000,.500)*.500),'#,##0.000')) & ' - ' & Text(Num(3.500+(Div([Interest Rate]-3.000,.500)*.500),'#,##0.000'))
+            
+                )
+            
+                ) as [Interest Rate Group (.500)],
+                
+
+    if([Interest Rate]<3.000, 'Values<3.000',
+
+        if([Interest Rate]>=$(vFloorMaxInterestRate) AND [Interest Rate]<=$(vMaxInterestRate), 'Values>=$(vFloorMaxInterestRate)',
+        
+            Text(Num(3.000+(Div([Interest Rate]-3.000,1)*1),'#,##0.000')) & ' - ' & Text(Num(4.000+(Div([Interest Rate]-3.000,1)*1),'#,##0.000'))
+            
+                )
+            
+                ) as [Interest Rate Group (1.000)]
+                
+    ///////////////////////////////Interest Rate Group Sorting////////////////////////////////
+
+        ,if([Interest Rate]<3.000, 0,
+
+        if([Interest Rate]>$(vMaxInterestRate), $(vMaxInterestRate),
+        
+            Num(3.125+(Div([Interest Rate]-3.000,.125)*.125),'#,##0.000')
+            
+                )
+            
+                ) as [Interest Rate Group Sort(.125)],
+
+
+    if([Interest Rate]<3.000, 0,
+
+        if([Interest Rate]>$(vMaxInterestRate), $(vMaxInterestRate),
+        
+            Num(3.500+(Div([Interest Rate]-3.000,.500)*.500),'#,##0.000')
+            
+                )
+            
+                ) as [Interest Rate Group Sort(.500)],
+                
+
+    if([Interest Rate]<3.000, 0,
+
+        if([Interest Rate]>$(vMaxInterestRate), $(vMaxInterestRate),
+        
+            Num(4.000+(Div([Interest Rate]-3.000,1)*1),'#,##0.000')
+            
+                )
+            
+                ) as [Interest Rate Group Sort(1.000)];
+LOAD *,
+    if((1+[Loan Complexity Score])*100>=131,'1-GT 131',
+    if((1+[Loan Complexity Score])*100>=121,'2-121 to 130',
+    if((1+[Loan Complexity Score])*100>=111,'3-111 to 120',
+    if((1+[Loan Complexity Score])*100>=101,'4-101 to 110',
+    if((1+[Loan Complexity Score])*100>=91,'5-91 to 100',
+    if((1+[Loan Complexity Score])*100>=81,'6-81 to 90',
+    if((1+[Loan Complexity Score])*100>=0,'8-zero','7-LE 80'))))))) as Complexity_Group,
+
+    if([Current Loan Status]='Active Loan','5-Active Loan',
+    if([Current Loan Status]='Application approved but not accepted','2-Withdrawn',
+    if([Current Loan Status]='Application denied','3-Denied',
+    if([Current Loan Status]='Application withdrawn','2-Withdrawn',
+    if([Current Loan Status]='File Closed for incompleteness','2-Withdrawn',
+    if([Current Loan Status]='Loan Originated','1-Loan Originated','7-Other')))))) as Final_Disposition_Group,
+
+    if([Current Loan Status]='Loan Originated',[Funding Date]-[Application Date],
+    if([Current Loan Status]='Active Loan',Today()-[Application Date], [Current Status Date]-[Application Date])) as Final_Disposition_Days,
+
+    if([Funded Flag]='Yes','1-Funded',
+    if([Approved Flag]='Yes','2-Approved',
+    If([Conditional Approved Flag]='Yes','3-Conditional Approval',
+    if([Locked Flag]='Yes','4-Locked','5-All Other')))) as Historical_Status,
+
+    [Funding Date]- [CTC Date] as CTC_Days,
+    [Funding Date]- [$(vUWAppField)] as Approval_Days,
+    [Funding Date]- [Conditional Approval Date] as Cond_Approval_Days,
+    [Funding Date]- [Lock Date] as Locked_Days,
+    [Funding Date]- [Application Date] as App_Days,
+    
+    if(len([Closing Disclosure Sent Date])=0,'No','Yes') as CD_Sent_Flag,
+
+    if([LE Sent Flag]='Yes',dual('LE Sent',6),
+    if(Today()-[Application Date]>3,dual('Over Three Days',1),
+    if(Today()-[Application Date]>2,dual('Over Two Days',2),
+    if(Today()-[Application Date]>1,dual('Over One Day',3),
+    if(Today()-[Application Date]>0,dual('Yesterday',4),dual('Today',5)))))) as LE_Days_Since_App,
+
+    if([Appraisal Ordered Flag]='Yes',dual('Appr Ordered',6),
+    if(Today()-[Application Date]>7,dual('Over 7 Days',4),
+    if(Today()-[Application Date]>14,dual('Over 14 Days',3),
+    if(Today()-[Application Date]>21,dual('Over 21 Days',2),
+    if(Today()-[Application Date]>30,dual('Over 30 Days',1),dual('This Week',5)))))) as Appraisal_Days_Since_App,
+
+    if([Conditional Approved Flag]='Yes',dual('Cond Approved',6),
+    if(Today()-[Application Date]>15,dual('Over 15 Days',4),
+    if(Today()-[Application Date]>30,dual('Over 30 Days',3),
+    if(Today()-[Application Date]>60,dual('Over 60 Days',2),
+    if(Today()-[Application Date]>90,dual('Over 90 Days',1),dual('Less than 16 Days',5)))))) as Cond_Appr_Days_Since_App,
+
+    if(len([Closing Disclosure Sent Date])>0,dual('CD Sent',5),
+    if([Estimated Closing Date]-Today()<0,dual('Passed ECD',1),
+    if([Estimated Closing Date]-Today()>15,dual('Over 15 Days',4),
+    if([Estimated Closing Date]-Today()>11,dual('15 Days or Less',3),
+    dual('11 Days or Less',2))))) as CD_Sent_to_ECD
+;
+Load *
+	,ApplyMap('ClosingProjectionGroupList',[Closing Projection Group]) as [Closing Projection Group Sort]
+    ,If([Funded Not Purchased Flag] = 'Yes', Floor($(vCurrentDate)-[Funding Date]), Null()) as [Funded Not Purchased Aging]
+    ,if([Denied Flag]=1,[Current Status Date],Null()) as [Denied Date]
+    ,if([Account Executive]='99-Missing',Null(),[Account Executive]) as [Account Executive.Temp]
+;
+Load *,
+	ApplyMap('Processor_Production',[Processor],'No') as [Processor_Production]
+	,ApplyMap('Underwriter_Production',[Underwriter],'No') as [Underwriter_Production]
+    ,ApplyMap('Closer_Production',[Closer],'No') as [Closer_Production]
+
+	,If([FICO Ranges] = 'In Range' AND [DTI Ranges] = 'In Range' AND [LTV Ranges] = 'In Range' AND [Interest Ranges] = 'In Range','All In Range',
+    	If([FICO Ranges] = 'Out of Range' AND [DTI Ranges] = 'Out of Range' AND [LTV Ranges] = 'Out of Range' AND [Interest Ranges] = 'Out of Range','All Out of Range',
+        	'Partially Out of Range')) as [Global Ranges]
+            
+    ,ApplyMap('ActiveAgingSort',[Active Aging Range]) as [Active Aging Range Sort]
+    ,ApplyMap('ActiveAgingGreater90Sort',[Active Aging Days > 90]) as [Active Aging Days > 90 Sort]
+    ,If(WildMatch([Current Loan Status],'*Originated*','*purchased*')>0,'Yes','No') as [Pull Through Originated Flag]
+    
+    ,If(InMonthToDate("Funding Date",$(vMaxDate),0),'Funded',
+    	if("Active Loan Flag"='Yes' AND [CTC Flag]='Yes' AND [Funded Flag]='No','CTC',
+        	if("Active Loan Flag"='Yes' AND [Approved Flag]='Yes' AND [CTC Flag]='No' AND [Funded Flag]='No','Approved',
+    			if("Active Loan Flag"='Yes' AND [Conditional Approved Flag]='Yes' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Conditional Approved',
+        			if("Active Loan Flag"='Yes' AND [Locked Flag]='Yes' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Locked',
+                    	if("Active Loan Flag"='Yes' AND [Locked Flag]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No' AND Len(Trim([Sent To Processing]))>0,'In Processing',
+                        	if("Active Loan Flag"='Yes' AND [Locked Flag]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No' AND Len(Trim([Sent To Processing]))=0,'Not Yet In Processing',
+        				Null()
+    ))))))) as [Closing Projection Group]
+    
+    
+    
+    // Current Loan Status to streamline dimension values displayed in charts, include drill down.
+    ,If([Denied Flag]=1,'Application denied',
+      If([Withdrawn Flag]=1,'Application withdrawn',
+        If(Wildmatch([Current Loan Status],'*purch*')>0,'Loan purchased by your institution',
+          [Current Loan Status]))) as [Current Loan Status Group]
+;
+Load *,
+	If([FICO Score]<$(vFICOMin) OR [FICO Score]>$(vFICOMax),'Out of Range','In Range') as [FICO Ranges],
+    If([BE DTI Ratio]<$(vDTIMin) OR [BE DTI Ratio]>$(vDTIMax),'Out of Range','In Range') as [DTI Ranges],
+    If([LTV Ratio]<$(vLTVMin) OR [LTV Ratio]>$(vLTVMax),'Out of Range','In Range') as [LTV Ranges],
+    If([Interest Rate]<$(vInterestMin) OR [Interest Rate]>$(vInterestMax),'Out of Range','In Range') as [Interest Ranges],
+    
+    If("Loan Amount" > 50000 AND "Loan Amount" <= 750000, "Original Balance Range",
+    If("Loan Amount" < 0, 'Below 0',
+    If("Loan Amount" <= 10000, '0-10,000',
+    If("Loan Amount" <= 20000, '10,000.01-20,000',
+    If("Loan Amount" <= 30000, '20,000.01-30,000',
+    If("Loan Amount" <= 40000, '30,000.01-40,000',
+    If("Loan Amount" <= 50000, '40,000.01-50,000',
+    
+    If("Loan Amount" <= 800000, '750,000.01-800,000',
+    If("Loan Amount" <= 850000, '800,000.01-850,000',
+    If("Loan Amount" <= 900000, '850,000.01-900,000',
+    If("Loan Amount" <= 950000, '900,000.01-950,000',
+    If("Loan Amount" <= 1000000, '950,000.01-1,000,000',
+    '>1,000,000')))))))))))) as [Original Balance Outlier Range]
+    
+    ,If([Active Loan Flag] = 'Yes',
+       If($(vCurrentDate)-[Application Date]<=15,'0-15',
+			If($(vCurrentDate)-[Application Date]<=30,'16-30',
+    			If($(vCurrentDate)-[Application Date]<=45,'31-45',
+                	If($(vCurrentDate)-[Application Date]<=60,'46-60',
+						If($(vCurrentDate)-[Application Date]<=90,'61-90',
+    						'> 90'))))),Null()) as [Active Aging Range]
+                            
+    ,If([Active Loan Flag] = 'Yes',
+       Floor($(vCurrentDate)-[Application Date]),Null()) as [Active Aging Days]
+       
+    ,If([Active Loan Flag] = 'Yes',
+       If($(vCurrentDate)-[Application Date]>90 AND $(vCurrentDate)-[Application Date]<=120,'91-120',
+       	If($(vCurrentDate)-[Application Date]>120 AND $(vCurrentDate)-[Application Date]<=150,'121-150',
+        	If($(vCurrentDate)-[Application Date]>150 AND $(vCurrentDate)-[Application Date]<=180,'151-180',
+            	If($(vCurrentDate)-[Application Date]>180 AND $(vCurrentDate)-[Application Date]<=210,'181-210',
+                	If($(vCurrentDate)-[Application Date]>210 AND $(vCurrentDate)-[Application Date]<=240,'211-240',
+                    	If($(vCurrentDate)-[Application Date]>240 AND $(vCurrentDate)-[Application Date]<=270,'241-270',
+                        	If($(vCurrentDate)-[Application Date]>270,'> 270',Null()))))))))as [Active Aging Days > 90]   
+    
+    ,If([Processor] = '99-Missing',1,0) as [Processor Missing]
+    ,If([Underwriter] = '99-Missing',1,0) as [Underwriter Missing]
+    ,If([Closer] = '99-Missing',1,0) as [Closer Missing]
+    
+    ,If(WildMatch([Current Loan Status],'*withdraw*','*incomplete*')>0,1,0) as [Withdrawn Flag]
+    
+    ,If(Len(Trim([Credit Pull Year]))=0,'Date Missing',[Credit Pull Year]) as [Credit Pull Year_Strat]
+    ,If(Len(Trim([Application Year]))=0,'Date Missing',[Application Year]) as [Application Year_Strat]
+    ,If(Len(Trim([UW Suspended Year]))=0,'Date Missing',[UW Suspended Year]) as [UW Suspended Year_Strat]
+    ,If(Len(Trim([Estimated Closing Year]))=0,'Date Missing',[Estimated Closing Year]) as [Estimated Closing Year_Strat]
+    ,If(Len(Trim([Loan Estimate Sent Year]))=0,'Date Missing',[Loan Estimate Sent Year]) as [Loan Estimate Sent Year_Strat]
+    ,If(Len(Trim([Loan Estimate Received Year]))=0,'Date Missing',[Loan Estimate Received Year]) as [Loan Estimate Received Year_Strat]
+    ,If(Len(Trim([Closing Disclosure Sent Year]))=0,'Date Missing',[Closing Disclosure Sent Year]) as [Closing Disclosure Sent Year_Strat]
+    ,If(Len(Trim([Closing Disclosure Received Year]))=0,'Date Missing',[Closing Disclosure Received Year]) as [Closing Disclosure Received Year_Strat]
+    ,If(Len(Trim([CTC Year]))=0,'Date Missing',[CTC Year]) as [CTC Year_Strat]
+    ,If(Len(Trim([Investor Purchase Year]))=0,'Date Missing',[Investor Purchase Year]) as [Investor Purchase Year_Strat]
+    ,If(Len(Trim([Shipped Year]))=0,'Date Missing',[Shipped Year]) as [Shipped Year_Strat]
+    ,If(Len(Trim([Funding Year]))=0,'Date Missing',[Funding Year]) as [Funding Year_Strat]
+    
+    ,If(Len(Trim([Sent To Processing Year]))=0,'Date Missing',[Sent To Processing Year]) as [Sent To Processing Year_Strat]
+    ,If(Len(Trim([Sent To Underwriting Year]))=0,'Date Missing',[Sent To Underwriting Year]) as [Sent To Underwriting Year_Strat]
+    ,If(Len(Trim([Sent To Closing Year]))=0,'Date Missing',[Sent To Closing Year]) as [Sent To Closing Year_Strat]
+    
+    
+    ,If(Len([Conditional Approval Date])=0, 'No', 'Yes') as [Conditional Approved Flag]  
+    ,Date([Sent To Processing]) as [Sent To Processing Temp]
+    
+    ,'Week '&Week([Closing Projection Date]) as [Closing Projection Week]
+Resident [$(vWriteTableName)];
+Drop Table [$(vWriteTableName)];
+Rename Table RangesLoanData To [$(vWriteTableName)];
+
+Drop Fields [Sent To Processing],[Account Executive];
+Rename Fields [Sent To Processing Temp] To [Sent To Processing],[Account Executive.Temp] to [Account Executive];
+
+Historical_Status_Group_Dimensions:
+Load * inline [
+Historical_Status_Group_Dim,
+1-CTC
+2-Final Approval
+3-Condtional Approval
+4-Locked
+5-All Others];

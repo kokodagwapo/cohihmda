@@ -1,0 +1,715 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Coheus Backend stack (Elastic Beanstalk + RDS + VPC - Complete infrastructure)
+  
+  IMPORTANT: If updating an existing Elastic Beanstalk environment that was created without VPC,
+  set UseVPCForEB parameter to 'false'. AWS does not allow migrating existing environments to VPC.
+  For new environments, set UseVPCForEB to 'true' to use VPC configuration.
+
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: coheus-backend
+    Description: Elastic Beanstalk application name
+
+  EnvironmentName:
+    Type: String
+    Description: Elastic Beanstalk environment name
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    Description: EC2 instance type for Elastic Beanstalk
+
+  DatabaseEngineVersion:
+    Type: String
+    Default: '15.14'
+    Description: PostgreSQL engine version
+    AllowedValues:
+      - '15.4'
+      - '15.14'
+      - '16.1'
+      - '16.2'
+
+  DatabaseInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    Description: RDS instance class
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    Description: Master password for RDS database (leave empty to auto-generate)
+    Default: ''
+
+  DatabaseName:
+    Type: String
+    Default: coheus
+    Description: Database name
+
+  DatabaseUsername:
+    Type: String
+    Default: coheusadmin
+    Description: Database master username
+
+  NetworkMode:
+    Type: String
+    Default: new
+    AllowedValues:
+      - new
+      - existing
+    Description: Create a new VPC/subnets (new) or use existing VPC/subnets (existing)
+
+  ExistingVPCId:
+    Type: String
+    Default: ''
+    Description: Existing VPC ID to use when NetworkMode=existing (e.g., vpc-0123456789abcdef0)
+
+  ExistingPrivateSubnet1:
+    Type: String
+    Default: ''
+    Description: Existing private subnet 1 ID when NetworkMode=existing
+
+  ExistingPrivateSubnet2:
+    Type: String
+    Default: ''
+    Description: Existing private subnet 2 ID when NetworkMode=existing
+
+  ExistingPublicSubnet1:
+    Type: String
+    Default: ''
+    Description: Existing public subnet 1 ID when NetworkMode=existing
+
+  ExistingPublicSubnet2:
+    Type: String
+    Default: ''
+    Description: Existing public subnet 2 ID when NetworkMode=existing
+
+  ExistingBackendSecurityGroupId:
+    Type: String
+    Default: ''
+    Description: Existing backend instance security group ID (used for DB ingress when updating an existing EB environment)
+
+  ExistingVPCCidr:
+    Type: String
+    Default: ''
+    Description: Existing VPC CIDR (e.g., 10.0.0.0/16). Required when NetworkMode=existing so the load balancer can reach instances.
+
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: JWT secret used to sign/verify tokens (min 32 chars)
+    MinLength: 32
+
+  FrontendUrl:
+    Type: String
+    Default: ''
+    Description: Optional FRONTEND_URL for CORS (comma-separated allowed origins)
+
+  AppPort:
+    Type: Number
+    Default: 8081
+    Description: Port the Node.js app listens on in Elastic Beanstalk (recommended 8081)
+
+  UseVPCForEB:
+    Type: String
+    Default: 'true'
+    Description: Use VPC for Elastic Beanstalk environment (set to 'true' for new environments, 'false' for existing environments that cannot be migrated to VPC)
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Conditions:
+  UseCustomPassword: !Not [!Equals [!Ref DatabasePassword, '']]
+  UseGeneratedPassword: !Equals [!Ref DatabasePassword, '']
+  UseVPC: !Equals [!Ref UseVPCForEB, 'true']
+  CreateNewVPC: !Equals [!Ref NetworkMode, 'new']
+  UseExistingVPC: !Equals [!Ref NetworkMode, 'existing']
+  HasExistingBackendSecurityGroupId: !Not [!Equals [!Ref ExistingBackendSecurityGroupId, '']]
+  HasExistingVPCCidr: !Not [!Equals [!Ref ExistingVPCCidr, '']]
+
+Rules:
+  ExistingNetworkRequiresIds:
+    RuleCondition: !Equals [!Ref NetworkMode, 'existing']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingVPCId, '']]
+        AssertDescription: ExistingVPCId is required when NetworkMode=existing.
+      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnet1, '']]
+        AssertDescription: ExistingPrivateSubnet1 is required when NetworkMode=existing.
+      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnet2, '']]
+        AssertDescription: ExistingPrivateSubnet2 is required when NetworkMode=existing.
+      - Assert: !Not [!Equals [!Ref ExistingPublicSubnet1, '']]
+        AssertDescription: ExistingPublicSubnet1 is required when NetworkMode=existing.
+      - Assert: !Not [!Equals [!Ref ExistingPublicSubnet2, '']]
+        AssertDescription: ExistingPublicSubnet2 is required when NetworkMode=existing.
+      - Assert: !Not [!Equals [!Ref ExistingVPCCidr, '']]
+        AssertDescription: ExistingVPCCidr is required when NetworkMode=existing.
+
+  NoVpcEbRequiresExistingNetworkAndBackendSg:
+    RuleCondition: !Equals [!Ref UseVPCForEB, 'false']
+    Assertions:
+      - Assert: !Equals [!Ref NetworkMode, 'existing']
+        AssertDescription: When UseVPCForEB=false (existing EB environment), set NetworkMode=existing so RDS/network match the existing VPC.
+      - Assert: !Not [!Equals [!Ref ExistingBackendSecurityGroupId, '']]
+        AssertDescription: When UseVPCForEB=false, ExistingBackendSecurityGroupId is required so the DB can allow inbound from your existing EB instances.
+
+Resources:
+  # ============================================================================
+  # KMS Key for Encryption
+  # ============================================================================
+  EncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'KMS key for ${ApplicationName} encryption'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow CloudWatch Logs
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+          - Sid: Allow RDS use of the key
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:ListGrants'
+              - 'kms:RevokeGrant'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                kms:CallerAccount: !Ref AWS::AccountId
+              StringLike:
+                kms:ViaService: !Sub 'rds.${AWS::Region}.amazonaws.com'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-encryption-key'
+
+  EncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${ApplicationName}-key'
+      TargetKeyId: !Ref EncryptionKey
+
+  # ============================================================================
+  # VPC and Networking
+  # ============================================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Condition: CreateNewVPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-VPC'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-PrivateSubnet1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-PrivateSubnet2'
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.10.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-PublicSubnet1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.11.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-PublicSubnet2'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: CreateNewVPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-IGW'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateNewVPC
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateNewVPC
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-PublicRT'
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateNewVPC
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: CreateNewVPC
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-NAT-EIP'
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: CreateNewVPC
+    DependsOn: NatGatewayEIP
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-NAT-Gateway'
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateNewVPC
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-PrivateRT'
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateNewVPC
+    DependsOn: NatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  # ============================================================================
+  # Security Groups
+  # ============================================================================
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'Security group for ${ApplicationName} backend instances'
+      VpcId: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !If [CreateNewVPC, 10.0.0.0/16, !Ref ExistingVPCCidr]
+          Description: Allow HTTP from VPC CIDR (load balancer forwards traffic)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-Backend-SG'
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'Security group for ${ApplicationName} RDS instance'
+      VpcId: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !If [HasExistingBackendSecurityGroupId, !Ref ExistingBackendSecurityGroupId, !Ref BackendSecurityGroup]
+          Description: Allow PostgreSQL from backend
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-RDS-SG'
+
+  # ============================================================================
+  # RDS Database
+  # ============================================================================
+  DatabaseSecretProvided:
+    Type: AWS::SecretsManager::Secret
+    Condition: UseCustomPassword
+    Properties:
+      Name: !Sub '${ApplicationName}/database'
+      Description: !Sub 'RDS credentials for ${ApplicationName}'
+      KmsKeyId: !Ref EncryptionKey
+      SecretString: !Sub |
+        {"username":"${DatabaseUsername}","password":"${DatabasePassword}","dbname":"${DatabaseName}"}
+
+  DatabaseSecretGenerated:
+    Type: AWS::SecretsManager::Secret
+    Condition: UseGeneratedPassword
+    Properties:
+      Name: !Sub '${ApplicationName}/database'
+      Description: !Sub 'RDS credentials for ${ApplicationName}'
+      KmsKeyId: !Ref EncryptionKey
+      GenerateSecretString:
+        SecretStringTemplate: !Sub |
+          {"username":"${DatabaseUsername}","dbname":"${DatabaseName}"}
+        GenerateStringKey: password
+        PasswordLength: 32
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${ApplicationName} RDS instance'
+      SubnetIds:
+        - !If [CreateNewVPC, !Ref PrivateSubnet1, !Ref ExistingPrivateSubnet1]
+        - !If [CreateNewVPC, !Ref PrivateSubnet2, !Ref ExistingPrivateSubnet2]
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-DB-SubnetGroup'
+
+  DatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${ApplicationName}-db'
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !Ref EncryptionKey
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !If
+        - UseCustomPassword
+        - !Sub '{{resolve:secretsmanager:${DatabaseSecretProvided}:SecretString:password}}'
+        - !Sub '{{resolve:secretsmanager:${DatabaseSecretGenerated}:SecretString:password}}'
+      DBName: !Ref DatabaseName
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${ApplicationName}-Database'
+
+  # ============================================================================
+  # IAM Roles for Elastic Beanstalk
+  # ============================================================================
+  ElasticBeanstalkServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: elasticbeanstalk.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkManagedUpdatesCustomerRolePolicy
+
+  ElasticBeanstalkInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ElasticBeanstalkInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ElasticBeanstalkInstanceRole
+
+  # ============================================================================
+  # Elastic Beanstalk Application and Environment
+  # ============================================================================
+  BackendApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: !Ref ApplicationName
+
+  BackendEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    DependsOn:
+      - ElasticBeanstalkServiceRole
+      - ElasticBeanstalkInstanceProfile
+      - DatabaseInstance
+      - BackendSecurityGroup
+    Properties:
+      ApplicationName: !Ref BackendApplication
+      EnvironmentName: !Ref EnvironmentName
+      SolutionStackName: "64bit Amazon Linux 2023 v6.7.1 running Node.js 22"
+      OptionSettings:
+        # Service Role
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: ServiceRole
+          Value: !GetAtt ElasticBeanstalkServiceRole.Arn
+
+        # Environment Type
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: LoadBalanced
+
+        # Instance Configuration
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: !Ref InstanceType
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref ElasticBeanstalkInstanceProfile
+
+        # Security Groups (only when using VPC)
+        - !If
+          - UseVPC
+          - Namespace: aws:autoscaling:launchconfiguration
+            OptionName: SecurityGroups
+            Value: !Ref BackendSecurityGroup
+          - !Ref AWS::NoValue
+
+        # Load Balancer Configuration
+        # Use Application Load Balancer (ALB) for WebSocket support
+        - Namespace: aws:elasticbeanstalk:environment:loadbalancer
+          OptionName: LoadBalancerType
+          Value: application
+        - Namespace: aws:elbv2:loadbalancer
+          OptionName: IdleTimeout
+          Value: '3600'  # 1 hour - required for long-lived WebSocket connections
+        - Namespace: aws:elbv2:loadbalancer
+          OptionName: AccessLogsS3Bucket
+          Value: ''  # Optional: S3 bucket for access logs
+        
+        # Enable sticky sessions for WebSocket connections (required for ALB)
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: StickinessEnabled
+          Value: 'true'
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: StickinessLBCookieDuration
+          Value: '86400'  # 24 hours - cookie duration for sticky sessions
+
+        # VPC Configuration - Only include if UseVPC is true
+        # Note: You cannot migrate an existing environment to VPC
+        # Set UseVPCForEB to 'true' only for NEW environments
+        - !If
+          - UseVPC
+          - Namespace: aws:ec2:vpc
+            OptionName: VPCId
+            Value: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
+          - !Ref AWS::NoValue
+        - !If
+          - UseVPC
+          - Namespace: aws:ec2:vpc
+            OptionName: Subnets
+            Value: !If
+              - CreateNewVPC
+              - !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+              - !Join [',', [!Ref ExistingPrivateSubnet1, !Ref ExistingPrivateSubnet2]]
+          - !Ref AWS::NoValue
+        - !If
+          - UseVPC
+          - Namespace: aws:ec2:vpc
+            OptionName: ELBSubnets
+            Value: !If
+              - CreateNewVPC
+              - !Join [',', [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+              - !Join [',', [!Ref ExistingPublicSubnet1, !Ref ExistingPublicSubnet2]]
+          - !Ref AWS::NoValue
+        - !If
+          - UseVPC
+          - Namespace: aws:ec2:vpc
+            OptionName: AssociatePublicIpAddress
+            Value: 'false'
+          - !Ref AWS::NoValue
+
+        # Health Check
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: HealthCheckPath
+          Value: /health
+
+        # Application environment variables (Coheus backend expects these)
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: NODE_ENV
+          Value: production
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: PORT
+          Value: !Ref AppPort
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: JWT_SECRET
+          Value: !Ref JwtSecret
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: FRONTEND_URL
+          Value: !Ref FrontendUrl
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_HOST
+          Value: !GetAtt DatabaseInstance.Endpoint.Address
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_PORT
+          Value: '5432'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_NAME
+          Value: !Ref DatabaseName
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_USER
+          Value: !Ref DatabaseUsername
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DB_PASSWORD
+          Value: !If
+            - UseCustomPassword
+            - !Sub '{{resolve:secretsmanager:${DatabaseSecretProvided}:SecretString:password}}'
+            - !Sub '{{resolve:secretsmanager:${DatabaseSecretGenerated}:SecretString:password}}'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: KMS_KEY_ID
+          Value: !Ref EncryptionKey
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: AWS_REGION
+          Value: !Ref 'AWS::Region'
+
+Outputs:
+  BackendEndpoint:
+    Description: Elastic Beanstalk endpoint URL
+    Value: !GetAtt BackendEnvironment.EndpointURL
+  
+  BackendApplicationName:
+    Description: Elastic Beanstalk application name
+    Value: !Ref BackendApplication
+  
+  BackendEnvironmentName:
+    Description: Elastic Beanstalk environment name
+    Value: !Ref BackendEnvironment
+
+  DatabaseEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+
+  DatabasePort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt DatabaseInstance.Endpoint.Port
+
+  DatabaseName:
+    Description: Database name
+    Value: !Ref DatabaseName
+
+  DatabaseUsername:
+    Description: Database master username
+    Value: !Ref DatabaseUsername
+
+  DatabaseSecretArn:
+    Description: Secrets Manager secret ARN containing DB credentials (username/password/dbname)
+    Value: !If
+      - UseCustomPassword
+      - !Ref DatabaseSecretProvided
+      - !Ref DatabaseSecretGenerated
+
+  SecurityGroupId:
+    Description: Backend security group ID (use this for SECURITY_GROUP_ID secret)
+    Value: !Ref BackendSecurityGroup
+
+  SubnetId1:
+    Description: First private subnet ID (use this for SUBNET_ID_1 secret)
+    Value: !If [CreateNewVPC, !Ref PrivateSubnet1, !Ref ExistingPrivateSubnet1]
+
+  SubnetId2:
+    Description: Second private subnet ID (use this for SUBNET_ID_2 secret)
+    Value: !If [CreateNewVPC, !Ref PrivateSubnet2, !Ref ExistingPrivateSubnet2]
+
+  VPCId:
+    Description: VPC ID
+    Value: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
+
+  KMSKeyId:
+    Description: KMS encryption key ID
+    Value: !Ref EncryptionKey

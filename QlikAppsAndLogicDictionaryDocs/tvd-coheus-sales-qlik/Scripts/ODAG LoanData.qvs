@@ -1,0 +1,13 @@
+/*** ODAG LoanData Script ***/
+/*** REPLACE LoanData base script ***/
+
+//	2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce
+//			on-going maintenance effort.  
+//			Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI
+set vScriptPath='lib://QlikShare/Include/';
+//	For the Contribution app *only*, uncomment the following line:
+// LET vOLD_Script_WriteTableNameWhereClause = 'Where NOT WildMatch(Channel,' & chr(39) * '*Corresp*' & chr(39) & ')';
+// Note: OLD means "ODAG Loan Data", not the opposite of young!   chr(39) in the line above is for an in-string single quote.
+$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ODAG Loan Data.qvs);
+set vScriptPath=;
+set vOLD_Script_WriteTableNameWhereClause = '';

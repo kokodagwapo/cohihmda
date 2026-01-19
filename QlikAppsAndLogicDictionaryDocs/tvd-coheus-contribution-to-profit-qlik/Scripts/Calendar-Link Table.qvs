@@ -1,0 +1,55 @@
+//===================================================
+// Collect Fact Dates into a link table.
+//===================================================
+DateLink:	
+LOAD 							// Build for Applications
+	RowNo							// Fact Key
+	,[Application Date] as Date		// Fact Date
+	,'Application' as DateType		// Fact Type
+RESIDENT Coheus_Input				// from Orders
+;
+LOAD							// Repeat for Closings
+	RowNo
+	,[Closing Date] as Date
+	,'Closing' as DateType
+RESIDENT Coheus_Input
+;
+LOAD 							// Repeat for Fundings
+	RowNo
+	,[Funding Date] as Date
+	,'Funding' as DateType
+RESIDENT Coheus_Input
+;
+LOAD 							// Repeat for Investor Purchases
+	RowNo
+	,[Investor Purchase Date] as Date
+	,'Investor Purchase' as DateType
+RESIDENT Coheus_Input
+;
+LOAD 							// Repeat for Investor Locks
+	RowNo
+	,[Investor Lock Date] as Date
+	,'Investor Lock' as DateType
+RESIDENT Coheus_Input
+;
+LOAD 							// Repeat for Estimated Closings
+	RowNo
+	,[Estimated Closing Date] as Date
+	,'Estimated Close' as DateType
+RESIDENT Coheus_Input
+;
+LOAD 							// Repeat for Clear to Close
+	RowNo
+	,[CTC Date] as Date
+	,'CTC' as DateType
+RESIDENT Coheus_Input
+;
+
+// Call Calendar Generator for field "Date"
+CALL CalendarFromField('Date', 'CommonCalendar', '');
+
+// //Optional: Generate Individual Calendars for each fact date
+// CALL CalendarFromField('Application Date', 'ApplicationCalendar', 'Application ');										// Create Calendar for Application Date
+// CALL CalendarFromField('Closing Date', 'ClosingCalendar', 'Closing ');													// Create Calendar for Closing Date
+// CALL CalendarFromField('Funding Date', 'FundingCalendar', 'Funding ');													// Create Calendar for Funding Date
+// CALL CalendarFromField('Investor Purchase Date', 'InvestorPurchaseCalendar', 'Investor Purchase ');						// Create Calendar for Investor Purchase Date

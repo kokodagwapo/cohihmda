@@ -1,0 +1,534 @@
+//=============================
+// New Variables
+//=============================
+
+//Added 3-1-2023
+LET vClosingProjContainer = 'Summary';
+LET vClosingProjContainer2 = 'Funded';
+
+Let vClosingProjectionsMeasure='Volume';
+Let vClosingProjectionsDimension='Branch';
+Let vCPShow = -1; //Toggle MoM to YoY comparison
+Let vCPDetailShow = 0; //Toggle Summary to Detail on Detail Sheet
+Let vCPFundTT = 'Average'; //toggle Average vs. Median
+
+Let vClosingProjectionRanges = False();
+
+ClosingProjectionsTTList:
+Load * Inline [
+CPTurnTime, CPTTSortOrder
+CTC to Fund, 1
+Approved to Fund, 2
+Conditional Approved to Fund, 3
+Locked to Fund, 4
+];
+
+
+CPTTList:
+Load
+	Concat(CPTurnTime,'|',CPTTSortOrder) as CPTTList
+Resident ClosingProjectionsTTList
+;
+
+Let vCPTurnTime='CTC to Fund';
+Let vCPTurnTimeList=Peek('CPTTList', 0, 'CPTTList');
+Let vCPTurnTimeShow=-1;
+
+Drop Table CPTTList;
+
+//=====================================================================
+
+// LET vTimeSeries='Month';			//variable to toggle btw Month and Quarter snapshot charts for Scorecard
+// LET vDateType='Application';		//variable to toggle btw Applications, Closed, Funded
+LET vCPDim='[Loan Purpose]';		//variable to toggle second dimension on Closing Projections Summary pivot table
+LET vPTDim='[Current Loan Status]';	//variable to toggle dimension on Pull Through Revisions pivot table
+
+//TPO Check Flag
+NoConcatenate
+TPOSort:
+Load [TPO Check]
+Resident $(vWriteTableName)
+Order By [TPO Check] asc
+;
+
+LET vTPOCheck= Peek('TPO Check',0,'TPOSort');
+Drop Table TPOSort;
+
+//Blue Hover Color in Tables
+SET vTVBlueHover = '#e7f0f3';
+
+//Red/Green indicator colors
+SET vErrorColor='#B00020'; //Red text
+SET vErrorColorBKGD='#F7E6E9'; //Red background
+SET vMatchColor='#70BA6E'; //Green text
+SET vMatchColorBKGD='#E2F1E2'; //Green background
+
+SET vCallOutColor='#ec983d'; //Orange call out/highlight
+
+//Formula Switch
+LET vActionItemsFormula='Avg';
+
+//Sorting Order Switch
+LET vSortingOrder=1;
+
+//Actor List used on Actors Sheet/////////////////////////////
+/* Set vActorList based on vTPOCheck. Thus, load list for TPO clients and separate list for Retail Only clients */
+// $(vTPOCheck) /*-1=True (multi-channel); 0=False (Retail ONLY)*/
+
+If $(vTPOCheck)=-1 then
+// Actor List for multi-channel clients
+SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Account Executive|Broker Lender Name|Branch|TPO Company Name|Investor|Retail Branch ID|Retail LO|Originator Loan Officer Name|Originator Loan Processor Name|Correspondent Sales Rep/AE|Correspondent Lender Name|Sales Rep/AE|Warehouse Co Name|Warehouse Bank Name';
+Rename Field [Sale Rep/AE] TO [Sales Rep/AE];
+else
+// Actor list for Retail Only clients
+SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Branch|Investor|Warehouse Co Name';
+end if
+
+//Actor List Variables
+For i = 1 to 4
+//LET vActor$(i)='';
+LET vActorList$(i)='$(vActorList)';
+Next i;
+
+//Actor Picker Variables
+LET vActor1='Loan Officer';
+LET vActor2='Processor';
+LET vActor3='Underwriter';
+LET vActor4='Closer';
+
+
+//Scorecard Actor List & Entity List/////////////////////////////
+If $(vTPOCheck)=-1 then
+// Scorecard Actor List for multi-channel clients
+SET vScorecardActorList='Loan Officer|Account Executive|Originator Loan Officer Name|Sales Rep/AE';
+else
+// Scorecard Actor list for Retail Only clients
+SET vScorecardActorList='Loan Officer|Account Executive';
+end if
+
+// Scorecard & High Performer Lists
+If $(vTPOCheck)=-1 then
+// Scorecard Entity List for multi-channel clients
+SET vScorecardList='Branch|Broker Lender Name|TPO Company Name|Channel_ExcludeCorrespondent~Channel|Investor';
+else
+// Scorecard Entity list for Retail Only clients
+SET vScorecardList='Branch|Broker Lender Name|Channel|Investor';
+end if
+
+LET vScorecardActor='Loan Officer';
+LET vScorecard='Branch';
+
+/////////////////////////////////////////////////////////////////////////////
+// Lists & Variables for Correspondent Loans
+// Channel List to exclude Correspondent Loans
+ChannelList:
+Load
+	Concat(DISTINCT Channel,'|') as ChannelList_Temp
+Resident $(vWriteTableName)
+WHERE WildMatch(Channel,'Corresp*')=0;
+
+Let vChannelList=Peek('ChannelList_Temp', 0, 'ChannelList');
+
+Drop Table ChannelList;
+
+ChannelGroupList:
+Load
+	Concat(DISTINCT [Consolidated Channels],'|') as ConsolidatedChannelList_Temp
+Resident $(vWriteTableName);
+
+Let vChannelGroupList=Peek('ConsolidatedChannelList_Temp', 0, 'ChannelGroupList');
+
+Drop Table ChannelGroupList;
+
+// Variable to exclude or include Correspondent Channel in set analysis using Correspondent Channel Flag
+LET vCorrespondent='No';
+
+// Variable for Date Toggle
+LET vDateToggleCorresp='Registration';
+
+// Variable to Show/Hide Correspondent Sheet
+ChannelList:
+Load Distinct Channel as Channel2,
+if(WildMatch(Channel,'Corresp*')=1,1,0) as ChannelShowFlag
+Resident $(vWriteTableName)
+Order By Channel desc
+;
+
+Let vShowCorresp=Peek('ChannelShowFlag', 0, 'ChannelList');
+
+// Variable to toggle Production Trend charts 
+Let vDateToggle2=1;
+Let vToolTip=1;
+Let vCorrespLoanStatus=1;	//1=Show Overview (Registered or Purchased Loans); 0=Show Active Loans
+
+//==========================================
+// Functions for missing derived date flags
+//==========================================
+LET fLYMTD = 'If(InMonthToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -12), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fLYQTD = 'If(InQuarterToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -4), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+SET fMonth = 'Month($1)';
+LET f2YearPrevious = 'If(InYear($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -2), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+SET fDate = 'Date($1)';
+SET fYear = 'Year($1)';
+LET fYearMonth = 'Dual(Year($1)&' & CHR(39) & '-' & CHR(39) & '&Month($1), monthstart($1))';
+LET fYTD = 'If(InYearToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fQTD = 'If(InQuarterToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fMTD = 'If(InMonthToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fYesterdayFlag = 'If($1 = DayStart(' & CHR(39) & '$(vMaxDate)' & CHR(39) & ') -1, ' & CHR(39) & 'Yes' & CHR(39) &', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fLYYesterdayFlag = 'If($1 = DayStart(' & CHR(39) & '$(vMaxDate)' & CHR(39) & ') -366, ' & CHR(39) & 'Yes' & CHR(39) &', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fYTDPrevious = 'If(InYearToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fYearPrevious = 'If(InYear($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+
+//==========================================
+// Channel Logic Added 07.20.2022
+//==========================================
+
+ChannelGrouping:
+Load
+	Channel as Channels,
+    Sum([Loan Amount]) as ChannelLoanAmount
+Resident $(vWriteTableName)
+WHERE WildMatch(Channel,'99-Missing')=0 AND [Started Date] >= Date(MonthStart(AddMonths('$(vCurrentDateAsDate)',-12)))
+Group By Channel;
+
+
+
+DefaultChannel:
+Load Channels as DefaultChannel
+Resident ChannelGrouping
+Order By ChannelLoanAmount desc;
+
+// *** MAY 2022 ADDED Variable and List for Vital Signs ***
+Let vChannel=Peek('DefaultChannel',0,'DefaultChannel');
+Let vConsolidatedChannels = if(WildMatch('$(vChannel)','*Retail*','*Brok*')>=1,'Retail',
+						if(Wildmatch('$(vChannel)','*Whole*', '*Corresp*')>=1, 'TPO',
+    						'$(vChannel)'));
+Let vChannelGroup = if(WildMatch('$(vChannel)','*Retail*','*Brok*')>=1,'Retail',
+						if(Wildmatch('$(vChannel)','*Whole*', '*Corresp*')>=1, 'TPO',
+    						'$(vChannel)'));                            
+Drop Tables ChannelGrouping,DefaultChannel;
+
+//================================
+// New Calcuations & Date Flags
+//================================
+
+If $(vTPOCheck)=-1 THEN
+$(vWriteTableName).Temp:
+Load *
+	,if([Registration Date]<addmonths(monthend($(vMaxDate)),-5),'<= ' & Date(AddMonths(monthend($(vMaxDate)),-5),'MMM-YYYY'),[Registration YearMonth]) as [Registration YearMonth Group]
+	,ApplyMap('ClosingProjectionGroupList',[Closing Projection Group]) as [Closing Projection Group Sort]
+;
+
+LOAD *
+	// *** Added 3-1-2023 NEW Dimension Closing Projection Group  Added Sent to Process Group April 2023 Release ****************************
+    ,If(InMonthToDate("Funding Date",$(vMaxDate),0),'Funded',
+    	if("Active Loan Flag"='Yes' AND [CTC Flag]='Yes' AND [Funded Flag]='No','CTC',
+        if("Active Loan Flag"='Yes' AND [Approved Flag]='Yes' AND [CTC Flag]='No' AND [Funded Flag]='No','Approved',
+    	if("Active Loan Flag"='Yes' AND [Conditional Approved Flag]='Yes' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Conditional Approved',
+        if("Active Loan Flag"='Yes' AND [Locked Flag.Temp]='Yes' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Locked',
+        if("Active Loan Flag"='Yes' AND [Sent To Processing Flag]='Yes' AND [Locked Flag.Temp]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','In Processing',
+        if("Active Loan Flag"='Yes' AND [Sent To Processing Flag]='No' AND [Locked Flag.Temp]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Not Yet In Processing',
+        Null()
+    	))))))) as [Closing Projection Group]
+        
+    // Current Loan Status to streamline dimension values displayed in charts, include drill down.
+    ,If([Denied Flag]=1,'Application denied',
+      If([Withdrawn Flag]=1,'Application withdrawn',
+        If(Wildmatch([Current Loan Status],'*purch*')>0,'Loan purchased by your institution',
+          [Current Loan Status]))) as [Current Loan Status Group]
+;
+
+    // Dates for Correspondent Loans - Remove timestamp and create derived dates
+    Load *
+	,$(fDate([Registration Date])) as [Registration Date_Temp]
+    ,$(fYear([Registration Date])) as [Registration Year]
+    ,$(fYearMonth([Registration Date])) as [Registration YearMonth]
+    ,$(fYTD([Registration Date])) as [Registration YTD Flag]
+    ,$(fQTD([Registration Date])) as [Registration QTD]
+    ,$(fMTD([Registration Date])) as [Registration MTD]
+    ,$(fYesterdayFlag([Registration Date])) as [Registration Yesterday Flag]
+    ,$(fLYYesterdayFlag([Registration Date])) as [Registration LYYesterday Flag]
+    ,$(fYTDPrevious([Registration Date])) as [Registration YTD Previous]
+    ,$(fLYMTD([Registration Date])) as [Registration LYMTD]
+    ,$(fLYQTD([Registration Date])) as [Registration LYQTD]
+    ,$(fMonth([Registration Date])) as [Registration Month]
+    ,$(fYearPrevious([Registration Date])) as [Registration Year Previous]
+    ,$(f2YearPrevious([Registration Date])) as [Registration 2 Year Previous]
+          
+    ,$(fDate([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date_Temp]
+    ,$(fYear([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date Year]
+    ,$(fYearMonth([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date YearMonth]
+	,$(fYTD([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date YTD Flag]
+    ,$(fQTD([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date QTD]
+    ,$(fMTD([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date MTD]
+    ,$(fYesterdayFlag([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date Yesterday Flag]
+    ,$(fLYYesterdayFlag([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date LYYesterday Flag]
+    ,$(fYTDPrevious([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date YTD Previous]
+    ,$(fLYMTD([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date LYMTD]
+    ,$(fLYQTD([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date LYQTD]
+    ,$(fMonth([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date Month]
+    ,$(fYearPrevious([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date Year Previous]
+    ,$(f2YearPrevious([Correspondent Purchase Advice Date])) as [Correspondent Purchase Advice Date 2 Year Previous]
+;
+Load *
+	,If(Len([Conditional Approval Date])=0, 'No', 'Yes') as [Conditional Approved Flag]
+    ,If(Len([Lock Date])=0, 'No', 'Yes') as [Locked Flag.Temp] //3-1-2023 Replaced Investor Lock Date with Lock Date
+    ,if([Denied Flag]=1,[Current Status Date],Null()) as [Denied Date]
+    //,if([Withdrawn Flag]=1,[Current Status Date],Null()) as [Withdrawn Date Temp]
+
+	// April 2023 Release - flag to include loans Sent to Processing in Closing Projections    
+    ,if(Len([Sent To Processing])=0, 'No', 'Yes') as [Sent To Processing Flag]
+;
+
+Load *
+	// FEB 2021 RELEASE Pull Through - flag for originated loans (captures Loan Originated & Loan Purchased by Your Insitutiion)
+	,If(WildMatch([Current Loan Status],'*Originated*','*purchased*')>0,'Yes','No') as [Pull Through Originated Flag]
+    ,If(WildMatch([Current Loan Status],'*withdraw*','*not accepted*')>0,1,0) as [Withdrawn Flag]
+    
+    // *** MAY 2021 ***
+    ,$(f2YearPrevious([Application Date])) as [Application 2 Year Previous]
+    ,$(f2YearPrevious([Closing Date])) as [Closing 2 Year Previous]
+    ,$(f2YearPrevious([Funding Date])) as [Funding 2 Year Previous]
+    
+    ,If([Loan Officer]='99-Missing', Null(), [Loan Officer]) as [Loan Officer.Temp]
+    ,If([Broker Lender Name]='99-Missing', Null(), [Broker Lender Name]) as [Broker Lender Name.Temp]
+    ,If([Account Executive]='99-Missing', Null(), [Account Executive]) as [Account Executive.Temp]
+//     ,if([Application YearMonth]<addmonths(monthend($(vMaxDate)),-5),'<= ' & Date(AddMonths(monthend($(vMaxDate)),-5),'MMM-YYYY'),[Application YearMonth]) as [Application YearMonth Group]
+    ,If([Current Status Date]>AddYears(Today(),5),Null(),[Current Status Date]) as [Current Status Date.Temp]
+    ,If([CTC Date]>AddYears(Today(),5),Null(),[CTC Date]) as [CTC Date.Temp]
+//     ,If(WildMatch(Channel,'Corresp*')=0,Channel) as [Channel_ExcludeCorrespondent]
+//     ,If(WildMatch(Channel,'Corresp*')>0,'Yes','No') as [Correspondent Channel Flag]
+
+// Loan Type grouping into Conventional and Government (group/transform FHA, VA, Rural)
+	,If([Loan Type]='No Data' OR Len([Loan Type])=0,'No Data',
+    	If([Loan Type]='Conventional', 'Conventional','Government')) as [Loan Type_Group]
+        
+// Loan Purpose grouping into Purchase and Refinance (group/transform Refi CO & Refi No CO)
+	,If([Loan Purpose]='No Data' OR Len([Loan Purpose])=0,'No Data',
+    	If(WildMatch([Loan Purpose],'Purch*')>0,'Purchase',
+        If(WildMatch([Loan Purpose],'Refi*')>0,'Refinance','Other'))) as [Loan Purpose_Group]
+	
+    ,If([Loan Officer] = '99-Missing' OR IsNull([Loan Officer]),1,0) as [Loan Officer Missing]
+    ,If([Broker Lender Name] = '99-Missing' OR IsNull([Broker Lender Name]),1,0) as [Broker Lender Name Missing]
+    ,If([Account Executive] = '99-Missing' OR IsNull([Account Executive]),1,0) as [Account Executive Missing]
+    ,If([Branch] = '99-Missing' OR IsNull([Branch]) Or [Branch]='No Branch Found',1,0) as [Branch Missing]
+    ,if([TPO Flag]='Yes',[Account Executive],[Loan Officer]) as [Mortgage Loan Officer (MLO)]
+    
+    ,If([Consolidated Channels] = 'Retail',Channel) as [Retail Channels]
+    ,If([Consolidated Channels] = 'TPO',Channel) as [TPO Channels]
+Resident $(vWriteTableName);
+Drop Table $(vWriteTableName);
+Rename Table $(vWriteTableName).Temp to $(vWriteTableName);
+
+Drop Fields 
+	[Loan Officer],
+    [Broker Lender Name],
+    [Account Executive],
+    [Current Status Date],
+    [CTC Date],
+    [Registration Date],
+    [Correspondent Purchase Advice Date],
+    [Locked Flag],
+    //[Withdrawn Date],
+    ;
+
+Rename Fields 
+	[Loan Officer.Temp] to [Loan Officer], 
+    [Broker Lender Name.Temp] to [Broker Lender Name],
+    [Account Executive.Temp] to [Account Executive],
+    [Current Status Date.Temp] to [Current Status Date],
+    [CTC Date.Temp] to [CTC Date],
+    [Registration Date_Temp] to [Registration Date],
+    [Correspondent Purchase Advice Date_Temp] to [Correspondent Purchase Advice Date],
+    [Locked Flag.Temp] to [Locked Flag],
+    //[Withdrawn Date Temp] to [Withdrawn Date],
+    ;
+
+ELSE
+
+$(vWriteTableName).Temp:
+Load *
+	,If(WildMatch([Current Loan Status],'*Originated*','*purchased*')>0,'Yes','No') as [Pull Through Originated Flag]
+    ,ApplyMap('ClosingProjectionGroupList',[Closing Projection Group]) as [Closing Projection Group Sort]
+;
+
+LOAD *
+	// *** Added 3-1-2023 NEW Dimension Closing Projection Group. Added Sent to Process Group April 2023 Release ****************************
+    ,If(InMonthToDate("Funding Date",$(vMaxDate),0),'Funded',
+    	if("Active Loan Flag"='Yes' AND [CTC Flag]='Yes' AND [Funded Flag]='No','CTC',
+        if("Active Loan Flag"='Yes' AND [Approved Flag]='Yes' AND [CTC Flag]='No' AND [Funded Flag]='No','Approved',
+    	if("Active Loan Flag"='Yes' AND [Conditional Approved Flag]='Yes' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Conditional Approved',
+        if("Active Loan Flag"='Yes' AND [Locked Flag.Temp]='Yes' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Locked',
+        if("Active Loan Flag"='Yes' AND [Sent To Processing Flag]='Yes' AND [Locked Flag.Temp]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','In Processing',
+        if("Active Loan Flag"='Yes' AND [Sent To Processing Flag]='No' AND [Locked Flag.Temp]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Not Yet In Processing',
+        Null()
+    	))))))) as [Closing Projection Group]
+        
+    // Current Loan Status to streamline dimension values displayed in charts, include drill down.
+    ,If([Denied Flag]=1,'Application denied',
+      If([Withdrawn Flag]=1,'Application withdrawn',
+        If(Wildmatch([Current Loan Status],'*purch*')>0,'Loan purchased by your institution',
+          [Current Loan Status]))) as [Current Loan Status Group]
+;
+
+LOAD *
+	,If(Len([Conditional Approval Date])=0, 'No', 'Yes') as [Conditional Approved Flag]
+    ,If(Len([Lock Date])=0, 'No', 'Yes') as [Locked Flag.Temp] //3-1-2023 Replaced Investor Lock Date with Lock Date
+    ,if([Denied Flag]=1,[Current Status Date],Null()) as [Denied Date]
+    //,if([Withdrawn Flag]=1,[Current Status Date],Null()) as [Withdrawn Date Temp]
+
+	// April 2023 Release - flag to include loans Sent to Processing in Closing Projections
+    ,if(Len([Sent To Processing])=0, 'No', 'Yes') as [Sent To Processing Flag]
+;
+
+Load *
+	,If(WildMatch([Current Loan Status],'*withdraw*','*not accepted*')>0,1,0) as [Withdrawn Flag]
+    // *** MAY 2021 ***
+    ,$(f2YearPrevious([Application Date])) as [Application 2 Year Previous]
+    ,$(f2YearPrevious([Closing Date])) as [Closing 2 Year Previous]
+    ,$(f2YearPrevious([Funding Date])) as [Funding 2 Year Previous]
+    
+    ,If([Loan Officer]='99-Missing', Null(), [Loan Officer]) as [Loan Officer.Temp]
+    ,If([Broker Lender Name]='99-Missing', Null(), [Broker Lender Name]) as [Broker Lender Name.Temp]
+    ,If([Account Executive]='99-Missing', Null(), [Account Executive]) as [Account Executive.Temp]
+//     ,if([Application YearMonth]<addmonths(monthend($(vMaxDate)),-5),'<= ' & Date(AddMonths(monthend($(vMaxDate)),-5),'MMM-YYYY'),[Application YearMonth]) as [Application YearMonth Group]
+    ,If([Current Status Date]>AddYears(Today(),5),Null(),[Current Status Date]) as [Current Status Date.Temp]
+    ,If([CTC Date]>AddYears(Today(),5),Null(),[CTC Date]) as [CTC Date.Temp]
+//     ,If(WildMatch(Channel,'Corresp*')=0,Channel) as [Channel_ExcludeCorrespondent]
+//     ,If(WildMatch(Channel,'Corresp*')>0,'Yes','No') as [Correspondent Channel Flag]
+
+// Loan Type grouping into Conventional and Government (group/transform FHA, VA, Rural)
+	,If([Loan Type]='No Data' OR Len([Loan Type])=0,'No Data',
+    	If([Loan Type]='Conventional', 'Conventional','Government')) as [Loan Type_Group]
+        
+// Loan Purpose grouping into Purchase and Refinance (group/transform Refi CO & Refi No CO)
+	,If([Loan Purpose]='No Data' OR Len([Loan Purpose])=0,'No Data',
+    	If(WildMatch([Loan Purpose],'Purch*')>0,'Purchase',
+        If(WildMatch([Loan Purpose],'Refi*')>0,'Refinance','Other'))) as [Loan Purpose_Group]
+
+	,If([Loan Officer] = '99-Missing' OR IsNull([Loan Officer]),1,0) as [Loan Officer Missing]
+    ,If([Broker Lender Name] = '99-Missing' OR IsNull([Broker Lender Name]),1,0) as [Broker Lender Name Missing]
+    ,If([Account Executive] = '99-Missing' OR IsNull([Account Executive]),1,0) as [Account Executive Missing]
+    ,If([Branch] = '99-Missing' OR IsNull([Branch]) Or [Branch]='No Branch Found',1,0) as [Branch Missing]
+    ,if([TPO Flag]='Yes',[Account Executive],[Loan Officer]) as [Mortgage Loan Officer (MLO)]
+        
+    ,If([Consolidated Channels] = 'Retail',Channel) as [Retail Channels]
+    ,If([Consolidated Channels] = 'TPO',Channel) as [TPO Channels]
+Resident $(vWriteTableName);
+Drop Table $(vWriteTableName);
+Rename Table $(vWriteTableName).Temp to $(vWriteTableName);
+
+Drop Fields 
+	[Loan Officer],
+    [Broker Lender Name],
+    [Account Executive],
+    [Current Status Date],
+    [CTC Date],
+    [Locked Flag],
+//     [Withdrawn Date],
+    ;
+
+Rename Fields 
+	[Loan Officer.Temp] to [Loan Officer], 
+    [Broker Lender Name.Temp] to [Broker Lender Name],
+    [Account Executive.Temp] to [Account Executive],
+    [Current Status Date.Temp] to [Current Status Date],
+    [CTC Date.Temp] to [CTC Date],
+    [Locked Flag.Temp] to [Locked Flag],
+    //[Withdrawn Date Temp] to [Withdrawn Date],
+    ;
+
+End If
+
+//===========================================================================
+// New Closing Projections Dimension - NOT in FEB 2021 RELEASE (future dev)  
+// Group dimnension for pick match in tables and/or pivot tables			 
+//===========================================================================
+
+KPI_ClosingProjections:
+Load * Inline [
+KPI_ClosingProjections, Sort
+'Closed Current Month Units', 3
+'Closed Current Month Volume', 4
+'Clear to Close Units', 5
+'Clear to Close Volume', 6
+'Estimated to Close Units', 7
+'Estimated to Close Volume', 8
+];
+
+
+//=============================================================================================
+// Possible future development
+// Add KPI for Closing Projections to group Closed and Funded & Estimated to Close NOT Closed.
+// Requires additional testing
+//=============================================================================================
+
+// 'Closed AND Funded Current Month Units', 1
+// 'Closed AND Funded Current Month Volume', 2
+// 'Estimated to Close NOT Closed Units', 9
+// 'Estimated to Close NOT Closed Volume', 10
+
+// =================================================================================================
+// Date Range Dimenension
+// Use as dimension to set Date Range Variables using Vizlib Filter to include in Vizlib Sheet Menu
+// =================================================================================================
+
+DateRangeList:
+Load * Inline [
+DateRange, DateRangeSort
+All Time, 1
+Month to Date, 2
+Last Month, 3
+This Quarter to Date, 4
+Year to Date, 5
+Last Year, 6
+];
+
+MarginLoanStatusList:
+Load * Inline [
+MarginLoanStatus, MarginLoanStatusSort
+Active, 1
+Funded, 2
+];
+
+// ===============================================================================================
+// Company Detail Synthetic Dimensions
+// ===============================================================================================
+
+CompanyDetail_InProcess:
+Load * Inline [
+InProcessGroup, InProcessSort
+Active Loans, 1
+CTC, 2
+Projected Closings, 3
+]
+;
+
+CompanyDetail_FinalDisposition:
+Load * Inline [
+FinalDispositionGroup, FinalDispositionSort
+Originated, 1
+Adverse, 2
+Withdrawn, 3
+]
+;
+
+CompanyDetail_NewOpportunities:
+Load * Inline [
+NewOpportunitiesGroup, NewOpportunitiesSort
+Credit Pulls, 1
+Applications Taken, 2
+]
+;
+
+CompanyDetail_Performance:
+Load * Inline [
+PerformanceGroup, PerformanceSort
+Pull Through, 1
+Turn Time, 2
+]
+;
+
+
+
+

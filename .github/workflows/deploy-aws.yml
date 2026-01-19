@@ -1,0 +1,1456 @@
+name: Deploy to AWS
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main     # Deploy to production when PR is merged to main
+  workflow_dispatch: # Manual triggering only for dev, automatic for production
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - production
+
+concurrency:
+  group: deploy-${{ github.ref }}-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  NODE_VERSION: '18'
+
+jobs:
+  determine-environment:
+    name: Determine Deployment Environment
+    runs-on: ubuntu-latest
+    # Only run if PR was merged (not just closed) or manually triggered
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      github.event_name == 'workflow_dispatch'
+    outputs:
+      environment: ${{ steps.set-env.outputs.env }}
+      s3_bucket_secret: ${{ steps.set-env.outputs.s3_bucket_secret }}
+      eb_app_name_secret: ${{ steps.set-env.outputs.eb_app_name_secret }}
+      eb_env_name_secret: ${{ steps.set-env.outputs.eb_env_name_secret }}
+      stage: ${{ steps.set-env.outputs.stage }}
+    steps:
+      - name: Set environment variables
+        id: set-env
+        run: |
+          if [ "${{ github.event.pull_request.base.ref }}" == "main" ] || [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.event.inputs.environment }}" == "production" ]; then
+            echo "env=production" >> "$GITHUB_OUTPUT"
+            echo "s3_bucket_secret=S3_BUCKET_PROD" >> "$GITHUB_OUTPUT"
+            echo "eb_app_name_secret=EB_APP_NAME_PROD" >> "$GITHUB_OUTPUT"
+            echo "eb_env_name_secret=EB_ENV_NAME_PROD" >> "$GITHUB_OUTPUT"
+            echo "stage=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=dev" >> "$GITHUB_OUTPUT"
+            echo "s3_bucket_secret=S3_BUCKET_DEV" >> "$GITHUB_OUTPUT"
+            echo "eb_app_name_secret=EB_APP_NAME_DEV" >> "$GITHUB_OUTPUT"
+            echo "eb_env_name_secret=EB_ENV_NAME_DEV" >> "$GITHUB_OUTPUT"
+            echo "stage=dev" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Debug resolved outputs
+        shell: bash
+        run: |
+          echo "resolved env='${{ steps.set-env.outputs.env }}'"
+          echo "resolved s3_bucket_secret='${{ steps.set-env.outputs.s3_bucket_secret }}'"
+          echo "resolved eb_app_name_secret='${{ steps.set-env.outputs.eb_app_name_secret }}'"
+          echo "resolved eb_env_name_secret='${{ steps.set-env.outputs.eb_env_name_secret }}'"
+          echo "resolved stage='${{ steps.set-env.outputs.stage }}'"
+          echo ""
+          echo "Direct secret checks (will show empty if not set):"
+          echo "S3_BUCKET_DEV length: ${#S3_BUCKET_DEV}"
+          echo "S3_BUCKET_PROD length: ${#S3_BUCKET_PROD}"
+          echo "EB_APP_NAME_DEV length: ${#EB_APP_NAME_DEV}"
+          echo "EB_ENV_NAME_DEV length: ${#EB_ENV_NAME_DEV}"
+        env:
+          S3_BUCKET_DEV: ${{ secrets.S3_BUCKET_DEV }}
+          S3_BUCKET_PROD: ${{ secrets.S3_BUCKET_PROD }}
+          EB_APP_NAME_DEV: ${{ secrets.EB_APP_NAME_DEV }}
+          EB_ENV_NAME_DEV: ${{ secrets.EB_ENV_NAME_DEV }}
+
+      - name: Validate required secrets
+        env:
+          S3_BUCKET_DEV: ${{ secrets.S3_BUCKET_DEV }}
+          S3_BUCKET_PROD: ${{ secrets.S3_BUCKET_PROD }}
+          EB_APP_NAME_DEV: ${{ secrets.EB_APP_NAME_DEV }}
+          EB_APP_NAME_PROD: ${{ secrets.EB_APP_NAME_PROD }}
+          EB_ENV_NAME_DEV: ${{ secrets.EB_ENV_NAME_DEV }}
+          EB_ENV_NAME_PROD: ${{ secrets.EB_ENV_NAME_PROD }}
+        run: |
+          ENVIRONMENT="${{ steps.set-env.outputs.env }}"
+          
+          # Get the secret values based on environment
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            S3_BUCKET="${S3_BUCKET_PROD}"
+            EB_APP_NAME="${EB_APP_NAME_PROD}"
+            EB_ENV_NAME="${EB_ENV_NAME_PROD}"
+          else
+            S3_BUCKET="${S3_BUCKET_DEV}"
+            EB_APP_NAME="${EB_APP_NAME_DEV}"
+            EB_ENV_NAME="${EB_ENV_NAME_DEV}"
+          fi
+          
+          echo "========================================="
+          echo "Validating secrets for ${ENVIRONMENT} environment..."
+          echo "========================================="
+          
+          HAS_ERROR=0
+          
+          # Validate S3 bucket
+          if [ -z "${S3_BUCKET}" ]; then
+            echo "::error::Missing required secret: S3_BUCKET_${ENVIRONMENT^^}"
+            echo "Please configure the S3_BUCKET_${ENVIRONMENT^^} secret in your GitHub repository settings"
+            HAS_ERROR=1
+          else
+            # Validate S3 bucket naming conventions
+            if [[ ! "${S3_BUCKET}" =~ ^[a-z0-9][a-z0-9.-]*[a-z0-9]$ ]] || [[ "${S3_BUCKET}" =~ \.\. ]] || [ ${#S3_BUCKET} -lt 3 ] || [ ${#S3_BUCKET} -gt 63 ]; then
+              echo "::error::Invalid S3 bucket name: ${S3_BUCKET}"
+              echo "S3 bucket names must be 3-63 characters, contain only lowercase letters, numbers, dots, and hyphens"
+              HAS_ERROR=1
+            else
+              echo "✓ S3 Bucket: ${S3_BUCKET}"
+            fi
+          fi
+          
+          # Validate Elastic Beanstalk app name
+          if [ -z "${EB_APP_NAME}" ]; then
+            echo "::error::Missing required secret: EB_APP_NAME_${ENVIRONMENT^^}"
+            echo "Please configure the EB_APP_NAME_${ENVIRONMENT^^} secret in your GitHub repository settings"
+            HAS_ERROR=1
+          else
+            # Validate EB app name length (max 100 chars)
+            if [ ${#EB_APP_NAME} -gt 100 ]; then
+              echo "::error::Invalid EB app name: ${EB_APP_NAME} (exceeds 100 characters)"
+              HAS_ERROR=1
+            else
+              echo "✓ EB App Name: ${EB_APP_NAME}"
+            fi
+          fi
+          
+          # Validate Elastic Beanstalk environment name
+          if [ -z "${EB_ENV_NAME}" ]; then
+            echo "::error::Missing required secret: EB_ENV_NAME_${ENVIRONMENT^^}"
+            echo "Please configure the EB_ENV_NAME_${ENVIRONMENT^^} secret in your GitHub repository settings"
+            HAS_ERROR=1
+          else
+            # Validate EB env name (4-40 chars, alphanumeric and hyphens)
+            if [[ ! "${EB_ENV_NAME}" =~ ^[a-zA-Z0-9-]{4,40}$ ]]; then
+              echo "::error::Invalid EB environment name: ${EB_ENV_NAME}"
+              echo "EB environment names must be 4-40 characters and contain only alphanumeric characters and hyphens"
+              HAS_ERROR=1
+            else
+              echo "✓ EB Env Name: ${EB_ENV_NAME}"
+            fi
+          fi
+          
+          # Validate AWS credentials
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "::error::Missing required secret: AWS_ACCESS_KEY_ID"
+            HAS_ERROR=1
+          else
+            echo "✓ AWS Access Key ID is set"
+          fi
+          
+          if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::Missing required secret: AWS_SECRET_ACCESS_KEY"
+            HAS_ERROR=1
+          else
+            echo "✓ AWS Secret Access Key is set"
+          fi
+          
+          # Validate Lambda-related secrets (DB credentials)
+          if [ -z "${{ secrets.DB_HOST }}" ]; then
+            echo "::warning::Missing secret: DB_HOST (required for Lambda deployment)"
+          else
+            echo "✓ DB Host is set"
+          fi
+          
+          if [ -z "${{ secrets.DB_NAME }}" ]; then
+            echo "::warning::Missing secret: DB_NAME (required for Lambda deployment)"
+          else
+            echo "✓ DB Name is set"
+          fi
+          
+          if [ -z "${{ secrets.DB_USER }}" ]; then
+            echo "::warning::Missing secret: DB_USER (required for Lambda deployment)"
+          else
+            echo "✓ DB User is set"
+          fi
+          
+          if [ -z "${{ secrets.DB_PASSWORD }}" ]; then
+            echo "::warning::Missing secret: DB_PASSWORD (required for Lambda deployment)"
+          else
+            echo "✓ DB Password is set"
+          fi
+          
+          if [ -z "${{ secrets.SECURITY_GROUP_ID }}" ]; then
+            echo "::warning::Missing secret: SECURITY_GROUP_ID (required for Lambda VPC config)"
+          else
+            echo "✓ Security Group ID is set"
+          fi
+          
+          if [ -z "${{ secrets.SUBNET_ID_1 }}" ]; then
+            echo "::warning::Missing secret: SUBNET_ID_1 (required for Lambda VPC config)"
+          else
+            echo "✓ Subnet ID 1 is set"
+          fi
+          
+          if [ -z "${{ secrets.SUBNET_ID_2 }}" ]; then
+            echo "::warning::Missing secret: SUBNET_ID_2 (required for Lambda VPC config)"
+          else
+            echo "✓ Subnet ID 2 is set"
+          fi
+          
+          echo "========================================="
+          if [ $HAS_ERROR -eq 1 ]; then
+            echo "::error::Validation failed! Please fix the above errors before deploying."
+            exit 1
+          else
+            echo "✓ All critical secrets validated successfully for ${ENVIRONMENT} deployment"
+          fi
+          echo "========================================="
+
+      - name: Verify AWS credentials and resources
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check AWS resources accessibility
+        env:
+          S3_BUCKET_DEV: ${{ secrets.S3_BUCKET_DEV }}
+          S3_BUCKET_PROD: ${{ secrets.S3_BUCKET_PROD }}
+          EB_APP_NAME_DEV: ${{ secrets.EB_APP_NAME_DEV }}
+          EB_APP_NAME_PROD: ${{ secrets.EB_APP_NAME_PROD }}
+          EB_ENV_NAME_DEV: ${{ secrets.EB_ENV_NAME_DEV }}
+          EB_ENV_NAME_PROD: ${{ secrets.EB_ENV_NAME_PROD }}
+        run: |
+          ENVIRONMENT="${{ steps.set-env.outputs.env }}"
+          
+          # Get the secret values based on environment
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            S3_BUCKET="${S3_BUCKET_PROD}"
+            EB_APP_NAME="${EB_APP_NAME_PROD}"
+            EB_ENV_NAME="${EB_ENV_NAME_PROD}"
+          else
+            S3_BUCKET="${S3_BUCKET_DEV}"
+            EB_APP_NAME="${EB_APP_NAME_DEV}"
+            EB_ENV_NAME="${EB_ENV_NAME_DEV}"
+          fi
+          
+          echo "========================================="
+          echo "Verifying AWS resources accessibility..."
+          echo "========================================="
+          
+          HAS_WARNING=0
+          
+          # Test AWS credentials by getting caller identity
+          echo "Testing AWS credentials..."
+          if ! AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>&1); then
+            echo "::error::Failed to authenticate with AWS. Check your AWS credentials."
+            echo "Error: ${AWS_ACCOUNT}"
+            exit 1
+          fi
+          echo "✓ Authenticated to AWS Account: ${AWS_ACCOUNT}"
+          
+          # Check if S3 bucket exists and is accessible
+          echo ""
+          echo "Checking S3 bucket: ${S3_BUCKET}..."
+          if aws s3api head-bucket --bucket "${S3_BUCKET}" 2>/dev/null; then
+            echo "✓ S3 bucket exists and is accessible"
+          else
+            echo "::warning::S3 bucket '${S3_BUCKET}' may not exist or is not accessible."
+            echo "The deployment will attempt to use this bucket anyway."
+            HAS_WARNING=1
+          fi
+          
+          # Check if Elastic Beanstalk application exists
+          echo ""
+          echo "Checking Elastic Beanstalk application: ${EB_APP_NAME}..."
+          if aws elasticbeanstalk describe-applications --application-names "${EB_APP_NAME}" --region "${AWS_REGION}" 2>&1 | grep -q "${EB_APP_NAME}"; then
+            echo "✓ Elastic Beanstalk application exists"
+          else
+            echo "::warning::Elastic Beanstalk application '${EB_APP_NAME}' not found."
+            echo "Please create the application before deploying or check the application name."
+            HAS_WARNING=1
+          fi
+          
+          # Check if Elastic Beanstalk environment exists
+          echo ""
+          echo "Checking Elastic Beanstalk environment: ${EB_ENV_NAME}..."
+          if aws elasticbeanstalk describe-environments --environment-names "${EB_ENV_NAME}" --region "${AWS_REGION}" 2>&1 | grep -q "${EB_ENV_NAME}"; then
+            echo "✓ Elastic Beanstalk environment exists"
+            
+            # Check environment health
+            ENV_STATUS=$(aws elasticbeanstalk describe-environments --environment-names "${EB_ENV_NAME}" --region "${AWS_REGION}" --query 'Environments[0].Status' --output text)
+            ENV_HEALTH=$(aws elasticbeanstalk describe-environments --environment-names "${EB_ENV_NAME}" --region "${AWS_REGION}" --query 'Environments[0].Health' --output text)
+            
+            echo "  Environment Status: ${ENV_STATUS}"
+            echo "  Environment Health: ${ENV_HEALTH}"
+            
+            if [ "${ENV_STATUS}" != "Ready" ]; then
+              echo "::warning::Environment is not in Ready state. Current state: ${ENV_STATUS}"
+              echo "Deployment may fail or queue until environment is ready."
+              HAS_WARNING=1
+            fi
+          else
+            echo "::warning::Elastic Beanstalk environment '${EB_ENV_NAME}' not found."
+            echo "Please create the environment before deploying or check the environment name."
+            HAS_WARNING=1
+          fi
+          
+          echo ""
+          echo "========================================="
+          if [ $HAS_WARNING -eq 1 ]; then
+            echo "⚠ Resource verification completed with warnings."
+            echo "Review the warnings above. Deployment will continue but may fail."
+          else
+            echo "✓ All AWS resources verified successfully"
+          fi
+          echo "========================================="
+
+  deploy-frontend:
+    name: Deploy Frontend to S3 (${{ needs.determine-environment.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: determine-environment
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build frontend
+        env:
+          ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+          # Environment-specific secrets (with fallback to shared secrets)
+          VITE_WEBSOCKET_URL_DEV: ${{ secrets.VITE_WEBSOCKET_URL_DEV }}
+          VITE_WEBSOCKET_URL_PROD: ${{ secrets.VITE_WEBSOCKET_URL_PROD }}
+          VITE_WEBSOCKET_URL: ${{ secrets.VITE_WEBSOCKET_URL }}
+          VITE_API_URL_DEV: ${{ secrets.VITE_API_URL_DEV }}
+          VITE_API_URL_PROD: ${{ secrets.VITE_API_URL_PROD }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_API_GATEWAY_REST_URL: ${{ secrets.VITE_API_GATEWAY_REST_URL }}
+          VITE_API_GATEWAY_WEBSOCKET_URL: ${{ secrets.VITE_API_GATEWAY_WEBSOCKET_URL }}
+          VITE_AGILEPLAN_API_URL: ${{ secrets.VITE_AGILEPLAN_API_URL }}
+          VITE_AGILEPLAN_SYNC_ENABLED: ${{ secrets.VITE_AGILEPLAN_SYNC_ENABLED }}
+          VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
+        run: |
+          # Select environment-specific or shared secrets
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            export VITE_WEBSOCKET_URL="${VITE_WEBSOCKET_URL_PROD:-${VITE_WEBSOCKET_URL}}"
+            export VITE_API_URL="${VITE_API_URL_PROD:-${VITE_API_URL}}"
+          else
+            export VITE_WEBSOCKET_URL="${VITE_WEBSOCKET_URL_DEV:-${VITE_WEBSOCKET_URL}}"
+            export VITE_API_URL="${VITE_API_URL_DEV:-${VITE_API_URL}}"
+          fi
+          npm run build
+        
+      - name: Validate build output
+        run: |
+          if [ ! -d "docs" ]; then
+            echo "::error::Build failed: docs/ directory not found"
+            exit 1
+          fi
+          if [ ! -f "docs/index.html" ]; then
+            echo "::error::Build failed: docs/index.html not found"
+            exit 1
+          fi
+          echo "✓ Build output validated"
+      
+      - name: Validate S3 bucket (fail fast)
+        env:
+          S3_BUCKET_DEV: ${{ secrets.S3_BUCKET_DEV }}
+          S3_BUCKET_PROD: ${{ secrets.S3_BUCKET_PROD }}
+        shell: bash
+        run: |
+          ENVIRONMENT="${{ needs.determine-environment.outputs.environment }}"
+          
+          # Get the secret value based on environment
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            S3_BUCKET="${S3_BUCKET_PROD}"
+          else
+            S3_BUCKET="${S3_BUCKET_DEV}"
+          fi
+          
+          echo "Deploying to ${ENVIRONMENT} environment: ${S3_BUCKET}"
+          if [ -z "$S3_BUCKET" ]; then
+            echo "::error::S3 bucket is empty. Fix secret scope (Environment vs Repository) or secret name."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        env:
+          S3_BUCKET_DEV: ${{ secrets.S3_BUCKET_DEV }}
+          S3_BUCKET_PROD: ${{ secrets.S3_BUCKET_PROD }}
+        run: |
+          ENVIRONMENT="${{ needs.determine-environment.outputs.environment }}"
+          
+          # Get the secret value based on environment
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            S3_BUCKET="${S3_BUCKET_PROD}"
+          else
+            S3_BUCKET="${S3_BUCKET_DEV}"
+          fi
+          
+          echo "========================================="
+          echo "Deploying frontend to S3..."
+          echo "========================================="
+          
+          # Validate S3 bucket is not empty
+          if [ -z "${S3_BUCKET}" ]; then
+            echo "::error::S3 bucket is empty! Cannot deploy."
+            exit 1
+          fi
+          
+          echo "Environment: ${ENVIRONMENT}"
+          echo "S3 Bucket: ${S3_BUCKET}"
+          echo ""
+          
+          # Check if bucket exists
+          if ! aws s3api head-bucket --bucket "${S3_BUCKET}" 2>/dev/null; then
+            echo "::error::S3 bucket '${S3_BUCKET}' does not exist or is not accessible!"
+            echo "Please create the bucket or check permissions."
+            exit 1
+          fi
+          
+          echo "✓ S3 bucket exists and is accessible"
+          echo ""
+          
+          # Check if docs directory exists
+          if [ ! -d "docs" ]; then
+            echo "::error::docs/ directory not found! Build may have failed."
+            exit 1
+          fi
+          
+          # Check if index.html exists
+          if [ ! -f "docs/index.html" ]; then
+            echo "::error::docs/index.html not found! Build may have failed."
+            exit 1
+          fi
+          
+          echo "✓ Build artifacts found"
+          echo ""
+          echo "Syncing files to S3..."
+          
+          # Sync static assets
+          if ! aws s3 sync docs/ "s3://${S3_BUCKET}" \
+            --region "${AWS_REGION}" \
+            --delete \
+            --exclude ".DS_Store" \
+            --exclude "*.map" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html" \
+            --exclude "404.html"; then
+            echo "::error::Failed to sync static assets to S3"
+            exit 1
+          fi
+          
+          echo "✓ Static assets synced"
+          
+          # Upload index.html with no cache
+          if ! aws s3 cp docs/index.html "s3://${S3_BUCKET}/index.html" \
+            --region "${AWS_REGION}" \
+            --content-type "text/html" \
+            --cache-control "no-cache, no-store, must-revalidate"; then
+            echo "::error::Failed to upload index.html"
+            exit 1
+          fi
+          
+          echo "✓ index.html uploaded"
+          
+          # Upload 404.html with no cache (if exists)
+          if [ -f "docs/404.html" ]; then
+            if ! aws s3 cp docs/404.html "s3://${S3_BUCKET}/404.html" \
+              --region "${AWS_REGION}" \
+              --content-type "text/html" \
+              --cache-control "no-cache, no-store, must-revalidate"; then
+              echo "::warning::Failed to upload 404.html"
+            else
+              echo "✓ 404.html uploaded"
+            fi
+          fi
+          
+          echo ""
+          echo "========================================="
+          echo "✓ Frontend deployment to S3 completed"
+          echo "========================================="
+          
+          # Invalidate CloudFront cache (if CloudFront distribution ID is set)
+          if [ "${{ needs.determine-environment.outputs.environment }}" == "production" ] && [ -n "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID_PROD }}" ]; then
+            echo ""
+            echo "Invalidating CloudFront cache..."
+            DIST_ID="${{ secrets.CLOUDFRONT_DISTRIBUTION_ID_PROD }}"
+            # Validate distribution ID format
+            if [[ ! "${DIST_ID}" =~ ^[A-Z0-9]{13}$ ]]; then
+              echo "::warning::Invalid CloudFront distribution ID format: ${DIST_ID}"
+            elif aws cloudfront create-invalidation \
+              --distribution-id "${DIST_ID}" \
+              --paths "/*" 2>&1; then
+              echo "✓ CloudFront cache invalidation triggered"
+            else
+              echo "::warning::Failed to invalidate CloudFront cache"
+            fi
+          elif [ "${{ needs.determine-environment.outputs.environment }}" == "dev" ] && [ -n "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID_DEV }}" ]; then
+            echo ""
+            echo "Invalidating CloudFront cache..."
+            DIST_ID="${{ secrets.CLOUDFRONT_DISTRIBUTION_ID_DEV }}"
+            # Validate distribution ID format
+            if [[ ! "${DIST_ID}" =~ ^[A-Z0-9]{13}$ ]]; then
+              echo "::warning::Invalid CloudFront distribution ID format: ${DIST_ID}"
+            elif aws cloudfront create-invalidation \
+              --distribution-id "${DIST_ID}" \
+              --paths "/*" 2>&1; then
+              echo "✓ CloudFront cache invalidation triggered"
+            else
+              echo "::warning::Failed to invalidate CloudFront cache"
+            fi
+          fi
+
+  deploy-backend:
+    name: Deploy Backend to Elastic Beanstalk (${{ needs.determine-environment.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: determine-environment
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./server
+        run: npm ci
+
+      - name: Build backend
+        working-directory: ./server
+        run: npm run build
+        
+      - name: Validate build output
+        working-directory: ./server
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "::error::Build failed: dist/ directory not found"
+            exit 1
+          fi
+          if [ -z "$(ls -A dist)" ]; then
+            echo "::error::Build failed: dist/ directory is empty"
+            exit 1
+          fi
+          echo "✓ Build output validated"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve Elastic Beanstalk names
+        env:
+          EB_APP_NAME_DEV: ${{ secrets.EB_APP_NAME_DEV }}
+          EB_APP_NAME_PROD: ${{ secrets.EB_APP_NAME_PROD }}
+          EB_ENV_NAME_DEV: ${{ secrets.EB_ENV_NAME_DEV }}
+          EB_ENV_NAME_PROD: ${{ secrets.EB_ENV_NAME_PROD }}
+        shell: bash
+        run: |
+          ENVIRONMENT="${{ needs.determine-environment.outputs.environment }}"
+          
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            EB_APP_NAME="${EB_APP_NAME_PROD}"
+            EB_ENV_NAME="${EB_ENV_NAME_PROD}"
+          else
+            EB_APP_NAME="${EB_APP_NAME_DEV}"
+            EB_ENV_NAME="${EB_ENV_NAME_DEV}"
+          fi
+          
+          echo "ENVIRONMENT=${ENVIRONMENT}" >> "$GITHUB_ENV"
+          echo "EB_APP_NAME=${EB_APP_NAME}" >> "$GITHUB_ENV"
+          echo "EB_ENV_NAME=${EB_ENV_NAME}" >> "$GITHUB_ENV"
+          
+          echo "Resolved deployment targets:"
+          echo "  ENVIRONMENT=${ENVIRONMENT}"
+          echo "  AWS_REGION=${AWS_REGION}"
+          echo "  EB_APP_NAME=${EB_APP_NAME}"
+          echo "  EB_ENV_NAME=${EB_ENV_NAME}"
+
+      - name: Validate Elastic Beanstalk resources
+        run: |
+          echo "========================================="
+          echo "Validating Elastic Beanstalk resources..."
+          echo "========================================="
+          echo "Environment: ${ENVIRONMENT}"
+          echo "Region: ${AWS_REGION}"
+          echo ""
+          
+          echo "Testing AWS credentials..."
+          AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "UNKNOWN")
+          echo "✓ AWS Account: ${AWS_ACCOUNT}"
+          echo ""
+          
+          # Validate EB app name is not empty
+          if [ -z "${EB_APP_NAME}" ]; then
+            echo "::error::Elastic Beanstalk app name is empty! Cannot deploy."
+            exit 1
+          fi
+          
+          # Validate EB env name is not empty
+          if [ -z "${EB_ENV_NAME}" ]; then
+            echo "::error::Elastic Beanstalk environment name is empty! Cannot deploy."
+            exit 1
+          fi
+
+          # Check if environment exists FIRST (if it exists, the application must exist too).
+          # This also lets us infer the correct ApplicationName if the EB_APP_NAME secret is wrong.
+          ENV_INFO=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${EB_ENV_NAME}" \
+            --region "${AWS_REGION}" \
+            --query 'Environments[0]' \
+            --output json 2>/dev/null || echo "null")
+
+          if [ "${ENV_INFO}" = "null" ] || echo "${ENV_INFO}" | grep -q "null"; then
+            echo "::error::Elastic Beanstalk environment '${EB_ENV_NAME}' does not exist in region '${AWS_REGION}' (account ${AWS_ACCOUNT})."
+            echo "Fix: verify EB_ENV_NAME_${ENVIRONMENT^^} and AWS_REGION match where your EB environment lives."
+            exit 1
+          fi
+
+          ENV_STATUS=$(echo "${ENV_INFO}" | jq -r '.Status // "Unknown"')
+          ENV_HEALTH=$(echo "${ENV_INFO}" | jq -r '.Health // "Unknown"')
+          INFERRED_APP_NAME=$(echo "${ENV_INFO}" | jq -r '.ApplicationName // ""')
+
+          echo "✓ Environment '${EB_ENV_NAME}' exists"
+          echo "  Status: ${ENV_STATUS}"
+          echo "  Health: ${ENV_HEALTH}"
+          echo "  Application (from environment): ${INFERRED_APP_NAME:-Unknown}"
+
+          if [ -n "${INFERRED_APP_NAME}" ] && [ "${INFERRED_APP_NAME}" != "${EB_APP_NAME}" ]; then
+            echo "::warning::EB_APP_NAME_${ENVIRONMENT^^} ('${EB_APP_NAME}') does not match environment's ApplicationName ('${INFERRED_APP_NAME}')."
+            echo "::warning::Proceeding using '${INFERRED_APP_NAME}'. Please fix your GitHub secret to avoid confusion."
+            EB_APP_NAME="${INFERRED_APP_NAME}"
+            echo "EB_APP_NAME=${EB_APP_NAME}" >> "$GITHUB_ENV"
+          fi
+
+          # Now verify the (possibly inferred) application exists
+          if ! aws elasticbeanstalk describe-applications \
+            --application-names "${EB_APP_NAME}" \
+            --region "${AWS_REGION}" \
+            --query 'Applications[0].ApplicationName' \
+            --output text 2>/dev/null | grep -q "${EB_APP_NAME}"; then
+            echo "::error::Elastic Beanstalk application '${EB_APP_NAME}' does not exist in region '${AWS_REGION}' (account ${AWS_ACCOUNT})."
+            echo "Fix: verify EB_APP_NAME_${ENVIRONMENT^^} and AWS_REGION match where your EB application lives."
+            exit 1
+          fi
+
+          echo "✓ Application '${EB_APP_NAME}' exists"
+          
+          # Warn if environment is not ready
+          if [ "${ENV_STATUS}" != "Ready" ]; then
+            echo "::warning::Environment status is '${ENV_STATUS}', not 'Ready'."
+            echo "Deployment will be queued until environment is ready."
+          fi
+          
+          # Check if environment is being terminated
+          if [ "${ENV_STATUS}" == "Terminating" ] || [ "${ENV_STATUS}" == "Terminated" ]; then
+            echo "::error::Environment is being terminated or already terminated!"
+            exit 1
+          fi
+          
+          echo "========================================="
+          echo "✓ Elastic Beanstalk validation passed"
+          echo "========================================="
+
+      - name: Validate required files
+        working-directory: ./server
+        run: |
+          MISSING_FILES=()
+          
+          if [ ! -f "Procfile" ]; then
+            MISSING_FILES+=("Procfile")
+          fi
+          
+          if [ ! -f ".ebignore" ]; then
+            echo "::warning::.ebignore not found, creating default one"
+            echo "*.log" > .ebignore
+            echo "*.md" >> .ebignore
+            echo ".git/" >> .ebignore
+            echo ".env*" >> .ebignore
+          fi
+          
+          if [ ! -d "dist" ]; then
+            echo "::error::dist/ directory not found. Build may have failed."
+            exit 1
+          fi
+          
+          if [ ${#MISSING_FILES[@]} -gt 0 ]; then
+            echo "::error::Missing required files: ${MISSING_FILES[*]}"
+            exit 1
+          fi
+          
+          echo "✓ Required files validated"
+
+      - name: Create deployment package
+        working-directory: ./server
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          PACKAGE_NAME="ailethia-backend-${ENVIRONMENT}-${TIMESTAMP}.zip"
+          
+          # Build zip command with conditional includes
+          ZIP_CMD="zip -r ../${PACKAGE_NAME} dist/ node_modules/ package.json package-lock.json Procfile .ebignore"
+          
+          if [ -d ".ebextensions" ]; then
+            ZIP_CMD="${ZIP_CMD} .ebextensions/"
+          fi
+          
+          if [ -d ".platform" ]; then
+            ZIP_CMD="${ZIP_CMD} .platform/"
+          fi
+          
+          ZIP_CMD="${ZIP_CMD} -x \"*.log\" \"*.md\" \".git/*\" \"*.zip\" \".env*\" \"tsconfig.json\" \"src/**/*.ts\" \"!src/**/*.js\""
+          
+          eval "${ZIP_CMD}"
+          
+          # Verify zip was created
+          if [ ! -f "../${PACKAGE_NAME}" ]; then
+            echo "::error::Failed to create deployment package"
+            exit 1
+          fi
+          
+          PACKAGE_SIZE=$(stat -f%z "../${PACKAGE_NAME}" 2>/dev/null || stat -c%s "../${PACKAGE_NAME}" 2>/dev/null || echo "0")
+          echo "✓ Package created: ${PACKAGE_NAME} (${PACKAGE_SIZE} bytes)"
+          
+          echo "PACKAGE_NAME=${PACKAGE_NAME}" >> $GITHUB_ENV
+
+      - name: Upload to S3
+        run: |
+          # Validate EB app name is not empty
+          if [ -z "${EB_APP_NAME}" ]; then
+            echo "::error::Elastic Beanstalk app name is empty! Cannot deploy."
+            exit 1
+          fi
+          
+          # Validate package exists
+          if [ ! -f "${PACKAGE_NAME}" ]; then
+            echo "::error::Deployment package ${PACKAGE_NAME} not found!"
+            exit 1
+          fi
+          
+          S3_BUCKET="elasticbeanstalk-${AWS_REGION}-$(aws sts get-caller-identity --query Account --output text)"
+          S3_KEY="${EB_APP_NAME}/${PACKAGE_NAME}"
+          
+          echo "Uploading package to S3..."
+          echo "Bucket: ${S3_BUCKET}"
+          echo "Key: ${S3_KEY}"
+          
+          # Create bucket if it doesn't exist
+          aws s3 mb "s3://${S3_BUCKET}" --region "${AWS_REGION}" 2>/dev/null || true
+          
+          # Upload package
+          if aws s3 cp "${PACKAGE_NAME}" "s3://${S3_BUCKET}/${S3_KEY}" --region "${AWS_REGION}"; then
+            echo "✓ Package uploaded successfully"
+          else
+            echo "::error::Failed to upload package to S3"
+            exit 1
+          fi
+
+      - name: Create application version
+        run: |
+          # Validate environment names are not empty
+          if [ -z "${EB_APP_NAME}" ] || [ -z "${EB_ENV_NAME}" ]; then
+            echo "::error::Elastic Beanstalk app/env name is empty! Cannot deploy."
+            exit 1
+          fi
+          
+          S3_BUCKET="elasticbeanstalk-${AWS_REGION}-$(aws sts get-caller-identity --query Account --output text)"
+          S3_KEY="${EB_APP_NAME}/${PACKAGE_NAME}"
+          VERSION_LABEL="ci-${ENVIRONMENT}-${GITHUB_SHA:0:7}-$(date +%Y%m%d-%H%M%S)"
+          
+          # Check if version label already exists (EB has a limit)
+          if aws elasticbeanstalk describe-application-versions \
+            --application-name "${EB_APP_NAME}" \
+            --version-labels "${VERSION_LABEL}" \
+            --region "${AWS_REGION}" \
+            --query 'ApplicationVersions[0].VersionLabel' \
+            --output text 2>/dev/null | grep -q "${VERSION_LABEL}"; then
+            echo "::warning::Version label ${VERSION_LABEL} already exists, appending timestamp"
+            VERSION_LABEL="ci-${ENVIRONMENT}-${GITHUB_SHA:0:7}-$(date +%Y%m%d-%H%M%S-%N | cut -b1-23)"
+          fi
+          
+          aws elasticbeanstalk create-application-version \
+            --application-name "${EB_APP_NAME}" \
+            --version-label "${VERSION_LABEL}" \
+            --source-bundle "S3Bucket=${S3_BUCKET},S3Key=${S3_KEY}" \
+            --region "${AWS_REGION}" \
+            --description "CI/CD deployment to ${ENVIRONMENT} from ${GITHUB_SHA}"
+          
+          echo "VERSION_LABEL=${VERSION_LABEL}" >> $GITHUB_ENV
+
+      - name: Deploy to Elastic Beanstalk
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          echo "========================================="
+          echo "Deploying to Elastic Beanstalk..."
+          echo "========================================="
+          echo "Application: ${EB_APP_NAME}"
+          echo "Environment: ${EB_ENV_NAME}"
+          echo "Version: ${VERSION_LABEL}"
+          echo ""
+
+          # Ensure required DB settings are present so we don't accidentally overwrite EB env vars with empty values.
+          : "${DB_HOST:?Missing required secret: DB_HOST}"
+          : "${DB_NAME:?Missing required secret: DB_NAME}"
+          : "${DB_USER:?Missing required secret: DB_USER}"
+          : "${DB_PASSWORD:?Missing required secret: DB_PASSWORD}"
+
+          # Helper to update EB environment with BOTH the version label and env vars, using JSON input.
+          # This avoids shell quoting issues (passwords with special characters) and prevents drift between EB + GitHub Secrets.
+          update_eb_env() {
+            local version_label="$1"
+            local json_file
+            json_file="$(mktemp)"
+
+            jq -n \
+              --arg envName "${EB_ENV_NAME}" \
+              --arg versionLabel "${version_label}" \
+              --arg dbHost "${DB_HOST}" \
+              --arg dbName "${DB_NAME}" \
+              --arg dbUser "${DB_USER}" \
+              --arg dbPassword "${DB_PASSWORD}" \
+              --arg dbPort "5432" \
+              '{
+                EnvironmentName: $envName,
+                VersionLabel: $versionLabel,
+                OptionSettings: [
+                  { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_HOST", Value: $dbHost },
+                  { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_NAME", Value: $dbName },
+                  { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_USER", Value: $dbUser },
+                  { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_PASSWORD", Value: $dbPassword },
+                  { Namespace: "aws:elasticbeanstalk:application:environment", OptionName: "DB_PORT", Value: $dbPort }
+                ]
+              }' > "${json_file}"
+
+            aws elasticbeanstalk update-environment \
+              --region "${AWS_REGION}" \
+              --cli-input-json "file://${json_file}"
+          }
+          
+          # Check current environment state before deploying
+          CURRENT_ENV_INFO=$(aws elasticbeanstalk describe-environments \
+            --environment-names "${EB_ENV_NAME}" \
+            --region "${AWS_REGION}" \
+            --query 'Environments[0]' \
+            --output json)
+          
+          CURRENT_VERSION=$(echo "${CURRENT_ENV_INFO}" | jq -r '.VersionLabel // "None"')
+          ENV_STATUS=$(echo "${CURRENT_ENV_INFO}" | jq -r '.Status // "Unknown"')
+          
+          echo "Current environment state:"
+          echo "  Status: ${ENV_STATUS}"
+          echo "  Current Version: ${CURRENT_VERSION}"
+          echo "  Target Version: ${VERSION_LABEL}"
+          echo ""
+          
+          # If environment is not Ready, wait for it.
+          # (update-environment requires Status=Ready; treating Updating as "ok" causes InvalidParameterValue failures.)
+          if [ "${ENV_STATUS}" != "Ready" ]; then
+            echo "::warning::Environment is in '${ENV_STATUS}' state. Waiting for Ready state..."
+            TIMEOUT=300  # 5 minutes
+            ELAPSED=0
+            while [ $ELAPSED -lt $TIMEOUT ]; do
+              sleep 10
+              ELAPSED=$((ELAPSED + 10))
+              ENV_STATUS=$(aws elasticbeanstalk describe-environments \
+                --environment-names "${EB_ENV_NAME}" \
+                --region "${AWS_REGION}" \
+                --query 'Environments[0].Status' \
+                --output text)
+              
+              if [ "${ENV_STATUS}" == "Ready" ]; then
+                echo "✓ Environment is now Ready"
+                break
+              fi
+              echo "  Still waiting... Status: ${ENV_STATUS} (${ELAPSED}s)"
+            done
+            
+            if [ "${ENV_STATUS}" != "Ready" ]; then
+              echo "::error::Environment did not become Ready within timeout"
+              exit 1
+            fi
+          fi
+          
+          # Deploy the new version
+          echo "Initiating deployment..."
+          if update_eb_env "${VERSION_LABEL}" 2>&1 | tee /tmp/eb-deploy-output.log; then
+            echo ""
+            echo "✓ Deployment initiated successfully"
+          else
+            DEPLOY_ERROR=$(cat /tmp/eb-deploy-output.log)
+            
+            # Check if error is due to version mismatch
+            if echo "${DEPLOY_ERROR}" | grep -qi "incorrect application version\|version mismatch\|expected version"; then
+              echo "::warning::Version mismatch detected. Attempting to recover..."
+              
+              # Get the expected version from the error or environment
+              EXPECTED_VERSION=$(echo "${CURRENT_ENV_INFO}" | jq -r '.VersionLabel // ""')
+              
+              if [ -n "${EXPECTED_VERSION}" ] && [ "${EXPECTED_VERSION}" != "None" ]; then
+                echo "  Environment expects version: ${EXPECTED_VERSION}"
+                echo "  Attempting to deploy expected version first, then retry..."
+                
+                # Try deploying the expected version first to sync state
+                update_eb_env "${EXPECTED_VERSION}" || true
+                
+                # Wait a bit for the sync
+                echo "  Waiting 30 seconds for environment to sync..."
+                sleep 30
+              fi
+              
+              # Retry the original deployment
+              echo "  Retrying deployment with version: ${VERSION_LABEL}"
+              if update_eb_env "${VERSION_LABEL}"; then
+                echo "✓ Deployment retry successful"
+              else
+                echo "::error::Deployment failed even after recovery attempt"
+                echo "::error::Please check the environment status manually"
+                exit 1
+              fi
+            else
+              echo "::error::Deployment failed with error:"
+              echo "${DEPLOY_ERROR}"
+              exit 1
+            fi
+          fi
+          
+          echo ""
+          echo "✓ Deployment initiated. Monitoring status..."
+          
+          # Wait for deployment to start (max 2 minutes)
+          TIMEOUT=120
+          ELAPSED=0
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            ENV_STATUS=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${EB_ENV_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'Environments[0].Status' \
+              --output text 2>/dev/null || echo "Unknown")
+            
+            if [ "${ENV_STATUS}" == "Updating" ] || [ "${ENV_STATUS}" == "Ready" ]; then
+              echo "✓ Environment status: ${ENV_STATUS}"
+              break
+            fi
+            
+            sleep 5
+            ELAPSED=$((ELAPSED + 5))
+          done
+          
+          echo ""
+          echo "========================================="
+          echo "✓ Deployment command completed"
+          echo "Note: Full deployment may take several minutes"
+          echo "Monitor status in AWS Console:"
+          echo "https://console.aws.amazon.com/elasticbeanstalk/home?region=${AWS_REGION}#/environments"
+          echo "========================================="
+          
+      - name: Cleanup deployment package
+        if: always()
+        run: |
+          if [ -n "${PACKAGE_NAME}" ] && [ -f "${PACKAGE_NAME}" ]; then
+            rm -f "${PACKAGE_NAME}"
+            echo "✓ Cleaned up deployment package"
+          fi
+
+  deploy-lambda:
+    name: Deploy Lambda Functions (${{ needs.determine-environment.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: determine-environment
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Serverless Framework and plugins
+        working-directory: ./lambda
+        run: |
+          echo "Installing Serverless Framework plugins..."
+          npm install
+          echo "Installing Serverless Framework globally..."
+          npm install -g serverless@3
+          echo "Verifying plugins are installed..."
+          ls -la node_modules/serverless-plugin-typescript || echo "Warning: serverless-plugin-typescript not found"
+      
+      - name: Install Lambda function dependencies
+        working-directory: ./lambda
+        run: |
+          echo "Installing dependencies for all Lambda functions..."
+          for dir in */; do
+            if [ -f "${dir}package.json" ]; then
+              echo "Installing dependencies for ${dir}..."
+              (cd "${dir}" && npm install)
+            fi
+          done
+          echo "✓ All Lambda function dependencies installed"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate Lambda deployment requirements
+        env:
+          LAMBDA_EXECUTION_ROLE_ARN_DEV: ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN_DEV }}
+          LAMBDA_EXECUTION_ROLE_ARN_PROD: ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN_PROD }}
+        run: |
+          STAGE="${{ needs.determine-environment.outputs.stage }}"
+          ENVIRONMENT="${{ needs.determine-environment.outputs.environment }}"
+          
+          echo "========================================="
+          echo "Validating Lambda deployment requirements for ${STAGE}..."
+          echo "========================================="
+          
+          HAS_ERROR=0
+
+          # Execution role (to avoid iam:CreateRole during Serverless deploy)
+          if [ "${ENVIRONMENT}" == "production" ]; then
+            LAMBDA_EXECUTION_ROLE_ARN="${LAMBDA_EXECUTION_ROLE_ARN_PROD}"
+          else
+            LAMBDA_EXECUTION_ROLE_ARN="${LAMBDA_EXECUTION_ROLE_ARN_DEV}"
+          fi
+
+          if [ -z "${LAMBDA_EXECUTION_ROLE_ARN}" ]; then
+            echo "::error::Missing required secret: LAMBDA_EXECUTION_ROLE_ARN_${ENVIRONMENT^^}"
+            echo "::error::Create a Lambda execution role in AWS, then store its ARN in GitHub Secrets."
+            HAS_ERROR=1
+          else
+            if [[ ! "${LAMBDA_EXECUTION_ROLE_ARN}" =~ ^arn:aws:iam::[0-9]{12}:role/.+ ]]; then
+              echo "::error::Invalid Lambda execution role ARN format: ${LAMBDA_EXECUTION_ROLE_ARN}"
+              HAS_ERROR=1
+            else
+              echo "✓ Lambda execution role ARN is configured"
+              # Export for later steps (Serverless reads this via env var in serverless.yml)
+              echo "LAMBDA_EXECUTION_ROLE_ARN=${LAMBDA_EXECUTION_ROLE_ARN}" >> $GITHUB_ENV
+            fi
+          fi
+          
+          # Check database configuration
+          if [ -z "${{ secrets.DB_HOST }}" ]; then
+            echo "::error::DB_HOST secret is not configured"
+            HAS_ERROR=1
+          else
+            echo "✓ DB_HOST is configured"
+          fi
+          
+          if [ -z "${{ secrets.DB_NAME }}" ]; then
+            echo "::error::DB_NAME secret is not configured"
+            HAS_ERROR=1
+          else
+            echo "✓ DB_NAME is configured"
+          fi
+          
+          if [ -z "${{ secrets.DB_USER }}" ]; then
+            echo "::error::DB_USER secret is not configured"
+            HAS_ERROR=1
+          else
+            echo "✓ DB_USER is configured"
+          fi
+          
+          if [ -z "${{ secrets.DB_PASSWORD }}" ]; then
+            echo "::error::DB_PASSWORD secret is not configured"
+            HAS_ERROR=1
+          else
+            echo "✓ DB_PASSWORD is configured"
+          fi
+          
+          # Check VPC configuration
+          if [ -z "${{ secrets.SECURITY_GROUP_ID }}" ]; then
+            echo "::error::SECURITY_GROUP_ID secret is not configured"
+            HAS_ERROR=1
+          else
+            # Validate security group ID format
+            if [[ ! "${{ secrets.SECURITY_GROUP_ID }}" =~ ^sg-[a-zA-Z0-9]{8,}$ ]]; then
+              echo "::error::Invalid SECURITY_GROUP_ID format: ${{ secrets.SECURITY_GROUP_ID }}"
+              echo "Expected format: sg-xxxxxxxxx"
+              HAS_ERROR=1
+            else
+              echo "✓ SECURITY_GROUP_ID is configured"
+            fi
+          fi
+          
+          if [ -z "${{ secrets.SUBNET_ID_1 }}" ]; then
+            echo "::error::SUBNET_ID_1 secret is not configured"
+            HAS_ERROR=1
+          else
+            # Validate subnet ID format
+            if [[ ! "${{ secrets.SUBNET_ID_1 }}" =~ ^subnet-[a-zA-Z0-9]{8,}$ ]]; then
+              echo "::error::Invalid SUBNET_ID_1 format: ${{ secrets.SUBNET_ID_1 }}"
+              echo "Expected format: subnet-xxxxxxxxx"
+              HAS_ERROR=1
+            else
+              echo "✓ SUBNET_ID_1 is configured"
+            fi
+          fi
+          
+          if [ -z "${{ secrets.SUBNET_ID_2 }}" ]; then
+            echo "::error::SUBNET_ID_2 secret is not configured"
+            HAS_ERROR=1
+          else
+            # Validate subnet ID format
+            if [[ ! "${{ secrets.SUBNET_ID_2 }}" =~ ^subnet-[a-zA-Z0-9]{8,}$ ]]; then
+              echo "::error::Invalid SUBNET_ID_2 format: ${{ secrets.SUBNET_ID_2 }}"
+              echo "Expected format: subnet-xxxxxxxxx"
+              HAS_ERROR=1
+            else
+              echo "✓ SUBNET_ID_2 is configured"
+            fi
+          fi
+          
+          # Verify AWS resources exist
+          if [ $HAS_ERROR -eq 0 ]; then
+            echo ""
+            echo "Verifying AWS resources exist..."
+            
+            AWS_REGION="${{ env.AWS_REGION }}"
+            
+            # Check security group
+            if ! aws ec2 describe-security-groups \
+              --group-ids "${{ secrets.SECURITY_GROUP_ID }}" \
+              --region "${AWS_REGION}" \
+              --output json 2>&1 | grep -q "GroupId"; then
+              echo "::error::Security group ${{ secrets.SECURITY_GROUP_ID }} not found or not accessible"
+              HAS_ERROR=1
+            else
+              echo "✓ Security group exists and is accessible"
+            fi
+            
+            # Check subnet 1
+            if ! aws ec2 describe-subnets \
+              --subnet-ids "${{ secrets.SUBNET_ID_1 }}" \
+              --region "${AWS_REGION}" \
+              --output json 2>&1 | grep -q "SubnetId"; then
+              echo "::error::Subnet ${{ secrets.SUBNET_ID_1 }} not found or not accessible"
+              HAS_ERROR=1
+            else
+              echo "✓ Subnet 1 exists and is accessible"
+            fi
+            
+            # Check subnet 2
+            if ! aws ec2 describe-subnets \
+              --subnet-ids "${{ secrets.SUBNET_ID_2 }}" \
+              --region "${AWS_REGION}" \
+              --output json 2>&1 | grep -q "SubnetId"; then
+              echo "::error::Subnet ${{ secrets.SUBNET_ID_2 }} not found or not accessible"
+              HAS_ERROR=1
+            else
+              echo "✓ Subnet 2 exists and is accessible"
+            fi
+          fi
+          
+          echo "========================================="
+          if [ $HAS_ERROR -eq 1 ]; then
+            echo "::error::Lambda validation failed! Please fix the above errors."
+            exit 1
+          else
+            echo "✓ All Lambda deployment requirements validated"
+          fi
+          echo "========================================="
+
+      - name: Check CloudFormation stack status
+        working-directory: ./lambda
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          STAGE: ${{ needs.determine-environment.outputs.stage }}
+        run: |
+          STACK_NAME="coheus-lambda-functions-${STAGE}"
+          echo "Checking CloudFormation stack status: ${STACK_NAME}"
+          
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query 'Stacks[0].StackStatus' \
+            --output text 2>/dev/null || echo "NOT_FOUND")
+          
+          echo "Stack status: ${STACK_STATUS}"
+          
+          if [[ "${STACK_STATUS}" == *"ROLLBACK"* ]] || [[ "${STACK_STATUS}" == *"CLEANUP"* ]]; then
+            echo "::warning::Stack is in rollback/cleanup state: ${STACK_STATUS}"
+            echo "Waiting for rollback to complete (max 5 minutes)..."
+            
+            # Wait for rollback to complete
+            TIMEOUT=300  # 5 minutes
+            ELAPSED=0
+            while [[ $ELAPSED -lt $TIMEOUT ]]; do
+              CURRENT_STATUS=$(aws cloudformation describe-stacks \
+                --stack-name "${STACK_NAME}" \
+                --region "${AWS_REGION}" \
+                --query 'Stacks[0].StackStatus' \
+                --output text 2>/dev/null || echo "NOT_FOUND")
+              
+              echo "Current status: ${CURRENT_STATUS} (${ELAPSED}s elapsed)"
+              
+              if [[ "${CURRENT_STATUS}" != *"ROLLBACK"* ]] && [[ "${CURRENT_STATUS}" != *"CLEANUP"* ]] && [[ "${CURRENT_STATUS}" != "NOT_FOUND" ]]; then
+                echo "✓ Rollback completed. Stack status: ${CURRENT_STATUS}"
+                break
+              fi
+              
+              sleep 10
+              ELAPSED=$((ELAPSED + 10))
+            done
+            
+            if [[ $ELAPSED -ge $TIMEOUT ]]; then
+              echo "::error::Rollback timeout. Stack may be stuck."
+              echo "::error::Attempting to continue rollback..."
+              
+              # Try to continue the rollback
+              if aws cloudformation continue-update-rollback \
+                --stack-name "${STACK_NAME}" \
+                --region "${AWS_REGION}" 2>/dev/null; then
+                echo "::warning::Rollback continuation initiated. Waiting additional 2 minutes..."
+                sleep 120
+                
+                FINAL_STATUS=$(aws cloudformation describe-stacks \
+                  --stack-name "${STACK_NAME}" \
+                  --region "${AWS_REGION}" \
+                  --query 'Stacks[0].StackStatus' \
+                  --output text 2>/dev/null || echo "NOT_FOUND")
+                
+                if [[ "${FINAL_STATUS}" == "ROLLBACK_COMPLETE" ]] || [[ "${FINAL_STATUS}" == "UPDATE_ROLLBACK_COMPLETE" ]]; then
+                  echo "✓ Rollback completed. Stack status: ${FINAL_STATUS}"
+                else
+                  echo "::error::Stack is still in state: ${FINAL_STATUS}"
+                  echo "::error::Please manually check the stack in AWS Console:"
+                  echo "::error::https://console.aws.amazon.com/cloudformation/home?region=${AWS_REGION}#/stacks"
+                  echo "::error::"
+                  echo "::error::Options:"
+                  echo "::error::1. Wait for rollback to complete manually"
+                  echo "::error::2. Delete the stack: aws cloudformation delete-stack --stack-name ${STACK_NAME} --region ${AWS_REGION}"
+                  echo "::error::3. Then retry the deployment"
+                  exit 1
+                fi
+              else
+                echo "::error::Could not continue rollback. Stack may be stuck."
+                echo "::error::Please manually check the stack in AWS Console:"
+                echo "::error::https://console.aws.amazon.com/cloudformation/home?region=${AWS_REGION}#/stacks"
+                echo "::error::"
+                echo "::error::Options:"
+                echo "::error::1. Wait for rollback to complete manually"
+                echo "::error::2. Delete the stack: aws cloudformation delete-stack --stack-name ${STACK_NAME} --region ${AWS_REGION}"
+                echo "::error::3. Then retry the deployment"
+                exit 1
+              fi
+            fi
+            
+            # If stack is in ROLLBACK_COMPLETE, we can continue
+            if [[ "${CURRENT_STATUS}" == "ROLLBACK_COMPLETE" ]]; then
+              echo "::warning::Stack is in ROLLBACK_COMPLETE state. Deployment will continue."
+            fi
+          elif [[ "${STACK_STATUS}" == "NOT_FOUND" ]]; then
+            echo "Stack does not exist. Will create new stack."
+          else
+            echo "✓ Stack is in deployable state: ${STACK_STATUS}"
+          fi
+
+      - name: Validate serverless.yml
+        working-directory: ./lambda
+        run: |
+          if [ ! -f "serverless.yml" ]; then
+            echo "::error::serverless.yml not found in lambda directory"
+            exit 1
+          fi
+          echo "✓ serverless.yml found"
+
+      - name: Deploy Lambda functions
+        working-directory: ./lambda
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          STAGE: ${{ needs.determine-environment.outputs.stage }}
+          LAMBDA_EXECUTION_ROLE_ARN: ${{ env.LAMBDA_EXECUTION_ROLE_ARN }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SECURITY_GROUP_ID: ${{ secrets.SECURITY_GROUP_ID }}
+          SUBNET_ID_1: ${{ secrets.SUBNET_ID_1 }}
+          SUBNET_ID_2: ${{ secrets.SUBNET_ID_2 }}
+        run: |
+          echo "========================================="
+          echo "Deploying Lambda functions..."
+          echo "========================================="
+          echo "Stage: ${{ needs.determine-environment.outputs.stage }}"
+          echo "Region: ${AWS_REGION}"
+          echo ""
+          
+          # Stream output while also keeping a copy for error detection
+          set +e
+          serverless deploy --stage ${{ needs.determine-environment.outputs.stage }} 2>&1 | tee serverless-deploy.log
+          DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          
+          if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
+            echo ""
+            echo "========================================="
+            echo "✓ Lambda deployment completed"
+            echo "========================================="
+          else
+            echo ""
+            echo "::error::Lambda deployment failed"
+            echo ""
+            
+            # Check for specific IAM permission errors
+            if grep -q "iam:CreateRole" serverless-deploy.log; then
+              echo "========================================="
+              echo "::error::IAM Permission Error Detected"
+              echo "========================================="
+              echo ""
+              echo "Your deploy credentials do not have permission to create IAM roles."
+              echo "This workflow is configured to avoid role creation by using a pre-created execution role ARN."
+              echo ""
+              echo "Fix: ensure the deploy is using a pre-created role:"
+              echo "  - Set GitHub Secret LAMBDA_EXECUTION_ROLE_ARN_${{ needs.determine-environment.outputs.environment == 'production' && 'PROD' || 'DEV' }}"
+              echo "  - Ensure the deploy IAM user/role has iam:PassRole on that execution role ARN"
+              echo "  - Ensure the execution role itself has the permissions the Lambdas need (SecretsManager/KMS/DynamoDB/CloudWatch Logs/execute-api:ManageConnections)"
+              echo "========================================="
+            elif grep -q "tagging\\|TagResource\\|TagRole\\|UnauthorizedTaggingOperation" serverless-deploy.log; then
+              echo "========================================="
+              echo "::error::Tagging Permission Error Detected"
+              echo "========================================="
+              echo ""
+              echo "Your deploy credentials are missing required tagging permissions for one or more resources."
+              echo ""
+              echo "Fix: update the deploy IAM policy to allow tagging, typically:"
+              echo "  - iam:TagRole / iam:UntagRole (if roles are being created/updated)"
+              echo "  - cloudformation:TagResource / cloudformation:UntagResource"
+              echo "  - lambda:TagResource / lambda:UntagResource"
+              echo "========================================="
+            fi
+            
+            exit 1
+          fi
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [determine-environment, deploy-frontend, deploy-backend, deploy-lambda]
+    if: always()
+    steps:
+      - name: Generate deployment summary
+        run: |
+          ENVIRONMENT="${{ needs.determine-environment.outputs.environment }}"
+          
+          echo "# 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** \`${ENVIRONMENT}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Job Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Frontend status
+          if [ "${{ needs.deploy-frontend.result }}" == "success" ]; then
+            echo "✅ **Frontend:** Deployed successfully to S3" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-frontend.result }}" == "failure" ]; then
+            echo "❌ **Frontend:** Deployment failed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-frontend.result }}" == "cancelled" ]; then
+            echo "⚠️ **Frontend:** Deployment cancelled" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **Frontend:** Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Backend status
+          if [ "${{ needs.deploy-backend.result }}" == "success" ]; then
+            echo "✅ **Backend:** Deployed successfully to Elastic Beanstalk" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-backend.result }}" == "failure" ]; then
+            echo "❌ **Backend:** Deployment failed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-backend.result }}" == "cancelled" ]; then
+            echo "⚠️ **Backend:** Deployment cancelled" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **Backend:** Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Lambda status
+          if [ "${{ needs.deploy-lambda.result }}" == "success" ]; then
+            echo "✅ **Lambda:** Functions deployed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "   - Stage: \`${{ needs.determine-environment.outputs.stage }}\`" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-lambda.result }}" == "failure" ]; then
+            echo "❌ **Lambda:** Deployment failed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.deploy-lambda.result }}" == "cancelled" ]; then
+            echo "⚠️ **Lambda:** Deployment cancelled" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **Lambda:** Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [ "${{ needs.deploy-frontend.result }}" == "success" ] && \
+             [ "${{ needs.deploy-backend.result }}" == "success" ] && \
+             [ "${{ needs.deploy-lambda.result }}" == "success" ]; then
+            echo "## ✅ Overall Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All components deployed successfully to **${ENVIRONMENT}** environment!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Overall Status: INCOMPLETE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Some components failed to deploy. Please check the logs above for details." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Need Help?" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for detailed error messages" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify all secrets are configured in [repository settings](${{ github.server_url }}/${{ github.repository }}/settings/secrets/actions)" >> $GITHUB_STEP_SUMMARY
+          echo "- Review the AWS resources in the [AWS Console](https://console.aws.amazon.com/)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check overall deployment status
+        run: |
+          if [ "${{ needs.deploy-frontend.result }}" == "failure" ] || \
+             [ "${{ needs.deploy-backend.result }}" == "failure" ] || \
+             [ "${{ needs.deploy-lambda.result }}" == "failure" ]; then
+            echo "::error::One or more deployment jobs failed"
+            exit 1
+          fi
+
+
