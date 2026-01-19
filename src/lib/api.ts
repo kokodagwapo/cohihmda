@@ -11,54 +11,51 @@ export const getApiUrl = (): string => {
     const origin = window.location.origin;
     const hostname = window.location.hostname;
     
-    // For localhost/127.0.0.1, always use localhost:3001 backend
-    if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
-      console.log('Using local Docker backend: http://localhost:3001');
+    // For Vite dev server (development mode), use relative paths so Vite proxy handles it
+    // This works for localhost, Replit, and other dev environments with Vite proxy
+    if (import.meta.env.DEV) {
+      console.log('Using Vite dev proxy for API requests');
+      return '';  // Empty string = relative paths, Vite proxies /api/* to backend
+    }
+    
+    // For CloudFront distributions
+    if (hostname.includes('cloudfront.net')) {
+      // Check localStorage for custom backend URL (can be set in admin)
+      const customBackendUrl = localStorage.getItem('BACKEND_API_URL');
+      if (customBackendUrl && customBackendUrl.trim() !== '') {
+        console.log('Using custom backend URL from localStorage:', customBackendUrl);
+        return customBackendUrl;
+      }
+      // Use same origin - CloudFront proxies /api/* to backend
+      console.log('Using CloudFront API proxy (same origin)');
+      return '';  // Empty string = same origin as frontend
+    }
+    
+    // For S3 website endpoints, use the configured backend URL
+    if (hostname.includes('s3-website') || hostname.includes('amazonaws.com')) {
+      console.warn('VITE_API_URL not set in build. Using default backend URL.');
       return 'http://localhost:3001';
     }
     
-    // If we're on a production domain (not localhost), try to detect backend
-    if (!hostname.includes('localhost') && !hostname.includes('127.0.0.1')) {
-      // For CloudFront distributions
-      if (hostname.includes('cloudfront.net')) {
-        // Check localStorage for custom backend URL (can be set in admin)
-        const customBackendUrl = localStorage.getItem('BACKEND_API_URL');
-        if (customBackendUrl && customBackendUrl.trim() !== '') {
-          console.log('Using custom backend URL from localStorage:', customBackendUrl);
-          return customBackendUrl;
-        }
-        // Use same origin - CloudFront proxies /api/* to backend
-        // This avoids mixed content issues (HTTPS frontend calling HTTP backend)
-        // CloudFront must be configured with backend origin and /api/* behavior
-        console.log('Using CloudFront API proxy (same origin)');
-        return '';  // Empty string = same origin as frontend
-      }
-      
-      // For S3 website endpoints, use the configured backend URL
-      if (hostname.includes('s3-website') || hostname.includes('amazonaws.com')) {
-        // Default backend URL for S3 deployment
-        // This should be set via VITE_API_URL during build, but provide fallback
-        console.warn('VITE_API_URL not set in build. Using default backend URL.');
-        return 'http://localhost:3001';
-      }
-      
-      // For GitHub Pages (github.io), backend is typically on a different domain
-      if (hostname.includes('github.io') || hostname.includes('github.com')) {
-        // For GitHub Pages, we need VITE_API_URL to be set
-        // If not set, return empty string which will show the setup message
-        console.warn('Backend API URL not configured. Please set VITE_API_URL in GitHub Secrets.');
-        // Return empty to trigger the "server unavailable" state gracefully
-        return '';
-      }
-      
-      // For other production domains, assume backend is on same origin or /api
-      // You can customize this logic based on your deployment
-      return origin;
+    // For GitHub Pages (github.io), backend is typically on a different domain
+    if (hostname.includes('github.io') || hostname.includes('github.com')) {
+      console.warn('Backend API URL not configured. Please set VITE_API_URL in GitHub Secrets.');
+      return '';
     }
+    
+    // Check localStorage for custom backend URL (can be set in admin for any domain)
+    const customBackendUrl = localStorage.getItem('BACKEND_API_URL');
+    if (customBackendUrl && customBackendUrl.trim() !== '') {
+      console.log('Using custom backend URL from localStorage:', customBackendUrl);
+      return customBackendUrl;
+    }
+    
+    // For other production domains, assume backend is on same origin or /api
+    return origin;
   }
   
-  // Default to localhost for local development only
-  return 'http://localhost:3001';
+  // Default to empty for relative paths
+  return '';
 };
 
 /**
