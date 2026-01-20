@@ -29,6 +29,7 @@ import { Navigation } from '@/components/layout/Navigation';
 import { CohiChatPanel } from '@/components/qlik/CohiChatPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '@/components/theme-provider';
+import { LOS_FIELD_LIBRARY } from '@/lib/losFieldLibrary';
 
 interface LogicDefinition {
   name: string;
@@ -3255,15 +3256,47 @@ const QlikMigration = () => {
                             }
                           };
                           
-                          // Return mappings if found, otherwise return generic mappings
+                          // Return mappings if found, otherwise check LOS field library
                           if (losMappings[fieldName]) {
                             return losMappings[fieldName];
                           }
                           
-                          // Generate generic mappings based on field name
+                          // Try to find field in LOS field library by display name or aliases
+                          const libraryField = LOS_FIELD_LIBRARY.find(field => 
+                            field.displayName === fieldName || 
+                            field.aliases?.includes(fieldName) ||
+                            field.sourceKey === fieldName.toLowerCase().replace(/\s+/g, '_')
+                          );
+                          
+                          // Generate mappings - use library field ID if available
                           const fieldKey = fieldName.toLowerCase().replace(/\s+/g, '_');
+                          const encompassFieldId = libraryField?.encompassFieldId;
+                          
+                          // For calculated/derived fields (like Warehouse Line Duration), indicate it's calculated
+                          const isCalculatedField = fieldName.includes('Duration') || 
+                                                    fieldName.includes('Days') || 
+                                                    fieldName.includes('-') ||
+                                                    fieldName.includes('Flag') ||
+                                                    fieldName.includes('Range');
+                          
+                          // Determine ICE Encompass field display
+                          let iceEncompassField: string;
+                          if (encompassFieldId) {
+                            // Use actual field ID from library
+                            iceEncompassField = encompassFieldId;
+                          } else if (isCalculatedField) {
+                            // Calculated/derived fields
+                            iceEncompassField = '(Calculated - Derived from other fields)';
+                          } else if (libraryField) {
+                            // Field exists in library but no field ID configured
+                            iceEncompassField = '(Field ID not configured - Contact admin)';
+                          } else {
+                            // Field not found in library at all
+                            iceEncompassField = '(Field ID not found - Contact admin)';
+                          }
+                          
                           return {
-                            'ICE Encompass': `Fields.${fieldName.replace(/\s+/g, '')}`,
+                            'ICE Encompass': iceEncompassField,
                             'MeridianLink': fieldName.replace(/\s+/g, ''),
                             'Calyx Point': fieldName.replace(/\s+/g, ''),
                             'BytePro': fieldName.replace(/\s+/g, ''),
@@ -3825,14 +3858,23 @@ const QlikMigration = () => {
                                   <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
                                     <p className="text-sm font-medium text-slate-900 dark:text-white mb-3">LOS System Field Mappings</p>
                                     <div className="space-y-2">
-                                      {Object.entries(fieldDetails.losMappings).map(([losSystem, fieldName]) => (
-                                        <div key={losSystem} className="flex items-center justify-between py-2 px-3 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
-                                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{losSystem}</span>
-                                          <code className="text-xs text-slate-900 dark:text-white font-mono bg-slate-100 dark:bg-slate-900 px-2 py-1 rounded">
-                                            {fieldName as string}
-                                          </code>
-                                        </div>
-                                      ))}
+                                      {Object.entries(fieldDetails.losMappings).map(([losSystem, fieldName]) => {
+                                        // For ICE Encompass, ensure we display the field ID# format (e.g., "Fields.1236")
+                                        const displayValue = losSystem === 'ICE Encompass' 
+                                          ? (fieldName as string).startsWith('Fields.') 
+                                            ? fieldName as string 
+                                            : `Fields.${fieldName}`
+                                          : fieldName as string;
+                                        
+                                        return (
+                                          <div key={losSystem} className="flex items-center justify-between py-2 px-3 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{losSystem}</span>
+                                            <code className="text-xs text-slate-900 dark:text-white font-mono bg-slate-100 dark:bg-slate-900 px-2 py-1 rounded">
+                                              {displayValue}
+                                            </code>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-3 font-light">
                                       Reference field names for mapping data from your LOS system to Coheus v2

@@ -1042,6 +1042,13 @@ export const LOS_FIELD_LIBRARY: LOSField[] = [
     required: false,
     description: 'Date loan was registered in system',
     aliases: ['registrationDate', 'registered_date', 'registeredDate'],
+    // Note: Registration Date is NOT found in the Encompass 2020 URLA Field Guide
+    // This is likely a custom field or maps to another standard field (e.g., Started Date, Application Date)
+    // To find the correct field ID:
+    // 1. Use Encompass Field Search API: https://developer.icemortgagetechnology.com/developer-connect/reference/field-search
+    // 2. Check your Encompass instance's custom fields
+    // 3. Verify if it maps to "Started Date" (Fields.XXXX) or "Application Date" (Fields.15)
+    // encompassFieldId: 'Fields.XXXX', // TODO: Verify actual field ID in your Encompass instance
   },
   {
     sourceKey: 'started_date',
