@@ -231,6 +231,185 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     sqlQuery: `COUNT(CASE WHEN l.credit_pull_date IS NOT NULL THEN 1 END)`,
     dependencies: [],
     defaultDateField: 'credit_pull_date'
+  },
+  
+  // Funnel Metrics (based on Qlik Logic Dictionary)
+  // IMPORTANT: Date filtering should be on started_date (Started Year), NOT application_date
+  // RESPA App Status is then calculated based on whether application_date exists
+  'loans_started': {
+    id: 'loans_started',
+    name: 'Loans Started',
+    description: 'Total count of loans started. Filtered by Started Year (started_date) in Qlik.',
+    category: 'count',
+    formula: 'Count({<[Started Year]*={$(vYear)}>}[Loan Number])',
+    sqlQuery: `COUNT(l.loan_id)`,
+    dependencies: [],
+    defaultDateField: 'started_date' // Filter by started_date, NOT application_date
+  },
+  'loans_with_respa_app': {
+    id: 'loans_with_respa_app',
+    name: 'Loans with RESPA Applications',
+    description: 'Loans (filtered by Started Year) where RESPA App Status = Yes (application_date exists). Qlik: if(Len(Trim([Application Date]))>0,"Yes","No")',
+    category: 'count',
+    formula: 'Count({<[Started Year]*={$(vYear)}, [RESPA App Status]*={Yes}>}[Loan Number])',
+    sqlQuery: `COUNT(CASE WHEN l.application_date IS NOT NULL AND TRIM(l.application_date::text) != '' THEN 1 END)`,
+    dependencies: [],
+    defaultDateField: 'started_date' // Filter by started_date first, then check application_date
+  },
+  'loans_no_respa_app': {
+    id: 'loans_no_respa_app',
+    name: 'Loans with No RESPA Applications',
+    description: 'Loans (filtered by Started Year) where RESPA App Status = No (application_date is null). Qlik: if(Len(Trim([Application Date]))>0,"Yes","No")',
+    category: 'count',
+    formula: 'Count({<[Started Year]*={$(vYear)}, [RESPA App Status]*={No}>}[Loan Number])',
+    sqlQuery: `COUNT(CASE WHEN l.application_date IS NULL OR TRIM(l.application_date::text) = '' THEN 1 END)`,
+    dependencies: [],
+    defaultDateField: 'started_date' // Filter by started_date first, then check application_date
+  },
+  'originated_loans': {
+    id: 'originated_loans',
+    name: 'Originated Loans',
+    description: 'Loans with Pull Through Originated Flag = Yes. From Qlik: If(WildMatch([Current Loan Status],"*Originated*","*purchased*")>0,"Yes","No")',
+    category: 'count',
+    formula: 'Count({<[Started Year]*={$(vYear)}, [Pull Through Originated Flag]*={Yes}>}[Loan Number])',
+    sqlQuery: `COUNT(CASE 
+      WHEN l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%' THEN 1 
+    END)`,
+    dependencies: [],
+    defaultDateField: 'funding_date'
+  },
+  'fallout_withdrawn': {
+    id: 'fallout_withdrawn',
+    name: 'Fallout - Withdrawn',
+    description: 'Loans withdrawn/cancelled. From Qlik: WildMatch([Current Loan Status],"*withdraw*","*not accepted*","*incomp*")>0 AND Pull Through Originated Flag = No',
+    category: 'count',
+    formula: 'Count({<[Started Year]*={$(vYear)}, [Current Loan Status]={"*withdraw*","*not accepted*","*incomp*"}, [Pull Through Originated Flag]*={No}>}[Loan Number])',
+    sqlQuery: `COUNT(CASE 
+      WHEN (l.current_loan_status ILIKE '%withdraw%' OR l.current_loan_status ILIKE '%not accepted%' OR l.current_loan_status ILIKE '%incomp%')
+      AND NOT (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+      THEN 1 
+    END)`,
+    dependencies: [],
+    defaultDateField: 'application_date'
+  },
+  'fallout_denied': {
+    id: 'fallout_denied',
+    name: 'Fallout - Denied',
+    description: 'Loans denied. From Qlik: WildMatch([Current Loan Status],"*denied*")>0 AND Pull Through Originated Flag = No',
+    category: 'count',
+    formula: 'Count({<[Started Year]*={$(vYear)}, [Current Loan Status]={"*denied*"}, [Pull Through Originated Flag]*={No}>}[Loan Number])',
+    sqlQuery: `COUNT(CASE 
+      WHEN l.current_loan_status ILIKE '%denied%'
+      AND NOT (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+      THEN 1 
+    END)`,
+    dependencies: [],
+    defaultDateField: 'application_date'
+  },
+  
+  // Funnel Volume Metrics
+  // IMPORTANT: Date filtering should be on started_date (Started Year), NOT application_date
+  'loans_started_volume': {
+    id: 'loans_started_volume',
+    name: 'Loans Started Volume',
+    description: 'Total loan amount for all loans started (filtered by Started Year)',
+    category: 'volume',
+    formula: 'Sum({<[Started Year]*={$(vYear)}>}[Loan Amount])',
+    sqlQuery: `SUM(COALESCE(l.loan_amount, 0))`,
+    dependencies: [],
+    defaultDateField: 'started_date' // Filter by started_date
+  },
+  'loans_with_respa_app_volume': {
+    id: 'loans_with_respa_app_volume',
+    name: 'Loans with RESPA Applications Volume',
+    description: 'Total loan amount for loans (filtered by Started Year) with RESPA applications (application_date exists)',
+    category: 'volume',
+    formula: 'Sum({<[Started Year]*={$(vYear)}, [RESPA App Status]*={Yes}>}[Loan Amount])',
+    sqlQuery: `SUM(CASE WHEN l.application_date IS NOT NULL AND TRIM(l.application_date::text) != '' THEN COALESCE(l.loan_amount, 0) ELSE 0 END)`,
+    dependencies: [],
+    defaultDateField: 'started_date' // Filter by started_date first
+  },
+  'loans_no_respa_app_volume': {
+    id: 'loans_no_respa_app_volume',
+    name: 'Loans with No RESPA Applications Volume',
+    description: 'Total loan amount for loans (filtered by Started Year) without RESPA applications (application_date is null)',
+    category: 'volume',
+    formula: 'Sum({<[Started Year]*={$(vYear)}, [RESPA App Status]*={No}>}[Loan Amount])',
+    sqlQuery: `SUM(CASE WHEN l.application_date IS NULL OR TRIM(l.application_date::text) = '' THEN COALESCE(l.loan_amount, 0) ELSE 0 END)`,
+    dependencies: [],
+    defaultDateField: 'started_date' // Filter by started_date first
+  },
+  
+  // Personnel Metrics - for use with groupBy and personnel filters
+  // These can be filtered by loan_officer, processor, underwriter, branch, etc.
+  'lo_loan_count': {
+    id: 'lo_loan_count',
+    name: 'Loan Officer Loan Count',
+    description: 'Number of loans originated by loan officer. Use with loan_officer filter or groupBy: ["loan_officer"].',
+    category: 'count',
+    formula: 'Count({<[Loan Officer]>}[Loan Number])',
+    sqlQuery: `COUNT(*)`,
+    dependencies: [],
+    defaultDateField: 'funding_date'
+  },
+  'lo_volume': {
+    id: 'lo_volume',
+    name: 'Loan Officer Volume',
+    description: 'Total loan volume originated by loan officer. Use with loan_officer filter or groupBy: ["loan_officer"].',
+    category: 'volume',
+    formula: 'Sum({<[Loan Officer]>}[Loan Amount])',
+    sqlQuery: `SUM(COALESCE(l.loan_amount, 0))`,
+    dependencies: [],
+    defaultDateField: 'funding_date'
+  },
+  'lo_avg_cycle_time': {
+    id: 'lo_avg_cycle_time',
+    name: 'Loan Officer Avg Cycle Time',
+    description: 'Average cycle time (App to Close) for loan officer. Use with loan_officer filter or groupBy: ["loan_officer"].',
+    category: 'turn_time',
+    formula: 'Avg({<[Loan Officer]>}[App-Close])',
+    sqlQuery: `AVG(CASE 
+      WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
+      THEN DATE(l.closing_date) - DATE(l.application_date) 
+      ELSE NULL 
+    END)`,
+    dependencies: [],
+    defaultDateField: 'funding_date'
+  },
+  'lo_pull_through': {
+    id: 'lo_pull_through',
+    name: 'Loan Officer Pull Through Rate',
+    description: 'Pull through rate for loan officer (originated / total applications). Use with loan_officer filter.',
+    category: 'pull_through',
+    formula: 'Count({<[Loan Officer], [Pull Through Originated Flag]={Yes}>}[Loan Number]) / Count({<[Loan Officer], [RESPA App Status]={Yes}>}[Loan Number])',
+    sqlQuery: `ROUND(
+      COUNT(CASE WHEN l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%' THEN 1 END)::float 
+      / NULLIF(COUNT(CASE WHEN l.application_date IS NOT NULL AND l.current_loan_status NOT ILIKE '%active%' THEN 1 END), 0) * 100
+    , 1)`,
+    dependencies: [],
+    defaultDateField: 'started_date'
+  },
+  
+  // Branch Metrics
+  'branch_loan_count': {
+    id: 'branch_loan_count',
+    name: 'Branch Loan Count',
+    description: 'Number of loans by branch. Use with branch filter or groupBy: ["branch"].',
+    category: 'count',
+    formula: 'Count({<[Branch]>}[Loan Number])',
+    sqlQuery: `COUNT(*)`,
+    dependencies: [],
+    defaultDateField: 'funding_date'
+  },
+  'branch_volume': {
+    id: 'branch_volume',
+    name: 'Branch Volume',
+    description: 'Total loan volume by branch. Use with branch filter or groupBy: ["branch"].',
+    category: 'volume',
+    formula: 'Sum({<[Branch]>}[Loan Amount])',
+    sqlQuery: `SUM(COALESCE(l.loan_amount, 0))`,
+    dependencies: [],
+    defaultDateField: 'funding_date'
   }
 };
 
@@ -301,9 +480,41 @@ function buildWhereClause(filters: Record<string, any>, paramOffset: number = 0)
     params.push(filters.branch);
   }
   
+  // Personnel filters - support both ID and name
   if (filters.loan_officer_id) {
     clauses.push(`l.loan_officer_id = $${paramOffset + params.length + 1}`);
     params.push(filters.loan_officer_id);
+  }
+  
+  if (filters.loan_officer) {
+    // Filter by loan officer name (case-insensitive partial match)
+    clauses.push(`LOWER(l.loan_officer) LIKE LOWER($${paramOffset + params.length + 1})`);
+    params.push(`%${filters.loan_officer}%`);
+  }
+  
+  if (filters.processor) {
+    clauses.push(`LOWER(l.processor) LIKE LOWER($${paramOffset + params.length + 1})`);
+    params.push(`%${filters.processor}%`);
+  }
+  
+  if (filters.underwriter) {
+    clauses.push(`LOWER(l.underwriter) LIKE LOWER($${paramOffset + params.length + 1})`);
+    params.push(`%${filters.underwriter}%`);
+  }
+  
+  if (filters.closer) {
+    clauses.push(`LOWER(l.closer) LIKE LOWER($${paramOffset + params.length + 1})`);
+    params.push(`%${filters.closer}%`);
+  }
+  
+  if (filters.channel) {
+    clauses.push(`l.channel = $${paramOffset + params.length + 1}`);
+    params.push(filters.channel);
+  }
+  
+  if (filters.investor) {
+    clauses.push(`l.investor = $${paramOffset + params.length + 1}`);
+    params.push(filters.investor);
   }
   
   if (filters.status) {
@@ -481,4 +692,108 @@ export async function queryMetricsByCategory(
  */
 export function getMetricsCatalog(): MetricDefinition[] {
   return Object.values(METRICS_CATALOG);
+}
+
+/**
+ * Query a metric grouped by a field (e.g., loan_officer, branch)
+ * Returns an array of results with the group key and metric value
+ */
+export interface GroupedMetricResult {
+  groupKey: string;
+  value: number | string;
+  metadata?: Record<string, any>;
+}
+
+export async function queryMetricGroupedBy(
+  tenantPool: pg.Pool,
+  metricId: string,
+  groupBy: 'loan_officer' | 'branch' | 'processor' | 'underwriter' | 'channel' | 'investor' | 'loan_type',
+  options: MetricQueryOptions = {}
+): Promise<GroupedMetricResult[]> {
+  const metric = METRICS_CATALOG[metricId];
+  if (!metric) {
+    throw new Error(`Metric ${metricId} not found in catalog`);
+  }
+  
+  const dateField = options.dateField || metric.defaultDateField || 'application_date';
+  
+  // Build date range clause
+  let dateRangeClause;
+  if (metric.ignoreDateFilter) {
+    dateRangeClause = { clause: '', params: [] };
+  } else {
+    dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
+  }
+  
+  const additionalFiltersClause = options.additionalFilters 
+    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
+    : { clause: '', params: [] };
+  
+  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  
+  // Validate groupBy field
+  const allowedGroupByFields = ['loan_officer', 'branch', 'processor', 'underwriter', 'channel', 'investor', 'loan_type'];
+  if (!allowedGroupByFields.includes(groupBy)) {
+    throw new Error(`Invalid groupBy field: ${groupBy}. Allowed: ${allowedGroupByFields.join(', ')}`);
+  }
+  
+  // Build query with GROUP BY
+  const query = `
+    SELECT 
+      l.${groupBy} as group_key,
+      ${metric.sqlQuery} as metric_value,
+      COUNT(*) as count
+    FROM public.loans l
+    WHERE l.${groupBy} IS NOT NULL 
+      AND TRIM(l.${groupBy}::text) != ''
+      ${dateRangeClause.clause}
+      ${additionalFiltersClause.clause}
+    GROUP BY l.${groupBy}
+    ORDER BY ${metric.sqlQuery} DESC NULLS LAST
+    LIMIT 50
+  `;
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[MetricsService] Querying ${metricId} grouped by ${groupBy}:`, {
+      query,
+      params
+    });
+  }
+  
+  const result = await tenantPool.query(query, params);
+  
+  return result.rows.map(row => ({
+    groupKey: row.group_key,
+    value: parseFloat(row.metric_value) || 0,
+    metadata: {
+      count: parseInt(row.count) || 0
+    }
+  }));
+}
+
+/**
+ * Get distinct values for a field (for filter dropdowns)
+ */
+export async function getDistinctFieldValues(
+  tenantPool: pg.Pool,
+  field: 'loan_officer' | 'branch' | 'processor' | 'underwriter' | 'channel' | 'investor' | 'loan_type' | 'current_loan_status'
+): Promise<string[]> {
+  const allowedFields = [
+    'loan_officer', 'branch', 'processor', 'underwriter', 
+    'channel', 'investor', 'loan_type', 'current_loan_status'
+  ];
+  
+  if (!allowedFields.includes(field)) {
+    throw new Error(`Invalid field: ${field}. Allowed: ${allowedFields.join(', ')}`);
+  }
+  
+  const result = await tenantPool.query(`
+    SELECT DISTINCT ${field}
+    FROM public.loans
+    WHERE ${field} IS NOT NULL AND TRIM(${field}::text) != ''
+    ORDER BY ${field}
+    LIMIT 100
+  `);
+  
+  return result.rows.map(row => row[field]);
 }

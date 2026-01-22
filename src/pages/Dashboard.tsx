@@ -1043,11 +1043,11 @@ const Dashboard = () => {
                 
                 {/* TopTiering Loan Funnel - Full Width Section */}
                 {dashboardVisibility.topTiering && <div className="section-top-tiering mt-12 sm:mt-16 mb-4 sm:mb-8">
-                    <LoanFunnelView view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} />
+                    <LoanFunnelView view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} selectedTenantId={selectedTenantId} />
                   </div>}
                 
                 {/* Leader Board Section */}
-                {dashboardVisibility.leaderboard && <div className="section-leaderboard"><LeaderBoardSection dateFilter={dateFilter} /></div>}
+                {dashboardVisibility.leaderboard && <div className="section-leaderboard"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
               </div>
             )}
           </div>}

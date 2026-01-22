@@ -50,15 +50,37 @@ router.get('/funnel', authenticateToken, attachTenantContext, async (req: AuthRe
 /**
  * GET /api/dashboard/leaderboard
  * Get leaderboard data for a specific timeframe
+ * Supports filters: branch, scope (all/branch/team)
+ * Supports custom date range with startDate and endDate parameters
  */
 router.get('/leaderboard', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    const { timeframe = 'mtd' } = z.object({
-      timeframe: z.enum(['wtd', 'mtd', 'qtd', 'ytd']).optional(),
-    }).parse(req.query);
+    const querySchema = z.object({
+      // Extended timeframes: wtd, mtd, qtd, ytd, lm (last month), lq (last quarter), ly (last year), custom
+      timeframe: z.enum(['wtd', 'mtd', 'qtd', 'ytd', 'lm', 'lq', 'ly', 'custom']).optional(),
+      branch: z.string().optional(),
+      scope: z.enum(['all', 'branch', 'team']).optional(),
+      startDate: z.string().optional(), // For custom date range (YYYY-MM-DD)
+      endDate: z.string().optional(),   // For custom date range (YYYY-MM-DD)
+    });
+    
+    const { timeframe = 'mtd', branch, scope, startDate, endDate } = querySchema.parse(req.query);
 
     const tenantContext = getTenantContext(req);
-    const result = await getLeaderboardData(tenantContext.tenantPool, timeframe as 'wtd' | 'mtd' | 'qtd' | 'ytd');
+    
+    // Build filters object
+    const filters = {
+      branch: branch || undefined,
+      scope: (scope as 'all' | 'branch' | 'team') || 'all',
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    };
+    
+    const result = await getLeaderboardData(
+      tenantContext.tenantPool, 
+      timeframe as 'wtd' | 'mtd' | 'qtd' | 'ytd' | 'lm' | 'lq' | 'ly' | 'custom',
+      filters
+    );
     res.json(result);
   } catch (error: any) {
     if (error instanceof z.ZodError) {

@@ -13,6 +13,7 @@ import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
+import Loans from "./pages/Loans";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
@@ -125,6 +126,7 @@ const App = () => (
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/insights" element={<Dashboard />} />
+              <Route path="/loans" element={<Loans />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/subscription/success" element={<SubscriptionSuccess />} />
               <Route path="/subscription/cancel" element={<SubscriptionCancel />} />

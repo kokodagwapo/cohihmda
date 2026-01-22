@@ -23,6 +23,93 @@ function daysBetween(date1: Date | string | null, date2: Date | string | null): 
 const router = Router();
 
 /**
+ * GET /api/loans/schema
+ * Get the schema/columns of the loans table for dynamic table rendering
+ */
+router.get('/schema', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+
+    // Get column information from information_schema
+    const result = await tenantPool.query(`
+      SELECT 
+        column_name,
+        data_type,
+        is_nullable,
+        column_default
+      FROM information_schema.columns 
+      WHERE table_schema = 'public' 
+      AND table_name = 'loans'
+      ORDER BY ordinal_position
+    `);
+
+    // Map to friendly column info
+    const columns = result.rows.map(col => ({
+      name: col.column_name,
+      type: col.data_type,
+      nullable: col.is_nullable === 'YES',
+      // Generate a display name from column_name
+      displayName: col.column_name
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (l: string) => l.toUpperCase()),
+      // Categorize columns for UI grouping
+      category: categorizeColumn(col.column_name)
+    }));
+
+    res.json({ columns });
+  } catch (error: any) {
+    logError('Error fetching loans schema', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to fetch loans schema' });
+  }
+});
+
+// Helper function to categorize columns
+function categorizeColumn(columnName: string): string {
+  if (['id', 'loan_id', 'loan_number', 'guid'].includes(columnName)) return 'identifier';
+  if (columnName.includes('date') || columnName.includes('_at')) return 'date';
+  if (columnName.includes('amount') || columnName.includes('rate') || columnName.includes('ltv') || columnName.includes('dti') || columnName.includes('price') || columnName.includes('value') || columnName.includes('fee') || columnName.includes('income') || columnName.includes('assets')) return 'financial';
+  if (columnName.includes('property') || columnName.includes('county') || columnName.includes('state') || columnName.includes('city') || columnName.includes('zip') || columnName.includes('street')) return 'property';
+  if (columnName.includes('borrower') || columnName.includes('borr_') || columnName.includes('co_borr')) return 'borrower';
+  if (columnName.includes('officer') || columnName.includes('processor') || columnName.includes('underwriter') || columnName.includes('closer')) return 'team';
+  if (columnName.includes('status') || columnName.includes('milestone')) return 'status';
+  if (columnName.includes('loan_type') || columnName.includes('loan_purpose') || columnName.includes('loan_program') || columnName.includes('product')) return 'loan_details';
+  if (columnName.includes('branch') || columnName.includes('channel') || columnName.includes('investor') || columnName.includes('nmls')) return 'organization';
+  return 'other';
+}
+
+/**
+ * GET /api/loans/distinct-values
+ * Get distinct values for a specific column (for filter dropdowns)
+ */
+router.get('/distinct-values/:column', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+    const { column } = req.params;
+    
+    // Whitelist of columns that can be queried for distinct values (prevent SQL injection)
+    const allowedColumns = [
+      'current_loan_status', 'loan_type', 'loan_purpose', 'loan_program', 'product_type',
+      'property_state', 'property_city', 'property_county', 'property_type', 'occupancy_type',
+      'branch', 'channel', 'investor', 'loan_officer', 'processor', 'underwriter', 'closer',
+      'lien_position', 'refinance_cash_out_type', 'atr_loan_type', 'qm_loan_type'
+    ];
+    
+    if (!allowedColumns.includes(column)) {
+      return res.status(400).json({ error: 'Invalid column for distinct values query' });
+    }
+
+    const result = await tenantPool.query(
+      `SELECT DISTINCT ${column} as value FROM public.loans WHERE ${column} IS NOT NULL AND ${column} != '' ORDER BY ${column} LIMIT 100`
+    );
+
+    res.json({ values: result.rows.map(r => r.value) });
+  } catch (error: any) {
+    logError('Error fetching distinct values', error, { userId: req.userId, column: req.params.column });
+    res.status(500).json({ error: error.message || 'Failed to fetch distinct values' });
+  }
+});
+
+/**
  * GET /api/loans
  * Get loans for authenticated tenant with optional filters
  * Uses tenant-specific database (no tenant_id in WHERE clause)
@@ -33,77 +120,133 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
 
     // Parse query parameters
     const {
-      status,
-      loan_type,
-      limit = '100',
+      limit = '50',
       offset = '0',
-      start_date,
-      end_date,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+      search,
+      ...filterParams
     } = req.query;
 
-    // Build query (no tenant_id filter - using tenant-specific database)
-    let query = 'SELECT * FROM public.loans WHERE 1=1';
+    // Build WHERE clause dynamically
+    const conditions: string[] = [];
     const params: any[] = [];
     let paramIndex = 1;
 
-    if (status) {
-      query += ` AND status = $${paramIndex}`;
-      params.push(status);
+    // Handle search across multiple fields
+    if (search && typeof search === 'string' && search.trim()) {
+      const searchTerm = `%${search.trim().toLowerCase()}%`;
+      conditions.push(`(
+        LOWER(COALESCE(loan_id, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(loan_number, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(current_loan_status, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(loan_type, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(loan_officer, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(branch, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(property_city, '')) LIKE $${paramIndex} OR
+        LOWER(COALESCE(property_state, '')) LIKE $${paramIndex}
+      )`);
+      params.push(searchTerm);
       paramIndex++;
     }
 
-    if (loan_type) {
-      query += ` AND loan_type = $${paramIndex}`;
-      params.push(loan_type);
+    // Handle specific column filters
+    const filterableColumns = [
+      'current_loan_status', 'loan_type', 'loan_purpose', 'loan_program', 'product_type',
+      'property_state', 'property_city', 'property_county', 'property_type', 'occupancy_type',
+      'branch', 'channel', 'investor', 'loan_officer', 'processor', 'underwriter', 'closer',
+      'lien_position', 'refinance_cash_out_type'
+    ];
+
+    for (const [key, value] of Object.entries(filterParams)) {
+      if (filterableColumns.includes(key) && value && typeof value === 'string') {
+        conditions.push(`${key} = $${paramIndex}`);
+        params.push(value);
+        paramIndex++;
+      }
+    }
+
+    // Handle date range filters with configurable date field
+    // date_field: which date column to filter on (default: started_date, fallback to application_date, then created_at)
+    const allowedDateFields = ['started_date', 'application_date', 'closing_date', 'funding_date', 'lock_date', 'credit_pull_date', 'approval_date', 'created_at'];
+    const dateField = filterParams.date_field && allowedDateFields.includes(filterParams.date_field as string) 
+      ? filterParams.date_field as string 
+      : 'started_date'; // Default to started_date
+    
+    if (filterParams.start_date && typeof filterParams.start_date === 'string') {
+      // Use COALESCE to handle nulls - try the selected field, then fall back to created_at
+      conditions.push(`COALESCE(${dateField}, created_at) >= $${paramIndex}`);
+      params.push(filterParams.start_date);
+      paramIndex++;
+    }
+    if (filterParams.end_date && typeof filterParams.end_date === 'string') {
+      conditions.push(`COALESCE(${dateField}, created_at) <= $${paramIndex}`);
+      params.push(filterParams.end_date);
       paramIndex++;
     }
 
-    if (start_date) {
-      query += ` AND application_date >= $${paramIndex}`;
-      params.push(start_date);
+    // Handle amount range filters
+    if (filterParams.min_amount && typeof filterParams.min_amount === 'string') {
+      conditions.push(`loan_amount >= $${paramIndex}`);
+      params.push(parseFloat(filterParams.min_amount));
+      paramIndex++;
+    }
+    if (filterParams.max_amount && typeof filterParams.max_amount === 'string') {
+      conditions.push(`loan_amount <= $${paramIndex}`);
+      params.push(parseFloat(filterParams.max_amount));
       paramIndex++;
     }
 
-    if (end_date) {
-      query += ` AND application_date <= $${paramIndex}`;
-      params.push(end_date);
-      paramIndex++;
+    // Handle null/empty field filters
+    // null_fields: comma-separated list of columns that should be NULL/empty
+    // not_null_fields: comma-separated list of columns that should NOT be NULL/empty
+    const nullableColumns = [
+      'started_date', 'application_date', 'closing_date', 'funding_date', 'lock_date', 'credit_pull_date',
+      'approval_date', 'ctc_date', 'docs_out_date', 'docs_signing_date',
+      'loan_officer', 'processor', 'underwriter', 'closer',
+      'fico_score', 'interest_rate', 'loan_amount',
+      'property_state', 'property_city', 'branch'
+    ];
+    
+    if (filterParams.null_fields && typeof filterParams.null_fields === 'string') {
+      const nullFields = filterParams.null_fields.split(',').filter(f => nullableColumns.includes(f.trim()));
+      nullFields.forEach(field => {
+        conditions.push(`(${field.trim()} IS NULL OR ${field.trim()}::text = '')`);
+      });
+    }
+    
+    if (filterParams.not_null_fields && typeof filterParams.not_null_fields === 'string') {
+      const notNullFields = filterParams.not_null_fields.split(',').filter(f => nullableColumns.includes(f.trim()));
+      notNullFields.forEach(field => {
+        conditions.push(`(${field.trim()} IS NOT NULL AND ${field.trim()}::text != '')`);
+      });
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Validate sort column (prevent SQL injection)
+    const allowedSortColumns = [
+      'loan_id', 'loan_number', 'loan_amount', 'current_loan_status', 'loan_type',
+      'application_date', 'closing_date', 'funding_date', 'lock_date', 'created_at',
+      'property_state', 'property_city', 'branch', 'loan_officer', 'interest_rate'
+    ];
+    const sortColumn = allowedSortColumns.includes(sort_by as string) ? sort_by : 'created_at';
+    const sortDirection = sort_order === 'asc' ? 'ASC' : 'DESC';
+
+    // Execute main query
+    const query = `
+      SELECT * FROM public.loans 
+      ${whereClause}
+      ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
     params.push(parseInt(limit as string), parseInt(offset as string));
 
     const result = await tenantPool.query(query, params);
 
-    // Get total count for pagination (no tenant_id filter - using tenant-specific database)
-    let countQuery = 'SELECT COUNT(*) FROM public.loans WHERE 1=1';
-    const countParams: any[] = [];
-    let countParamIndex = 1;
-
-    if (status) {
-      countQuery += ` AND status = $${countParamIndex}`;
-      countParams.push(status);
-      countParamIndex++;
-    }
-
-    if (loan_type) {
-      countQuery += ` AND loan_type = $${countParamIndex}`;
-      countParams.push(loan_type);
-      countParamIndex++;
-    }
-
-    if (start_date) {
-      countQuery += ` AND application_date >= $${countParamIndex}`;
-      countParams.push(start_date);
-      countParamIndex++;
-    }
-
-    if (end_date) {
-      countQuery += ` AND application_date <= $${countParamIndex}`;
-      countParams.push(end_date);
-      countParamIndex++;
-    }
-
+    // Get total count for pagination
+    const countParams = params.slice(0, -2); // Remove limit and offset
+    const countQuery = `SELECT COUNT(*) FROM public.loans ${whereClause}`;
     const countResult = await tenantPool.query(countQuery, countParams);
     const total = parseInt(countResult.rows[0].count);
 
@@ -112,6 +255,8 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
       total,
       limit: parseInt(limit as string),
       offset: parseInt(offset as string),
+      page: Math.floor(parseInt(offset as string) / parseInt(limit as string)) + 1,
+      totalPages: Math.ceil(total / parseInt(limit as string)),
     });
   } catch (error: any) {
     logError('Error fetching loans', error, { userId: req.userId });
@@ -421,95 +566,191 @@ router.get('/stats', authenticateToken, apiLimiter, async (req: AuthRequest, res
 /**
  * GET /api/loans/funnel
  * Get funnel data calculated from loans
+ * Uses tenant-specific database via attachTenantContext (same as metrics endpoints)
  */
-router.get('/funnel', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id from query or user profile (supports super admins)
-    let tenantId = req.query.tenant_id as string;
-    
-    if (!tenantId) {
-      const profileResult = await retryQuery(
-        () => pool.query(
-          'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-          [req.userId]
-        ),
-        3, 1000
-      );
-      tenantId = profileResult.rows[0]?.tenant_id;
-    }
-    
-    // If still no tenant, check if user is super admin and use Default Tenant
-    if (!tenantId) {
-      const userResult = await retryQuery(
-        () => pool.query(
-          'SELECT role FROM public.users WHERE id = $1',
-          [req.userId]
-        ),
-        3, 1000
-      );
-      if (userResult.rows[0]?.role === 'super_admin') {
-        const defaultTenantResult = await retryQuery(
-          () => pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`
-          ),
-          3, 1000
-        );
-        if (defaultTenantResult.rows.length > 0) {
-          tenantId = defaultTenantResult.rows[0].id;
-        }
-      }
-    }
+    const tenantContext = getTenantContext(req);
+    const tenantPool = tenantContext.tenantPool;
+    const tenantId = tenantContext.tenantId;
 
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
+    // Parse optional filters
+    const yearFilter = req.query.year ? parseInt(req.query.year as string) : null;
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const loanOfficerId = req.query.loan_officer_id as string | undefined;
+    const branch = req.query.branch as string | undefined;
+    const loanType = req.query.loan_type as string | undefined;
+    // Option to exclude "Out of Range" loans
+    // NOTE: The Qlik "Loans Started" waterfall does NOT apply Out of Range filter by default
+    // The Out of Range filter is a UI toggle that users can optionally enable
+    // Default: false (include all loans, matching Qlik's default funnel behavior)
+    const excludeOutOfRange = req.query.exclude_out_of_range === 'true'; // Default: false
+    
+    // Build WHERE clause for optional filters (no tenant_id needed - tenant DB is already isolated)
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+    
+    // Handle date filtering - MUST use started_date (not application_date)
+    // Qlik Logic: Loans Started is filtered by [Started Year], then RESPA App Status is calculated
+    // from those started loans based on whether application_date exists
+    if (startDate && endDate) {
+      // Custom date range filter on started_date
+      // Use COALESCE to fall back to created_at only if started_date is NULL
+      conditions.push(`COALESCE(started_date, created_at) >= $${paramIndex}`);
+      params.push(startDate);
+      paramIndex++;
+      conditions.push(`COALESCE(started_date, created_at) <= $${paramIndex}`);
+      params.push(endDate);
+      paramIndex++;
+    } else if (yearFilter) {
+      // Year filter on started_date
+      conditions.push(`EXTRACT(YEAR FROM COALESCE(started_date, created_at)) = $${paramIndex}`);
+      params.push(yearFilter);
+      paramIndex++;
     }
+    if (loanOfficerId) {
+      conditions.push(`loan_officer_id = $${paramIndex}`);
+      params.push(loanOfficerId);
+      paramIndex++;
+    }
+    if (branch) {
+      conditions.push(`branch = $${paramIndex}`);
+      params.push(branch);
+      paramIndex++;
+    }
+    if (loanType) {
+      conditions.push(`loan_type = $${paramIndex}`);
+      params.push(loanType);
+      paramIndex++;
+    }
+    
+    // Out of Range Exclusion (Qlik default behavior)
+    // From Transform.qvs lines 671-675:
+    //   if([Interest Rate]<=0 OR [Interest Rate]>=15, 'Yes', 'No') as [Interest Rate Out of Range Flag],
+    //   if([FICO Score]<350 OR [FICO Score]>=900, 'Yes', 'No') as [FICO Out of Range Flag],
+    //   if([LTV Ratio]>=110 OR [LTV Ratio]<=0, 'Yes', 'No') as [LTV Out of Range Flag],
+    //   if([BE DTI Ratio]>=70 OR [BE DTI Ratio]<=0, 'Yes', 'No') as [DTI Out of Range Flag],
+    // 
+    // IMPORTANT: Upper bounds use STRICT inequality (<), not inclusive (<=)
+    if (excludeOutOfRange) {
+      // FICO Score: In Range = 350 <= x < 900 (Out of Range = < 350 OR >= 900)
+      conditions.push(`(fico_score IS NULL OR (fico_score >= 350 AND fico_score < 900))`);
+      // Interest Rate: In Range = 0 < x < 15 (Out of Range = <= 0 OR >= 15)
+      conditions.push(`(interest_rate IS NULL OR (interest_rate > 0 AND interest_rate < 15))`);
+      // LTV Ratio: In Range = 0 < x < 110 (Out of Range = <= 0 OR >= 110)
+      conditions.push(`(ltv_ratio IS NULL OR (ltv_ratio > 0 AND ltv_ratio < 110))`);
+      // BE DTI Ratio: In Range = 0 < x < 70 (Out of Range = <= 0 OR >= 70)
+      conditions.push(`(be_dti_ratio IS NULL OR (be_dti_ratio > 0 AND be_dti_ratio < 70))`);
+    }
+    
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Get all loans for tenant (optimized query - select needed columns including raw_data)
-    // Use retryQuery for database resilience
+    logInfo('[Funnel] Querying tenant database', { 
+      whereClause, 
+      params,
+      tenantId,
+      tenantName: tenantContext.tenantInfo.name,
+      excludeOutOfRange,
+      dateFilter: { startDate, endDate, yearFilter }
+    });
+
+    // Get all loans from tenant-specific database (no tenant_id filter needed)
+    // Using only columns that exist in the tenant database schema
+    // IMPORTANT: started_date is the primary date for "Loans Started" (per Qlik logic)
+    //            application_date is used to determine RESPA App Status (has app vs no app)
+    // Note: Out of Range columns (fico_score, etc.) are only included if excludeOutOfRange is true
+    const baseColumns = `loan_id, loan_amount, loan_type, current_loan_status,
+          started_date, application_date, closing_date, lock_date, funding_date, branch`;
+    
+    // Only include Out of Range columns if we're filtering on them
+    const selectColumns = excludeOutOfRange 
+      ? `${baseColumns}, fico_score, ltv_ratio, be_dti_ratio, interest_rate`
+      : baseColumns;
+    
     const loansResult = await retryQuery(
-      () => pool.query(
-        `SELECT 
-          loan_id, borrower_name, loan_amount, loan_type, status, 
-          application_date, closing_date, lock_date, interest_rate,
-          loan_purpose, branch, credit_pull_date, cycle_time_days,
-          raw_data
+      () => tenantPool.query(
+        `SELECT ${selectColumns}
          FROM public.loans 
-         WHERE tenant_id = $1 
-         ORDER BY application_date DESC`,
-        [tenantId]
+         ${whereClause}
+         ORDER BY COALESCE(started_date, created_at) DESC`,
+        params
       ),
       2, // max retries
       500 // delay between retries
     );
 
-    // Enhance loans with data from raw_data for fields not in main columns
-    const loans = loansResult.rows.map(loan => {
-      const rawData = typeof loan.raw_data === 'string' ? JSON.parse(loan.raw_data) : (loan.raw_data || {});
-      return {
-        ...loan,
-        // Extract fields from raw_data if not in main columns
-        fico_score: rawData.fico_score || rawData.fico,
-        ltv: rawData.ltv || rawData.loan_to_value,
-        respa_date: rawData.respa_date || rawData.respaDate,
-        fallout_reason: rawData.fallout_reason || rawData.falloutReason || rawData.fallout,
-        loan_officer_name: rawData.loan_officer_name || rawData.loan_officer || rawData.officer_name,
-      };
+    // Debug: Also get total count without date filter to understand the gap
+    const totalCountResult = await tenantPool.query(`SELECT COUNT(*) as total FROM public.loans`);
+    const totalInDb = totalCountResult.rows[0]?.total || 0;
+    
+    // Debug: Get count by year to see distribution
+    const yearCountResult = await tenantPool.query(`
+      SELECT EXTRACT(YEAR FROM COALESCE(started_date, created_at)) as year, COUNT(*) as count
+      FROM public.loans 
+      GROUP BY EXTRACT(YEAR FROM COALESCE(started_date, created_at))
+      ORDER BY year DESC
+      LIMIT 5
+    `);
+    
+    // Debug: Get distinct current_loan_status values with counts
+    const statusCountResult = await tenantPool.query(`
+      SELECT current_loan_status, COUNT(*) as count
+      FROM public.loans 
+      ${whereClause.length > 0 ? whereClause : ''}
+      GROUP BY current_loan_status
+      ORDER BY count DESC
+    `, params);
+    
+    logInfo('[Funnel] Query returned', { 
+      totalLoans: loansResult.rows.length,
+      totalInDb,
+      loansByYear: yearCountResult.rows,
+      statusCounts: statusCountResult.rows.slice(0, 10), // Top 10 statuses
+      tenantId,
+      dateFilter: { startDate, endDate, yearFilter },
+      sampleLoans: loansResult.rows.slice(0, 3).map(r => ({ 
+        current_loan_status: r.current_loan_status,
+        started_date: r.started_date,
+        application_date: r.application_date,
+        funding_date: r.funding_date
+      }))
     });
 
-    // Infer status based on dates and raw status
+    // Use loan data directly from tenant database
+    const loans = loansResult.rows;
+
+    // Infer status based on current_loan_status field (tenant DB format) and dates
     const getInferredStatus = (loan: any) => {
-      if (loan.closing_date) return 'Closed';
+      // First check dates for definitive status (most reliable)
+      if (loan.funding_date || loan.closing_date) return 'Closed';
       if (loan.lock_date) return 'Locked';
-      const rawStatus = (loan.status || '').toString().toUpperCase();
-      // Handle all possible status values from both LOS imports and sample data
-      if (['ACTIVE', 'SUBMITTED', 'APPROVED', 'CTC', 'STARTED', 'INQUIRY', 'PROCESSING', 'UNDERWRITING'].includes(rawStatus)) return 'Active';
-      if (['WITHDRAWN', 'CANCELLED'].includes(rawStatus)) return 'Withdrawn';
-      if (['DENIED', 'DECLINED', 'REJECTED'].includes(rawStatus)) return 'Denied';
-      if (['ORIGINATED', 'FUNDED', 'CLOSED', 'COMPLETE', 'COMPLETED'].includes(rawStatus)) return 'Closed';
-      if (['LOCKED'].includes(rawStatus)) return 'Locked';
-      // If status is a state code (2 letters), treat as active
-      if (/^[A-Z]{2}$/.test(rawStatus)) return 'Active';
-      return 'Active'; // Default
+      
+      // Use current_loan_status from tenant database
+      const currentStatus = (loan.current_loan_status || '').toString().toLowerCase().trim();
+      
+      // Map known current_loan_status values (from tenant database)
+      // Based on observed values: 'Active Loan', 'Application approved but not accepted', 
+      // 'Application denied', 'Application withdrawn', 'File Closed for incompleteness', 'Loan Originated'
+      if (currentStatus.includes('active loan')) return 'Active';
+      if (currentStatus.includes('loan originated')) return 'Closed';
+      if (currentStatus.includes('application denied') || currentStatus.includes('denied')) return 'Denied';
+      if (currentStatus.includes('application withdrawn') || currentStatus.includes('withdrawn')) return 'Withdrawn';
+      if (currentStatus.includes('file closed') || currentStatus.includes('incompleteness')) return 'Withdrawn';
+      if (currentStatus.includes('approved but not accepted')) return 'Active'; // Still in progress
+      
+      // Handle other common status values
+      if (['active', 'submitted', 'approved', 'ctc', 'started', 'inquiry', 'processing', 'underwriting'].includes(currentStatus)) {
+        return 'Active';
+      }
+      if (currentStatus === 'locked') return 'Locked';
+      if (['withdrawn', 'cancelled'].includes(currentStatus)) return 'Withdrawn';
+      if (['denied', 'declined'].includes(currentStatus)) return 'Denied';
+      if (['funded', 'closed', 'originated', 'complete', 'completed'].includes(currentStatus)) return 'Closed';
+      
+      // If no status or unrecognized, default to active
+      return 'Active';
     };
 
     const loansWithInferredStatus = loans.map(loan => ({
@@ -521,36 +762,91 @@ router.get('/funnel', authenticateToken, apiLimiter, async (req: AuthRequest, re
     const loansStarted = loans.length;
     const loansStartedVolume = loans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
 
-    // Active loans (not closed) - smart detection
-    const stillActive = loansWithInferredStatus.filter(l =>
-      ['Active', 'Locked', 'Submitted', 'Approved', 'CTC'].includes(l.inferred_status)
+    // RESPA App Status logic from Qlik: if(Len(Trim([Application Date]))>0,'Yes','No')
+    // Loans with RESPA Application = loans WHERE application_date IS NOT NULL
+    // Loans with No RESPA Application = loans WHERE application_date IS NULL
+    const loansWithRespaApp = loans.filter(l => 
+      l.application_date !== null && l.application_date !== undefined && String(l.application_date).trim() !== ''
     );
+    const loansWithRespaAppVolume = loansWithRespaApp.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
+    
+    const loansNoRespaApp = loans.filter(l => 
+      l.application_date === null || l.application_date === undefined || String(l.application_date).trim() === ''
+    );
+    const loansNoRespaAppVolume = loansNoRespaApp.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
+
+    // Active Loan Flag from Qlik: if("Current Loan Status" = 'Active Loan' AND Len([Application Date])>0, 'Yes', 'No')
+    // "Still Active" loans must have:
+    // 1. Current Loan Status = 'Active Loan' (not just any active status)
+    // 2. AND application_date exists (not null/empty)
+    const stillActive = loans.filter(l => {
+      const currentStatus = (l.current_loan_status || '').toString().toLowerCase().trim();
+      const hasApplicationDate = l.application_date !== null && l.application_date !== undefined && String(l.application_date).trim() !== '';
+      // Active Loan Flag = 'Yes' when status is 'Active Loan' AND has application date
+      return currentStatus === 'active loan' && hasApplicationDate;
+    });
     const stillActiveVolume = stillActive.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
 
-    // Originated/Closed loans - smart detection
-    const originated = loansWithInferredStatus.filter(l =>
-      ['Closed', 'Originated', 'Funded'].includes(l.inferred_status)
-    );
+    // Originated loans - Pull Through Originated Flag from Qlik
+    // Qlik: If(WildMatch([Current Loan Status],'*Originated*','*purchased*')>0,'Yes','No') as [Pull Through Originated Flag]
+    // This checks ONLY the current_loan_status field, not dates
+    const originated = loans.filter(l => {
+      const currentStatus = (l.current_loan_status || '').toString().toLowerCase();
+      return currentStatus.includes('originated') || currentStatus.includes('purchased');
+    });
     const originatedVolume = originated.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
 
-    // Fallout - Withdrawn (use inferred_status for consistency)
-    const falloutWithdrawn = loansWithInferredStatus.filter(l =>
-      l.inferred_status === 'Withdrawn'
-    );
+    // Fallout - Withdrawn
+    // Qlik: If(WildMatch([Current Loan Status],'*withdraw*','*not accepted*','*incomp*')>0,1,0)
+    // AND [Pull Through Originated Flag]*={No} (not originated)
+    const falloutWithdrawn = loans.filter(l => {
+      const currentStatus = (l.current_loan_status || '').toString().toLowerCase();
+      const isWithdrawn = currentStatus.includes('withdraw') || 
+                          currentStatus.includes('not accepted') || 
+                          currentStatus.includes('incomp');
+      // Exclude if already originated
+      const isOriginated = currentStatus.includes('originated') || currentStatus.includes('purchased');
+      return isWithdrawn && !isOriginated;
+    });
     const falloutWithdrawnVolume = falloutWithdrawn.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
 
-    // Fallout - Denied (use inferred_status for consistency)
-    const falloutDenied = loansWithInferredStatus.filter(l =>
-      l.inferred_status === 'Denied'
-    );
+    // Fallout - Denied
+    // Qlik: If(WildMatch([Current Loan Status],'*denied*')>0,1,0)
+    // AND [Pull Through Originated Flag]*={No} (not originated)
+    const falloutDenied = loans.filter(l => {
+      const currentStatus = (l.current_loan_status || '').toString().toLowerCase();
+      const isDenied = currentStatus.includes('denied');
+      // Exclude if already originated
+      const isOriginated = currentStatus.includes('originated') || currentStatus.includes('purchased');
+      return isDenied && !isOriginated;
+    });
     const falloutDeniedVolume = falloutDenied.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-
-    // No RESPA Apps (loans that didn't proceed to RESPA stage - estimate as small percentage)
-    const noRespaApp = Math.max(0, Math.floor(loansStarted * 0.004)); // ~0.4% of loans
-    const noRespaAppVolume = Math.floor(loansStartedVolume * 0.004);
 
     // Calculate revenue (simplified - 1% of loan amount)
     const revenueRate = 0.01;
+
+    // Verify: All funnel metrics should already be filtered by started_date (from the WHERE clause)
+    // The 'loans' array only contains loans where started_date matches the filter
+    logInfo('[Funnel] Calculated funnel breakdown', {
+      dateFilter: { startDate, endDate, yearFilter },
+      loansStarted,
+      respaApp: loansWithRespaApp.length,
+      noRespaApp: loansNoRespaApp.length,
+      stillActive: stillActive.length,
+      originated: originated.length,
+      withdrawn: falloutWithdrawn.length,
+      denied: falloutDenied.length,
+      loansStartedVolume,
+      respaAppVolume: loansWithRespaAppVolume,
+      noRespaAppVolume: loansNoRespaAppVolume,
+      stillActiveVolume,
+      originatedVolume,
+      // Debug: verify the started_date range of loans in each category
+      sampleStartedDates: {
+        loansStarted: loans.slice(0, 3).map(l => ({ started_date: l.started_date, application_date: l.application_date })),
+        stillActive: stillActive.slice(0, 3).map(l => ({ started_date: l.started_date, status: l.current_loan_status })),
+      }
+    });
 
     res.json({
       loansStarted: {
@@ -578,16 +874,18 @@ router.get('/funnel', authenticateToken, apiLimiter, async (req: AuthRequest, re
         volume: falloutDeniedVolume,
         lostRevenue: falloutDeniedVolume * revenueRate,
       },
-      // For compatibility with existing schema
+      // RESPA App Status from Qlik: if(Len(Trim([Application Date]))>0,'Yes','No')
+      // Loans WITH application_date = RESPA App Status 'Yes'
       respaApp: {
-        units: loansStarted - noRespaApp, // Loans that proceeded to RESPA
-        volume: loansStartedVolume - noRespaAppVolume,
-        revenue: (loansStartedVolume - noRespaAppVolume) * revenueRate,
+        units: loansWithRespaApp.length,
+        volume: loansWithRespaAppVolume,
+        revenue: loansWithRespaAppVolume * revenueRate,
       },
+      // Loans WITHOUT application_date = RESPA App Status 'No'
       noRespaApp: {
-        units: noRespaApp,
-        volume: noRespaAppVolume,
-        lostRevenue: noRespaAppVolume * revenueRate,
+        units: loansNoRespaApp.length,
+        volume: loansNoRespaAppVolume,
+        lostRevenue: loansNoRespaAppVolume * revenueRate,
       },
     });
   } catch (error: any) {

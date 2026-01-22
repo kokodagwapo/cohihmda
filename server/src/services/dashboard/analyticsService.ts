@@ -36,9 +36,11 @@ export interface LeaderboardEntry {
   role: string;
   branch: string;
   loansClosed: number;
+  loansStarted?: number;
   totalVolume: number;
   avgCycleTime: number;
   pullThroughRate: number;
+  delta?: number; // Percentage change from previous period
 }
 
 export interface TopTieringRanking {
@@ -169,98 +171,314 @@ export async function getFunnelData(
   }
 }
 
+// Extended timeframe types
+type ExtendedTimeframe = 'wtd' | 'mtd' | 'qtd' | 'ytd' | 'lm' | 'lq' | 'ly' | 'custom';
+
 /**
  * Calculate date range based on timeframe
+ * Returns { start, end } for all timeframes
  */
-function getDateRangeForTimeframe(timeframe: 'wtd' | 'mtd' | 'qtd' | 'ytd'): Date {
+function getDateRangeForTimeframe(timeframe: ExtendedTimeframe, customStart?: string, customEnd?: string): { start: Date; end: Date } {
   const now = new Date();
-  let startDate: Date;
+  let start: Date;
+  let end: Date = new Date(); // Default end is today
+  
   switch (timeframe) {
     case 'wtd':
-      startDate = new Date(now.setDate(now.getDate() - now.getDay()));
+      // Week-to-date: Start of current week to today
+      start = new Date(now);
+      start.setDate(now.getDate() - now.getDay());
+      start.setHours(0, 0, 0, 0);
       break;
     case 'mtd':
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      // Month-to-date: Start of current month to today
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
       break;
     case 'qtd':
+      // Quarter-to-date: Start of current quarter to today
       const quarter = Math.floor(now.getMonth() / 3);
-      startDate = new Date(now.getFullYear(), quarter * 3, 1);
+      start = new Date(now.getFullYear(), quarter * 3, 1);
       break;
     case 'ytd':
-      startDate = new Date(now.getFullYear(), 0, 1);
+      // Year-to-date: Start of current year to today
+      start = new Date(now.getFullYear(), 0, 1);
+      break;
+    case 'lm':
+      // Last Month: Full previous month
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of prev month
+      break;
+    case 'lq':
+      // Last Quarter: Full previous quarter
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      const prevQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
+      const prevQuarterYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      start = new Date(prevQuarterYear, prevQuarter * 3, 1);
+      end = new Date(prevQuarterYear, prevQuarter * 3 + 3, 0); // Last day of prev quarter
+      break;
+    case 'ly':
+      // Last Year: Full previous year
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear() - 1, 11, 31);
+      break;
+    case 'custom':
+      // Custom date range
+      if (customStart && customEnd) {
+        start = new Date(customStart);
+        end = new Date(customEnd);
+      } else {
+        // Default to MTD if no custom dates provided
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      break;
+    default:
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  
+  return { start, end };
+}
+
+/**
+ * Calculate date range for previous period (for delta calculation)
+ */
+function getPreviousPeriodRange(timeframe: ExtendedTimeframe): { start: Date; end: Date } {
+  const now = new Date();
+  let start: Date;
+  let end: Date;
+  
+  switch (timeframe) {
+    case 'wtd':
+      // Previous week
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(now.getDate() - now.getDay());
+      end = new Date(currentWeekStart);
+      end.setDate(end.getDate() - 1);
+      start = new Date(end);
+      start.setDate(start.getDate() - 6);
+      break;
+    case 'mtd':
+      // Previous month (same period as Last Month)
+      end = new Date(now.getFullYear(), now.getMonth(), 0);
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      break;
+    case 'qtd':
+      // Previous quarter (same period as Last Quarter)
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      const prevQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
+      const prevQuarterYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      start = new Date(prevQuarterYear, prevQuarter * 3, 1);
+      end = new Date(prevQuarterYear, prevQuarter * 3 + 3, 0);
+      break;
+    case 'lm':
+      // For "Last Month", compare to the month before that
+      end = new Date(now.getFullYear(), now.getMonth() - 1, 0); // Last day of 2 months ago
+      start = new Date(now.getFullYear(), now.getMonth() - 2, 1); // First day of 2 months ago
+      break;
+    case 'lq':
+      // For "Last Quarter", compare to the quarter before that
+      const lqCurrentQuarter = Math.floor(now.getMonth() / 3);
+      const lqPrevQuarter = lqCurrentQuarter === 0 ? 3 : lqCurrentQuarter - 1;
+      const lqPrevPrevQuarter = lqPrevQuarter === 0 ? 3 : lqPrevQuarter - 1;
+      const lqYear = lqPrevQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const lqPrevYear = lqPrevPrevQuarter === 3 ? lqYear - 1 : lqYear;
+      start = new Date(lqPrevYear, lqPrevPrevQuarter * 3, 1);
+      end = new Date(lqPrevYear, lqPrevPrevQuarter * 3 + 3, 0);
+      break;
+    case 'ly':
+      // For "Last Year", compare to the year before that
+      start = new Date(now.getFullYear() - 2, 0, 1);
+      end = new Date(now.getFullYear() - 2, 11, 31);
+      break;
+    case 'custom':
+    case 'ytd':
+    default:
+      // For custom and YTD, compare to previous year same period
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear() - 1, 11, 31);
       break;
   }
-  return startDate;
+  
+  return { start, end };
 }
 
 /**
  * Get leaderboard data for a specific timeframe
+ * Groups loans by loan_officer (name) field directly - no employees table required
  */
 export async function getLeaderboardData(
   tenantPool: pg.Pool,
-  timeframe: 'wtd' | 'mtd' | 'qtd' | 'ytd' = 'mtd'
+  timeframe: ExtendedTimeframe = 'mtd',
+  filters?: { 
+    branch?: string; 
+    scope?: 'all' | 'branch' | 'team';
+    startDate?: string; // For custom date range
+    endDate?: string;   // For custom date range
+  }
 ): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string }> {
   try {
-    const startDate = getDateRangeForTimeframe(timeframe);
-
-    // Check if employees table exists
-    const tableCheck = await tenantPool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'employees'
-      )
-    `);
+    const dateRange = getDateRangeForTimeframe(timeframe, filters?.startDate, filters?.endDate);
+    const startDate = dateRange.start;
+    const endDate = dateRange.end;
+    const prevPeriod = getPreviousPeriodRange(timeframe);
     
-    if (!tableCheck.rows[0]?.exists) {
+    // Build WHERE clause for filters
+    const conditions: string[] = [];
+    const params: any[] = [startDate, endDate];
+    let paramIndex = 3;
+    
+    // Branch filter
+    if (filters?.branch) {
+      conditions.push(`l.branch = $${paramIndex}`);
+      params.push(filters.branch);
+      paramIndex++;
+    }
+    
+    const branchFilter = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
+
+    // Query performance metrics grouped by loan_officer name
+    // This works even if employees table doesn't exist
+    // Uses both start and end dates for proper date range filtering
+    const leaderboardResult = await tenantPool.query(
+      `SELECT 
+        l.loan_officer as name,
+        l.branch,
+        COUNT(*) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+        ) as loans_started,
+        -- Originated/Closed: Pull Through Originated Flag = Yes
+        COUNT(*) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ) as loans_closed,
+        -- Total volume for period
+        COALESCE(SUM(l.loan_amount) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ), 0) as total_volume,
+        -- Cycle time: App date to Closing/Funding date
+        AVG(CASE 
+          WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
+          THEN DATE(l.closing_date) - DATE(l.application_date) 
+          WHEN l.funding_date IS NOT NULL AND l.application_date IS NOT NULL 
+          THEN DATE(l.funding_date::date) - DATE(l.application_date)
+          ELSE NULL 
+        END) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+        ) as avg_cycle_time,
+        -- Pull-through rate: Originated / (Originated + Withdrawn + Denied)
+        COUNT(*) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        )::float 
+        / NULLIF(
+          COUNT(*) FILTER (
+            WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+              AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+              AND l.application_date IS NOT NULL
+              AND (
+                LOWER(l.current_loan_status) LIKE '%originated%' 
+                OR LOWER(l.current_loan_status) LIKE '%purchased%'
+                OR LOWER(l.current_loan_status) LIKE '%withdraw%'
+                OR LOWER(l.current_loan_status) LIKE '%denied%'
+                OR LOWER(l.current_loan_status) LIKE '%not accepted%'
+              )
+          ), 0
+        ) * 100 as pull_through_rate
+       FROM public.loans l
+       WHERE l.loan_officer IS NOT NULL 
+         AND TRIM(l.loan_officer) != ''
+         ${branchFilter}
+       GROUP BY l.loan_officer, l.branch
+       HAVING COUNT(*) FILTER (
+         WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+           AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+       ) > 0
+       ORDER BY 
+         COUNT(*) FILTER (
+           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+         ) DESC,
+         SUM(l.loan_amount) FILTER (
+           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+         ) DESC
+       LIMIT 10`,
+      params
+    );
+
+    // If no results, return empty
+    if (leaderboardResult.rows.length === 0) {
       return { leaderboard: [], timeframe };
     }
 
-    // Query employee performance metrics
-    // Note: employees.id is UUID, loans.loan_officer_id is TEXT - need to cast
-    const leaderboardResult = await tenantPool.query(
+    // Query previous period for delta calculation
+    // params is [startDate, endDate, ...branchFilter], so slice(2) gets just the branch filter params
+    const prevParams = [prevPeriod.start, prevPeriod.end, ...params.slice(2)];
+    let prevParamIndex = 3;
+    const prevBranchFilter = filters?.branch 
+      ? `AND l.branch = $${prevParamIndex}` 
+      : '';
+    
+    const prevPeriodResult = await tenantPool.query(
       `SELECT 
-        e.id,
-        e.first_name,
-        e.last_name,
-        e.role,
-        e.branch,
-        COUNT(l.id) as loans_closed,
-        SUM(l.loan_amount) as total_volume,
-        -- Cycle time: App-Close (calculated from dates)
-        AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.closing_date) - DATE(l.application_date) 
-          ELSE NULL END) as avg_cycle_time,
-        COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END) as funded_count,
-        -- Pull-through rate (excludes active loans)
-        COUNT(CASE WHEN l.investor_purchase_date IS NOT NULL 
-          AND l.current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-          / NULLIF(COUNT(CASE WHEN l.application_date IS NOT NULL 
-          AND l.current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate
-       FROM public.employees e
-       LEFT JOIN public.loans l ON e.id::TEXT = l.loan_officer_id
-         AND COALESCE(l.application_date, l.created_at) >= $1
-       GROUP BY e.id, e.first_name, e.last_name, e.role, e.branch
-       ORDER BY loans_closed DESC, total_volume DESC
-       LIMIT 10`,
-      [startDate]
+        l.loan_officer as name,
+        COUNT(*) FILTER (
+          WHERE (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ) as loans_closed
+       FROM public.loans l
+       WHERE l.loan_officer IS NOT NULL 
+         AND TRIM(l.loan_officer) != ''
+         AND COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+         AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+         ${prevBranchFilter}
+       GROUP BY l.loan_officer`,
+      prevParams
     );
 
-    const leaderboard: LeaderboardEntry[] = leaderboardResult.rows.map((row, index) => ({
-      rank: index + 1,
-      employeeId: row.id,
-      name: `${row.first_name} ${row.last_name}`,
-      role: row.role,
-      branch: row.branch,
-      loansClosed: parseInt(row.loans_closed) || 0,
-      totalVolume: parseFloat(row.total_volume) || 0,
-      avgCycleTime: parseFloat(row.avg_cycle_time) || 0,
-      pullThroughRate: parseFloat(row.pull_through_rate) || 0,
-    }));
+    // Create lookup for previous period data
+    const prevPeriodMap = new Map<string, number>();
+    prevPeriodResult.rows.forEach(row => {
+      prevPeriodMap.set(row.name, parseInt(row.loans_closed) || 0);
+    });
+
+    // Transform results with delta calculation
+    const leaderboard: LeaderboardEntry[] = leaderboardResult.rows.map((row, index) => {
+      const currentLoans = parseInt(row.loans_closed) || 0;
+      const prevLoans = prevPeriodMap.get(row.name) || 0;
+      
+      // Calculate delta percentage (change from previous period)
+      let delta = 0;
+      if (prevLoans > 0) {
+        delta = Math.round(((currentLoans - prevLoans) / prevLoans) * 100);
+      } else if (currentLoans > 0) {
+        delta = 100; // New performer (wasn't in previous period)
+      }
+
+      return {
+        rank: index + 1,
+        employeeId: `lo-${index + 1}`, // Generate placeholder ID since we're using name
+        name: row.name || 'Unknown',
+        role: 'Loan Officer', // Default role (could be enhanced with employees table lookup)
+        branch: row.branch || 'Unknown',
+        loansClosed: currentLoans,
+        loansStarted: parseInt(row.loans_started) || 0,
+        totalVolume: parseFloat(row.total_volume) || 0,
+        avgCycleTime: Math.round(parseFloat(row.avg_cycle_time) || 0),
+        pullThroughRate: Math.round(parseFloat(row.pull_through_rate) || 0),
+        delta,
+      };
+    });
 
     return { leaderboard, timeframe };
   } catch (dbError: any) {
-    // If employees/loans tables don't exist, return empty array
+    console.error('[Leaderboard] Error:', dbError.message);
+    // If loans table doesn't exist, return empty array
     if (dbError.code === '42P01') {
       return { leaderboard: [], timeframe };
     }

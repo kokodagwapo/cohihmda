@@ -1,32 +1,75 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { format } from 'date-fns';
-import { BarChart3, ChevronRight, AlertTriangle, Zap } from 'lucide-react';
+import { BarChart3, ChevronRight, AlertTriangle, Zap, Calendar as CalendarIcon, X } from 'lucide-react';
 import { LOSFunnelData } from '@/lib/losSchema';
 import { FunnelVisualization } from '@/components/FunnelVisualization';
 import { FunnelDataPoint } from '@/types/funnel';
 import { formatCompactNumber } from '@/utils/formatting';
-import { useFunnelData } from '@/hooks/useFunnelData';
+import { useFunnelData, FunnelDateFilter } from '@/hooks/useFunnelData';
 import { SalesView } from './SalesView';
 import { OpsView } from './OpsView';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 interface LoanFunnelViewProps {
   view: 'funnel' | 'bar' | 'revenue' | 'units' | 'volume' | 'detail';
   onViewChange: (view: 'funnel' | 'bar' | 'revenue' | 'units' | 'volume' | 'detail') => void;
   year: number;
   onYearChange: (year: number) => void;
+  selectedTenantId?: string | null;
 }
+
+// Generate years from current year down to 2022
+const currentYear = new Date().getFullYear();
+const availableYears = Array.from({ length: currentYear - 2021 }, (_, i) => currentYear - i);
 
 export const LoanFunnelView = ({
   view,
   onViewChange,
   year,
-  onYearChange
+  onYearChange,
+  selectedTenantId
 }: LoanFunnelViewProps) => {
   // Tab state for Company/Sales/Ops
   const [activeTab, setActiveTab] = useState<'company' | 'sales' | 'ops'>('company');
+  
+  // Custom date range state
+  const [dateFilterType, setDateFilterType] = useState<'year' | 'custom'>('year');
+  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ start: null, end: null });
 
-  // Use the hook for funnel data fetching
-  const { funnelData: funnelDataState, loading: funnelLoading } = useFunnelData(year);
+  // Build the date filter for the hook
+  // For current year, use YTD (Jan 1 to today); for past years, use full year (Jan 1 to Dec 31)
+  const dateFilter: FunnelDateFilter = useMemo(() => {
+    if (dateFilterType === 'custom' && customDateRange.start && customDateRange.end) {
+      return {
+        type: 'custom',
+        startDate: customDateRange.start.toISOString().split('T')[0],
+        endDate: customDateRange.end.toISOString().split('T')[0],
+      };
+    }
+    
+    // For year-based filtering, calculate appropriate date range
+    const startOfYear = `${year}-01-01`;
+    const today = new Date();
+    const isCurrentYear = year === today.getFullYear();
+    
+    // For current year: use YTD (Jan 1 to today)
+    // For past years: use full year (Jan 1 to Dec 31)
+    const endDate = isCurrentYear 
+      ? today.toISOString().split('T')[0]
+      : `${year}-12-31`;
+    
+    return {
+      type: 'custom', // Use custom date range to get proper date filtering
+      startDate: startOfYear,
+      endDate: endDate,
+    };
+  }, [dateFilterType, year, customDateRange.start, customDateRange.end]);
+
+  // Use the hook for funnel data fetching with tenant context
+  const { funnelData: funnelDataState, loading: funnelLoading } = useFunnelData(dateFilter, selectedTenantId);
 
   // Debug: Log when component renders and view changes
   useEffect(() => {
@@ -74,15 +117,13 @@ export const LoanFunnelView = ({
   });
 
   // Zeroed fallback values keep UI empty until real data arrives
-  const funnelViewFunnelData: Record<number, LOSFunnelData> = {
-    2025: createZeroFunnelYear(),
-    2024: createZeroFunnelYear(),
-    2023: createZeroFunnelYear(),
-    2022: createZeroFunnelYear()
-  };
+  // Dynamically create fallback for all available years
+  const funnelViewFunnelData: Record<number, LOSFunnelData> = Object.fromEntries(
+    availableYears.map(y => [y, createZeroFunnelYear()])
+  );
 
   // Use effectiveFunnelData - prioritize API data, fallback to mock data
-  const effectiveFunnelData = funnelDataState || funnelViewFunnelData[year] || funnelViewFunnelData[2025];
+  const effectiveFunnelData = funnelDataState || funnelViewFunnelData[year] || funnelViewFunnelData[currentYear];
 
   // Format value helper - defined first so it can be used by other functions
   const formatValue = (value: number, type: 'revenue' | 'volume') => {
@@ -325,14 +366,83 @@ export const LoanFunnelView = ({
                 </button>)}
             </div>
             
-            {/* Year Selection - Mobile First */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-              <span className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">Year:</span>
+            {/* Year/Date Selection - Mobile First */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap">
+              <span className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">Period:</span>
               <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg overflow-x-auto">
-                {[2025, 2024, 2023, 2022].map(y => <button key={y} onClick={() => onYearChange(y)} className={`px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm font-medium rounded-md transition-all whitespace-nowrap touch-manipulation ${year === y ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                    {y}
-                  </button>)}
+                {availableYears.map(y => (
+                  <button 
+                    key={y} 
+                    onClick={() => {
+                      setDateFilterType('year');
+                      onYearChange(y);
+                    }} 
+                    className={`px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm font-medium rounded-md transition-all whitespace-nowrap touch-manipulation ${
+                      dateFilterType === 'year' && year === y 
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    {y === currentYear ? `${y} YTD` : y}
+                  </button>
+                ))}
+                {/* Custom Date Picker */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button 
+                      className={`px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm font-medium rounded-md transition-all whitespace-nowrap touch-manipulation flex items-center gap-1 ${
+                        dateFilterType === 'custom' 
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                      }`}
+                    >
+                      <CalendarIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                      {dateFilterType === 'custom' && customDateRange.start && customDateRange.end ? (
+                        <span className="hidden sm:inline">
+                          {format(customDateRange.start, 'MMM d')} - {format(customDateRange.end, 'MMM d, yyyy')}
+                        </span>
+                      ) : (
+                        <span className="hidden sm:inline">Custom</span>
+                      )}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      initialFocus
+                      mode="range"
+                      defaultMonth={customDateRange.start || new Date()}
+                      selected={{
+                        from: customDateRange.start || undefined,
+                        to: customDateRange.end || undefined,
+                      }}
+                      onSelect={(range) => {
+                        setCustomDateRange({
+                          start: range?.from || null,
+                          end: range?.to || null,
+                        });
+                        if (range?.from && range?.to) {
+                          setDateFilterType('custom');
+                        }
+                      }}
+                      numberOfMonths={2}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
+              {/* Clear custom date button */}
+              {dateFilterType === 'custom' && (customDateRange.start || customDateRange.end) && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setCustomDateRange({ start: null, end: null });
+                    setDateFilterType('year');
+                  }}
+                  className="h-6 w-6 sm:h-7 sm:w-7 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                >
+                  <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                </Button>
+              )}
             </div>
           </div>
             
@@ -358,7 +468,12 @@ export const LoanFunnelView = ({
                         </th>
                         <th className="py-3 px-3 sm:py-4 sm:px-5 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-slate-200/70 dark:bg-slate-700/70 text-slate-600 dark:text-slate-300 text-[10px] sm:text-xs whitespace-nowrap">
-                            Loans Started in {year}
+                            {dateFilterType === 'custom' && customDateRange.start && customDateRange.end 
+                              ? `Loans Started ${format(customDateRange.start, 'MMM d, yyyy')} - ${format(customDateRange.end, 'MMM d, yyyy')}`
+                              : year === currentYear
+                                ? `Loans Started YTD ${year}`
+                                : `Loans Started in ${year}`
+                            }
                           </span>
                         </th>
                         <th className="text-right py-3 px-3 sm:py-4 sm:px-5 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">Units</th>
@@ -383,7 +498,7 @@ export const LoanFunnelView = ({
                           <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[9px] sm:text-[10px] font-medium tabular-nums">100.0%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-medium text-slate-700 dark:text-slate-300 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(817291852)}</span>
+                          <span className="font-medium text-slate-700 dark:text-slate-300 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(effectiveFunnelData.loansStarted.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
                           <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[9px] sm:text-[10px] font-medium tabular-nums">100.0%</span>
@@ -402,13 +517,13 @@ export const LoanFunnelView = ({
                           <span className="font-semibold text-slate-900 dark:text-white tabular-nums text-[10px] sm:text-xs">{effectiveFunnelData.noRespaApp.units.toLocaleString()}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{(effectiveFunnelData.noRespaApp.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1)}%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.units > 0 ? (effectiveFunnelData.noRespaApp.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-medium text-slate-700 dark:text-slate-300 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(2738043)}</span>
+                          <span className="font-medium text-slate-700 dark:text-slate-300 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(effectiveFunnelData.noRespaApp.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">0.3%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.volume > 0 ? (effectiveFunnelData.noRespaApp.volume / effectiveFunnelData.loansStarted.volume * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                       </tr>
 
@@ -424,13 +539,13 @@ export const LoanFunnelView = ({
                           <span className="font-semibold text-slate-900 dark:text-white tabular-nums text-[10px] sm:text-xs">{effectiveFunnelData.respaApp.units.toLocaleString()}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{(effectiveFunnelData.respaApp.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1)}%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.units > 0 ? (effectiveFunnelData.respaApp.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-medium text-slate-700 dark:text-slate-300 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(814553809)}</span>
+                          <span className="font-medium text-slate-700 dark:text-slate-300 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(effectiveFunnelData.respaApp.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 text-[9px] sm:text-[10px] font-medium tabular-nums">99.7%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.volume > 0 ? (effectiveFunnelData.respaApp.volume / effectiveFunnelData.loansStarted.volume * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                       </tr>
 
@@ -447,13 +562,13 @@ export const LoanFunnelView = ({
                           <span className="font-bold text-emerald-600 dark:text-emerald-400 tabular-nums text-[10px] sm:text-xs">{effectiveFunnelData.originated.units.toLocaleString()}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 text-[9px] sm:text-[10px] font-semibold tabular-nums">{(effectiveFunnelData.originated.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1)}%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 text-[9px] sm:text-[10px] font-semibold tabular-nums">{effectiveFunnelData.loansStarted.units > 0 ? (effectiveFunnelData.originated.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(535411055)}</span>
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(effectiveFunnelData.originated.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 text-[9px] sm:text-[10px] font-semibold tabular-nums">65.5%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 text-[9px] sm:text-[10px] font-semibold tabular-nums">{effectiveFunnelData.loansStarted.volume > 0 ? (effectiveFunnelData.originated.volume / effectiveFunnelData.loansStarted.volume * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                       </tr>
 
@@ -470,13 +585,13 @@ export const LoanFunnelView = ({
                           <span className="font-semibold text-rose-600 dark:text-rose-400 tabular-nums text-[10px] sm:text-xs">{effectiveFunnelData.falloutWithdrawn.units.toLocaleString()}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{(effectiveFunnelData.falloutWithdrawn.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1)}%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.units > 0 ? (effectiveFunnelData.falloutWithdrawn.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-medium text-rose-600 dark:text-rose-400 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(156750766)}</span>
+                          <span className="font-medium text-rose-600 dark:text-rose-400 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(effectiveFunnelData.falloutWithdrawn.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 text-[9px] sm:text-[10px] font-medium tabular-nums">19.2%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.volume > 0 ? (effectiveFunnelData.falloutWithdrawn.volume / effectiveFunnelData.loansStarted.volume * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                       </tr>
 
@@ -493,13 +608,13 @@ export const LoanFunnelView = ({
                           <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums text-[10px] sm:text-xs">{effectiveFunnelData.falloutDenied.units.toLocaleString()}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{(effectiveFunnelData.falloutDenied.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1)}%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.units > 0 ? (effectiveFunnelData.falloutDenied.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-medium text-amber-600 dark:text-amber-400 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(22274275)}</span>
+                          <span className="font-medium text-amber-600 dark:text-amber-400 tabular-nums text-[10px] sm:text-xs">{formatCompactNumber(effectiveFunnelData.falloutDenied.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">2.7%</span>
+                          <span className="inline-flex items-center px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[9px] sm:text-[10px] font-medium tabular-nums">{effectiveFunnelData.loansStarted.volume > 0 ? (effectiveFunnelData.falloutDenied.volume / effectiveFunnelData.loansStarted.volume * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                       </tr>
 
@@ -516,13 +631,13 @@ export const LoanFunnelView = ({
                           <span className="font-semibold text-violet-600 dark:text-violet-400 tabular-nums text-xs sm:text-sm">{effectiveFunnelData.stillActive.units.toLocaleString()}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] sm:text-xs font-medium tabular-nums">{(effectiveFunnelData.stillActive.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1)}%</span>
+                          <span className="inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] sm:text-xs font-medium tabular-nums">{effectiveFunnelData.loansStarted.units > 0 ? (effectiveFunnelData.stillActive.units / effectiveFunnelData.loansStarted.units * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="font-medium text-violet-600 dark:text-violet-400 tabular-nums text-xs sm:text-sm">{100712055 .toLocaleString()}</span>
+                          <span className="font-medium text-violet-600 dark:text-violet-400 tabular-nums text-xs sm:text-sm">{formatCompactNumber(effectiveFunnelData.stillActive.volume)}</span>
                         </td>
                         <td className="text-right py-2 px-2 sm:py-3 sm:px-3">
-                          <span className="inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] sm:text-xs font-medium tabular-nums">12.3%</span>
+                          <span className="inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] sm:text-xs font-medium tabular-nums">{effectiveFunnelData.loansStarted.volume > 0 ? (effectiveFunnelData.stillActive.volume / effectiveFunnelData.loansStarted.volume * 100).toFixed(1) : '0.0'}%</span>
                         </td>
                       </tr>
                     </tbody>

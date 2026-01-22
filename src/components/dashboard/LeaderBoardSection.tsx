@@ -1,18 +1,94 @@
-import { useState } from 'react';
-import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X, CalendarDays, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLeaderboardData, LeaderboardLeader } from '@/hooks/useLeaderboardData';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
+import { format } from 'date-fns';
+
+// Extended timeframe types
+type TimeframeType = 'WTD' | 'MTD' | 'QTD' | 'LM' | 'LQ' | 'LY' | 'custom';
 
 interface LeaderBoardSectionProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
+  selectedTenantId?: string | null;
 }
 
-export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
-  const [timeframe, setTimeframe] = useState<'WTD' | 'MTD' | 'QTD'>('MTD');
+// Display labels for timeframes
+const timeframeLabels: Record<TimeframeType, string> = {
+  'WTD': 'Week-to-Date',
+  'MTD': 'Month-to-Date',
+  'QTD': 'Quarter-to-Date',
+  'LM': 'Last Month',
+  'LQ': 'Last Quarter',
+  'LY': 'Last Year',
+  'custom': 'Custom Range'
+};
+
+// Short labels for buttons
+const timeframeShortLabels: Record<TimeframeType, string> = {
+  'WTD': 'WTD',
+  'MTD': 'MTD',
+  'QTD': 'QTD',
+  'LM': 'Last Mo',
+  'LQ': 'Last Qtr',
+  'LY': 'Last Yr',
+  'custom': 'Custom'
+};
+
+export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoardSectionProps) => {
+  const [timeframe, setTimeframe] = useState<TimeframeType>('MTD');
   const [scope, setScope] = useState<'All' | 'Branch' | 'Team'>('All');
   const [selectedLeader, setSelectedLeader] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(timeframe);
+  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ 
+    start: null, 
+    end: null 
+  });
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  
+  // Pass scope filter to API
+  const scopeMap: Record<'All' | 'Branch' | 'Team', 'all' | 'branch' | 'team'> = {
+    'All': 'all',
+    'Branch': 'branch', 
+    'Team': 'team'
+  };
+  
+  // Calculate date range based on timeframe
+  const dateRangeFilter = useMemo(() => {
+    if (timeframe === 'custom' && customDateRange.start && customDateRange.end) {
+      return {
+        startDate: customDateRange.start.toISOString().split('T')[0],
+        endDate: customDateRange.end.toISOString().split('T')[0]
+      };
+    }
+    return undefined;
+  }, [timeframe, customDateRange]);
+  
+  // Map timeframe to API format
+  const apiTimeframe = useMemo((): 'wtd' | 'mtd' | 'qtd' | 'lm' | 'lq' | 'ly' | 'custom' => {
+    if (timeframe === 'custom') return 'custom';
+    return timeframe.toLowerCase() as 'wtd' | 'mtd' | 'qtd' | 'lm' | 'lq' | 'ly';
+  }, [timeframe]);
+  
+  const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(
+    apiTimeframe, 
+    selectedTenantId,
+    { 
+      scope: scopeMap[scope],
+      startDate: dateRangeFilter?.startDate,
+      endDate: dateRangeFilter?.endDate
+    }
+  );
+  
+  // Get display label for current timeframe
+  const getTimeframeDisplayLabel = () => {
+    if (timeframe === 'custom' && customDateRange.start && customDateRange.end) {
+      return `${format(customDateRange.start, 'MMM d')} - ${format(customDateRange.end, 'MMM d, yyyy')}`;
+    }
+    return timeframeLabels[timeframe];
+  };
 
   // Base leader data with different timeframes (fallback)
   const baseLeadersData: LeaderboardLeader[] = [{
@@ -92,66 +168,20 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
     streakDays: 0
   }];
 
-  // Calculate data based on timeframe
-  const getTimeframeMultiplier = (tf: 'WTD' | 'MTD' | 'QTD') => {
-    switch (tf) {
-      case 'WTD':
-        return 0.25;
-      // Week-to-date is ~25% of month
-      case 'MTD':
-        return 1.0;
-      // Month-to-date is baseline
-      case 'QTD':
-        return 3.0;
-      // Quarter-to-date is ~3x month
-      default:
-        return 1.0;
-    }
-  };
-
-  // Filter and calculate leader data based on timeframe and scope
-  const getFilteredLeadersData = (): LeaderboardLeader[] => {
+  // Get leader data from API or fallback
+  // API now handles filtering by scope and timeframe
+  const getLeadersData = (): LeaderboardLeader[] => {
     // Use API data if available, otherwise fallback to baseLeadersData
-    const dataSource = leaderboardData.length > 0 ? leaderboardData : baseLeadersData;
-    const multiplier = getTimeframeMultiplier(timeframe);
-
-    // Apply timeframe multiplier to points and metrics
-    const timeframeData = dataSource.map(leader => ({
-      ...leader,
-      points: Math.round(leader.points * multiplier),
-      loans: Math.round(leader.loans * multiplier),
-      revenue: leader.revenue ? `$${(parseFloat(leader.revenue.replace(/[^0-9.]/g, '')) * multiplier).toFixed(1)}M` : leader.revenue,
-      // Adjust delta based on timeframe (shorter timeframes have more volatility)
-      delta: timeframe === 'WTD' ? leader.delta + Math.floor(Math.random() * 10) - 5 // More variation for weekly
-      : timeframe === 'QTD' ? Math.round(leader.delta * 0.8) // More stable for quarterly
-      : leader.delta
-    }));
-
-    // Apply scope filter
-    if (scope === 'Branch') {
-      // Show only top performers from different branches (simulate branch filtering)
-      return timeframeData.filter((_, idx) => idx < 4) // Top 4 for branch view
-      .map((leader, idx) => ({
-        ...leader,
-        rank: idx + 1
-      }));
-    } else if (scope === 'Team') {
-      // Show team-based ranking (simulate team grouping)
-      return timeframeData.slice(0, 5) // Top 5 for team view
-      .map((leader, idx) => ({
-        ...leader,
-        rank: idx + 1,
-        role: leader.role.includes('Manager') ? 'Team Lead' : leader.role
-      }));
+    if (leaderboardData.length > 0) {
+      // Data is already filtered/calculated server-side
+      return leaderboardData;
     }
-
-    // All scope - show all leaders
-    return timeframeData.map((leader, idx) => ({
-      ...leader,
-      rank: idx + 1
-    }));
+    
+    // Fallback to empty state display (baseLeadersData shows 0s)
+    return baseLeadersData;
   };
-  const leadersData = getFilteredLeadersData();
+  
+  const leadersData = getLeadersData();
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5); // Show all remaining entries (ranks 6-10)
 
@@ -169,16 +199,113 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
               Leaderboard
             </h3>
             <p className="text-[10px] sm:text-sm text-slate-600 dark:text-slate-300 font-light truncate">
-              {timeframe === 'WTD' ? 'Week-to-Date' : timeframe === 'MTD' ? 'Month-to-Date' : 'Quarter-to-Date'} · {scope === 'All' ? 'All branches' : scope === 'Branch' ? 'By branch' : 'By team'}
+              {getTimeframeDisplayLabel()} · {scope === 'All' ? 'All branches' : scope === 'Branch' ? 'By branch' : 'By team'}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Primary timeframe buttons - To-Date options */}
           <div className="flex gap-1 p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
-            {(['WTD', 'MTD', 'QTD'] as const).map(tf => <button key={tf} onClick={() => setTimeframe(tf)} className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${timeframe === tf ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+            {(['WTD', 'MTD', 'QTD'] as const).map(tf => (
+              <button 
+                key={tf} 
+                onClick={() => setTimeframe(tf)} 
+                className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-md text-[11px] sm:text-xs font-medium transition-all ${
+                  timeframe === tf 
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
                 {tf}
-              </button>)}
+              </button>
+            ))}
           </div>
+          
+          {/* Secondary timeframe buttons - Last period options */}
+          <div className="flex gap-1 p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
+            {(['LM', 'LQ', 'LY'] as const).map(tf => (
+              <button 
+                key={tf} 
+                onClick={() => setTimeframe(tf)} 
+                className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-md text-[11px] sm:text-xs font-medium transition-all ${
+                  timeframe === tf 
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+                title={timeframeLabels[tf]}
+              >
+                {timeframeShortLabels[tf]}
+              </button>
+            ))}
+          </div>
+          
+          {/* Custom date range picker */}
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="sm"
+                className={`gap-1.5 text-[11px] sm:text-xs h-8 sm:h-9 ${
+                  timeframe === 'custom' 
+                    ? 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600' 
+                    : ''
+                }`}
+              >
+                <CalendarDays className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {timeframe === 'custom' && customDateRange.start && customDateRange.end 
+                    ? `${format(customDateRange.start, 'MMM d')} - ${format(customDateRange.end, 'MMM d')}`
+                    : 'Custom'
+                  }
+                </span>
+                <span className="sm:hidden">Custom</span>
+                <ChevronDown className="w-3 h-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <div className="p-3 border-b border-slate-200 dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-900 dark:text-white">Select Date Range</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Choose start and end dates</p>
+              </div>
+              <Calendar
+                mode="range"
+                selected={{ 
+                  from: customDateRange.start || undefined, 
+                  to: customDateRange.end || undefined 
+                }}
+                onSelect={(range) => {
+                  setCustomDateRange({ 
+                    start: range?.from || null, 
+                    end: range?.to || null 
+                  });
+                  if (range?.from && range?.to) {
+                    setTimeframe('custom');
+                    setCalendarOpen(false);
+                  }
+                }}
+                numberOfMonths={2}
+                className="rounded-md"
+              />
+              <div className="p-3 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    setCustomDateRange({ start: null, end: null });
+                    setTimeframe('MTD');
+                    setCalendarOpen(false);
+                  }}
+                >
+                  Clear
+                </Button>
+                {customDateRange.start && customDateRange.end && (
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    {format(customDateRange.start, 'MMM d, yyyy')} - {format(customDateRange.end, 'MMM d, yyyy')}
+                  </span>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
