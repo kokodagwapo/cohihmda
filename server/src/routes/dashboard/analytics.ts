@@ -3,6 +3,7 @@ import { authenticateToken, AuthRequest } from '../../middleware/auth.js';
 import { z } from 'zod';
 import { getTenantId } from '../../utils/tenantUtils.js';
 import { handleDatabaseError } from '../../config/database.js';
+import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
 import {
   getFunnelData,
   getLeaderboardData,
@@ -23,19 +24,13 @@ const yearQuerySchema = z.object({
  * GET /api/dashboard/funnel
  * Get loan funnel data for a specific year
  */
-router.get('/funnel', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/funnel', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const { year } = yearQuerySchema.parse(req.query);
     const targetYear = year || new Date().getFullYear().toString();
 
-    // Get tenant_id using helper function (supports super admins)
-    const tenantId = await getTenantId(req.userId!, req.query.tenant_id as string);
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-
-    const funnelData = await getFunnelData(tenantId, targetYear);
+    const tenantContext = getTenantContext(req);
+    const funnelData = await getFunnelData(tenantContext.tenantPool, targetYear);
       res.json({ funnel: funnelData });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -56,20 +51,14 @@ router.get('/funnel', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/dashboard/leaderboard
  * Get leaderboard data for a specific timeframe
  */
-router.get('/leaderboard', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/leaderboard', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const { timeframe = 'mtd' } = z.object({
       timeframe: z.enum(['wtd', 'mtd', 'qtd', 'ytd']).optional(),
     }).parse(req.query);
 
-    // Get tenant_id using helper function (supports super admins)
-    const tenantId = await getTenantId(req.userId!, req.query.tenant_id as string);
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-
-    const result = await getLeaderboardData(tenantId, timeframe as 'wtd' | 'mtd' | 'qtd' | 'ytd');
+    const tenantContext = getTenantContext(req);
+    const result = await getLeaderboardData(tenantContext.tenantPool, timeframe as 'wtd' | 'mtd' | 'qtd' | 'ytd');
     res.json(result);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -90,16 +79,10 @@ router.get('/leaderboard', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/dashboard/top-tiering
  * Get TopTiering ranking with productivity, profitability, and complexity scoring
  */
-router.get('/top-tiering', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/top-tiering', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id using helper function (supports super admins)
-    const tenantId = await getTenantId(req.userId!, req.query.tenant_id as string);
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-
-    const result = await getTopTieringRankings(tenantId);
+    const tenantContext = getTenantContext(req);
+    const result = await getTopTieringRankings(tenantContext.tenantPool);
     res.json(result);
   } catch (error: any) {
     console.error('Error fetching top-tiering rankings:', error);
@@ -116,20 +99,31 @@ router.get('/top-tiering', authenticateToken, async (req: AuthRequest, res) => {
 /**
  * GET /api/dashboard/business-overview
  * Get business overview metrics
+ * Query params: year (optional), dateFilter (optional: 'today' | 'mtd' | 'ytd' | 'custom')
+ * For custom date range, also accepts: startDate, endDate (ISO strings)
  */
-router.get('/business-overview', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/business-overview', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const { year } = yearQuerySchema.parse(req.query);
     const targetYear = year || new Date().getFullYear().toString();
-
-    // Get tenant_id using helper function (supports super admins)
-    const tenantId = await getTenantId(req.userId!, req.query.tenant_id as string);
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
+    const dateFilter = (req.query.dateFilter as 'today' | 'mtd' | 'ytd' | 'custom') || 'ytd';
+    
+    // Parse custom date range if provided
+    let customDateRange: { start: Date; end: Date } | undefined;
+    if (dateFilter === 'custom' && req.query.startDate && req.query.endDate) {
+      customDateRange = {
+        start: new Date(req.query.startDate as string),
+        end: new Date(req.query.endDate as string)
+      };
     }
 
-    const metrics = await getBusinessOverviewMetrics(tenantId, targetYear);
+    const tenantContext = getTenantContext(req);
+    const metrics = await getBusinessOverviewMetrics(
+      tenantContext.tenantPool, 
+      targetYear,
+      dateFilter,
+      customDateRange
+    );
     res.json(metrics);
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -150,17 +144,13 @@ router.get('/business-overview', authenticateToken, async (req: AuthRequest, res
  * GET /api/dashboard/insights
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
  */
-router.get('/insights', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/insights', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    const tenantId = await getTenantId(req.userId!, req.query.tenant_id as string);
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-
+    const tenantContext = getTenantContext(req);
     const { dateFilter = 'ytd' } = req.query;
     const authHeader = req.headers.authorization;
 
-    const result = await getInsights(tenantId, dateFilter as string, authHeader);
+    const result = await getInsights(tenantContext.tenantPool, dateFilter as string, authHeader);
     res.json(result);
   } catch (error: any) {
     console.error('Error generating insights:', error);
@@ -178,15 +168,11 @@ router.get('/insights', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/dashboard/closing-fallout-forecast
  * Get closing and fallout forecast with Qlik formulas (pull-through by loan type, active aging, predictions)
  */
-router.get('/closing-fallout-forecast', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/closing-fallout-forecast', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    const tenantId = await getTenantId(req.userId!, req.query.tenant_id as string);
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-
+    const tenantContext = getTenantContext(req);
     const { dateFilter = 'ytd' } = req.query;
-    const result = await getClosingFalloutForecast(tenantId, dateFilter as 'today' | 'mtd' | 'ytd' | 'custom');
+    const result = await getClosingFalloutForecast(tenantContext.tenantPool, dateFilter as 'today' | 'mtd' | 'ytd' | 'custom');
     res.json(result);
   } catch (error: any) {
     console.error('Error fetching closing and fallout forecast:', error);

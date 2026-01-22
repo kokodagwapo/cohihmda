@@ -1,0 +1,51 @@
+//** NEW VARIABLES **/////////////////////////////////////////
+
+//TPO Check Flag
+NoConcatenate
+TPOSort:
+Load [TPO Check]
+Resident $(vWriteTableName)
+Order By [TPO Check] asc
+;
+
+LET vTPOCheck= Peek('TPO Check',0,'TPOSort');
+Drop Table TPOSort;
+
+//Actor List used on Actors Sheet/////////////////////////////
+/* Set vActorList based on vTPOCheck. Thus, load list for TPO clients and separate list for Retail Only clients */
+// $(vTPOCheck) /*-1=True (multi-channel); 0=False (Retail ONLY)*/
+
+If $(vTPOCheck)=-1 then
+// Actor List for multi-channel clients
+SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Account Executive|Account Manager|Broker Lender Name|Branch|TPO Company Name|Investor|Retail Branch ID|Retail LO|Originator Loan Officer Name|Originator Loan Processor Name|Correspondent Sales Rep/AE|Correspondent Lender Name|Sales Rep/AE|Warehouse Co Name|Warehouse Bank Name';
+Rename Field [Sale Rep/AE] TO [Sales Rep/AE];
+else
+// Actor list for Retail Only clients
+SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Branch|Investor|Warehouse Co Name';
+end if
+
+/***************************
+TW 10/25
+This code is producing the actor list 4 more times WHY?
+should be removed. 
+****************************/
+
+
+//Actor List Variables
+For i = 1 to 4
+//LET vActor$(i)='';
+LET vActorList$(i)='$(vActorList)';
+Next i;
+/***************************
+TW Changed LET to SET
+These 3 of these variable values are also created in Varaibles section 
+They can be condolidated.
+****************************/
+//Actor Picker Variables 
+SET vActor1='Loan Officer';
+SET vActor2='Processor';
+SET vActor3='Underwriter';
+SET vActor4='Closer';
+
+
+

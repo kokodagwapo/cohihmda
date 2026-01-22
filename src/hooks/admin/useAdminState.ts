@@ -14,7 +14,8 @@ export type AdminSection =
   | 'stripe' 
   | 'rag-voice' 
   | 'soc2' 
-  | 'aws-hosting';
+  | 'aws-hosting'
+  | 'metrics-catalog';
 
 export const useAdminState = () => {
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');

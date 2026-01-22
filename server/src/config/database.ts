@@ -38,11 +38,15 @@ function getPool(): pg.Pool {
     const rawHost = envTrim(process.env.DB_HOST) || 'localhost';
     const dbHost = (rawHost === 'localhost' || rawHost === '127.0.0.1') ? '127.0.0.1' : rawHost;
     
+    // Default database connection (for backward compatibility with existing shared DB)
+    // Management DB uses a separate connection pool (see managementDatabase.ts)
+    const dbName = envTrim(process.env.DB_NAME) || 'coheus';
+    
     // Log database connection details (without password) for debugging
     const dbConfig = {
       host: dbHost,
       port: parseInt(envTrim(process.env.DB_PORT) || '5432'),
-      database: envTrim(process.env.DB_NAME) || 'coheus',
+      database: dbName,
       user: envTrim(process.env.DB_USER) || 'postgres',
       password: envTrim(process.env.DB_PASSWORD) || 'postgres',
     };
@@ -237,7 +241,18 @@ export async function initDatabase(): Promise<void> {
     await pool.query('SELECT NOW()');
     console.log('✅ Database connected (timezone: UTC)');
     
+    // Initialize management database schema first
+    try {
+      const { initManagementDatabase } = await import('./managementDatabase.js');
+      await initManagementDatabase();
+    } catch (managementError: any) {
+      console.warn('⚠️ Management database initialization warning:', managementError.message);
+      // Continue - management DB might not exist yet
+    }
+    
     // Run migrations (don't block server startup on migration warnings)
+    // Note: These migrations are for backward compatibility with existing shared database
+    // New tenants will use tenant-specific databases created via provisioning
     try {
       await runMigrations();
     } catch (migrationError) {
@@ -247,6 +262,163 @@ export async function initDatabase(): Promise<void> {
   } catch (error) {
     console.error('❌ Database connection failed:', error);
     throw error;
+  }
+}
+
+/**
+ * Create derived field calculation functions
+ */
+async function createDerivedFieldFunctions() {
+  try {
+    // Revenue calculation function
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION calculate_revenue(p_loan_id UUID)
+      RETURNS DECIMAL(12,2) AS $$
+      DECLARE
+        v_revenue DECIMAL(12,2);
+      BEGIN
+        SELECT 
+          COALESCE(origination_points, 0) + 
+          COALESCE(orig_fee_borr_pd, 0) + 
+          COALESCE(orig_fees_seller, 0) - 
+          COALESCE(cd_lender_credits, 0) +
+          COALESCE(pa_sell_amt, 0) + 
+          COALESCE(pa_srp_amt, 0) +
+          COALESCE(pa_payout_1, 0) + COALESCE(pa_payout_2, 0) + COALESCE(pa_payout_3, 0) +
+          COALESCE(pa_payout_4, 0) + COALESCE(pa_payout_5, 0) + COALESCE(pa_payout_6, 0) +
+          COALESCE(pa_payout_7, 0) + COALESCE(pa_payout_8, 0) + COALESCE(pa_payout_9, 0) +
+          COALESCE(pa_payout_10, 0) + COALESCE(pa_payout_11, 0) + COALESCE(pa_payout_12, 0)
+        INTO v_revenue
+        FROM public.loans
+        WHERE id = p_loan_id;
+        
+        RETURN COALESCE(v_revenue, 0);
+      END;
+      $$ LANGUAGE plpgsql;
+    `).catch((err) => {
+      console.warn('[Database] Error creating calculate_revenue function:', err.message);
+    });
+
+    // Turn time calculation function
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION calculate_turn_time(
+        p_start_date DATE,
+        p_end_date DATE
+      )
+      RETURNS INTEGER AS $$
+      BEGIN
+        IF p_start_date IS NULL OR p_end_date IS NULL THEN
+          RETURN NULL;
+        END IF;
+        
+        RETURN p_end_date - p_start_date;
+      END;
+      $$ LANGUAGE plpgsql;
+    `).catch((err) => {
+      console.warn('[Database] Error creating calculate_turn_time function:', err.message);
+    });
+
+    // Margin (BPS) calculation function
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION calculate_margin_bps(p_loan_id UUID)
+      RETURNS DECIMAL(12,2) AS $$
+      DECLARE
+        v_revenue DECIMAL(12,2);
+        v_loan_amount DECIMAL(12,2);
+        v_margin_bps DECIMAL(12,2);
+      BEGIN
+        SELECT calculate_revenue(p_loan_id), loan_amount
+        INTO v_revenue, v_loan_amount
+        FROM public.loans
+        WHERE id = p_loan_id;
+        
+        IF v_loan_amount IS NULL OR v_loan_amount <= 0 THEN
+          RETURN NULL;
+        END IF;
+        
+        v_margin_bps := (v_revenue / v_loan_amount) * 10000;
+        RETURN v_margin_bps;
+      END;
+      $$ LANGUAGE plpgsql;
+    `).catch((err) => {
+      console.warn('[Database] Error creating calculate_margin_bps function:', err.message);
+    });
+
+    // Get loans for YTD period
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION get_loans_ytd(
+        p_tenant_id UUID,
+        p_date_field TEXT DEFAULT 'application_date'
+      )
+      RETURNS TABLE (
+        id UUID,
+        loan_id TEXT,
+        loan_amount DECIMAL(12,2),
+        application_date DATE,
+        closing_date DATE,
+        funding_date DATE
+      ) AS $$
+      BEGIN
+        RETURN QUERY
+        EXECUTE format('
+          SELECT 
+            l.id,
+            l.loan_id,
+            l.loan_amount,
+            l.application_date,
+            l.closing_date,
+            l.funding_date
+          FROM public.loans l
+          WHERE l.tenant_id = $1
+            AND l.%I >= DATE_TRUNC(''year'', CURRENT_DATE)
+            AND l.%I <= CURRENT_DATE
+        ', p_date_field, p_date_field)
+        USING p_tenant_id;
+      END;
+      $$ LANGUAGE plpgsql;
+    `).catch((err) => {
+      console.warn('[Database] Error creating get_loans_ytd function:', err.message);
+    });
+
+    // Get loans for MTD period
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION get_loans_mtd(
+        p_tenant_id UUID,
+        p_date_field TEXT DEFAULT 'application_date'
+      )
+      RETURNS TABLE (
+        id UUID,
+        loan_id TEXT,
+        loan_amount DECIMAL(12,2),
+        application_date DATE,
+        closing_date DATE,
+        funding_date DATE
+      ) AS $$
+      BEGIN
+        RETURN QUERY
+        EXECUTE format('
+          SELECT 
+            l.id,
+            l.loan_id,
+            l.loan_amount,
+            l.application_date,
+            l.closing_date,
+            l.funding_date
+          FROM public.loans l
+          WHERE l.tenant_id = $1
+            AND l.%I >= DATE_TRUNC(''month'', CURRENT_DATE)
+            AND l.%I <= CURRENT_DATE
+        ', p_date_field, p_date_field)
+        USING p_tenant_id;
+      END;
+      $$ LANGUAGE plpgsql;
+    `).catch((err) => {
+      console.warn('[Database] Error creating get_loans_mtd function:', err.message);
+    });
+
+    console.log('✅ Derived field functions created');
+  } catch (error: any) {
+    console.warn('⚠️  Derived field functions creation warning:', error.message);
   }
 }
 
@@ -541,6 +713,11 @@ async function runMigrations() {
         webhook_secret TEXT,
         webhook_enabled BOOLEAN DEFAULT false,
         is_active BOOLEAN DEFAULT true,
+        -- Encompass-specific fields
+        encompass_secret_arn TEXT,
+        encompass_instance_id TEXT,
+        encompass_sa_username TEXT,
+        encompass_extraction_method TEXT CHECK (encompass_extraction_method IN ('partner', 'ropc', 'api')),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         created_by UUID
@@ -565,26 +742,364 @@ async function runMigrations() {
     `);
     
     // Create loans table (single source of truth for LOS-synced data)
+    // Includes all source fields from CoheusDataDictionary.xml
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.loans (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE,
         loan_id TEXT NOT NULL,
+        
+        -- Core loan fields
         borrower_name TEXT,
-        loan_amount NUMERIC,
+        loan_amount DECIMAL(12,2),
         loan_type TEXT,
-        status TEXT,
-        application_date TIMESTAMPTZ,
-        closing_date TIMESTAMPTZ,
-        interest_rate NUMERIC,
-        loan_officer_id UUID,
-        branch TEXT,
+        loan_program TEXT,
         loan_purpose TEXT,
-        cycle_time_days INTEGER,
-        credit_pull_date TIMESTAMPTZ,
-        lock_date TIMESTAMPTZ,
+        loan_term INTEGER,
+        loan_number TEXT,
+        loan_folder TEXT,
+        loan_source TEXT,
+        status TEXT,
+        current_loan_status TEXT,
+        current_milestone TEXT,
+        current_status_date DATE,
+        
+        -- Financial fields
+        interest_rate DECIMAL(5,3),
+        base_loan_amount DECIMAL(12,2),
+        sales_price DECIMAL(12,2),
+        appraised_value DECIMAL(12,2),
+        ltv_ratio DECIMAL(5,2),
+        cltv DECIMAL(5,2),
+        hcltv DECIMAL(5,2),
+        be_dti_ratio DECIMAL(5,2),
+        income_total_mo_income DECIMAL(12,2),
+        assets_subtotal_liquid_assets DECIMAL(12,2),
+        combined_assets_all_borrowers DECIMAL(12,2),
+        number_of_months_reserves INTEGER,
+        
+        -- Property fields
+        property_street TEXT,
+        property_city TEXT,
+        property_county TEXT,
+        property_state TEXT,
+        property_zip TEXT,
+        number_of_units INTEGER,
+        property_type TEXT,
+        occupancy_type TEXT,
+        property_rights TEXT,
+        lien_position TEXT,
+        county_fips_code TEXT,
+        state_fips_code TEXT,
+        
+        -- Date fields (all as DATE type for straightforward queries)
+        application_date DATE,
+        gfe_application_date DATE,
+        started_date DATE,
+        pre_approval_date DATE,
+        disclosure_prep_date DATE,
+        signed_date DATE,
+        scrubbed_date DATE,
+        processing_date DATE,
+        submitted_to_processing_date DATE,
+        submitted_to_underwriting_date DATE,
+        submittal_date DATE,
+        cond_approval_date DATE,
+        conditional_approval_date DATE,
+        resubmittal_date DATE,
+        approval_date DATE,
+        uw_final_approval_date DATE,
+        uw_denied_date DATE,
+        uw_suspended_date DATE,
+        ctc_date DATE,
+        ready_for_docs_date DATE,
+        closer_assignment_date DATE,
+        docs_out_date DATE,
+        docs_signing_date DATE,
+        doc_preparation_date DATE,
+        closing_date DATE,
+        estimated_closing_date DATE,
+        funding_date DATE,
         fund_date TIMESTAMPTZ,
+        funds_sent_date DATE,
+        shipped_date DATE,
+        investor_purchase_date DATE,
+        purchased_date DATE,
+        reconciled_date DATE,
+        completion_date DATE,
+        post_closing_date DATE,
+        lock_date TIMESTAMPTZ,
+        lock_expiration_date DATE,
+        buy_side_lock_date DATE,
+        buy_side_lock_days INTEGER,
+        buy_side_lock_expiration DATE,
+        sell_side_lock_days INTEGER,
+        sell_side_lock_expiration DATE,
+        investor_lock_date DATE,
+        last_rate_set_date DATE,
+        rate_lock_sell_side_last_rate_set_date DATE,
+        loan_estimate_sent_date DATE,
+        loan_estimate_received_date DATE,
+        revised_le_sent_date DATE,
+        revised_le_received_date DATE,
+        initial_disclosure_due_date DATE,
+        gfe_initial_gfe_disclosure_provided_date DATE,
+        til_intl_disclosure_provided_date DATE,
+        closing_disclosure_sent_date DATE,
+        closing_disclosure_received_date DATE,
+        revised_cd_sent_date DATE,
+        revised_cd_received_date DATE,
+        closing_docs_1003_signature_date DATE,
+        loan_first_payment_date DATE,
+        maturity_date DATE,
+        note_date DATE,
+        first_rate_adjustment_date DATE,
+        credit_pull_date TIMESTAMPTZ,
+        appraisal_ordered_date DATE,
+        appraisal_completed_date DATE,
+        appraisal_received_date DATE,
+        flood_certification_date DATE,
+        au_decision_date DATE,
+        repurchase_date DATE,
+        date_sold_to_third_party DATE,
+        date_warehoused DATE,
+        last_modified_date TIMESTAMPTZ,
+        appt_reset_date DATE,
+        appt_set_date DATE,
+        
+        -- Revenue fields
+        origination_points DECIMAL(12,2),
+        orig_fee_borr_pd DECIMAL(12,2),
+        orig_fees_seller DECIMAL(12,2),
+        cd_lender_credits DECIMAL(12,2),
+        cd_applied_cure DECIMAL(12,2),
+        pa_sell_amt DECIMAL(12,2),
+        pa_srp_amt DECIMAL(12,2),
+        pa_payout_1 DECIMAL(12,2),
+        pa_payout_2 DECIMAL(12,2),
+        pa_payout_3 DECIMAL(12,2),
+        pa_payout_4 DECIMAL(12,2),
+        pa_payout_5 DECIMAL(12,2),
+        pa_payout_6 DECIMAL(12,2),
+        pa_payout_7 DECIMAL(12,2),
+        pa_payout_8 DECIMAL(12,2),
+        pa_payout_9 DECIMAL(12,2),
+        pa_payout_10 DECIMAL(12,2),
+        pa_payout_11 DECIMAL(12,2),
+        pa_payout_12 DECIMAL(12,2),
+        net_buy DECIMAL(12,2),
+        net_sell DECIMAL(12,2),
+        rate_lock_buy_side_net_buy_rate DECIMAL(12,2),
+        rate_lock_buy_side_base_price_rate DECIMAL(12,2),
+        rate_lock_buy_side_adjusted_buy_price DECIMAL(12,2),
+        srp_from_investor DECIMAL(12,2),
+        discount_yield_spread_premium DECIMAL(12,2),
+        corporate_price_concession DECIMAL(12,2),
+        branch_price_concession DECIMAL(12,2),
+        service_fee DECIMAL(12,2),
+        guaranty_fee DECIMAL(12,2),
+        msr_value DECIMAL(12,2),
+        
+        -- Rate lock profit margin adjustments
+        rate_lock_buy_side_profit_margin_adjustment_1_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_1_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_2_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_2_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_3_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_3_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_4_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_4_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_5_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_5_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_6_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_6_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_7_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_7_rate DECIMAL(12,2),
+        rate_lock_buy_side_profit_margin_adjustment_8_desc TEXT,
+        rate_lock_buy_side_profit_margin_adjustment_8_rate DECIMAL(12,2),
+        
+        -- ARM fields
+        arm_program TEXT,
+        margin DECIMAL(5,3),
+        margin_index TEXT,
+        lookback TEXT,
+        first_change_months INTEGER,
+        maximum_rate_adjustment_cap DECIMAL(5,3),
+        adjustment_period_months INTEGER,
+        first_rate_adjustment_cap DECIMAL(5,3),
+        floor_rate DECIMAL(5,3),
+        life_cap DECIMAL(5,3),
+        rounding TEXT,
+        description_of_the_arm_index_type TEXT,
+        interest_only_payments BOOLEAN,
+        number_of_months_interest_only_payments INTEGER,
+        balloon_payments BOOLEAN,
+        pi_payment DECIMAL(12,2),
+        piti_payment DECIMAL(12,2),
+        
+        -- PMI fields
+        pmi_flag BOOLEAN,
+        mortgage_insurance_company_name TEXT,
+        private_mortgage_insurance_indicator TEXT,
+        mi_percent_coverage_1 DECIMAL(5,2),
+        mi_coverage_1_months INTEGER,
+        mi_percent_coverage_2 DECIMAL(5,2),
+        mi_coverage_2_months INTEGER,
+        mi_cancel_percent DECIMAL(5,2),
+        
+        -- HELOC fields
+        heloc_initial_draw DECIMAL(12,2),
+        heloc_draw_period INTEGER,
+        heloc_repayment_period INTEGER,
+        
+        -- Credit/Score fields
+        fico_score INTEGER,
+        cu_risk_score INTEGER,
+        freddie_loan_level_credit_score_value INTEGER,
+        freddie_loan_level_credit_score_method TEXT,
+        
+        -- Underwriting fields
+        underwriter_risk_assess_type TEXT,
+        underwriter_risk_assess_aus_recomm TEXT,
+        underwriting_description TEXT,
+        underwriting_aus_source TEXT,
+        underwriting_aus_number TEXT,
+        number_of_conditions INTEGER,
+        fannie_au_decision TEXT,
+        fannie_property_valuation_form_type TEXT,
+        freddie_au_decision TEXT,
+        freddie_avm_model_name_type_other_description TEXT,
+        freddie_property_valuation_form_type TEXT,
+        freddie_underwriting_type_other TEXT,
+        property_valuation_method_type TEXT,
+        property_valuation_effective_date DATE,
+        
+        -- Borrower fields
+        borr_employer TEXT,
+        borr_position TEXT,
+        borr_position_2nd TEXT,
+        borr_yrs_on_job INTEGER,
+        borr_yrs_on_job_2nd INTEGER,
+        borr_self_employed BOOLEAN,
+        borr_self_employed_2nd BOOLEAN,
+        co_borr_employer TEXT,
+        co_borr_position TEXT,
+        co_borr_yrs_on_job INTEGER,
+        co_borr_self_employed BOOLEAN,
+        borrower_type TEXT,
+        co_borrower_type TEXT,
+        co_borrower_mailing_address_is_same_as_the_property_address BOOLEAN,
+        borrower_mailing_address_is_same_as_the_property_address BOOLEAN,
+        
+        -- Team member IDs (stored as TEXT, can reference employees table)
+        loan_officer_id UUID,
+        loan_officer TEXT,
+        legacy_loan_officer_id TEXT,
+        loan_interviewer TEXT,
+        loan_processor_id TEXT,
+        processor TEXT,
+        underwriter_id TEXT,
+        underwriter TEXT,
+        closer_id TEXT,
+        closer TEXT,
+        account_executive TEXT,
+        
+        -- Branch/Org fields
+        branch TEXT,
+        orgid TEXT,
+        broker_lender_name TEXT,
+        referral_name TEXT,
+        warehouse_co_name TEXT,
+        investor TEXT,
+        investor_status TEXT,
+        
+        -- Channel fields
+        channel TEXT,
+        
+        -- NMLS fields
+        company_nmls_id TEXT,
+        nmls_id TEXT,
+        
+        -- Loan details
+        product_type TEXT,
+        mers_min TEXT,
+        hedged_loan BOOLEAN,
+        lock_days INTEGER,
+        total_mortgaged_properties_count INTEGER,
+        
+        -- QM/ATR fields
+        exempt_from_reg_z BOOLEAN,
+        atr_loan_type TEXT,
+        qm_loan_type TEXT,
+        safe_harbor TEXT,
+        meets_agency_gse_qm BOOLEAN,
+        
+        -- HMDA fields
+        interest_only_indicator BOOLEAN,
+        business_or_commercial_purpose BOOLEAN,
+        
+        -- Refinance fields
+        refinance_cash_out_type TEXT,
+        
+        -- Fee fields (HUD line items)
+        fee_details_line_804_borrower_amount_appraisal_fee DECIMAL(12,2),
+        fee_details_line_804_seller_amount_appraisal_fee DECIMAL(12,2),
+        fee_details_line_805_borrower_amount_credit_report DECIMAL(12,2),
+        fee_details_line_805_seller_amount_credit_report DECIMAL(12,2),
+        fee_details_line_807_borrower_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_807_seller_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_804_borrower_poc_amount_appraisal DECIMAL(12,2),
+        fee_details_line_804_seller_poc_amount_appraisal DECIMAL(12,2),
+        fee_details_line_804_broker_poc_amount_appraisal DECIMAL(12,2),
+        fee_details_line_804_lender_poc_amount_appraisal DECIMAL(12,2),
+        fee_details_line_804_other_poc_amount_appraisal DECIMAL(12,2),
+        fee_details_line_805_borrower_poc_amount_cred_report DECIMAL(12,2),
+        fee_details_line_805_seller_poc_amount_cred_report DECIMAL(12,2),
+        fee_details_line_805_broker_poc_amount_cred_report DECIMAL(12,2),
+        fee_details_line_805_lender_poc_amount_cred_report DECIMAL(12,2),
+        fee_details_line_805_other_poc_amount_cred_report DECIMAL(12,2),
+        fee_details_line_807_borrower_poc_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_807_seller_poc_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_807_broker_poc_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_807_lender_poc_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_807_other_poc_amount_flood_cert DECIMAL(12,2),
+        fee_details_line_804_appraisal_fee_pac DECIMAL(12,2),
+        fee_details_line_805_credit_report_fee_pac DECIMAL(12,2),
+        fee_details_line_807_flood_certification_fee_pac DECIMAL(12,2),
+        
+        -- Compliance/Mavent fields
+        mavent_gse_result TEXT,
+        mavent_high_cost_result TEXT,
+        mavent_enterprise_result TEXT,
+        mavent_atr_qm_result TEXT,
+        mavent_tila_tolerance_result TEXT,
+        mavent_nmls_licensing_result TEXT,
+        mavent_state_rules_result TEXT,
+        mavent_hmda_result TEXT,
+        mavent_hpml_result TEXT,
+        mavent_license_reviewer_result TEXT,
+        mavent_other_result TEXT,
+        mavent_overall_result TEXT,
+        
+        -- Document fields
+        document_type TEXT,
+        du_lp_case_id TEXT,
+        
+        -- GFE disclosure dates
+        gfe_initial_gfe_disclosure_affiliated_business_disclosure_provided_date DATE,
+        gfe_initial_gfe_disclosure_charm_booklet_provided_date DATE,
+        gfe_initial_gfe_disclosure_hud_special_booklet_provided_date DATE,
+        gfe_initial_gfe_disclosure_heloc_brochure_provided_date DATE,
+        
+        -- Other fields
+        guid TEXT,
+        encompass_instance TEXT,
+        uw_touches INTEGER,
+        cycle_time_days INTEGER,
+        
+        -- Metadata
         raw_data JSONB,
+        metadata JSONB DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         created_by UUID,
@@ -647,6 +1162,100 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    
+    // Create Encompass field swaps table (for client-specific field mappings)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.encompass_field_swaps (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+        los_connection_id UUID REFERENCES public.los_connections(id) ON DELETE CASCADE,
+        coheus_alias VARCHAR(255) NOT NULL,
+        encompass_field_id VARCHAR(255) NOT NULL,
+        swap_type VARCHAR(50) DEFAULT 'Standard' CHECK (swap_type IN ('Standard', 'Profitability')),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tenant_id, los_connection_id, coheus_alias, swap_type)
+      )
+    `);
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_tenant ON public.encompass_field_swaps(tenant_id)
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_connection ON public.encompass_field_swaps(los_connection_id)
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_alias ON public.encompass_field_swaps(coheus_alias)
+    `).catch(() => {});
+    
+    // Create Encompass token cache table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.encompass_token_cache (
+        cache_key VARCHAR(255) PRIMARY KEY,
+        token TEXT NOT NULL,
+        expires_at BIGINT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_encompass_token_cache_expires ON public.encompass_token_cache(expires_at)
+    `).catch(() => {});
+    
+    // Create Encompass concurrency metrics table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.encompass_concurrency_metrics (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID REFERENCES public.tenants(id) ON DELETE SET NULL,
+        los_connection_id UUID REFERENCES public.los_connections(id) ON DELETE SET NULL,
+        limit_value INTEGER NOT NULL,
+        remaining INTEGER NOT NULL,
+        utilized INTEGER NOT NULL,
+        utilization_ratio DECIMAL(5,4) NOT NULL,
+        exceeded_threshold BOOLEAN NOT NULL,
+        timestamp TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_encompass_concurrency_tenant ON public.encompass_concurrency_metrics(tenant_id, timestamp)
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_encompass_concurrency_connection ON public.encompass_concurrency_metrics(los_connection_id, timestamp)
+    `).catch(() => {});
+    
+    // Add indexes for frequently queried loan fields
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_application_date ON public.loans(application_date) WHERE application_date IS NOT NULL
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_closing_date ON public.loans(closing_date) WHERE closing_date IS NOT NULL
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_funding_date ON public.loans(funding_date) WHERE funding_date IS NOT NULL
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_loan_type ON public.loans(loan_type) WHERE loan_type IS NOT NULL
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_current_loan_status ON public.loans(current_loan_status) WHERE current_loan_status IS NOT NULL
+    `).catch(() => {});
+    
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_branch ON public.loans(branch) WHERE branch IS NOT NULL
+    `).catch(() => {});
+    
+    // Create derived field calculation functions
+    await createDerivedFieldFunctions();
     
     // Create subscription plans table
     await pool.query(`

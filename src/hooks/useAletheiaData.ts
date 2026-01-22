@@ -44,7 +44,8 @@ const getDemoInsights = (): AletheiaInsight[] => [
 
 export const useAletheiaData = (
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom',
-  onDataAvailabilityChange?: (hasData: boolean) => void
+  onDataAvailabilityChange?: (hasData: boolean) => void,
+  selectedTenantId?: string | null
 ) => {
   const [allInsights, setAllInsights] = useState<AletheiaInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
@@ -70,7 +71,8 @@ export const useAletheiaData = (
       }
       
       try {
-        const data = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}`);
+        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+        const data = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
         
         if (data.insights && Array.isArray(data.insights) && data.insights.length > 0) {
           // Map API insights to component format with icons, preserving source information
@@ -120,7 +122,7 @@ export const useAletheiaData = (
     };
 
     fetchInsights();
-  }, [dateFilter, onDataAvailabilityChange]);
+  }, [dateFilter, selectedTenantId, onDataAvailabilityChange]);
 
   // Fetch funnel data for briefing context
   useEffect(() => {
@@ -133,7 +135,8 @@ export const useAletheiaData = (
       }
       
       try {
-        const data = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}`);
+        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+        const data = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`);
         setFunnelData(data);
       } catch (error: any) {
         // Handle unauthorized errors silently (user not logged in)
@@ -152,7 +155,7 @@ export const useAletheiaData = (
     };
 
     fetchFunnelData();
-  }, [dateFilter]);
+  }, [dateFilter, selectedTenantId]);
 
   // Handle error state and set demo insights if needed
   useEffect(() => {

@@ -59,6 +59,7 @@ import { ExportModal } from '@/components/dashboard/modals/ExportModal';
 import { ShareModal } from '@/components/dashboard/modals/ShareModal';
 import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
+import { TenantSelector } from '@/components/dashboard/TenantSelector';
 
 
 
@@ -86,6 +87,9 @@ const Dashboard = () => {
   const [authChecked, setAuthChecked] = useState(false);
   const [loading, setLoading] = useState(false); // No loading needed since we're auto-authenticating
   const [pageError, setPageError] = useState<Error | null>(null);
+  
+  // Tenant selection state for admins
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   
   // Briefing context state
   const [briefingContext, setBriefingContext] = useState<{
@@ -188,8 +192,11 @@ const Dashboard = () => {
   }, [setContextAuthenticated]);
 
   // Fetch briefing context data (insights and funnel data)
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
+  
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || briefingLoading) return;
     
     const fetchBriefingContext = async () => {
       // Check if user has a valid token before making API calls
@@ -204,9 +211,13 @@ const Dashboard = () => {
         return;
       }
       
+      setBriefingLoading(true);
+      setBriefingError(null);
+      
       try {
         // Fetch insights/dialogues
-        const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}`);
+        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+        const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
         const dialogues = insightsData?.insights?.map((insight: any) => ({
           message: insight.message || '',
           type: insight.type || 'info',
@@ -216,7 +227,7 @@ const Dashboard = () => {
         // Fetch funnel data
         let funnelStory = null;
         try {
-          const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}`);
+          const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`);
           if (funnelData) {
             funnelStory = {
               conversionRates: funnelData.conversionRates || {},
@@ -225,13 +236,10 @@ const Dashboard = () => {
             };
           }
         } catch (error: any) {
-          // Handle unauthorized errors silently
-          if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
-            // User not authenticated - continue without funnel data
-          } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-            // For timeout errors, log as warning since briefing works without funnel data
-            console.warn('Funnel data request timed out for briefing, continuing without it:', error.message);
-          } else {
+          // Handle errors silently - briefing works without funnel data
+          if (!error.message?.includes('Unauthorized') && !error.message?.includes('401') && 
+              !error.message?.includes('timed out') && !error.message?.includes('timeout') &&
+              !error.message?.includes('403')) {
             console.warn('Error fetching funnel data for briefing:', error);
           }
         }
@@ -242,14 +250,23 @@ const Dashboard = () => {
           userName: undefined // Can be set from user profile if available
         });
       } catch (error: any) {
-        // Handle unauthorized errors silently
-        if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+        // Handle 403 (Forbidden) and 401 (Unauthorized) errors gracefully
+        if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+          // Tenant context not available - set empty context
+          setBriefingContext({
+            dialogues: [],
+            funnelStory: null,
+            userName: undefined
+          });
+          setBriefingError('Tenant context not available');
+        } else if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
           // User not authenticated - set empty context
           setBriefingContext({
             dialogues: [],
             funnelStory: null,
             userName: undefined
           });
+          setBriefingError('Not authenticated');
         } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
           // For timeout errors, log as warning since briefing has empty context fallback
           console.warn('Briefing context request timed out, using empty context fallback:', error.message);
@@ -258,6 +275,7 @@ const Dashboard = () => {
             funnelStory: null,
             userName: undefined
           });
+          setBriefingError('Request timed out');
         } else {
           console.error('Error fetching briefing context:', error);
           // Set empty context on error - briefing will still work
@@ -266,12 +284,15 @@ const Dashboard = () => {
             funnelStory: null,
             userName: undefined
           });
+          setBriefingError(error.message || 'Unknown error');
         }
+      } finally {
+        setBriefingLoading(false);
       }
     };
 
     fetchBriefingContext();
-  }, [isAuthenticated, dateFilter]);
+  }, [isAuthenticated, dateFilter, selectedTenantId]);
 
   // Animation cycle: 5 seconds animating, 30 seconds pause (35 second loop)
   useEffect(() => {
@@ -919,6 +940,13 @@ const Dashboard = () => {
         dashboardVisibility={dashboardVisibility}
         onVisibilityChange={handleVisibilityChange}
         onReportClick={handleReportClick}
+        headerContent={
+          <TenantSelector
+            selectedTenantId={selectedTenantId}
+            onTenantChange={setSelectedTenantId}
+            compact={true}
+          />
+        }
       >
         {/* Report Modal */}
         <ReportModal open={reportModalOpen} onClose={() => {
@@ -977,7 +1005,7 @@ const Dashboard = () => {
         setTrendsModal={setTrendsModal}
       />
 
-      <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-20 sm:pt-24 md:pt-28 pb-4 sm:pb-8 md:pb-12 relative z-10">
+      <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-28 sm:pt-32 md:pt-36 pb-4 sm:pb-8 md:pb-12 relative z-10">
         {/* Insights Section - Minimalist */}
         {isAuthenticated && <div className="section-insights mb-16 md:mb-20">
             {/* Ailethia Insights - First */}
@@ -986,6 +1014,7 @@ const Dashboard = () => {
                 <AletheiaPromptsCard 
                   dateFilter={dateFilter} 
                   briefingContext={briefingContext || undefined}
+                  selectedTenantId={selectedTenantId}
                   onDataAvailabilityChange={(hasData) => {
                     if (!hasData && dashboardVisibility.aletheiaInsights) {
                       handleVisibilityChange({
@@ -1007,7 +1036,7 @@ const Dashboard = () => {
                 <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">Dashboards</h2>
                 
                 {/* Business Overview */}
-                {dashboardVisibility.executiveDashboard && <div className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} /></div>}
+                {dashboardVisibility.executiveDashboard && <div className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
                 
                 {/* Closing & Fallout Forecast */}
                 {dashboardVisibility.closingFalloutForecast && <div className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}

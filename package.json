@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "init:management-db": "node scripts/create-management-db.js || bash scripts/create-management-db.sh",
+    "init:management-schema": "node -e \"import('./server/src/config/managementDatabase.js').then(m => m.initManagementDatabase().then(() => { console.log('✅ Done'); process.exit(0); }).catch(e => { console.error('❌ Error:', e); process.exit(1); }));\"",
+    "seed:management-db": "tsx scripts/seed-management-db.ts",
     "dev": "vite",
     "dev:backend": "cd server && npm run dev",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:backend\"",

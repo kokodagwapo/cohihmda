@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../config/database.js';
+import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
 import multer from 'multer';
@@ -11,6 +12,137 @@ import { logCostEvent } from '../middleware/costTracking.js';
 import { uploadLimiter } from '../middleware/rateLimiter.js';
 import { encryptAPIKeys, decryptAPIKeys, isEncryptionConfigured } from '../services/encryption.js';
 import { auditLog, logDataAccess } from '../services/auditLogger.js';
+import pg from 'pg';
+
+/**
+ * Helper function to get tenant pool for RAG settings
+ * Uses tenantDatabaseManager to connect to tenant-specific database
+ */
+async function getTenantPoolForRag(tenantId: string): Promise<pg.Pool> {
+  return tenantDbManager.getTenantPool(tenantId);
+}
+
+/**
+ * Create rag_settings table in tenant database if it doesn't exist
+ */
+async function createRagSettingsTable(tenantPool: pg.Pool): Promise<void> {
+  await tenantPool.query(`
+    CREATE TABLE IF NOT EXISTS public.rag_settings (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      -- Embedding/RAG configuration
+      embedding_model TEXT DEFAULT 'text-embedding-3-small',
+      vector_database TEXT DEFAULT 'pgvector',
+      chunk_size INTEGER DEFAULT 1000,
+      chunk_overlap INTEGER DEFAULT 200,
+      top_k INTEGER DEFAULT 5,
+      similarity_threshold NUMERIC DEFAULT 0.7,
+      enable_reranking BOOLEAN DEFAULT false,
+      reranking_model TEXT,
+      context_window INTEGER DEFAULT 8000,
+      -- Chat model configuration
+      chat_model TEXT DEFAULT 'gpt-4o-mini',
+      temperature NUMERIC DEFAULT 0.7,
+      custom_system_prompt TEXT,
+      -- PII/Privacy settings
+      enable_pii_sanitization BOOLEAN DEFAULT true,
+      redact_ssn BOOLEAN DEFAULT true,
+      redact_dob BOOLEAN DEFAULT true,
+      redact_account_numbers BOOLEAN DEFAULT true,
+      allow_employee_names BOOLEAN DEFAULT false,
+      log_ai_interactions BOOLEAN DEFAULT true,
+      -- API Keys (encrypted)
+      openai_api_key TEXT,
+      gemini_api_key TEXT,
+      -- Voice Agentic settings
+      voice_agentic_enabled BOOLEAN DEFAULT false,
+      voice_model TEXT DEFAULT 'gpt-4o-mini',
+      voice_name TEXT DEFAULT 'Aria',
+      voice_top_k INTEGER DEFAULT 3,
+      voice_similarity_threshold NUMERIC DEFAULT 0.75,
+      voice_context_window INTEGER DEFAULT 4000,
+      voice_temperature NUMERIC DEFAULT 0.8,
+      voice_response_max_length INTEGER DEFAULT 60,
+      voice_conversation_memory INTEGER DEFAULT 10,
+      voice_rag_enabled BOOLEAN DEFAULT true,
+      voice_system_prompt TEXT,
+      voice_enable_reranking BOOLEAN DEFAULT false,
+      voice_real_time_mode BOOLEAN DEFAULT false,
+      -- Personality/Conversation settings
+      allowed_topics TEXT,
+      conversation_rules TEXT,
+      personality_tone TEXT DEFAULT 'professional',
+      personality_style TEXT DEFAULT 'concise',
+      personality_custom TEXT,
+      knowledge_base_links TEXT,
+      -- Timestamps
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+/**
+ * Ensure rag_settings table and row exists in tenant database
+ * Creates table if missing, then creates default settings if no row exists
+ */
+async function ensureRagSettings(tenantPool: pg.Pool): Promise<void> {
+  // First, create the table if it doesn't exist
+  await createRagSettingsTable(tenantPool);
+  
+  // Then check if a row exists
+  const existing = await tenantPool.query('SELECT id FROM public.rag_settings LIMIT 1');
+  if (existing.rows.length === 0) {
+    // Create default settings
+    const defaultAllowedTopics = `Loan origination
+Underwriting
+Compliance and regulatory requirements
+Staff productivity and performance
+TopTiering system and rankings
+Fallout estimation and prediction
+Market trends and industry news
+Executive insights and strategic clarity
+Company health signals
+Profitability analysis
+Cycle time optimization
+Capacity management
+Risk assessment
+Operational bottlenecks
+Performance metrics and benchmarks`;
+
+    const defaultConversationRules = `Always ask for clarification when information is unclear
+Never provide financial advice or make credit decisions
+Always cite sources when referencing data or metrics
+Be proactive and predictive - surface important information before being asked
+Connect insights across different domains (market trends, staff performance, operational data)
+Use executive-level language appropriate for leadership
+Speak clearly and concisely - every word counts
+Provide actionable insights that lead to decisions
+Never include stage directions or bracketed text in responses
+Read financial figures in full professional terms (e.g., "one point two million dollars" not "1.2M")
+Stay current with mortgage industry trends and Fed announcements`;
+
+    const defaultKnowledgeBaseLinks = `https://docs.coheus.com
+https://wiki.coheus.com/knowledge-base
+https://docs.coheus.com/rag
+https://docs.coheus.com/voice-agentic`;
+
+    const defaultPersonalityCustom = `Be proactive and predictive - identify patterns before they become problems. Ask smart questions the CEO didn't even think of. Connect dots others might miss across market trends, staff performance, and operational data. Surface hidden opportunities and risks. Deliver insights like a trusted advisor, not just reporting data but providing strategic intelligence. Think like a Chief of Staff - every insight should matter to leadership and lead to actionable decisions.`;
+
+    await tenantPool.query(
+      `INSERT INTO public.rag_settings (
+        allowed_topics, 
+        conversation_rules, 
+        knowledge_base_links,
+        personality_tone,
+        personality_style,
+        personality_custom
+      ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [defaultAllowedTopics, defaultConversationRules, defaultKnowledgeBaseLinks, 'professional', 'concise', defaultPersonalityCustom]
+    );
+    
+    console.log('[RAG Settings] Created rag_settings table and default row in tenant database');
+  }
+}
 
 const router = Router();
 
@@ -90,131 +222,61 @@ const documentSourceSchema = z.object({
 
 /**
  * GET /api/rag/settings
- * Get RAG settings for authenticated tenant
+ * Get RAG settings for authenticated tenant (from tenant-specific database)
  */
 router.get('/settings', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    // Check if super admin is requesting a specific tenant's settings
     const requestedTenantId = req.query.tenant_id as string | undefined;
     
-    // Get user's profile to check if super admin
+    // Get user's role and tenant
     const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+      `SELECT u.role, p.tenant_id 
+       FROM public.users u 
+       LEFT JOIN public.profiles p ON u.id = p.user_id 
+       WHERE u.id = $1`,
       [req.userId]
     );
     
     const userTenantId = profileResult.rows[0]?.tenant_id;
-    const isSuperAdmin = !userTenantId;
+    const userRole = profileResult.rows[0]?.role;
+    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
     
-    // Determine which tenant_id to use. For super admins with no tenant_id, fall back
-    // to the first tenant so admin UI can load without passing a query param.
+    // Determine target tenant
     let targetTenantId: string | undefined;
-    if (requestedTenantId && isSuperAdmin) {
-      // Super admin can access any tenant's settings
+    if (isSuperAdmin && requestedTenantId) {
       targetTenantId = requestedTenantId;
     } else if (userTenantId) {
-      // Regular user can only access their own tenant's settings
       targetTenantId = userTenantId;
-    } else if (isSuperAdmin) {
-      // Default to first tenant to keep admin usable even without explicit tenant_id
-      const tenantResult = await pool.query(
-        'SELECT id FROM public.tenants ORDER BY created_at ASC LIMIT 1'
-      );
-      targetTenantId = tenantResult.rows[0]?.id;
     }
 
     if (!targetTenantId) {
       return res.status(403).json({ error: 'Access denied. Tenant context required.' });
     }
 
-    // Optimize: Get tenant_id and settings in a single query using JOIN
-    const result = await pool.query(
-      `SELECT 
-        $1::uuid as tenant_id,
-        r.*
-       FROM public.rag_settings r
-       WHERE r.tenant_id = $1
-       LIMIT 1`,
-      [targetTenantId]
-    );
+    // Get tenant database pool
+    const tenantPool = await getTenantPoolForRag(targetTenantId);
+    
+    // Ensure default settings exist
+    await ensureRagSettings(tenantPool);
+    
+    // Get settings from tenant database (no tenant_id column)
+    const result = await tenantPool.query('SELECT * FROM public.rag_settings LIMIT 1');
 
-    const tenantId = targetTenantId;
-
-    // If no settings exist, create default settings with Ailethia content
-    if (result.rows.length === 0 || !result.rows[0].id || !result.rows[0].embedding_model) {
-      
-      // Default content for Ailethia agentic voice
-      const defaultAllowedTopics = `Loan origination
-Underwriting
-Compliance and regulatory requirements
-Staff productivity and performance
-TopTiering system and rankings
-Fallout estimation and prediction
-Market trends and industry news
-Executive insights and strategic clarity
-Company health signals
-Profitability analysis
-Cycle time optimization
-Capacity management
-Risk assessment
-Operational bottlenecks
-Performance metrics and benchmarks`;
-      
-      const defaultConversationRules = `Always ask for clarification when information is unclear
-Never provide financial advice or make credit decisions
-Always cite sources when referencing data or metrics
-Be proactive and predictive - surface important information before being asked
-Connect insights across different domains (market trends, staff performance, operational data)
-Use executive-level language appropriate for leadership
-Speak clearly and concisely - every word counts
-Provide actionable insights that lead to decisions
-Never include stage directions or bracketed text in responses
-Read financial figures in full professional terms (e.g., "one point two million dollars" not "1.2M")
-Stay current with mortgage industry trends and Fed announcements`;
-      
-      const defaultKnowledgeBaseLinks = `https://docs.coheus.com
-https://wiki.coheus.com/knowledge-base
-https://docs.coheus.com/rag
-https://docs.coheus.com/voice-agentic`;
-      
-      const defaultPersonalityCustom = `Be proactive and predictive - identify patterns before they become problems. Ask smart questions the CEO didn't even think of. Connect dots others might miss across market trends, staff performance, and operational data. Surface hidden opportunities and risks. Deliver insights like a trusted advisor, not just reporting data but providing strategic intelligence. Think like a Chief of Staff - every insight should matter to leadership and lead to actionable decisions.`;
-      
-      await pool.query(
-        `INSERT INTO public.rag_settings (
-          tenant_id, 
-          allowed_topics, 
-          conversation_rules, 
-          knowledge_base_links,
-          personality_tone,
-          personality_style,
-          personality_custom
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7) 
-        ON CONFLICT (tenant_id) DO NOTHING`,
-        [tenantId, defaultAllowedTopics, defaultConversationRules, defaultKnowledgeBaseLinks, 'professional', 'concise', defaultPersonalityCustom]
-      );
-      
-      // Fetch the newly created settings
-      const newResult = await pool.query(
-        'SELECT * FROM public.rag_settings WHERE tenant_id = $1',
-        [tenantId]
-      );
-      
-      return res.json({ settings: newResult.rows[0] || {} });
+    if (result.rows.length === 0) {
+      return res.json({ settings: {} });
     }
 
-    // Return settings (exclude tenant_id from the settings object)
-    const row = result.rows[0];
-    const { tenant_id, ...settings } = row;
+    const settings = result.rows[0];
     
-    // Decrypt API keys before returning (SOC 2 compliance)
+    // Decrypt API keys before returning
     const decryptedSettings = await decryptAPIKeys(settings);
     
-    // Log data access for PII/sensitive data (SOC 2 requirement)
+    // Log data access
     await logDataAccess({
       userId: req.userId!,
-      tenantId: tenantId,
+      tenantId: targetTenantId,
       resourceType: 'rag_settings',
-      resourceId: row.id,
+      resourceId: settings.id,
       action: 'view',
       containsPII: true,
       piiFields: ['openai_api_key', 'gemini_api_key'],
@@ -222,94 +284,7 @@ https://docs.coheus.com/voice-agentic`;
       userAgent: req.get('user-agent'),
     });
     
-    // Use decrypted settings for response
-    const responseSettings = { ...decryptedSettings };
-    
-    // If any of the voice agentic fields are NULL or empty, populate with defaults
-    const defaultAllowedTopics = `Loan origination
-Underwriting
-Compliance and regulatory requirements
-Staff productivity and performance
-TopTiering system and rankings
-Fallout estimation and prediction
-Market trends and industry news
-Executive insights and strategic clarity
-Company health signals
-Profitability analysis
-Cycle time optimization
-Capacity management
-Risk assessment
-Operational bottlenecks
-Performance metrics and benchmarks`;
-    
-    const defaultConversationRules = `Always ask for clarification when information is unclear
-Never provide financial advice or make credit decisions
-Always cite sources when referencing data or metrics
-Be proactive and predictive - surface important information before being asked
-Connect insights across different domains (market trends, staff performance, operational data)
-Use executive-level language appropriate for leadership
-Speak clearly and concisely - every word counts
-Provide actionable insights that lead to decisions
-Never include stage directions or bracketed text in responses
-Read financial figures in full professional terms (e.g., "one point two million dollars" not "1.2M")
-Stay current with mortgage industry trends and Fed announcements`;
-    
-    const defaultKnowledgeBaseLinks = `https://docs.coheus.com
-https://wiki.coheus.com/knowledge-base
-https://docs.coheus.com/rag
-https://docs.coheus.com/voice-agentic`;
-    
-    const defaultPersonalityCustom = `Be proactive and predictive - identify patterns before they become problems. Ask smart questions the CEO didn't even think of. Connect dots others might miss across market trends, staff performance, and operational data. Surface hidden opportunities and risks. Deliver insights like a trusted advisor, not just reporting data but providing strategic intelligence. Think like a Chief of Staff - every insight should matter to leadership and lead to actionable decisions.`;
-    
-    // Populate NULL or empty fields with defaults
-    if (!responseSettings.allowed_topics || responseSettings.allowed_topics.trim() === '') {
-      responseSettings.allowed_topics = defaultAllowedTopics;
-      // Update database with defaults
-      await pool.query(
-        'UPDATE public.rag_settings SET allowed_topics = $1 WHERE tenant_id = $2',
-        [defaultAllowedTopics, tenantId]
-      );
-    }
-    if (!responseSettings.conversation_rules || responseSettings.conversation_rules.trim() === '') {
-      responseSettings.conversation_rules = defaultConversationRules;
-      // Update database with defaults
-      await pool.query(
-        'UPDATE public.rag_settings SET conversation_rules = $1 WHERE tenant_id = $2',
-        [defaultConversationRules, tenantId]
-      );
-    }
-    if (!responseSettings.knowledge_base_links || responseSettings.knowledge_base_links.trim() === '') {
-      responseSettings.knowledge_base_links = defaultKnowledgeBaseLinks;
-      // Update database with defaults
-      await pool.query(
-        'UPDATE public.rag_settings SET knowledge_base_links = $1 WHERE tenant_id = $2',
-        [defaultKnowledgeBaseLinks, tenantId]
-      );
-    }
-    if (!responseSettings.personality_custom || responseSettings.personality_custom.trim() === '') {
-      responseSettings.personality_custom = defaultPersonalityCustom;
-      // Update database with defaults
-      await pool.query(
-        'UPDATE public.rag_settings SET personality_custom = $1 WHERE tenant_id = $2',
-        [defaultPersonalityCustom, tenantId]
-      );
-    }
-    if (!responseSettings.personality_tone) {
-      responseSettings.personality_tone = 'professional';
-      await pool.query(
-        'UPDATE public.rag_settings SET personality_tone = $1 WHERE tenant_id = $2',
-        ['professional', tenantId]
-      );
-    }
-    if (!responseSettings.personality_style) {
-      responseSettings.personality_style = 'concise';
-      await pool.query(
-        'UPDATE public.rag_settings SET personality_style = $1 WHERE tenant_id = $2',
-        ['concise', tenantId]
-      );
-    }
-    
-    res.json({ settings: responseSettings });
+    res.json({ settings: decryptedSettings });
   } catch (error: any) {
     console.error('Error fetching RAG settings:', error);
     res.status(500).json({ error: 'Failed to fetch RAG settings' });
@@ -318,40 +293,50 @@ https://docs.coheus.com/voice-agentic`;
 
 /**
  * PUT /api/rag/settings
- * Update RAG settings for authenticated tenant
+ * Update RAG settings for authenticated tenant (in tenant-specific database)
  */
 router.put('/settings', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const updates = ragSettingsSchema.parse(req.body);
     const requestedTenantId = req.query.tenant_id as string | undefined;
 
-    // Get user's profile to check if super admin
+    // Get user's role and tenant
     const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+      `SELECT u.role, p.tenant_id 
+       FROM public.users u 
+       LEFT JOIN public.profiles p ON u.id = p.user_id 
+       WHERE u.id = $1`,
       [req.userId]
     );
     
     const userTenantId = profileResult.rows[0]?.tenant_id;
-    const isSuperAdmin = !userTenantId;
+    const userRole = profileResult.rows[0]?.role;
+    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
     
-    // Determine which tenant_id to use
+    console.log(`[RAG Settings] User role: ${userRole}, isSuperAdmin: ${isSuperAdmin}, requestedTenantId: ${requestedTenantId}, userTenantId: ${userTenantId}`);
+    
+    // Determine target tenant
     let targetTenantId: string;
-    if (requestedTenantId && isSuperAdmin) {
-      // Super admin can update any tenant's settings
+    if (isSuperAdmin && requestedTenantId) {
       targetTenantId = requestedTenantId;
+      console.log(`[RAG Settings] Super admin updating tenant: ${targetTenantId}`);
     } else if (userTenantId) {
-      // Regular user can only update their own tenant's settings
       targetTenantId = userTenantId;
+      console.log(`[RAG Settings] Regular user updating their tenant: ${targetTenantId}`);
     } else {
       return res.status(403).json({ error: 'Access denied. Tenant context required.' });
     }
 
-    const tenantId = targetTenantId;
+    // Get tenant database pool
+    const tenantPool = await getTenantPoolForRag(targetTenantId);
+    
+    // Ensure rag_settings row exists
+    await ensureRagSettings(tenantPool);
 
-    // Encrypt API keys before storing (SOC 2 compliance)
+    // Encrypt API keys before storing
     const encryptedUpdates = await encryptAPIKeys(updates);
 
-    // Build dynamic UPDATE query
+    // Build dynamic UPDATE query (no tenant_id column in tenant-specific DB)
     const updateFields: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
@@ -368,46 +353,21 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
 
-    values.push(tenantId);
-
+    // Update the single rag_settings row in tenant database
     const query = `
       UPDATE public.rag_settings
       SET ${updateFields.join(', ')}, updated_at = NOW()
-      WHERE tenant_id = $${paramIndex}
       RETURNING *
     `;
 
-    const result = await pool.query(query, values);
+    console.log(`[RAG Settings] Updating settings in tenant database for: ${targetTenantId}`);
+    console.log(`[RAG Settings] Fields being updated:`, Object.keys(encryptedUpdates).filter(k => encryptedUpdates[k] !== undefined));
+    
+    const result = await tenantPool.query(query, values);
+    console.log(`[RAG Settings] UPDATE returned ${result.rows.length} rows`);
 
     if (result.rows.length === 0) {
-      // Create if doesn't exist
-      await pool.query(
-        `INSERT INTO public.rag_settings (tenant_id, ${Object.keys(encryptedUpdates).join(', ')})
-         VALUES ($1, ${Object.keys(encryptedUpdates).map((_, i) => `$${i + 2}`).join(', ')})`,
-        [tenantId, ...Object.values(encryptedUpdates)]
-      );
-      const newResult = await pool.query(
-        'SELECT * FROM public.rag_settings WHERE tenant_id = $1',
-        [tenantId]
-      );
-      
-      // Decrypt before returning
-      const decryptedNew = await decryptAPIKeys(newResult.rows[0]);
-      
-      // Audit log
-      await auditLog({
-        userId: req.userId,
-        userEmail: req.userEmail,
-        tenantId: tenantId,
-        action: 'create',
-        resource: 'rag_settings',
-        description: 'Created RAG settings with encrypted API keys',
-        status: 'success',
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-      });
-      
-      return res.json({ settings: decryptedNew });
+      return res.status(500).json({ error: 'Failed to update RAG settings' });
     }
 
     // Decrypt before returning
@@ -417,10 +377,10 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res) => {
     await auditLog({
       userId: req.userId,
       userEmail: req.userEmail,
-      tenantId: tenantId,
+      tenantId: targetTenantId,
       action: 'update',
       resource: 'rag_settings',
-      description: 'Updated RAG settings with encrypted API keys',
+      description: 'Updated RAG settings in tenant database',
       changes: { fields: Object.keys(updates) },
       status: 'success',
       ipAddress: req.ip,
@@ -862,37 +822,39 @@ router.get('/embeddings/stats', authenticateToken, async (req: AuthRequest, res)
 
 /**
  * GET /api/rag/voice
- * Get RAG voice agentic settings (Ailethia voice configuration)
+ * Get RAG voice agentic settings (Ailethia voice configuration) from tenant database
  */
 router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    // Check if super admin is requesting a specific tenant's settings
     const requestedTenantId = req.query.tenant_id as string | undefined;
     
-    // Get user's profile to check if super admin
+    // Get user's role and tenant
     const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+      `SELECT u.role, p.tenant_id 
+       FROM public.users u 
+       LEFT JOIN public.profiles p ON u.id = p.user_id 
+       WHERE u.id = $1`,
       [req.userId]
     );
     
     const userTenantId = profileResult.rows[0]?.tenant_id;
-    const isSuperAdmin = !userTenantId;
+    const userRole = profileResult.rows[0]?.role;
+    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
     
-    // Determine which tenant_id to use
     let targetTenantId: string;
-    if (requestedTenantId && isSuperAdmin) {
-      // Super admin can access any tenant's settings
+    if (isSuperAdmin && requestedTenantId) {
       targetTenantId = requestedTenantId;
     } else if (userTenantId) {
-      // Regular user can only access their own tenant's settings
       targetTenantId = userTenantId;
     } else {
       return res.status(403).json({ error: 'Access denied. Tenant context required.' });
     }
 
-    const tenantId = targetTenantId;
+    // Get tenant database pool
+    const tenantPool = await getTenantPoolForRag(targetTenantId);
+    await ensureRagSettings(tenantPool);
 
-    const result = await pool.query(
+    const result = await tenantPool.query(
       `SELECT 
         voice_agentic_enabled,
         voice_model,
@@ -914,9 +876,7 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
         personality_custom,
         knowledge_base_links,
         gemini_api_key
-       FROM public.rag_settings
-       WHERE tenant_id = $1`,
-      [tenantId]
+       FROM public.rag_settings LIMIT 1`
     );
 
     if (result.rows.length === 0) {
@@ -968,7 +928,7 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
 
 /**
  * PUT /api/rag/voice
- * Update RAG voice agentic settings (Ailethia voice configuration)
+ * Update RAG voice agentic settings (Ailethia voice configuration) in tenant database
  */
 router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
   try {
@@ -997,30 +957,33 @@ router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
 
     const requestedTenantId = req.query.tenant_id as string | undefined;
 
-    // Get user's profile to check if super admin
+    // Get user's role and tenant
     const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+      `SELECT u.role, p.tenant_id 
+       FROM public.users u 
+       LEFT JOIN public.profiles p ON u.id = p.user_id 
+       WHERE u.id = $1`,
       [req.userId]
     );
     
     const userTenantId = profileResult.rows[0]?.tenant_id;
-    const isSuperAdmin = !userTenantId;
+    const userRole = profileResult.rows[0]?.role;
+    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
     
-    // Determine which tenant_id to use
     let targetTenantId: string;
-    if (requestedTenantId && isSuperAdmin) {
-      // Super admin can update any tenant's settings
+    if (isSuperAdmin && requestedTenantId) {
       targetTenantId = requestedTenantId;
     } else if (userTenantId) {
-      // Regular user can only update their own tenant's settings
       targetTenantId = userTenantId;
     } else {
       return res.status(403).json({ error: 'Access denied. Tenant context required.' });
     }
 
-    const tenantId = targetTenantId;
+    // Get tenant database pool
+    const tenantPool = await getTenantPoolForRag(targetTenantId);
+    await ensureRagSettings(tenantPool);
 
-    // Build dynamic UPDATE query
+    // Build dynamic UPDATE query (no tenant_id column)
     const updateFields: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
@@ -1037,29 +1000,16 @@ router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
 
-    values.push(tenantId);
-
     const query = `
       UPDATE public.rag_settings
       SET ${updateFields.join(', ')}, updated_at = NOW()
-      WHERE tenant_id = $${paramIndex}
       RETURNING *
     `;
 
-    const result = await pool.query(query, values);
+    const result = await tenantPool.query(query, values);
 
     if (result.rows.length === 0) {
-      // Create if doesn't exist
-      await pool.query(
-        `INSERT INTO public.rag_settings (tenant_id, ${Object.keys(voiceUpdates).join(', ')})
-         VALUES ($1, ${Object.keys(voiceUpdates).map((_, i) => `$${i + 2}`).join(', ')})`,
-        [tenantId, ...Object.values(voiceUpdates)]
-      );
-      const newResult = await pool.query(
-        'SELECT * FROM public.rag_settings WHERE tenant_id = $1',
-        [tenantId]
-      );
-      return res.json({ voice: newResult.rows[0] });
+      return res.status(500).json({ error: 'Failed to update voice settings' });
     }
 
     res.json({ voice: result.rows[0] });
@@ -1157,6 +1107,103 @@ router.post('/search', authenticateToken, async (req: AuthRequest, res) => {
     }
     console.error('Error performing RAG search:', error);
     res.status(500).json({ error: 'Failed to perform RAG search', details: error.message });
+  }
+});
+
+/**
+ * GET /api/rag/costs
+ * Get RAG-related costs for authenticated tenant
+ */
+router.get('/costs', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    // Check if super admin is requesting a specific tenant's costs
+    const requestedTenantId = req.query.tenant_id as string | undefined;
+    
+    // Get user's role from users table and tenant from profiles table
+    const profileResult = await pool.query(
+      `SELECT u.role, p.tenant_id 
+       FROM public.users u 
+       LEFT JOIN public.profiles p ON u.id = p.user_id 
+       WHERE u.id = $1`,
+      [req.userId]
+    );
+    
+    const userTenantId = profileResult.rows[0]?.tenant_id;
+    const userRole = profileResult.rows[0]?.role;
+    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
+    
+    // Determine which tenant_id to use
+    let targetTenantId: string;
+    if (isSuperAdmin && requestedTenantId) {
+      // Super admin can access any tenant's costs
+      targetTenantId = requestedTenantId;
+    } else if (userTenantId) {
+      // Use user's tenant (or super admin's default tenant)
+      targetTenantId = userTenantId;
+    } else {
+      return res.status(403).json({ error: 'Access denied. Tenant context required.' });
+    }
+
+    const tenantId = targetTenantId;
+
+    // Get date range (default to last 30 days)
+    const startDate = req.query.start_date as string || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const endDate = req.query.end_date as string || new Date().toISOString();
+
+    // Check if cost_events table exists
+    try {
+      const tableCheck = await pool.query(
+        `SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'cost_events'
+        )`
+      );
+      
+      const tableExists = tableCheck.rows[0]?.exists;
+      
+      if (!tableExists) {
+        // Table doesn't exist yet - return empty array
+        console.log('cost_events table does not exist, returning empty costs array');
+        return res.json({ costs: [] });
+      }
+
+      // Query RAG-related costs (embeddings, chat, voice, etc.)
+      const result = await pool.query(
+        `SELECT 
+          id,
+          service_category,
+          service_provider,
+          service_name,
+          usage_type,
+          usage_amount,
+          usage_unit,
+          unit_price,
+          total_cost,
+          created_at,
+          metadata
+         FROM public.cost_events
+         WHERE tenant_id = $1 
+           AND service_category IN ('embedding', 'chat', 'voice_ai', 'rag', 'vector_search')
+           AND created_at >= $2 
+           AND created_at <= $3
+         ORDER BY created_at DESC
+         LIMIT 1000`,
+        [tenantId, startDate, endDate]
+      );
+
+      res.json({ costs: result.rows });
+    } catch (dbError: any) {
+      // If table doesn't exist (42P01 = relation does not exist)
+      if (dbError.code === '42P01') {
+        console.log('cost_events table does not exist, returning empty costs array');
+        return res.json({ costs: [] });
+      }
+      throw dbError;
+    }
+  } catch (error: any) {
+    console.error('Error fetching RAG costs:', error);
+    res.status(500).json({ error: 'Failed to fetch RAG costs', details: error.message });
   }
 });
 

@@ -1,0 +1,22 @@
+//Please add versioning here.
+
+LET vVersion = '
+Version 1.1.0, Version Date MM/DD/2025
+
+
+
+
+';
+
+TRACE $(vVersion);
+
+//Move old versioning info into this variable to hide from UI
+LET vVersionArchive = '
+
+
+
+';
+
+TRACE $(vVersionArchive);
+
+

@@ -7,6 +7,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import { pool, retryQuery, handleDatabaseError } from '../config/database.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { logError, logWarn, logInfo, logDebug } from '../services/logger.js';
 
@@ -24,48 +25,11 @@ const router = Router();
 /**
  * GET /api/loans
  * Get loans for authenticated tenant with optional filters
+ * Uses tenant-specific database (no tenant_id in WHERE clause)
  */
-router.get('/', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id from query or user profile (supports super admins)
-    let tenantId = req.query.tenant_id as string;
-    
-    if (!tenantId) {
-      const profileResult = await retryQuery(
-        () => pool.query(
-          'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-          [req.userId]
-        ),
-        3, 1000
-      );
-      tenantId = profileResult.rows[0]?.tenant_id;
-    }
-    
-    // If still no tenant, check if user is super admin and use Default Tenant
-    if (!tenantId) {
-      const userResult = await retryQuery(
-        () => pool.query(
-          'SELECT role FROM public.users WHERE id = $1',
-          [req.userId]
-        ),
-        3, 1000
-      );
-      if (userResult.rows[0]?.role === 'super_admin') {
-        const defaultTenantResult = await retryQuery(
-          () => pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`
-          ),
-          3, 1000
-        );
-        if (defaultTenantResult.rows.length > 0) {
-          tenantId = defaultTenantResult.rows[0].id;
-        }
-      }
-    }
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
+    const tenantPool = getTenantContext(req).tenantPool;
 
     // Parse query parameters
     const {
@@ -77,10 +41,10 @@ router.get('/', authenticateToken, apiLimiter, async (req: AuthRequest, res) => 
       end_date,
     } = req.query;
 
-    // Build query
-    let query = 'SELECT * FROM public.loans WHERE tenant_id = $1';
-    const params: any[] = [tenantId];
-    let paramIndex = 2;
+    // Build query (no tenant_id filter - using tenant-specific database)
+    let query = 'SELECT * FROM public.loans WHERE 1=1';
+    const params: any[] = [];
+    let paramIndex = 1;
 
     if (status) {
       query += ` AND status = $${paramIndex}`;
@@ -109,15 +73,12 @@ router.get('/', authenticateToken, apiLimiter, async (req: AuthRequest, res) => 
     query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(parseInt(limit as string), parseInt(offset as string));
 
-    const result = await retryQuery(
-      () => pool.query(query, params),
-      3, 1000
-    );
+    const result = await tenantPool.query(query, params);
 
-    // Get total count for pagination
-    let countQuery = 'SELECT COUNT(*) FROM public.loans WHERE tenant_id = $1';
-    const countParams: any[] = [tenantId];
-    let countParamIndex = 2;
+    // Get total count for pagination (no tenant_id filter - using tenant-specific database)
+    let countQuery = 'SELECT COUNT(*) FROM public.loans WHERE 1=1';
+    const countParams: any[] = [];
+    let countParamIndex = 1;
 
     if (status) {
       countQuery += ` AND status = $${countParamIndex}`;
@@ -143,10 +104,7 @@ router.get('/', authenticateToken, apiLimiter, async (req: AuthRequest, res) => 
       countParamIndex++;
     }
 
-    const countResult = await retryQuery(
-      () => pool.query(countQuery, countParams),
-      3, 1000
-    );
+    const countResult = await tenantPool.query(countQuery, countParams);
     const total = parseInt(countResult.rows[0].count);
 
     res.json({

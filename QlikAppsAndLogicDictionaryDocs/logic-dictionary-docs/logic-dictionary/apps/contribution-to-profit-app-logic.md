@@ -144,6 +144,29 @@ END as loan_program_standardized
 
 ---
 
+## Revenue Calculations
+
+**See**: `derived/revenue-calculations.md` for complete revenue calculation documentation including:
+- Revenue_Contribution formula
+- Revenue configuration logic
+- Formula parsing and evaluation
+- Margin (BPS)_Contribution calculations
+
+## Pull Through Calculations
+
+**See**: `derived/pull-through-calculations.md` for complete pull-through documentation including:
+- Scorecard PullThrough (rolling 13 months)
+- Pull-through with Originated flag
+- Multi-channel pull-through logic
+
+## Expression Usage
+
+**See**: `validation/expression-categories.md` for expression categorization and:
+- `validation/qsda-cross-reference.md` for QSDA analysis findings
+- Common expression patterns used in Contribution app
+
+---
+
 ## Notes
 
 - Contribution to Profit app focuses on profitability metrics
@@ -151,3 +174,11 @@ END as loan_program_standardized
 - Channel-specific actor fields (MLO)
 - Scorecard logic varies by TPO presence
 - Loan program standardization for consistency
+
+## See Also
+
+- **Revenue Calculations**: `derived/revenue-calculations.md` - Revenue_Contribution and margin calculations
+- **Pull Through**: `derived/pull-through-calculations.md` - Pull-through metrics
+- **ODAG Logic**: `core/odag-logic.md` - Channel filtering (Correspondent exclusion)
+- **Expression Categories**: `validation/expression-categories.md` - Expression patterns
+- **QSDA Cross-Reference**: `validation/qsda-cross-reference.md` - App-specific findings

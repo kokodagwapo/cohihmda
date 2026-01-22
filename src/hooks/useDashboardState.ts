@@ -228,7 +228,7 @@ export function useDashboardState(): UseDashboardStateReturn {
   const [topTieringModal, setTopTieringModal] = useState(false);
   const [topTieringTab, setTopTieringTab] = useState<'overview' | 'branches' | 'los' | 'trends' | 'funnel'>('funnel');
   const [funnelView, setFunnelView] = useState<'funnel' | 'bar' | 'revenue' | 'units' | 'volume' | 'detail'>('funnel');
-  const [funnelYear, setFunnelYear] = useState<number>(2025);
+  const [funnelYear, setFunnelYear] = useState<number>(new Date().getFullYear());
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [selectedStaff, setSelectedStaff] = useState<{
     name: string;

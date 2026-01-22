@@ -19,6 +19,7 @@ import {
   CreditCard,
   ChevronRight,
   X,
+  Database,
 } from 'lucide-react';
 import type { AdminSection } from '@/hooks/admin/useAdminState';
 
@@ -36,6 +37,7 @@ const adminSections = [
   { id: 'deployment' as AdminSection, label: 'Deployment', icon: Cloud, description: 'Manage deployment instances', color: 'text-sky-300 dark:text-sky-400/70' },
   { id: 'stripe' as AdminSection, label: 'Stripe Payments', icon: CreditCard, description: 'Subscription and billing management', color: 'text-violet-300 dark:text-violet-400/70' },
   { id: 'aws-hosting' as AdminSection, label: 'AWS Hosting', icon: Cloud, description: 'Per-lender AWS hosting and billing', color: 'text-orange-300 dark:text-orange-400/70' },
+  { id: 'metrics-catalog' as AdminSection, label: 'Metrics Catalog', icon: Database, description: 'Browse all available metrics and formulas', color: 'text-teal-300 dark:text-teal-400/70' },
 ];
 
 interface AdminLayoutProps {

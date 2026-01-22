@@ -11,20 +11,8 @@ import { useUserTimezone } from "@/hooks/useUserTimezone";
 import { api } from "@/lib/api";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
-import Agentic from "./pages/Agentic";
-import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
-import V2 from "./pages/V2";
-import CodeRefactor from "./pages/CodeRefactor";
-import AgilePlan from "./pages/AgilePlan";
-import BackendArchitecture from "./pages/BackendArchitecture";
-import CSVEditor from "./pages/CSVEditor";
-import RAG from "./pages/RAG";
-import CodeReview from "./pages/CodeReview";
-import ICEEncompass from "./pages/ICEEncompass";
-import Loans from "./pages/Loans";
-import QlikMigration from "./pages/QlikMigration";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
@@ -138,18 +126,6 @@ const App = () => (
               <Route path="/login" element={<Login />} />
               <Route path="/insights" element={<Dashboard />} />
               <Route path="/admin" element={<Admin />} />
-              <Route path="/agentic" element={<Agentic />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/rag" element={<RAG />} />
-              <Route path="/v2" element={<V2 />} />
-              <Route path="/code-refactor" element={<CodeRefactor />} />
-              <Route path="/v2/agileplan" element={<AgilePlan />} />
-              <Route path="/backend-architecture" element={<BackendArchitecture />} />
-              <Route path="/csv-editor" element={<CSVEditor />} />
-              <Route path="/cr" element={<CodeReview />} />
-              <Route path="/ice" element={<ICEEncompass />} />
-              <Route path="/loans" element={<Loans />} />
-              <Route path="/qlik" element={<QlikMigration />} />
               <Route path="/subscription/success" element={<SubscriptionSuccess />} />
               <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

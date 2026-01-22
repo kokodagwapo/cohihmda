@@ -94,6 +94,8 @@ This document provides mappings from Qlik functions, data types, and expressions
 **Qlik**: `WildMatch(Channel, '*Retail*', '*Wholesale*')`  
 **PostgreSQL**: `channel ILIKE '%Retail%' OR channel ILIKE '%Wholesale%'`
 
+**See**: `patterns/aggregation-patterns.md` for WildMatch pattern details.
+
 #### SubField()
 **Qlik**: `SubField([Field], '|', 1)`  
 **PostgreSQL**: `SPLIT_PART(field, '|', 1)`
@@ -148,6 +150,8 @@ This document provides mappings from Qlik functions, data types, and expressions
 **Qlik**: `RangeSum([Field1], [Field2], [Field3])`  
 **PostgreSQL**: `COALESCE(field1, 0) + COALESCE(field2, 0) + COALESCE(field3, 0)`
 
+**See**: `patterns/aggregation-patterns.md` for RangeSum pattern details.
+
 ---
 
 ### Conditional Functions
@@ -162,7 +166,9 @@ This document provides mappings from Qlik functions, data types, and expressions
 
 #### Dual()
 **Qlik**: `Dual('Display', SortValue)`  
-**PostgreSQL**: Use computed column for sort value, or two columns
+**PostgreSQL**: Two columns (display_text, sort_value) or use DATE_TRUNC directly
+
+**See**: `patterns/dual-display-sort.md` for complete translation guide.
 
 ---
 
@@ -177,7 +183,9 @@ SELECT dimension, SUM(field) OVER (PARTITION BY dimension) as agg_value
 
 #### Class()
 **Qlik**: `Class([Field], 10)`  
-**PostgreSQL**: Use CASE statements or generate_series for buckets
+**PostgreSQL**: Use CASE statements or create bucket function
+
+**See**: `patterns/aggregation-patterns.md` for Class() bucketing pattern details.
 
 ---
 
@@ -326,7 +334,20 @@ $$ LANGUAGE plpgsql;
 
 ## Common Patterns
 
+**Note**: For detailed pattern translations, see the `patterns/` directory:
+- `patterns/date-period-filtering.md` - Date flags → Functions
+- `patterns/dual-display-sort.md` - Dual() pattern
+- `patterns/mapping-lookups.md` - ApplyMap() pattern
+- `patterns/date-groupings.md` - YearMonth patterns
+- `patterns/null-handling.md` - NULL handling
+- `patterns/aggregation-patterns.md` - RangeSum, Class, WildMatch
+- `patterns/qlik-to-postgresql.md` - General translation reference
+
 ### Date Flag Generation
+
+**Qlik Pattern**: Pre-computed date flags for filtering  
+**PostgreSQL Approach**: Use reusable functions, NOT computed columns
+
 **Qlik**:
 ```qvs
 If([Date] > $(vMaxDate), 'No',
@@ -334,15 +355,22 @@ If([Date] > $(vMaxDate), 'No',
    as [Rolling13MonthFlag]
 ```
 
-**PostgreSQL**:
+**PostgreSQL** (Function-based):
 ```sql
-CASE 
-    WHEN date_field > CURRENT_DATE THEN 'No'
-    WHEN date_field >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '13 months' 
-    THEN 'Yes'
-    ELSE 'No'
-END as rolling_13_month_flag
+-- Create reusable function
+CREATE OR REPLACE FUNCTION is_rolling_13_month(check_date DATE)
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN check_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '13 months'
+       AND check_date <= CURRENT_DATE;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Use in queries
+WHERE is_rolling_13_month(application_date)
 ```
+
+**See**: `patterns/date-period-filtering.md` for complete function examples.
 
 ### Turn Time Calculation
 **Qlik**:
@@ -356,6 +384,10 @@ DATE(funding_date) - DATE(application_date) as app_fund_days
 ```
 
 ### Revenue Aggregation
+
+**Qlik Pattern**: RangeSum() treats NULLs as 0  
+**PostgreSQL**: Use COALESCE for NULL-safe addition
+
 **Qlik**:
 ```qvs
 RangeSum([Origination Revenue], [Secondary Revenue]) as [Total Revenue]
@@ -365,6 +397,8 @@ RangeSum([Origination Revenue], [Secondary Revenue]) as [Total Revenue]
 ```sql
 COALESCE(origination_revenue, 0) + COALESCE(secondary_revenue, 0) as total_revenue
 ```
+
+**See**: `patterns/aggregation-patterns.md` for RangeSum pattern details.
 
 ### Complexity Score
 **Qlik**:
@@ -441,8 +475,23 @@ FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
 
 ## Notes
 
-- Qlik's `RangeSum()` handles NULLs as 0; use `COALESCE()` in PostgreSQL
-- Qlik's `Dual()` creates display + sort; use computed columns or two columns in PostgreSQL
+- **Date Flags**: Use functions, NOT computed columns. See `patterns/date-period-filtering.md`
+- **YearMonth Fields**: Use DATE_TRUNC functions, NOT computed columns. See `patterns/date-groupings.md`
+- **RangeSum()**: Handles NULLs as 0; use `COALESCE()` in PostgreSQL. See `patterns/aggregation-patterns.md`
+- **Dual()**: Creates display + sort; use two columns or DATE_TRUNC directly. See `patterns/dual-display-sort.md`
+- **ApplyMap()**: Use JOINs to mapping tables. See `patterns/mapping-lookups.md`
+- **NullAsValue**: Use COALESCE in queries. See `patterns/null-handling.md`
 - Qlik variables expand at query time; PostgreSQL uses parameters or config tables
 - Set analysis is powerful in Qlik; translate to SQL WHERE clauses with proper indexing
 - Date calculations in Qlik use numeric dates; PostgreSQL uses DATE type natively
+
+## Pattern Reference
+
+For complete pattern translations, see:
+- `patterns/date-period-filtering.md` - Date flags → Functions
+- `patterns/dual-display-sort.md` - Dual() → Two columns
+- `patterns/mapping-lookups.md` - ApplyMap() → JOINs
+- `patterns/date-groupings.md` - YearMonth → DATE_TRUNC
+- `patterns/null-handling.md` - NullAsValue → COALESCE
+- `patterns/aggregation-patterns.md` - RangeSum, Class, WildMatch
+- `patterns/qlik-to-postgresql.md` - General translation reference

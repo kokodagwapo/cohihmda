@@ -84,9 +84,47 @@ JOIN turn_time_definitions ON ...
 
 ---
 
+## Turn Time Calculations
+
+**See**: `concepts/turn-time.md` for complete turn time documentation including:
+- Milestone-to-milestone calculations
+- Business days vs calendar days
+- Turn time ranges and buckets
+
+## Revenue Calculations
+
+**See**: `derived/revenue-calculations.md` for Revenue_Ops calculations:
+- Revenue_Ops formula
+- Margin (BPS)_Ops
+- Revenue configuration logic
+
+## Custom Report Fields
+
+**See**: `core/custom-report-fields.md` for custom field logic:
+- Ad hoc turn time fields
+- Field swap logic
+- Field density calculations
+
+## Expression Usage
+
+**See**: `validation/expression-categories.md` for expression categorization and:
+- `validation/qsda-cross-reference.md` for QSDA analysis findings
+- Common expression patterns used in Operations app
+
+---
+
 ## Notes
 
 - Operations app focuses on turn time analysis
 - Supports custom turn time definitions
 - Milestone-focused date calculations
 - Custom field definitions from configuration
+
+## See Also
+
+- **Turn Time**: `concepts/turn-time.md` - Turn time calculations
+- **Revenue**: `derived/revenue-calculations.md` - Revenue_Ops calculations
+- **Custom Fields**: `core/custom-report-fields.md` - Custom field definitions
+- **Date Functions**: `core/functions.md` - Date flag functions
+- **Expression Categories**: `validation/expression-categories.md` - Expression patterns
+- **QSDA Cross-Reference**: `validation/qsda-cross-reference.md` - App-specific findings

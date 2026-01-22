@@ -1,142 +1,214 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Target, ArrowUp, ArrowDown, X } from 'lucide-react';
+import { Target, ArrowUp, ArrowDown, X, ChevronDown, Calendar as CalendarIcon } from 'lucide-react';
 import { LOSFunnelData } from '@/lib/losSchema';
 import { BusinessDataTable } from '@/components/dashboard/BusinessDataTable';
-import { useDashboardStats } from '@/hooks/useDashboardStats';
+import { useMetrics } from '@/hooks/useMetrics';
+import { PeriodValue, getPeriodRange } from '@/utils/closingFalloutFilters';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+
+// Period options for KPI timeframe selectors
+const PERIOD_OPTIONS: Array<{ value: PeriodValue; label: string; shortLabel: string }> = [
+  { value: 'mtd', label: 'Month to Date', shortLabel: 'MTD' },
+  { value: 'ytd', label: 'Year to Date', shortLabel: 'YTD' },
+  { value: 'last_month', label: 'Last Month', shortLabel: 'Last Mo' },
+  { value: 'last_year', label: 'Last Year', shortLabel: 'Last Yr' },
+  { value: 'all', label: 'All Time', shortLabel: 'All' },
+  { value: 'custom', label: 'Custom Range', shortLabel: 'Custom' },
+];
+
+// KPI to metric mapping with their volume counterparts
+const KPI_METRICS: Record<string, { primary: string; volume?: string }> = {
+  activeLoans: { primary: 'active_loans', volume: 'active_volume' },
+  closedLoans: { primary: 'closed_loans', volume: 'closed_volume' },
+  lockedLoans: { primary: 'locked_loans', volume: 'locked_volume' },
+  cycleTime: { primary: 'avg_cycle_time' },
+  pullThrough: { primary: 'pull_through_rate' },
+  creditPulls: { primary: 'credit_pulls' },
+};
 
 // Executive Dashboard - Business Overview Component (6 Cards with Modals)
 export const ExecutiveDashboard = ({
   dateFilter,
-  year = 2025
+  year = new Date().getFullYear(),
+  selectedTenantId
 }: {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
   year?: number;
+  selectedTenantId?: string | null;
 }) => {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
   const [isAnimating, setIsAnimating] = useState(false);
 
-  // Use custom hook for API data
-  const { statsData, statsLoading, funnelData: funnelDataState, funnelLoading } = useDashboardStats(dateFilter, year);
-
-  const createZeroFunnelYear = (): LOSFunnelData => ({
-    loansStarted: { revenue: 0, units: 0, volume: 0 },
-    noRespaApp: { revenue: 0, units: 0, volume: 0, lostRevenue: 0 },
-    respaApp: { revenue: 0, units: 0, volume: 0 },
-    originated: { revenue: 0, units: 0, volume: 0 },
-    falloutWithdrawn: { revenue: 0, units: 0, volume: 0, lostRevenue: 0 },
-    falloutDenied: { revenue: 0, units: 0, volume: 0, lostRevenue: 0 },
-    stillActive: { revenue: 0, units: 0, volume: 0 }
+  // Per-KPI timeframe state (Active Loans doesn't have timeframe - it's current state)
+  const [kpiTimeframes, setKpiTimeframes] = useState<Record<string, PeriodValue>>({
+    closedLoans: 'mtd',
+    lockedLoans: 'mtd', // Locked loans can be filtered by lock date
+    cycleTime: 'mtd',
+    pullThrough: 'ytd', // Pull-through typically measured YTD
+    creditPulls: 'mtd',
   });
 
-  // Multi-year funnel data - synced with TopTiering (fallback only) - memoized to prevent infinite loops
-  const multiYearFunnelData = useMemo<Record<number, LOSFunnelData>>(() => ({
-    2025: createZeroFunnelYear(),
-    2024: createZeroFunnelYear()
-  }), []);
+  // Track which KPI dropdown is open
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  
+  // Custom date ranges per KPI (used when period is 'custom')
+  const [kpiCustomDates, setKpiCustomDates] = useState<Record<string, { start: Date | null; end: Date | null }>>({});
+  
+  // Track which KPI's calendar popover is open (start or end)
+  const [calendarOpen, setCalendarOpen] = useState<{ kpiId: string; type: 'start' | 'end' } | null>(null);
 
-  // Memoize effectiveFunnelData to prevent reference changes on every render
-  const effectiveFunnelData = useMemo(() => {
-    return funnelDataState || multiYearFunnelData[year] || multiYearFunnelData[2025];
-  }, [funnelDataState, multiYearFunnelData, year]);
+  // Use metrics service for Qlik Logic Dictionary-based calculations
+  const { queryMetric, queryMetrics, queryMetricsWithDateRange, loading: metricsLoading } = useMetrics(selectedTenantId, year);
+  const [metricsData, setMetricsData] = useState<Record<string, any>>({});
+  const [loadingKpis, setLoadingKpis] = useState<Set<string>>(new Set());
+  
+  // Fetch a single KPI's metrics based on its timeframe
+  const fetchKpiMetrics = useCallback(async (kpiId: string, period: PeriodValue, customDates?: { start: Date | null; end: Date | null }) => {
+    const kpiConfig = KPI_METRICS[kpiId];
+    if (!kpiConfig) return;
+
+    setLoadingKpis(prev => new Set(prev).add(kpiId));
+    
+    try {
+      const metricsToFetch = [kpiConfig.primary];
+      if (kpiConfig.volume) metricsToFetch.push(kpiConfig.volume);
+      
+      // Active loans ignores date filter (current state)
+      const effectivePeriod = kpiId === 'activeLoans' ? 'all' : period;
+      
+      let results;
+      if (effectivePeriod === 'custom' && customDates?.start && customDates?.end) {
+        // Use custom date range
+        results = await queryMetricsWithDateRange(metricsToFetch, customDates.start, customDates.end);
+      } else {
+        results = await queryMetrics(metricsToFetch, effectivePeriod as any);
+      }
+      
+      setMetricsData(prev => ({
+        ...prev,
+        ...results,
+        [`${kpiId}_period`]: effectivePeriod, // Track which period this data is for
+      }));
+    } catch (error: any) {
+      console.error(`[ExecutiveDashboard] Error fetching ${kpiId} metrics:`, error);
+    } finally {
+      setLoadingKpis(prev => {
+        const next = new Set(prev);
+        next.delete(kpiId);
+        return next;
+      });
+    }
+  }, [queryMetrics, queryMetricsWithDateRange]);
+
+  // Handle timeframe change for a KPI
+  const handleTimeframeChange = useCallback((kpiId: string, period: PeriodValue) => {
+    setKpiTimeframes(prev => ({ ...prev, [kpiId]: period }));
+    setOpenDropdown(null);
+    
+    // If switching to custom and we have dates, fetch with those dates
+    if (period === 'custom') {
+      const customDates = kpiCustomDates[kpiId];
+      if (customDates?.start && customDates?.end) {
+        fetchKpiMetrics(kpiId, period, customDates);
+      }
+      // Otherwise wait for user to select dates
+    } else {
+      fetchKpiMetrics(kpiId, period);
+    }
+  }, [fetchKpiMetrics, kpiCustomDates]);
+
+  // Handle custom date selection for a KPI
+  const handleCustomDateChange = useCallback((kpiId: string, type: 'start' | 'end', date: Date | undefined) => {
+    setKpiCustomDates(prev => {
+      const current = prev[kpiId] || { start: null, end: null };
+      const updated = { ...current, [type]: date || null };
+      return { ...prev, [kpiId]: updated };
+    });
+    setCalendarOpen(null);
+    
+    // If both dates are set, fetch the metric
+    setTimeout(() => {
+      setKpiCustomDates(currentDates => {
+        const dates = currentDates[kpiId];
+        if (dates?.start && dates?.end) {
+          fetchKpiMetrics(kpiId, 'custom', dates);
+        }
+        return currentDates;
+      });
+    }, 0);
+  }, [fetchKpiMetrics]);
+
+  // Initial fetch for all KPIs based on their default timeframes
+  useEffect(() => {
+    // Fetch active loans (no date filter)
+    fetchKpiMetrics('activeLoans', 'all');
+    
+    // Fetch other KPIs with their selected timeframes
+    Object.entries(kpiTimeframes).forEach(([kpiId, period]) => {
+      fetchKpiMetrics(kpiId, period);
+    });
+  }, [selectedTenantId, year]); // Re-fetch when tenant or year changes
+
 
   // Helper function to format numbers (using utility function)
   // Note: Using formatCompactNumberNoCurrency for non-currency numbers
 
-  // Calculate metrics from funnelData or statsData - memoized to prevent infinite loops
+  // Calculate metrics from metrics service (Qlik Logic Dictionary formulas)
   const metrics = useMemo(() => {
-    // Show loading state if data is still loading
-    if (statsLoading && !statsData) {
-      return {
-        activeLoans: { value: '--', change: '+12%', trend: 'up' as const },
-        closedLoans: { value: '--', change: '+8%', trend: 'up' as const },
-        lockedLoans: { value: '--', change: '+5%', trend: 'up' as const },
-        cycleTime: { value: '-- days', change: '-2 days', trend: 'up' as const },
-        pullThrough: { value: '--%', change: '+3.2%', trend: 'up' as const },
-        creditPulls: { value: '--', change: '+15%', trend: 'up' as const }
-      };
-    }
-
-    // If we have neither statsData nor funnelData, show placeholders
-    if (!effectiveFunnelData && !statsData) {
-      return {
-        activeLoans: { value: '--', change: '+12%', trend: 'up' as const },
-        closedLoans: { value: '--', change: '+8%', trend: 'up' as const },
-        lockedLoans: { value: '--', change: '+5%', trend: 'up' as const },
-        cycleTime: { value: '-- days', change: '-2 days', trend: 'up' as const },
-        pullThrough: { value: '--%', change: '+3.2%', trend: 'up' as const },
-        creditPulls: { value: '--', change: '+15%', trend: 'up' as const }
-      };
-    }
-
-    // Always prefer statsData when available (even if values are 0) - this is the real imported data
-    // Only fall back to funnelData if statsData is not available or still loading
-    const useStatsData = statsData && !statsLoading;
+    // Check if we have any metrics data yet
+    const hasData = Object.keys(metricsData).length > 0;
     
-    // Active Loans - always use statsData if available (even if 0), otherwise use funnel data
-    const activeLoans = useStatsData && statsData.active !== undefined
-      ? statsData.active 
-      : (effectiveFunnelData?.stillActive?.units || 0);
+    // Show loading state if data is still loading or no data yet
+    if (!hasData) {
+      return {
+        activeLoans: { value: '--', change: '+12%', trend: 'up' as const },
+        closedLoans: { value: '--', change: '+8%', trend: 'up' as const },
+        lockedLoans: { value: '--', change: '+5%', trend: 'up' as const },
+        cycleTime: { value: '-- days', change: '-2 days', trend: 'up' as const },
+        pullThrough: { value: '--%', change: '+3.2%', trend: 'up' as const },
+        creditPulls: { value: '--', change: '+15%', trend: 'up' as const }
+      };
+    }
+
+    // Extract values from metrics service (Qlik Logic Dictionary formulas)
+    const activeLoans = typeof metricsData.active_loans?.value === 'number' 
+      ? metricsData.active_loans.value 
+      : parseFloat(metricsData.active_loans?.value as string) || 0;
     const activeLoansPrev = Math.round(activeLoans * 0.88); // Estimate previous period
     const activeLoansChange = activeLoansPrev > 0 ? ((activeLoans - activeLoansPrev) / activeLoansPrev * 100) : 12;
 
-    // Closed Loans - always use statsData if available (even if 0), otherwise use funnel data
-    const closedLoans = useStatsData && statsData.closed !== undefined
-      ? statsData.closed 
-      : (effectiveFunnelData?.originated?.units ?? 0);
+    const closedLoans = typeof metricsData.closed_loans?.value === 'number'
+      ? metricsData.closed_loans.value
+      : parseFloat(metricsData.closed_loans?.value as string) || 0;
     const closedLoansPrev = Math.round(closedLoans * 0.92); // Estimate previous period
     const closedLoansChange = closedLoansPrev > 0 ? ((closedLoans - closedLoansPrev) / closedLoansPrev * 100) : 8;
 
-    // Locked Loans - always use statsData if available (even if 0), otherwise use funnel data
-    const lockedLoans = useStatsData && statsData.locked !== undefined
-      ? statsData.locked 
-      : Math.round((effectiveFunnelData?.originated?.units || 0) * 1.1 + (effectiveFunnelData?.stillActive?.units || 0) * 0.8);
+    const lockedLoans = typeof metricsData.locked_loans?.value === 'number'
+      ? metricsData.locked_loans.value
+      : parseFloat(metricsData.locked_loans?.value as string) || 0;
     const lockedLoansPrev = Math.round(lockedLoans * 0.95);
     const lockedLoansChange = lockedLoansPrev > 0 ? ((lockedLoans - lockedLoansPrev) / lockedLoansPrev * 100) : 5;
 
-    // Cycle Time - always use statsData if available (even if 0), otherwise use default
-    const cycleTime = useStatsData && statsData.avgCycleTime !== undefined
-      ? statsData.avgCycleTime 
-      : 24;
+    const cycleTime = typeof metricsData.avg_cycle_time?.value === 'number'
+      ? metricsData.avg_cycle_time.value
+      : parseFloat(metricsData.avg_cycle_time?.value as string) || 0;
     const cycleTimePrev = cycleTime + 2; // Estimate previous
     const cycleTimeChange = cycleTimePrev - cycleTime;
 
-    // Pull-Through - always use statsData if available (even if 0), otherwise calculate from funnel
-    const pullThrough = useStatsData && statsData.pullThroughRate !== undefined
-      ? statsData.pullThroughRate 
-      : ((effectiveFunnelData?.loansStarted?.units && effectiveFunnelData.loansStarted.units > 0) 
-        ? ((effectiveFunnelData?.originated?.units || 0) / effectiveFunnelData.loansStarted.units * 100) 
-        : 0);
+    const pullThrough = typeof metricsData.pull_through_rate?.value === 'number'
+      ? metricsData.pull_through_rate.value
+      : parseFloat(metricsData.pull_through_rate?.value as string) || 0;
     const pullThroughPrev = pullThrough * 0.97; // Estimate previous
     const pullThroughChange = pullThrough - pullThroughPrev;
 
-    // Credit Pulls - always use statsData if available (even if 0), otherwise use funnel data
-    const creditPulls = useStatsData && statsData.creditPulls !== undefined
-      ? statsData.creditPulls 
-      : (effectiveFunnelData?.loansStarted?.units ?? 0);
-
-    // Debug logging
-    console.log('🔢 Calculated metrics:', JSON.stringify({
-      activeLoans,
-      closedLoans,
-      lockedLoans,
-      cycleTime,
-      pullThrough: pullThrough.toFixed(1) + '%',
-      creditPulls,
-      usingStatsData: useStatsData,
-      statsDataAvailable: !!statsData,
-      statsLoading,
-      usingFunnelData: !useStatsData && !!effectiveFunnelData,
-      statsDataValues: statsData ? {
-        active: statsData.active,
-        closed: statsData.closed,
-        locked: statsData.locked,
-        avgCycleTime: statsData.avgCycleTime,
-        pullThroughRate: statsData.pullThroughRate,
-        creditPulls: statsData.creditPulls
-      } : null
-    }, null, 2));
+    const creditPulls = typeof metricsData.credit_pulls?.value === 'number'
+      ? metricsData.credit_pulls.value
+      : parseFloat(metricsData.credit_pulls?.value as string) || 0;
     const creditPullsPrev = Math.round(creditPulls * 0.85);
     const creditPullsChange = creditPullsPrev > 0 ? ((creditPulls - creditPullsPrev) / creditPullsPrev * 100) : 15;
 
@@ -172,7 +244,7 @@ export const ExecutiveDashboard = ({
         trend: creditPullsChange >= 0 ? 'up' as const : 'down' as const 
       }
     };
-  }, [statsLoading, statsData, effectiveFunnelData]);
+  }, [metricsLoading, metricsData]);
 
   // Helper function to parse numeric value from formatted string
   const parseValue = (valueStr: string): number => {
@@ -269,7 +341,7 @@ export const ExecutiveDashboard = ({
   // Start count-up animation when component mounts or data changes
   useEffect(() => {
     // Don't animate if data is still loading or if values are placeholders
-    if (statsLoading || metrics.activeLoans.value === '--') {
+    if (metricsLoading || metrics.activeLoans.value === '--') {
       // If loading, set animated values to show placeholders, don't animate
       const placeholderValues: Record<string, number> = {};
       kpiCards.forEach(card => {
@@ -361,7 +433,7 @@ export const ExecutiveDashboard = ({
     setTimeout(() => {
       setIsAnimating(false);
     }, totalDuration);
-  }, [year, metrics, statsLoading]); // Re-animate when year, metrics, or loading state change (kpiCards removed - it's derived from metrics)
+  }, [year, metrics, metricsLoading]); // Re-animate when year, metrics, or loading state change
 
   // Helper function to format business overview values
   const formatBusinessValue = (value: number, type: 'units' | 'volume' | 'rate' | 'balance' | 'fico' | 'ltv' | 'days' | 'percent'): string => {
@@ -384,13 +456,13 @@ export const ExecutiveDashboard = ({
     return value.toString();
   };
 
-  // Calculate business overview data from statsData (same source as cards)
+  // Calculate business overview data from metricsData
   const calculateBusinessOverviewData = () => {
-    // Use statsData as primary source, but fallback to funnelData if statsData is not available
-    // This ensures modals show data even if stats API hasn't loaded yet
-    const useStatsData = statsData && !statsLoading;
+    // Check if we have any metrics data yet
+    const hasData = Object.keys(metricsData).length > 0;
     
-    if (!useStatsData && !effectiveFunnelData) {
+    // If no metrics data, return placeholders
+    if (!hasData) {
       return {
         activeLoans: { summary: { units: '--', volume: '--', avgInterestRate: '--', avgBalance: '--', avgFICO: '--', avgLTV: '--' }, byLoanType: [], byLoanPurpose: [], byLoanSize: [], byStage: [] },
         closedLoans: { summary: { units: '--', volume: '--', avgInterestRate: '--', avgBalance: '--', avgFICO: '--', avgLTV: '--' }, byLoanType: [], byLoanPurpose: [], byLoanSize: [] },
@@ -401,29 +473,43 @@ export const ExecutiveDashboard = ({
       };
     }
 
-    // Use statsData values if available, otherwise use funnelData to match what cards show
-    const activeUnits = useStatsData ? (statsData.active || 0) : (effectiveFunnelData?.stillActive?.units || 0);
-    const activeVolume = useStatsData ? (statsData.activeVolume || 0) : (effectiveFunnelData?.stillActive?.volume || 0);
-    const activeAvgBalance = activeUnits > 0 ? activeVolume / activeUnits : (useStatsData ? (statsData.avgLoanAmount || 0) : 0);
+    // Extract values from metrics service
+    const activeUnits = typeof metricsData.active_loans?.value === 'number' 
+      ? metricsData.active_loans.value 
+      : parseFloat(metricsData.active_loans?.value as string) || 0;
+    const activeVolume = typeof metricsData.active_volume?.value === 'number'
+      ? metricsData.active_volume.value
+      : parseFloat(metricsData.active_volume?.value as string) || 0;
+    const activeAvgBalance = activeUnits > 0 ? activeVolume / activeUnits : 0;
 
-    const closedUnits = useStatsData ? (statsData.closed || 0) : (effectiveFunnelData?.originated?.units || 0);
-    const closedVolume = useStatsData ? (statsData.closedVolume || 0) : (effectiveFunnelData?.originated?.volume || 0);
-    const closedAvgBalance = closedUnits > 0 ? closedVolume / closedUnits : (useStatsData ? (statsData.avgLoanAmount || 0) : 0);
+    const closedUnits = typeof metricsData.closed_loans?.value === 'number'
+      ? metricsData.closed_loans.value
+      : parseFloat(metricsData.closed_loans?.value as string) || 0;
+    const closedVolume = typeof metricsData.closed_volume?.value === 'number'
+      ? metricsData.closed_volume.value
+      : parseFloat(metricsData.closed_volume?.value as string) || 0;
+    const closedAvgBalance = closedUnits > 0 ? closedVolume / closedUnits : 0;
 
-    const lockedUnits = useStatsData ? (statsData.locked || 0) : Math.round((effectiveFunnelData?.originated?.units || 0) * 1.1 + (effectiveFunnelData?.stillActive?.units || 0) * 0.8);
-    const lockedVolume = useStatsData ? (statsData.lockedVolume || 0) : ((effectiveFunnelData?.originated?.volume || 0) + (effectiveFunnelData?.stillActive?.volume || 0));
-    const lockedAvgBalance = lockedUnits > 0 ? lockedVolume / lockedUnits : (useStatsData ? (statsData.avgLoanAmount || 0) : 0);
+    const lockedUnits = typeof metricsData.locked_loans?.value === 'number'
+      ? metricsData.locked_loans.value
+      : parseFloat(metricsData.locked_loans?.value as string) || 0;
+    const lockedVolume = typeof metricsData.locked_volume?.value === 'number'
+      ? metricsData.locked_volume.value
+      : parseFloat(metricsData.locked_volume?.value as string) || 0;
+    const lockedAvgBalance = lockedUnits > 0 ? lockedVolume / lockedUnits : 0;
 
-    // Use API values for averages if available, otherwise use defaults
-    const avgLoanBalance = useStatsData ? (statsData.avgLoanAmount || 0) : 0;
-    const avgInterestRate = useStatsData ? (statsData.avgInterestRate || 6.875) : 6.875; // Fallback to industry average if not available
-    const avgFICO = 740; // Industry average (not in API yet)
-    const avgLTV = 78.5; // Industry average (not in API yet)
+    // Calculate average loan balance from total volume / total units
+    const totalUnits = activeUnits + closedUnits + lockedUnits;
+    const totalVolume = activeVolume + closedVolume + lockedVolume;
+    const avgLoanBalance = totalUnits > 0 ? totalVolume / totalUnits : 0;
+    const avgInterestRate = 6.875; // Industry average
+    const avgFICO = 740; // Industry average
+    const avgLTV = 78.5; // Industry average
 
-    // Cycle Time - use real data from API if available
-    const avgDaysToFunding = useStatsData && statsData.avgCycleTime !== undefined
-      ? statsData.avgCycleTime 
-      : 24; // Fallback to default
+    // Cycle Time - use metrics data
+    const avgDaysToFunding = typeof metricsData.avg_cycle_time?.value === 'number'
+      ? metricsData.avg_cycle_time.value
+      : parseFloat(metricsData.avg_cycle_time?.value as string) || 0;
     // Cycle time by stage - estimate based on average cycle time (can be enhanced with stage-specific API endpoint)
     const stageRatios = { 'App to Lock': 0.21, 'Lock to UW': 0.13, 'UW to Approval': 0.29, 'Approval to CTC': 0.17, 'CTC to Closing': 0.20 };
     const cycleTimeByStage = Object.entries(stageRatios).map(([label, ratio]) => {
@@ -433,89 +519,46 @@ export const ExecutiveDashboard = ({
       return { label, values: [formatBusinessValue(current, 'days'), formatBusinessValue(previous, 'days'), formatBusinessValue(change, 'days')] };
     });
 
-    // Pull-Through calculation - use statsData if available, otherwise calculate from funnel
-    const pullThroughPercent = useStatsData && statsData.pullThroughRate !== undefined
-      ? statsData.pullThroughRate
-      : ((effectiveFunnelData?.loansStarted?.units && effectiveFunnelData.loansStarted.units > 0) 
-        ? ((effectiveFunnelData?.originated?.units || 0) / effectiveFunnelData.loansStarted.units * 100) 
-        : 0);
+    // Pull-Through calculation - use metrics data
+    const pullThroughPercent = typeof metricsData.pull_through_rate?.value === 'number'
+      ? metricsData.pull_through_rate.value
+      : parseFloat(metricsData.pull_through_rate?.value as string) || 0;
     const companyAvg = 75.0;
     const pullThroughStatus = pullThroughPercent >= companyAvg ? 'Above' : 'Below';
 
-    // Calculate breakdowns by loan type from statsData or use defaults
-    const loanTypeDistribution: Record<string, number> = {};
-    const loanPurposeDistribution: Record<string, number> = {};
-    const loanSizeDistribution: Record<string, number> = {};
-    
-    // Use statsData.byLoanType for accurate distribution if available
-    if (useStatsData && statsData.byLoanType) {
-      const totalLoans = statsData.total || 1;
-      Object.entries(statsData.byLoanType).forEach(([type, data]: [string, any]) => {
-        loanTypeDistribution[type] = (data.count || 0) / totalLoans;
-      });
-    } else {
-      // Fallback to industry averages if no data
-      loanTypeDistribution['Conventional'] = 0.60;
-      loanTypeDistribution['FHA'] = 0.25;
-      loanTypeDistribution['VA'] = 0.10;
-      loanTypeDistribution['USDA'] = 0.03;
-      loanTypeDistribution['Jumbo'] = 0.02;
-    }
-    
-    // Loan purpose and size distributions - would need additional API endpoint
-    // For now, use estimates (can be enhanced with metadata queries)
-    loanPurposeDistribution['Purchase'] = 0.65;
-    loanPurposeDistribution['Refinance'] = 0.35;
-    
-    loanSizeDistribution['Jumbo'] = 0.15;
-    loanSizeDistribution['Conforming Balance'] = 0.85;
+    // Calculate breakdowns by loan type - use defaults (can be enhanced with additional metrics)
+    const loanTypeDistribution: Record<string, number> = {
+      'Conventional': 0.60,
+      'FHA': 0.25,
+      'VA': 0.10,
+      'USDA': 0.03,
+      'Jumbo': 0.02
+    };
+    const loanPurposeDistribution: Record<string, number> = {
+      'Purchase': 0.65,
+      'Refinance': 0.35
+    };
+    const loanSizeDistribution: Record<string, number> = {
+      'Jumbo': 0.15,
+      'Conforming Balance': 0.85
+    };
 
-    // Active Loans breakdowns - use statsData.byLoanType if available
-    const activeByLoanType = useStatsData && statsData.byLoanType 
-      ? Object.entries(statsData.byLoanType)
-          .filter(([_, data]: [string, any]) => {
-            // Filter to only include loan types that have active loans
-            const activeLoansOfType = data.loans?.filter((l: any) => {
-              const status = l.inferred_status || 'Active'; // Default to Active if not set
-              return ['Active', 'Locked'].includes(status);
-            }) || [];
-            return activeLoansOfType.length > 0;
-          })
-          .map(([type, data]: [string, any]) => {
-            const activeLoansOfType = data.loans?.filter((l: any) => {
-              const status = l.inferred_status || 'Active'; // Default to Active if not set
-              return ['Active', 'Locked'].includes(status);
-            }) || [];
-            const units = activeLoansOfType.length;
-            const volume = activeLoansOfType.reduce((sum: number, l: any) => sum + parseFloat(l.loan_amount || 0), 0);
-            const typeAvgBalance = units > 0 ? volume / units : activeAvgBalance;
-            return {
-              label: type,
-              values: [
-                formatBusinessValue(units, 'units'),
-                formatBusinessValue(volume, 'volume'),
-                formatBusinessValue(avgInterestRate, 'rate'),
-                formatBusinessValue(typeAvgBalance, 'balance'),
-                formatBusinessValue(avgFICO, 'fico'),
-                formatBusinessValue(avgLTV, 'ltv')
-              ]
-            };
-          })
-      : Object.entries(loanTypeDistribution).map(([type, pct]) => {
-          const units = Math.round(activeUnits * pct);
-          const volume = units * activeAvgBalance;
-          return {
-            label: type,
-            values: [
-              formatBusinessValue(units, 'units'),
-              formatBusinessValue(volume, 'volume'),
-              formatBusinessValue(avgInterestRate, 'rate'),
-              formatBusinessValue(activeAvgBalance, 'balance'),
-              formatBusinessValue(avgFICO, 'fico'),
-              formatBusinessValue(avgLTV, 'ltv')
-            ]
-          };
-        });
+    // Active Loans breakdowns - use defaults (can be enhanced with additional metrics)
+    const activeByLoanType = Object.entries(loanTypeDistribution).map(([type, pct]) => {
+      const units = Math.round(activeUnits * pct);
+      const volume = units * activeAvgBalance;
+      return {
+        label: type,
+        values: [
+          formatBusinessValue(units, 'units'),
+          formatBusinessValue(volume, 'volume'),
+          formatBusinessValue(avgInterestRate, 'rate'),
+          formatBusinessValue(activeAvgBalance, 'balance'),
+          formatBusinessValue(avgFICO, 'fico'),
+          formatBusinessValue(avgLTV, 'ltv')
+        ]
+      };
+    });
 
     const activeByLoanPurpose = Object.entries(loanPurposeDistribution).map(([purpose, pct]) => {
       const units = Math.round(activeUnits * pct);
@@ -573,52 +616,22 @@ export const ExecutiveDashboard = ({
       };
     });
 
-    // Closed Loans breakdowns - use statsData.byLoanType if available
-    const closedByLoanType = useStatsData && statsData.byLoanType
-      ? Object.entries(statsData.byLoanType)
-          .filter(([_, data]: [string, any]) => {
-            // Filter to only include loan types that have closed loans
-            const closedLoansOfType = data.loans?.filter((l: any) => {
-              const status = l.inferred_status || 'Active'; // Default to Active if not set
-              return status === 'Closed';
-            }) || [];
-            return closedLoansOfType.length > 0;
-          })
-          .map(([type, data]: [string, any]) => {
-            const closedLoansOfType = data.loans?.filter((l: any) => {
-              const status = l.inferred_status || 'Active'; // Default to Active if not set
-              return status === 'Closed';
-            }) || [];
-            const units = closedLoansOfType.length;
-            const volume = closedLoansOfType.reduce((sum: number, l: any) => sum + parseFloat(l.loan_amount || 0), 0);
-            const typeAvgBalance = units > 0 ? volume / units : closedAvgBalance;
-            return {
-              label: type,
-              values: [
-                formatBusinessValue(units, 'units'),
-                formatBusinessValue(volume, 'volume'),
-                formatBusinessValue(avgInterestRate, 'rate'),
-                formatBusinessValue(typeAvgBalance, 'balance'),
-                formatBusinessValue(avgFICO, 'fico'),
-                formatBusinessValue(avgLTV, 'ltv')
-              ]
-            };
-          })
-      : Object.entries(loanTypeDistribution).map(([type, pct]) => {
-          const units = Math.round(closedUnits * pct);
-          const volume = units * closedAvgBalance;
-          return {
-            label: type,
-            values: [
-              formatBusinessValue(units, 'units'),
-              formatBusinessValue(volume, 'volume'),
-              formatBusinessValue(avgInterestRate, 'rate'),
-              formatBusinessValue(closedAvgBalance, 'balance'),
-              formatBusinessValue(avgFICO, 'fico'),
-              formatBusinessValue(avgLTV, 'ltv')
-            ]
-          };
-        });
+    // Closed Loans breakdowns - use defaults (can be enhanced with additional metrics)
+    const closedByLoanType = Object.entries(loanTypeDistribution).map(([type, pct]) => {
+      const units = Math.round(closedUnits * pct);
+      const volume = units * closedAvgBalance;
+      return {
+        label: type,
+        values: [
+          formatBusinessValue(units, 'units'),
+          formatBusinessValue(volume, 'volume'),
+          formatBusinessValue(avgInterestRate, 'rate'),
+          formatBusinessValue(closedAvgBalance, 'balance'),
+          formatBusinessValue(avgFICO, 'fico'),
+          formatBusinessValue(avgLTV, 'ltv')
+        ]
+      };
+    });
 
     const closedByLoanPurpose = Object.entries(loanPurposeDistribution).map(([purpose, pct]) => {
       const units = Math.round(closedUnits * pct);
@@ -698,24 +711,9 @@ export const ExecutiveDashboard = ({
       };
     });
 
-    // Fallout breakdown - calculate from statsData.byStatus if available, otherwise use funnel data
-    let withdrawnUnits = useStatsData && statsData.byStatus
-      ? 0
-      : (effectiveFunnelData?.falloutWithdrawn?.units || 0);
-    let deniedUnits = useStatsData && statsData.byStatus
-      ? 0
-      : (effectiveFunnelData?.falloutDenied?.units || 0);
-    
-    if (useStatsData && statsData.byStatus) {
-      Object.entries(statsData.byStatus).forEach(([status, data]: [string, any]) => {
-        const statusUpper = status.toUpperCase();
-        if (['WITHDRAWN', 'CANCELLED'].includes(statusUpper)) {
-          withdrawnUnits += data.count || 0;
-        } else if (['DENIED', 'DECLINED', 'REJECTED'].includes(statusUpper)) {
-          deniedUnits += data.count || 0;
-        }
-      });
-    }
+    // Fallout breakdown - use defaults (can be enhanced with additional metrics)
+    const withdrawnUnits = 0; // TODO: Add withdrawn loans metric
+    const deniedUnits = 0; // TODO: Add denied loans metric
     const totalFallout = withdrawnUnits + deniedUnits;
     const withdrawnPct = totalFallout > 0 ? (withdrawnUnits / totalFallout * 100) : 0;
     const deniedPct = totalFallout > 0 ? (deniedUnits / totalFallout * 100) : 0;
@@ -731,27 +729,19 @@ export const ExecutiveDashboard = ({
       }
     ];
 
-    // Credit Pulls - use statsData if available, otherwise use funnel data
-    const creditPullsTotal = useStatsData 
-      ? (statsData.creditPulls || statsData.total || 0)
-      : (effectiveFunnelData?.loansStarted?.units || 0);
-    const creditPullsByLoanType = useStatsData && statsData.byLoanType
-      ? Object.entries(statsData.byLoanType).map(([type, data]: [string, any]) => {
-          const mtd = data.count || 0;
-          const lastMonth = Math.round(mtd * 0.92); // Estimate 8% growth (could be enhanced with historical data)
-          return {
-            label: type,
-            values: [formatBusinessValue(mtd, 'units'), formatBusinessValue(lastMonth, 'units')]
-          };
-        })
-      : Object.entries(loanTypeDistribution).map(([type, pct]) => {
-          const mtd = Math.round(creditPullsTotal * pct);
-          const lastMonth = Math.round(mtd * 0.92);
-          return {
-            label: type,
-            values: [formatBusinessValue(mtd, 'units'), formatBusinessValue(lastMonth, 'units')]
-          };
-        });
+    // Credit Pulls - use metrics data
+    const creditPullsTotal = typeof metricsData.credit_pulls?.value === 'number'
+      ? metricsData.credit_pulls.value
+      : parseFloat(metricsData.credit_pulls?.value as string) || 0;
+    const creditPullsByLoanType = Object.entries(loanTypeDistribution).map(([type, pct]) => {
+      const mtd = Math.round(creditPullsTotal * pct);
+      const lastMonth = Math.round(mtd * 0.92);
+      return {
+        label: type,
+        values: [formatBusinessValue(mtd, 'units'), formatBusinessValue(lastMonth, 'units')]
+      };
+    });
+    
 
     const creditPullsByLoanPurpose = Object.entries(loanPurposeDistribution).map(([purpose, pct]) => {
       const mtd = Math.round(creditPullsTotal * pct);
@@ -818,7 +808,11 @@ export const ExecutiveDashboard = ({
     };
   };
 
-  const businessOverviewData = calculateBusinessOverviewData();
+  // Memoize business overview data to prevent recalculation on every render
+  const businessOverviewData = useMemo(() => {
+    return calculateBusinessOverviewData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metricsData, kpiTimeframes]);
 
   const metricsHeaders = ['Units', '$ Volume', 'Avg Rate', 'Avg Bal', 'FICO', 'LTV'];
   const cycleTimeHeaders = ['Avg Days', 'Target', 'Variance'];
@@ -826,13 +820,29 @@ export const ExecutiveDashboard = ({
   const pullThroughHeaders = ['Value', 'Co. Avg', 'Status'];
   const creditPullHeaders = ['MTD', 'Last Mo.'];
 
+  // Helper to get timeframe label for modal subtitle
+  const getTimeframeLabel = (cardId: string): string => {
+    if (cardId === 'activeLoans') return 'Current State';
+    const period = kpiTimeframes[cardId] || 'mtd';
+    if (period === 'custom') {
+      const dates = kpiCustomDates[cardId];
+      if (dates?.start && dates?.end) {
+        return `${format(dates.start, 'MMM d')} - ${format(dates.end, 'MMM d, yyyy')}`;
+      }
+      return 'Custom Range';
+    }
+    return PERIOD_OPTIONS.find(p => p.value === period)?.label || 'Month to Date';
+  };
+
   // Get modal content based on selected card
   const getModalContent = (cardId: string) => {
+    const timeframeLabel = getTimeframeLabel(cardId);
+    
     switch (cardId) {
       case 'activeLoans':
         return {
           title: 'Active Loans',
-          subtitle: 'Currently in pipeline',
+          subtitle: 'Currently in pipeline (current state)',
           color: 'bg-sky-50',
           borderColor: 'border-sky-200',
           accentColor: 'text-sky-600',
@@ -847,7 +857,7 @@ export const ExecutiveDashboard = ({
       case 'closedLoans':
         return {
           title: 'Closed Loans',
-          subtitle: 'Successfully funded',
+          subtitle: `Successfully funded • ${timeframeLabel}`,
           color: 'bg-emerald-50',
           borderColor: 'border-emerald-200',
           accentColor: 'text-emerald-600',
@@ -861,7 +871,7 @@ export const ExecutiveDashboard = ({
       case 'lockedLoans':
         return {
           title: 'Locked Loans',
-          subtitle: 'Rate locks in progress',
+          subtitle: `Rate locks in progress • ${timeframeLabel}`,
           color: 'bg-violet-50',
           borderColor: 'border-violet-200',
           accentColor: 'text-violet-600',
@@ -873,7 +883,7 @@ export const ExecutiveDashboard = ({
       case 'cycleTime':
         return {
           title: 'Cycle Time Analysis',
-          subtitle: `Avg: ${businessOverviewData.cycleTime.avgDaysToFunding} days to funding`,
+          subtitle: `Avg: ${businessOverviewData.cycleTime.avgDaysToFunding} days • ${timeframeLabel}`,
           color: 'bg-amber-50',
           borderColor: 'border-amber-200',
           accentColor: 'text-amber-600',
@@ -884,8 +894,8 @@ export const ExecutiveDashboard = ({
         };
       case 'pullThrough':
         return {
-          title: 'Pull-Through',
-          subtitle: `Avg: ${businessOverviewData.pullThrough.avgPercent}%`,
+          title: 'Pull-Through Rate',
+          subtitle: `${businessOverviewData.pullThrough.avgPercent}% • ${timeframeLabel}`,
           color: 'bg-rose-50',
           borderColor: 'border-rose-200',
           accentColor: 'text-rose-600',
@@ -897,7 +907,7 @@ export const ExecutiveDashboard = ({
       case 'creditPulls':
         return {
           title: 'Credit Pulls',
-          subtitle: 'MTD vs Last Month',
+          subtitle: `Application volume • ${timeframeLabel}`,
           color: 'bg-teal-50',
           borderColor: 'border-teal-200',
           accentColor: 'text-teal-600',
@@ -934,34 +944,177 @@ export const ExecutiveDashboard = ({
 
         {/* KPI Cards Grid - 6 cards in a row */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-          {kpiCards.map((card) => (
-            <motion.div
-              key={card.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-              onClick={() => setSelectedCard(card.id)}
-              className={`bg-white dark:bg-slate-800/50 rounded-xl border ${card.borderColor} dark:border-slate-700 p-4 hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3)] hover:scale-[1.02] transition-all duration-200 cursor-pointer shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center`}
-            >
-              <div className="flex items-center justify-center mb-2 gap-2">
-                <span className="text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">
-                  {card.label}
-                </span>
-                <span className={`inline-flex items-center gap-0.5 text-[10px] sm:text-xs font-medium ${card.trend === 'up' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                  {card.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                  {card.change}
-                </span>
-              </div>
-              <div className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
-                {isAnimating && animatedValues[card.id] !== undefined
-                  ? formatAnimatedValue(card.id, animatedValues[card.id], card.value)
-                  : (animatedValues[card.id] !== undefined 
+          {kpiCards.map((card) => {
+            const hasTimeframe = card.id !== 'activeLoans';
+            const selectedPeriod = kpiTimeframes[card.id] || 'mtd';
+            // Show custom date range or standard period label
+            const customDates = kpiCustomDates[card.id];
+            const selectedPeriodLabel = selectedPeriod === 'custom' && customDates?.start && customDates?.end
+              ? `${format(customDates.start, 'M/d')}-${format(customDates.end, 'M/d')}`
+              : PERIOD_OPTIONS.find(p => p.value === selectedPeriod)?.shortLabel || 'MTD';
+            const isLoading = loadingKpis.has(card.id);
+            
+            return (
+              <motion.div
+                key={card.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`bg-white dark:bg-slate-800/50 rounded-xl border ${card.borderColor} dark:border-slate-700 p-4 hover:shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3)] transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.04)] text-center relative ${isLoading ? 'opacity-70' : ''}`}
+              >
+                {/* Timeframe Dropdown (not for Active Loans) */}
+                {hasTimeframe && (
+                  <div className="absolute top-1 right-1">
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenDropdown(openDropdown === card.id ? null : card.id);
+                        }}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-[8px] sm:text-[9px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                        title={`Change timeframe (${PERIOD_OPTIONS.find(p => p.value === selectedPeriod)?.label})`}
+                      >
+                        {selectedPeriodLabel}
+                        <ChevronDown className="w-2.5 h-2.5" />
+                      </button>
+                      {openDropdown === card.id && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-40" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdown(null);
+                              setCalendarOpen(null);
+                            }}
+                          />
+                          <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 min-w-[140px]">
+                            {PERIOD_OPTIONS.map((option) => (
+                              <button
+                                key={option.value}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTimeframeChange(card.id, option.value);
+                                }}
+                                className={`w-full text-left px-3 py-1.5 text-[10px] sm:text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors ${
+                                  selectedPeriod === option.value 
+                                    ? 'text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/20' 
+                                    : 'text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                            
+                            {/* Custom date range pickers */}
+                            {selectedPeriod === 'custom' && (
+                              <div className="border-t border-slate-200 dark:border-slate-700 mt-1 pt-2 px-2 pb-2">
+                                <div className="text-[9px] text-slate-500 mb-1.5 font-medium">Custom Range</div>
+                                <div className="flex flex-col gap-1.5">
+                                  {/* Start Date */}
+                                  <Popover 
+                                    open={calendarOpen?.kpiId === card.id && calendarOpen?.type === 'start'}
+                                    onOpenChange={(open) => setCalendarOpen(open ? { kpiId: card.id, type: 'start' } : null)}
+                                  >
+                                    <PopoverTrigger asChild>
+                                      <button
+                                        onClick={(e) => e.stopPropagation()}
+                                        className={cn(
+                                          "flex items-center gap-1 px-2 py-1 text-[9px] border rounded bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors w-full justify-start",
+                                          !kpiCustomDates[card.id]?.start && "text-slate-400"
+                                        )}
+                                      >
+                                        <CalendarIcon className="w-2.5 h-2.5" />
+                                        {kpiCustomDates[card.id]?.start 
+                                          ? format(kpiCustomDates[card.id].start!, 'MMM d, yyyy')
+                                          : 'Start date'}
+                                      </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent 
+                                      className="w-auto p-0 z-[60]" 
+                                      align="start"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <Calendar
+                                        mode="single"
+                                        selected={kpiCustomDates[card.id]?.start || undefined}
+                                        onSelect={(date) => handleCustomDateChange(card.id, 'start', date)}
+                                        initialFocus
+                                      />
+                                    </PopoverContent>
+                                  </Popover>
+                                  
+                                  {/* End Date */}
+                                  <Popover
+                                    open={calendarOpen?.kpiId === card.id && calendarOpen?.type === 'end'}
+                                    onOpenChange={(open) => setCalendarOpen(open ? { kpiId: card.id, type: 'end' } : null)}
+                                  >
+                                    <PopoverTrigger asChild>
+                                      <button
+                                        onClick={(e) => e.stopPropagation()}
+                                        className={cn(
+                                          "flex items-center gap-1 px-2 py-1 text-[9px] border rounded bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors w-full justify-start",
+                                          !kpiCustomDates[card.id]?.end && "text-slate-400"
+                                        )}
+                                      >
+                                        <CalendarIcon className="w-2.5 h-2.5" />
+                                        {kpiCustomDates[card.id]?.end 
+                                          ? format(kpiCustomDates[card.id].end!, 'MMM d, yyyy')
+                                          : 'End date'}
+                                      </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent 
+                                      className="w-auto p-0 z-[60]" 
+                                      align="start"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <Calendar
+                                        mode="single"
+                                        selected={kpiCustomDates[card.id]?.end || undefined}
+                                        onSelect={(date) => handleCustomDateChange(card.id, 'end', date)}
+                                        initialFocus
+                                      />
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Card Content - Clickable for details */}
+                <div 
+                  onClick={() => setSelectedCard(card.id)}
+                  className="cursor-pointer hover:scale-[1.02] transition-transform"
+                >
+                  <div className="flex items-center justify-center mb-2 gap-2">
+                    <span className="text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+                      {card.label}
+                    </span>
+                    <span className={`inline-flex items-center gap-0.5 text-[10px] sm:text-xs font-medium ${card.trend === 'up' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                      {card.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                      {card.change}
+                    </span>
+                  </div>
+                  <div className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
+                    {isLoading ? (
+                      <span className="animate-pulse">...</span>
+                    ) : isAnimating && animatedValues[card.id] !== undefined
                       ? formatAnimatedValue(card.id, animatedValues[card.id], card.value)
-                      : card.value)}
-              </div>
-              <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 mt-2 text-center">Click for details</p>
-            </motion.div>
-          ))}
+                      : (animatedValues[card.id] !== undefined 
+                          ? formatAnimatedValue(card.id, animatedValues[card.id], card.value)
+                          : card.value)}
+                  </div>
+                  <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 mt-2 text-center">
+                    {hasTimeframe ? `${selectedPeriodLabel} • Click for details` : 'Current • Click for details'}
+                  </p>
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
 

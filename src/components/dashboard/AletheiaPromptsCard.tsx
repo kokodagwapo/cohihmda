@@ -7,7 +7,8 @@ import { AletheiaBriefingControls } from '@/components/aletheia/AletheiaBriefing
 export const AletheiaPromptsCard = ({
   dateFilter,
   onDataAvailabilityChange,
-  briefingContext
+  briefingContext,
+  selectedTenantId
 }: {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
   onDataAvailabilityChange?: (hasData: boolean) => void;
@@ -20,6 +21,7 @@ export const AletheiaPromptsCard = ({
     };
     userName?: string;
   };
+  selectedTenantId?: string | null;
 }) => {
   const [currentSet, setCurrentSet] = useState(0);
   const [expandedInsight, setExpandedInsight] = useState<number | null>(null);
@@ -29,7 +31,8 @@ export const AletheiaPromptsCard = ({
   // Use custom hook for data fetching
   const { allInsights, insightsLoading, insightsError, funnelData } = useAletheiaData(
     dateFilter,
-    onDataAvailabilityChange
+    onDataAvailabilityChange,
+    selectedTenantId
   );
 
   // Create unique ID for each insight based on message content (must be defined before useMemo)

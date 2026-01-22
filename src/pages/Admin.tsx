@@ -17,6 +17,7 @@ import { SOC2ComplianceSection } from '@/components/admin/SOC2ComplianceSection'
 import { StripeSection } from '@/components/admin/StripeSection';
 import { AWSHostingSection } from '@/components/admin/AWSHostingSection';
 import { DemoDataSection } from '@/components/admin/DemoDataSection';
+import { MetricsCatalogSection } from '@/components/admin/MetricsCatalogSection';
 import { Button } from '@/components/ui/button';
 import { Menu, Settings } from 'lucide-react';
 import { useAdminState } from '@/hooks/admin/useAdminState';
@@ -31,8 +32,12 @@ import { useRAGSettings } from '@/hooks/admin/useRAGSettings';
 import { useUsers } from '@/hooks/admin/useUsers';
 import { useStripeData } from '@/hooks/admin/useStripeData';
 import { useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
+import { api } from '@/lib/api';
 
 export const Admin = () => {
+  const { toast } = useToast();
+  
   // State management
   const {
     activeSection,
@@ -57,16 +62,22 @@ export const Admin = () => {
     deleteTenant,
   } = useTenants();
   const { securityInfo, loading: securityLoading, loadSecurityInfo } = useSecurityInfo();
-  const { 
-    losConnections, 
-    losTypes, 
-    loading: losLoading, 
+  const {
+    losConnections,
+    losTypes,
+    loading: losLoading,
     loadLosData,
     testConnection: testLosConnection,
     syncConnection: syncLosConnection,
     toggleConnection: toggleLosConnection,
     createConnection: createLosConnection,
+    updateConnection: updateLosConnection,
+    deleteConnection: deleteLosConnection,
   } = useLOSConnections();
+  
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const [tenantMetrics, setTenantMetrics] = useState<any>(null);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
   const {
     vendorConnections,
     vendorCatalog,
@@ -114,21 +125,31 @@ export const Admin = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Check admin status
+  // Check admin status with timeout to prevent blocking
   useEffect(() => {
     const checkAdminStatus = async () => {
       try {
         // Simple admin check - in reality this would come from an auth hook
         setIsAdmin(true);
+        // Set initial load to false immediately so page can render
         setInitialLoad(false);
       } catch (error) {
         console.error('Error checking admin status:', error);
         setIsAdmin(false);
+        // Always set initialLoad to false so page can render even on error
         setInitialLoad(false);
       }
     };
 
-    checkAdminStatus();
+    // Add a maximum wait time for the preloader
+    const timeout = setTimeout(() => {
+      console.warn('Admin status check taking too long, allowing page to render');
+      setInitialLoad(false);
+    }, 3000); // 3 second max for preloader
+
+    checkAdminStatus().finally(() => {
+      clearTimeout(timeout);
+    });
   }, [setInitialLoad]);
 
   // Lazy load section data
@@ -164,6 +185,9 @@ export const Admin = () => {
             break;
           case 'rag-voice':
             await loadRagVoiceData(false);
+            break;
+          case 'metrics-catalog':
+            // Metrics catalog loads on demand, no pre-loading needed
             break;
         }
         markSectionLoaded(activeSection);
@@ -318,10 +342,40 @@ export const Admin = () => {
                 losConnections={losConnections}
                 losTypes={losTypes}
                 loading={losLoading}
+                tenants={tenants}
+                selectedTenantId={selectedTenantId}
+                tenantMetrics={tenantMetrics}
+                loadingMetrics={loadingMetrics}
                 onTest={testLosConnection}
                 onSync={syncLosConnection}
                 onToggle={toggleLosConnection}
                 onCreate={createLosConnection}
+                onUpdate={updateLosConnection}
+                onDelete={deleteLosConnection}
+                onTenantChange={async (tenantId) => {
+                  setSelectedTenantId(tenantId);
+                  if (tenantId) {
+                    await loadLosData(tenantId);
+                  } else {
+                    await loadLosData();
+                  }
+                }}
+                onLoadMetrics={async (tenantId) => {
+                  setLoadingMetrics(true);
+                  try {
+                    const metrics = await api.request(`/api/admin/tenants/${tenantId}/metrics`);
+                    setTenantMetrics(metrics.metrics);
+                  } catch (error: any) {
+                    console.error('Error loading tenant metrics:', error);
+                    toast({
+                      title: 'Error',
+                      description: 'Failed to load tenant metrics',
+                      variant: 'destructive',
+                    });
+                  } finally {
+                    setLoadingMetrics(false);
+                  }
+                }}
               />
             )}
 
@@ -389,6 +443,11 @@ export const Admin = () => {
                 onRefresh={loadRagVoiceData}
                 onSaveApiKeys={saveApiKeys}
               />
+            )}
+
+            {/* Metrics Catalog Section */}
+            {activeSection === 'metrics-catalog' && (
+              <MetricsCatalogSection />
             )}
           </AdminLayout>
         </div>

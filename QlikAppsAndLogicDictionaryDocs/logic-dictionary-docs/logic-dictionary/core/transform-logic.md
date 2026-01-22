@@ -4,23 +4,31 @@
 
 This document catalogs all business logic definitions from the Transform.qvs script, which is the core data transformation script for the Qlik applications.
 
+**Note**: This document shows Qlik-specific implementations. For base concept definitions and PostgreSQL translations, see:
+- Base concepts: `concepts/` directory
+- Qlik patterns: `patterns/` directory  
+- Derived logic: `derived/` directory
+
 ---
 
 ## Table of Contents
 
-1. [Date Flags](#date-flags)
-2. [Turn Time Calculations](#turn-time-calculations)
-3. [Status Flags](#status-flags)
-4. [Channel Flags](#channel-flags)
-5. [Revenue Calculations](#revenue-calculations)
-6. [Complexity Scores](#complexity-scores)
-7. [Year/Month Fields](#yearmonth-fields)
-8. [Multi-Channel Logic](#multi-channel-logic)
-9. [Other Calculated Fields](#other-calculated-fields)
+1. [Date Flags](#date-flags) - *Qlik pattern, see `patterns/date-period-filtering.md`*
+2. [Turn Time Calculations](#turn-time-calculations) - *Base concept: `concepts/turn-time.md`*
+3. [Status Flags](#status-flags) - *Base concept: `concepts/status-flags.md`*
+4. [Channel Flags](#channel-flags) - *Base concept: `concepts/channel-logic.md`*
+5. [Revenue Calculations](#revenue-calculations) - *Base concept: `concepts/revenue.md`*
+6. [Complexity Scores](#complexity-scores) - *Base concept: `concepts/complexity.md`*
+7. [Year/Month Fields](#yearmonth-fields) - *Qlik pattern, see `patterns/date-groupings.md`*
+8. [Multi-Channel Logic](#multi-channel-logic) - *Base concept: `concepts/channel-logic.md`*
+9. [Section Access (Row-Level Security)](#section-access-row-level-security) - *Qlik pattern, see `patterns/section-access-row-security.md`*
+10. [Other Calculated Fields](#other-calculated-fields)
 
 ---
 
 ## Date Flags
+
+**Note**: Date flags are a Qlik-specific pattern for filtering in set analysis. In PostgreSQL, these translate to reusable functions (not computed columns). See `patterns/date-period-filtering.md` for PostgreSQL translation.
 
 ### Application All Time
 **Category**: Date Flags  
@@ -357,7 +365,11 @@ END as application_rolling_361_720_flag
 
 ## Turn Time Calculations
 
+**Base Concept**: See `concepts/turn-time.md` for the core turn time definition.
+
 **Note**: All turn time calculations use calendar days (Date(Floor())), not business days. Comments indicate that NetWorkDays was previously used but changed to calendar days.
+
+**Derived Logic**: Turn time ranges (buckets) are documented in `derived/turn-time-ranges.md`.
 
 ### Start-App
 **Category**: Turn Time  
@@ -685,6 +697,8 @@ END as w_h_days_range
 
 ## Status Flags
 
+**Base Concept**: See `concepts/status-flags.md` for the core status flag definitions and patterns.
+
 ### Funded Flag
 **Category**: Status Flags  
 **Definition**: Flag indicating if loan has been funded (has Funding Date and date is not in future)  
@@ -949,6 +963,8 @@ END as funded_not_purchased_flag
 ---
 
 ## Channel Flags
+
+**Base Concept**: See `concepts/channel-logic.md` for the core channel logic definitions.
 
 ### Retail Flag
 **Category**: Channel Flags  
@@ -1223,6 +1239,10 @@ COALESCE(origination_revenue, 0) + COALESCE(net_sell_dollars, 0) as sell_price_c
 ---
 
 ## Complexity Scores
+
+**Base Concept**: See `concepts/complexity.md` for the core complexity score definition and component breakdowns.
+
+**Pattern**: RangeSum() is used for aggregation. See `patterns/aggregation-patterns.md` for PostgreSQL translation.
 
 ### Loan Complexity Score
 **Category**: Complexity  
@@ -1664,6 +1684,8 @@ DATE_TRUNC('month', projected_closing_date) as projected_closing_yearmonth
 
 ## Multi-Channel Logic
 
+**Base Concept**: See `concepts/channel-logic.md` for the core channel logic and multi-channel date selection pattern.
+
 ### Multi-Channel App/Start Date
 **Category**: Multi-Channel Logic  
 **Definition**: Start date for multi-channel pull through calculations. Retail uses Application Date, TPO uses Started Date.  
@@ -1842,6 +1864,50 @@ END as closing_projection_date
 **Used In**: All apps  
 **Business Rules**: Prioritizes recent funding dates, then uses current date for old estimates, otherwise uses projected closing  
 **Migration Notes**: Complex conditional logic with date comparisons
+
+---
+
+## Section Access (Row-Level Security)
+
+**Note**: Section Access is a Qlik-specific pattern for implementing row-level security. In PostgreSQL, this translates to Row-Level Security (RLS) policies. See `patterns/section-access-row-security.md` for complete PostgreSQL translation.
+
+### Overview
+
+Section Access restricts which data records users can see based on their identity and assigned access values. This is implemented in `SectionAccess.qvs` and is critical for multi-tenant systems where different users should only see data relevant to their role (e.g., branch managers see only their branch's loans).
+
+### Key Components
+
+1. **Access Levels**: ADMIN (full access with `*` wildcard) or USER (restricted access)
+2. **Access Fields**: Configurable fields used for filtering (e.g., Branch, Loan Officer, Region)
+3. **Access Values**: Specific values users can access (e.g., "BRANCH001", "LO12345")
+4. **Multi-Level Access**: Up to 3 hierarchical levels (Level 1, 2, 3)
+5. **Bridge Table**: Connects access values to data rows
+
+### Implementation Location
+
+**Source File**: `Scripts/SectionAccess.qvs` (in each app)
+
+**Key Logic**:
+- Loads access configuration from XML config files
+- Builds Bridge table with all access field combinations
+- Creates SectionAccess table with user access mappings
+- Applies Section Access to filter data
+
+### Common Access Patterns
+
+- **Branch-Only**: User sees all loans in their branch(es)
+- **Branch + Loan Officer**: User sees only their own loans
+- **Multiple Branches**: User sees loans from multiple branches
+- **Admin Access**: User sees all data (wildcard `*`)
+
+### PostgreSQL Translation
+
+See `patterns/section-access-row-security.md` for:
+- PostgreSQL RLS policy implementation
+- User access table structure
+- Multi-level access handling
+- Performance optimization
+- Migration checklist
 
 ---
 
