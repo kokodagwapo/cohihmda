@@ -19,6 +19,8 @@ interface LoanFunnelViewProps {
   year: number;
   onYearChange: (year: number) => void;
   selectedTenantId?: string | null;
+  // Channel filter - uses consolidated channel groups (Retail, TPO, etc.)
+  selectedChannel?: string | null;
 }
 
 // Generate years from current year down to 2022
@@ -30,7 +32,8 @@ export const LoanFunnelView = ({
   onViewChange,
   year,
   onYearChange,
-  selectedTenantId
+  selectedTenantId,
+  selectedChannel
 }: LoanFunnelViewProps) => {
   // Tab state for Company/Sales/Ops
   const [activeTab, setActiveTab] = useState<'company' | 'sales' | 'ops'>('company');
@@ -68,8 +71,14 @@ export const LoanFunnelView = ({
     };
   }, [dateFilterType, year, customDateRange.start, customDateRange.end]);
 
-  // Use the hook for funnel data fetching with tenant context
-  const { funnelData: funnelDataState, loading: funnelLoading } = useFunnelData(dateFilter, selectedTenantId);
+  // Build additional filters including channel
+  const additionalFilters = useMemo(() => ({
+    // Use channelGroup for consolidated channel filtering (matches Qlik)
+    channelGroup: selectedChannel || undefined
+  }), [selectedChannel]);
+
+  // Use the hook for funnel data fetching with tenant context and channel filter
+  const { funnelData: funnelDataState, loading: funnelLoading } = useFunnelData(dateFilter, selectedTenantId, additionalFilters);
 
   // Debug: Log when component renders and view changes
   useEffect(() => {

@@ -60,6 +60,7 @@ import { ShareModal } from '@/components/dashboard/modals/ShareModal';
 import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
 import { TenantSelector } from '@/components/dashboard/TenantSelector';
+import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
 
 
 
@@ -90,6 +91,9 @@ const Dashboard = () => {
   
   // Tenant selection state for admins
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  
+  // Channel filter state - uses consolidated channel groups (Retail, TPO, etc.)
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   
   // Briefing context state
   const [briefingContext, setBriefingContext] = useState<{
@@ -941,11 +945,21 @@ const Dashboard = () => {
         onVisibilityChange={handleVisibilityChange}
         onReportClick={handleReportClick}
         headerContent={
-          <TenantSelector
-            selectedTenantId={selectedTenantId}
-            onTenantChange={setSelectedTenantId}
-            compact={true}
-          />
+          <div className="flex items-center gap-4 flex-wrap">
+            <TenantSelector
+              selectedTenantId={selectedTenantId}
+              onTenantChange={setSelectedTenantId}
+              compact={true}
+            />
+            <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
+            <ChannelSelector
+              selectedChannel={selectedChannel}
+              onChannelChange={setSelectedChannel}
+              selectedTenantId={selectedTenantId}
+              compact={true}
+              useChannelGroups={true}
+            />
+          </div>
         }
       >
         {/* Report Modal */}
@@ -1043,7 +1057,7 @@ const Dashboard = () => {
                 
                 {/* TopTiering Loan Funnel - Full Width Section */}
                 {dashboardVisibility.topTiering && <div className="section-top-tiering mt-12 sm:mt-16 mb-4 sm:mb-8">
-                    <LoanFunnelView view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} selectedTenantId={selectedTenantId} />
+                    <LoanFunnelView view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} selectedTenantId={selectedTenantId} selectedChannel={selectedChannel} />
                   </div>}
                 
                 {/* Leader Board Section */}

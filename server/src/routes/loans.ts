@@ -110,6 +110,86 @@ router.get('/distinct-values/:column', authenticateToken, attachTenantContext, a
 });
 
 /**
+ * GET /api/loans/channels
+ * Get distinct channel values with counts for channel selector dropdown
+ * Returns both the raw channel values and consolidated channel groups (Retail, TPO, etc.)
+ * Includes "99-Missing" for loans with null/empty channels (matches Qlik convention)
+ */
+router.get('/channels', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+
+    // Get distinct channels with counts, including null/empty as '99-Missing' (Qlik convention)
+    // The '99-Missing' convention comes from Qlik's NullAsValue statement: Set NullValue = '99-Missing';
+    // The "99" ensures it sorts to the end alphanumerically
+    const result = await tenantPool.query(`
+      SELECT 
+        COALESCE(NULLIF(TRIM(channel), ''), '99-Missing') as channel,
+        COUNT(*) as loan_count,
+        -- Consolidated channel group (matches Qlik logic)
+        CASE 
+          WHEN channel ILIKE '%retail%' OR channel ILIKE '%brok%' THEN 'Retail'
+          WHEN channel ILIKE '%whole%' OR channel ILIKE '%corresp%' THEN 'TPO'
+          WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
+          ELSE channel
+        END as channel_group
+      FROM public.loans 
+      GROUP BY 
+        COALESCE(NULLIF(TRIM(channel), ''), '99-Missing'),
+        CASE 
+          WHEN channel ILIKE '%retail%' OR channel ILIKE '%brok%' THEN 'Retail'
+          WHEN channel ILIKE '%whole%' OR channel ILIKE '%corresp%' THEN 'TPO'
+          WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
+          ELSE channel
+        END
+      ORDER BY 
+        CASE WHEN COALESCE(NULLIF(TRIM(channel), ''), '99-Missing') = '99-Missing' THEN 1 ELSE 0 END,
+        COUNT(*) DESC
+    `);
+
+    // Also get the consolidated groups with totals, including 99-Missing
+    // Use subquery to allow ordering by alias
+    const groupResult = await tenantPool.query(`
+      SELECT * FROM (
+        SELECT 
+          CASE 
+            WHEN channel ILIKE '%retail%' OR channel ILIKE '%brok%' THEN 'Retail'
+            WHEN channel ILIKE '%whole%' OR channel ILIKE '%corresp%' THEN 'TPO'
+            WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
+            ELSE 'Other'
+          END as channel_group,
+          COUNT(*) as loan_count
+        FROM public.loans 
+        GROUP BY 1
+      ) grouped
+      ORDER BY 
+        CASE channel_group
+          WHEN 'Retail' THEN 1
+          WHEN 'TPO' THEN 2
+          WHEN 'Other' THEN 3
+          WHEN '99-Missing' THEN 4
+          ELSE 5
+        END
+    `);
+
+    res.json({ 
+      channels: result.rows.map(r => ({
+        channel: r.channel,
+        channelGroup: r.channel_group,
+        loanCount: parseInt(r.loan_count)
+      })),
+      channelGroups: groupResult.rows.map(r => ({
+        group: r.channel_group,
+        loanCount: parseInt(r.loan_count)
+      }))
+    });
+  } catch (error: any) {
+    logError('Error fetching channels', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to fetch channels' });
+  }
+});
+
+/**
  * GET /api/loans
  * Get loans for authenticated tenant with optional filters
  * Uses tenant-specific database (no tenant_id in WHERE clause)
@@ -581,6 +661,10 @@ router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async 
     const loanOfficerId = req.query.loan_officer_id as string | undefined;
     const branch = req.query.branch as string | undefined;
     const loanType = req.query.loan_type as string | undefined;
+    const channel = req.query.channel as string | undefined;
+    // channelGroup allows filtering by consolidated channel (Retail, TPO, etc.)
+    // Matches Qlik logic: if(WildMatch(Channel,'*Retail*','*Brok*')>=1,'Retail', if(Wildmatch(Channel,'*Whole*','*Corresp*')>=1,'TPO', Channel))
+    const channelGroup = req.query.channel_group as string | undefined;
     // Option to exclude "Out of Range" loans
     // NOTE: The Qlik "Loans Started" waterfall does NOT apply Out of Range filter by default
     // The Out of Range filter is a UI toggle that users can optionally enable
@@ -626,6 +710,30 @@ router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async 
       paramIndex++;
     }
     
+    // Channel filter - exact match
+    if (channel) {
+      conditions.push(`channel = $${paramIndex}`);
+      params.push(channel);
+      paramIndex++;
+    }
+    
+    // Channel Group filter - consolidated channel (Retail, TPO, etc.)
+    // Matches Qlik: if(WildMatch(Channel,'*Retail*','*Brok*')>=1,'Retail', if(Wildmatch(Channel,'*Whole*','*Corresp*')>=1,'TPO', Channel))
+    if (channelGroup) {
+      if (channelGroup === 'Retail') {
+        conditions.push(`(channel ILIKE '%retail%' OR channel ILIKE '%brok%')`);
+      } else if (channelGroup === 'TPO') {
+        conditions.push(`(channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`);
+      } else if (channelGroup === '99-Missing') {
+        // Qlik convention: 99-Missing represents NULL or empty channel values
+        conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
+      } else if (channelGroup === 'Other') {
+        // Other = not Retail, not TPO, and not missing
+        conditions.push(`(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`);
+      }
+      // If channelGroup is 'All' or not recognized, don't add filter
+    }
+    
     // Out of Range Exclusion (Qlik default behavior)
     // From Transform.qvs lines 671-675:
     //   if([Interest Rate]<=0 OR [Interest Rate]>=15, 'Yes', 'No') as [Interest Rate Out of Range Flag],
@@ -653,7 +761,8 @@ router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async 
       tenantId,
       tenantName: tenantContext.tenantInfo.name,
       excludeOutOfRange,
-      dateFilter: { startDate, endDate, yearFilter }
+      dateFilter: { startDate, endDate, yearFilter },
+      channelFilter: { channel, channelGroup }
     });
 
     // Get all loans from tenant-specific database (no tenant_id filter needed)

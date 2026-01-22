@@ -111,23 +111,41 @@ export class EncompassEtlService {
       const duration = Date.now() - startTime;
       
       if (recordsSynced > 0) {
-        // Only update last_synced_at if we actually synced loans
+        // Query the MAX(last_modified_date) from loans table
+        // This is the key value for incremental sync - matches Qlik's RetrieveLastModDate approach
+        // Qlik uses the actual Loan.LastModified value, not when the sync was run
+        let maxLastModifiedDate: Date | null = null;
+        try {
+          const maxModifiedResult = await this.tenantPool.query(
+            `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
+          );
+          if (maxModifiedResult.rows[0]?.max_modified) {
+            maxLastModifiedDate = new Date(maxModifiedResult.rows[0].max_modified);
+            console.log(`[EncompassEtlService] MAX(last_modified_date) from loans: ${maxLastModifiedDate.toISOString()}`);
+          }
+        } catch (error: any) {
+          console.warn(`[EncompassEtlService] Could not query MAX(last_modified_date): ${error.message}`);
+        }
+
+        // Update both last_synced_at (when sync ran) and last_loan_modified_at (max loan modified date)
         await this.tenantPool.query(
           `UPDATE public.los_connections 
            SET last_synced_at = NOW(),
-               last_sync_status = $1,
-               last_sync_error = $2,
+               last_loan_modified_at = $1,
+               last_sync_status = $2,
+               last_sync_error = $3,
                updated_at = NOW()
-           WHERE id = $3`,
+           WHERE id = $4`,
           [
+            maxLastModifiedDate,
             recordsFailed === 0 ? 'success' : 'partial',
             errors.length > 0 ? errors.slice(0, 5).join('; ') : null,
             losConnectionId,
           ]
         );
-        console.log(`[EncompassEtlService] Updated last_synced_at (synced ${recordsSynced} loans)`);
+        console.log(`[EncompassEtlService] Updated last_synced_at and last_loan_modified_at=${maxLastModifiedDate?.toISOString() || 'null'} (synced ${recordsSynced} loans)`);
       } else {
-        // Don't update last_synced_at if no loans were synced
+        // Don't update last_synced_at or last_loan_modified_at if no loans were synced
         await this.tenantPool.query(
           `UPDATE public.los_connections 
            SET last_sync_status = $1,
@@ -140,7 +158,7 @@ export class EncompassEtlService {
             losConnectionId,
           ]
         );
-        console.log(`[EncompassEtlService] Did NOT update last_synced_at (0 loans synced)`);
+        console.log(`[EncompassEtlService] Did NOT update last_synced_at or last_loan_modified_at (0 loans synced)`);
       }
 
       return {

@@ -6,6 +6,9 @@ export interface FunnelDataFilters {
   loan_officer_id?: string;
   branch?: string;
   loan_type?: string;
+  channel?: string;
+  // channelGroup uses consolidated channel (Retail, TPO, etc.) matching Qlik logic
+  channelGroup?: string;
 }
 
 export interface FunnelDateFilter {
@@ -53,8 +56,10 @@ export const useFunnelData = (
         if (additionalFilters?.loan_officer_id) params.append('loan_officer_id', additionalFilters.loan_officer_id);
         if (additionalFilters?.branch) params.append('branch', additionalFilters.branch);
         if (additionalFilters?.loan_type) params.append('loan_type', additionalFilters.loan_type);
+        if (additionalFilters?.channel) params.append('channel', additionalFilters.channel);
+        if (additionalFilters?.channelGroup) params.append('channel_group', additionalFilters.channelGroup);
         
-        console.log('[useFunnelData] Fetching funnel data:', { dateFilter, selectedTenantId, params: params.toString() });
+        console.log('[useFunnelData] Fetching funnel data:', { dateFilter, selectedTenantId, channelGroup: additionalFilters?.channelGroup, params: params.toString() });
         const data = await api.request<LOSFunnelData>(`/api/loans/funnel?${params.toString()}`);
         console.log('[useFunnelData] Received funnel data:', {
           loansStarted: data?.loansStarted?.units,
@@ -80,7 +85,7 @@ export const useFunnelData = (
       }
     };
     fetchFunnelData();
-  }, [dateFilter.type, dateFilter.year, dateFilter.startDate, dateFilter.endDate, selectedTenantId, additionalFilters?.loan_officer_id, additionalFilters?.branch, additionalFilters?.loan_type]);
+  }, [dateFilter.type, dateFilter.year, dateFilter.startDate, dateFilter.endDate, selectedTenantId, additionalFilters?.loan_officer_id, additionalFilters?.branch, additionalFilters?.loan_type, additionalFilters?.channel, additionalFilters?.channelGroup]);
 
   return { funnelData, loading };
 };

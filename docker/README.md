@@ -10,6 +10,7 @@ Complete Docker-based development and production environment for Coheus with mul
 - [Production Deployment](#production-deployment)
 - [EC2 Deployment](#ec2-deployment)
 - [Multi-Tenant Configuration](#multi-tenant-configuration)
+- [Sharing Databases with Team Members](#sharing-databases-with-team-members)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
 
@@ -246,6 +247,125 @@ All data is automatically isolated by tenant:
 - Documents are tenant-specific
 - Cache keys are tenant-prefixed
 
+## Sharing Databases with Team Members
+
+When collaborating with frontend developers or other team members who need access to your database with loan data, use one of these methods:
+
+### Option A: Export/Import Docker Volume (Recommended)
+
+This preserves all databases and data exactly as-is, including the management database and all tenant databases.
+
+**On your machine (the one with data):**
+
+```bash
+# Windows PowerShell
+docker run --rm -v cohi_postgres_data:/data -v ${PWD}:/backup alpine tar cvf /backup/postgres_backup.tar /data
+
+# macOS/Linux
+docker run --rm -v cohi_postgres_data:/data -v $(pwd):/backup alpine tar cvf /backup/postgres_backup.tar /data
+```
+
+**Share the `postgres_backup.tar` file** via shared drive, cloud storage, or direct transfer.
+
+**On team member's machine:**
+
+```bash
+# Stop any running postgres container first
+docker compose -f docker/dev/docker-compose.dev.yml down
+
+# Import the volume (this replaces existing data)
+# Windows PowerShell
+docker run --rm -v cohi_postgres_data:/data -v ${PWD}:/backup alpine sh -c "rm -rf /data/* && tar xvf /backup/postgres_backup.tar -C /"
+
+# macOS/Linux
+docker run --rm -v cohi_postgres_data:/data -v $(pwd):/backup alpine sh -c "rm -rf /data/* && tar xvf /backup/postgres_backup.tar -C /"
+
+# Start services
+docker compose -f docker/dev/docker-compose.dev.yml up -d
+```
+
+### Option B: SQL Dump/Restore
+
+Export all databases to SQL files for more granular control.
+
+**On your machine:**
+
+```bash
+# Dump all databases at once
+docker exec coheus-postgres-dev pg_dumpall -U postgres > cohi_full_backup.sql
+
+# Or dump specific databases individually
+docker exec coheus-postgres-dev pg_dump -U postgres coheus > coheus_backup.sql
+docker exec coheus-postgres-dev pg_dump -U postgres coheus_management > management_backup.sql
+docker exec coheus-postgres-dev pg_dump -U postgres your_tenant_db > tenant_backup.sql
+```
+
+**Share the `.sql` files.**
+
+**On team member's machine:**
+
+```bash
+# Ensure postgres container is running
+docker compose -f docker/dev/docker-compose.dev.yml up -d postgres
+
+# Wait for postgres to be ready
+docker exec coheus-postgres-dev pg_isready -U postgres
+
+# Restore full dump (all databases)
+docker exec -i coheus-postgres-dev psql -U postgres < cohi_full_backup.sql
+
+# Or restore individual databases
+docker exec -i coheus-postgres-dev psql -U postgres -d coheus < coheus_backup.sql
+docker exec -i coheus-postgres-dev psql -U postgres -d coheus_management < management_backup.sql
+```
+
+### Option C: Shared Remote Database
+
+All team members connect to a shared development database (AWS RDS, Supabase, etc.).
+
+**Configure each developer's environment in `docker/dev/.env`:**
+
+```env
+DB_HOST=shared-dev-db.abc123.us-east-1.rds.amazonaws.com
+DB_PORT=5432
+DB_NAME=coheus
+DB_USER=dev_team
+DB_PASSWORD=shared_dev_password
+MANAGEMENT_DB_NAME=coheus_management
+```
+
+**Note:** When using a remote database, you can comment out the `postgres` service in `docker-compose.dev.yml` to avoid running a local database.
+
+### Option D: Fresh Setup with Seed Data
+
+For a clean environment with test data:
+
+```bash
+# Start fresh containers
+docker compose -f docker/dev/docker-compose.dev.yml up -d
+
+# Run migrations (creates tables)
+cd server && npm run migrate
+
+# Run seed script if available
+npm run seed
+```
+
+### Verifying Database Contents
+
+After importing, verify the data:
+
+```bash
+# List all databases
+docker exec coheus-postgres-dev psql -U postgres -c "\l"
+
+# Check tenants in management database
+docker exec coheus-postgres-dev psql -U postgres -d coheus_management -c "SELECT id, name, status FROM coheus_tenants;"
+
+# Check loan count in a tenant database
+docker exec coheus-postgres-dev psql -U postgres -d tenant_db_name -c "SELECT COUNT(*) FROM public.loans;"
+```
+
 ## Architecture
 
 ### Service Architecture
@@ -472,6 +592,10 @@ For issues or questions:
 2. Run health checks: `./docker/scripts/health-check.sh`
 3. Review this documentation
 4. Check the main project README
+
+## Related Documentation
+
+- **[Backend Architecture](../docs/BACKEND_ARCHITECTURE.md)**: Comprehensive documentation on the multi-tenant database architecture, metrics service, API patterns, and more.
 
 ## License
 

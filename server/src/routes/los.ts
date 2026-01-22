@@ -78,6 +78,25 @@ async function ensureLosConnectionsSchema(pool: any, tenantId?: string): Promise
       `);
       logInfo('Successfully added encompass_selected_folders column', { tenantId });
     }
+
+    // Check and add last_loan_modified_at column (for correct incremental sync - stores MAX(Loan.LastModified))
+    const lastLoanModifiedCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'los_connections'
+        AND column_name = 'last_loan_modified_at'
+      )
+    `);
+    
+    if (!lastLoanModifiedCheck.rows[0]?.exists) {
+      logInfo('Adding last_loan_modified_at column to los_connections table', { tenantId });
+      await pool.query(`
+        ALTER TABLE public.los_connections 
+        ADD COLUMN last_loan_modified_at TIMESTAMPTZ
+      `);
+      logInfo('Successfully added last_loan_modified_at column', { tenantId });
+    }
     
     // Migration: Change loan_officer_id from UUID to TEXT to handle Encompass string values
     // This runs on every sync to ensure the column is migrated even if it was created before the fix
@@ -362,7 +381,7 @@ router.get('/connections', authenticateToken, apiLimiter, async (req: AuthReques
               db_host, db_port, db_name, db_user,
               encompass_instance_id, encompass_api_server, encompass_extraction_method, encompass_secret_arn,
               encompass_selected_folders,
-              is_active, last_synced_at, last_sync_status, last_sync_error,
+              is_active, last_synced_at, last_loan_modified_at, last_sync_status, last_sync_error,
               created_at, updated_at
             FROM public.los_connections 
             ORDER BY created_at DESC`
@@ -427,7 +446,7 @@ router.get('/connections', authenticateToken, apiLimiter, async (req: AuthReques
         db_host, db_port, db_name, db_user,
         encompass_instance_id, encompass_api_server, encompass_extraction_method, encompass_secret_arn,
         encompass_selected_folders,
-        is_active, last_synced_at, last_sync_status, last_sync_error,
+        is_active, last_synced_at, last_loan_modified_at, last_sync_status, last_sync_error,
         created_at, updated_at
       FROM public.los_connections 
       WHERE is_active = true
@@ -1293,8 +1312,11 @@ router.post('/connections/:id/sync', authenticateToken, apiLimiter, async (req: 
 
     const connection = connectionResult.rows[0];
 
-    // IMPORTANT: Read last_synced_at BEFORE updating it, so we can use it for incremental sync
-    const lastSyncedAt = connection.last_synced_at;
+    // IMPORTANT: Read last_loan_modified_at for incremental sync filter
+    // This is the MAX(Loan.LastModified) from previously synced loans (matches Qlik's RetrieveLastModDate)
+    // NOT last_synced_at (which is when the sync RAN, not the loan's actual last modified date)
+    const lastLoanModifiedAt = connection.last_loan_modified_at;
+    const lastSyncedAt = connection.last_synced_at; // Still used for "too recent" check
 
     // Update sync status to pending (but DON'T update last_synced_at yet - that happens after successful sync)
     await tenantPool.query(
@@ -1362,57 +1384,74 @@ router.post('/connections/:id/sync', authenticateToken, apiLimiter, async (req: 
         }
       }
       
-      // Determine modifiedFrom date for incremental sync (use the PREVIOUS last_synced_at)
-      // IMPORTANT: Only use modifiedFrom if:
+      // Determine modifiedFrom date for incremental sync
+      // IMPORTANT: Use last_loan_modified_at (MAX of Loan.LastModified from previously synced loans)
+      // NOT last_synced_at (which is when the sync RAN, not the loan's actual last modified date)
+      // This matches Qlik's RetrieveLastModDate approach from the QVD file
+      // 
+      // Use modifiedFrom if:
       //   1. This is NOT a full sync
-      //   2. We have a previous sync time
+      //   2. We have a previous loan modified timestamp (last_loan_modified_at)
       //   3. There are existing loans in the database
-      //   4. The previous sync actually synced loans (lastSyncedAt exists AND loansCount > 0)
-      //   5. The last_synced_at is not too recent (within last 5 minutes) - this prevents using
-      //      a timestamp from a sync that synced 0 loans before the fix was applied
-      let modifiedFrom: Date | undefined = undefined; // Default to undefined
-      
-      // Check if lastSyncedAt is very recent (within last 5 minutes)
-      const lastSyncedDate = lastSyncedAt ? new Date(lastSyncedAt) : null;
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      const isLastSyncedTooRecent = lastSyncedDate && lastSyncedDate > fiveMinutesAgo;
+      let modifiedFrom: Date | undefined = undefined; // Default to undefined (no Loan.LastModified filter for full sync)
       
       logInfo('Sync decision', {
         connectionId: id,
         tenantId: tenantId,
         fullSync: fullSync,
-        lastSyncedAt: lastSyncedAt,
-        loansCount: loansCount,
-        isLastSyncedTooRecent: isLastSyncedTooRecent,
-        willUseModifiedFrom: !fullSync && lastSyncedAt && loansCount > 0 && !isLastSyncedTooRecent
+        lastLoanModifiedAt: lastLoanModifiedAt,
+        lastSyncedAt: lastSyncedAt, // For info only
+        loansCount: loansCount
       });
       
-      if (!fullSync && lastSyncedAt && loansCount > 0 && !isLastSyncedTooRecent) {
-        // Incremental sync: only get loans modified since last sync (and we have existing loans)
-        // AND the last sync wasn't too recent (to avoid using timestamps from failed syncs)
-        modifiedFrom = new Date(lastSyncedAt);
-        logInfo('Starting incremental sync', { 
+      if (!fullSync && lastLoanModifiedAt && loansCount > 0) {
+        // Incremental sync: only get loans modified since the last loan's modified date
+        // This is the correct approach matching Qlik's RetrieveLastModDate
+        modifiedFrom = new Date(lastLoanModifiedAt);
+        logInfo('Starting incremental sync (using last_loan_modified_at)', { 
           connectionId: id, 
           tenantId: tenantId,
           modifiedFrom: modifiedFrom.toISOString(),
-          lastSyncedAt: lastSyncedAt,
+          lastLoanModifiedAt: lastLoanModifiedAt,
           existingLoansCount: loansCount
         });
-      } else {
-        // Full sync (initial sync, explicit full sync, or clearDatabase) - limit to last 36 months (matching Qlik)
-        // Use MonthStart behavior: first day of month 36 months ago
-        const threeYearsAgo = new Date();
-        threeYearsAgo.setMonth(threeYearsAgo.getMonth() - 36); // 36 months = 3 years (matching Qlik)
-        threeYearsAgo.setDate(1); // Set to first day of month (MonthStart behavior)
-        threeYearsAgo.setHours(0, 0, 0, 0); // Set to midnight
-        modifiedFrom = threeYearsAgo;
-        logInfo('Starting full sync (limiting to last 3 years)', { 
+      } else if (!fullSync && !lastLoanModifiedAt && lastSyncedAt && loansCount > 0) {
+        // Fallback: if we don't have last_loan_modified_at but have last_synced_at and loans,
+        // query the database directly for MAX(last_modified_date)
+        try {
+          const maxModifiedResult = await tenantPool.query(
+            `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
+          );
+          if (maxModifiedResult.rows[0]?.max_modified) {
+            modifiedFrom = new Date(maxModifiedResult.rows[0].max_modified);
+            logInfo('Starting incremental sync (queried MAX from DB)', { 
+              connectionId: id, 
+              tenantId: tenantId,
+              modifiedFrom: modifiedFrom.toISOString(),
+              existingLoansCount: loansCount
+            });
+          } else {
+            // No last_modified_date in DB, fall through to full sync
+            logInfo('No last_modified_date found in loans, will do full sync', { connectionId: id });
+          }
+        } catch (queryError: any) {
+          logWarn('Could not query MAX(last_modified_date), will do full sync', { 
+            connectionId: id, 
+            error: queryError.message 
+          });
+        }
+      }
+      
+      // If we still don't have a modifiedFrom, it's a full sync (no Loan.LastModified filter)
+      // The loanStartDate filter (Fields.Log.MS.Date.Started >= 36 months ago) will still apply
+      if (!modifiedFrom) {
+        logInfo('Starting full sync (no Loan.LastModified filter, will use loanStartDate only)', { 
           connectionId: id, 
           tenantId: tenantId,
           existingLoansCount: loansCount,
           fullSyncRequested: fullSync,
           clearDatabase: clearDatabase,
-          modifiedFrom: modifiedFrom.toISOString()
+          reason: !lastLoanModifiedAt ? 'no last_loan_modified_at' : (loansCount === 0 ? 'no existing loans' : 'full sync requested')
         });
       }
       

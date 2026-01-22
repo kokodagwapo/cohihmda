@@ -724,6 +724,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         sync_enabled BOOLEAN DEFAULT true,
         sync_frequency TEXT DEFAULT 'hourly',
         last_synced_at TIMESTAMPTZ,
+        last_loan_modified_at TIMESTAMPTZ, -- MAX(Loan.LastModified) from previously synced loans - used for incremental sync filter
         last_sync_status TEXT,
         last_sync_error TEXT,
         -- Webhook settings
