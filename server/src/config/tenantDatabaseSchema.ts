@@ -419,7 +419,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         du_lp_case_id TEXT,
         
         -- GFE disclosure dates
-        gfe_initial_gfe_disclosure_affiliated_business_disclosure_provided_date DATE,
+        gfe_affiliated_business_disclosure_provided_date DATE,  -- Shortened from 67 chars to stay under PostgreSQL 63-char limit
         gfe_initial_gfe_disclosure_charm_booklet_provided_date DATE,
         gfe_initial_gfe_disclosure_hud_special_booklet_provided_date DATE,
         gfe_initial_gfe_disclosure_heloc_brochure_provided_date DATE,
@@ -679,6 +679,36 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       console.log('[TenantSchema] cu_risk_score field migration completed');
     } catch (error: any) {
       console.error('[TenantSchema] Error migrating cu_risk_score field:', error.message);
+      // Don't throw - allow schema creation to continue
+    }
+
+    // Migration: Rename truncated GFE disclosure column (PostgreSQL 63-char limit caused truncation)
+    try {
+      await pool.query(`
+        DO $$
+        BEGIN
+          -- Rename the truncated column to the new shortened name
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = 'loans' 
+            AND column_name = 'gfe_initial_gfe_disclosure_affiliated_business_disclosure_provi'
+          ) AND NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' 
+            AND table_name = 'loans' 
+            AND column_name = 'gfe_affiliated_business_disclosure_provided_date'
+          ) THEN
+            ALTER TABLE public.loans 
+            RENAME COLUMN gfe_initial_gfe_disclosure_affiliated_business_disclosure_provi 
+            TO gfe_affiliated_business_disclosure_provided_date;
+            RAISE NOTICE 'Renamed truncated GFE disclosure column';
+          END IF;
+        END $$;
+      `);
+      console.log('[TenantSchema] GFE disclosure column rename migration completed');
+    } catch (error: any) {
+      console.error('[TenantSchema] Error renaming GFE disclosure column:', error.message);
       // Don't throw - allow schema creation to continue
     }
 

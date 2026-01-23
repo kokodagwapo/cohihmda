@@ -59,7 +59,7 @@ flowchart TD
 |----------|---------|------------|
 | **Default (coheus)** | User authentication, legacy support | `users`, `tenants`, `profiles`, `audit_logs` |
 | **Management (coheus_management)** | Tenant registry, connection metadata | `coheus_tenants`, `user_tenant_mappings`, `tenant_api_keys` |
-| **Tenant DBs** | Isolated loan data per lender | `public.loans` (100+ columns) |
+| **Tenant DBs** | Isolated loan data per lender | `public.loans` (296 columns) |
 
 ### Key Components
 
@@ -496,7 +496,7 @@ CREATE TABLE user_tenant_mappings (
 
 ### Tenant Databases
 
-#### `public.loans` (100+ columns)
+#### `public.loans` (296 columns)
 
 Key columns include:
 
@@ -835,3 +835,31 @@ npm run dev
 | `server/src/config/tenantDatabaseManager.ts` | Tenant pool management |
 | `server/src/middleware/tenantContext.ts` | Tenant middleware |
 | `server/src/services/metrics/metricsService.ts` | Metrics catalog |
+
+---
+
+## Related Documentation
+
+### Data Architecture
+- [Data Architecture Overview](./data/OVERVIEW.md) - High-level data flow and principles
+- [Universal Connector](./data/UNIVERSAL_CONNECTOR.md) - LOS-agnostic integration layer
+- [Incremental Sync](./data/INCREMENTAL_SYNC.md) - How data syncs from LOS systems
+- [CSV Import Guide](./data/CSV_IMPORT.md) - Manual and scheduled file imports
+- [Data Quality Framework](./data/DATA_QUALITY.md) - Validation and monitoring
+
+### LOS Integrations
+- [Encompass Integration](./data/integrations/ENCOMPASS_INTEGRATION.md) - ICE Mortgage Technology LOS
+- [MeridianLink Integration](./data/integrations/MERIDIANLINK_INTEGRATION.md) - LendingQB, OpenClose (planned)
+- [Servicing Integration](./data/integrations/SERVICING_INTEGRATION.md) - Post-origination data (parking lot)
+
+### Architecture & Security
+- [Architecture Overview](./architecture/OVERVIEW.md)
+- [Multi-Tenant Architecture](./architecture/MULTI_TENANT.md)
+- [Self-Hosted Deployment](./architecture/SELF_HOSTED.md)
+- [Auth Refactor Plan](./security/AUTH_REFACTOR.md)
+
+### Admin & Deployment
+- [Client Admin Requirements](./architecture/CLIENT_ADMIN_REQUIREMENTS.md)
+- [Internal Admin Requirements](./architecture/INTERNAL_ADMIN_REQUIREMENTS.md)
+- [Terraform Modules](./deployment/TERRAFORM_MODULES.md)
+- [AWS Marketplace](./deployment/AWS_MARKETPLACE.md)

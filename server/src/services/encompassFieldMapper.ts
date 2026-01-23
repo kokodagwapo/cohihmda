@@ -143,6 +143,9 @@ const COLUMN_NAME_ALIASES: Record<string, string> = {
   'meets_agencygse_qm': 'meets_agency_gse_qm',
   'mavent_highcost_result': 'mavent_high_cost_result',
   'mavent_atrqm_result': 'mavent_atr_qm_result',
+  
+  // GFE disclosure fields (shortened to stay under PostgreSQL 63-char limit)
+  'gfe_initial_gfe_disclosure_affiliated_business_disclosure_provided_date': 'gfe_affiliated_business_disclosure_provided_date',
 };
 
 /**
