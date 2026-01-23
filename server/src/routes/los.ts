@@ -347,10 +347,17 @@ router.post('/test-connection', authenticateToken, apiLimiter, async (req: AuthR
  */
 router.get('/connections', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    const tenantId = req.query.tenant_id as string | undefined;
+    // Use query param first, then fall back to JWT tenant ID (for tenant admins)
+    const tenantId = (req.query.tenant_id as string | undefined) || req.tenantId;
+    
+    logDebug('GET /connections - determining tenant', { 
+      queryTenantId: req.query.tenant_id, 
+      jwtTenantId: req.tenantId,
+      resolvedTenantId: tenantId,
+      userRole: req.userRole
+    });
 
-    // If tenant_id is provided, this is a management UI request
-    // Connect to that tenant's database to get connections
+    // If tenant_id is available, connect to that tenant's database
     if (tenantId) {
       try {
         const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');

@@ -167,6 +167,18 @@ export class ApiClient {
   clearToken() {
     this.token = null;
     localStorage.removeItem('auth_token');
+    // Clear all cached data to prevent stale data after logout
+    this.clearCache();
+  }
+
+  /**
+   * Clear all cached requests and pending requests
+   * Should be called on logout to prevent stale data
+   */
+  clearCache() {
+    this.requestCache.clear();
+    this.pendingRequests.clear();
+    console.log('[API] Cache cleared');
   }
 
   // Get API Gateway URLs from environment

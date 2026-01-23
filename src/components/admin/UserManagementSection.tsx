@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -27,397 +28,889 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Search, Edit, Trash2, Plus, Shield, Loader2, CheckCircle2, Clock } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { 
+  Users,
+  UserPlus,
+  Search,
+  RefreshCw,
+  Edit2,
+  Trash2,
+  Shield,
+  Building2,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Crown,
+  Eye
+} from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { api } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
-interface User {
+/**
+ * User type for display
+ */
+interface UserDisplay {
   id: string;
   email: string;
+  full_name?: string;
+  role: string;
+  is_active: boolean;
+  last_login_at?: string;
   created_at: string;
-  email_confirmed_at: string | null;
-  full_name: string | null;
-  tenant_id: string | null;
-  tenant_name: string | null;
-  role?: string;
+  // For tenant users
+  tenant_id?: string;
+  tenant_name?: string;
+  tenant_slug?: string;
+  // For super admins
+  is_super_admin?: boolean;
 }
 
+/**
+ * Tenant type
+ */
 interface Tenant {
   id: string;
   name: string;
+  slug: string;
+  status: string;
+  database_name: string;
+  created_at: string;
 }
 
-interface UserManagementSectionProps {
-  users: User[];
-  tenants: Tenant[];
-  onCreateUser: (userData: any) => Promise<void>;
-  onUpdateUser: (userId: string, userData: any) => Promise<void>;
-  onDeleteUser: (userId: string) => Promise<void>;
-}
-
-const roleOptions = [
-  { value: 'super_admin', label: 'Super Admin', description: 'Full system access' },
-  { value: 'tenant_admin', label: 'Tenant Admin', description: 'Full tenant access' },
-  { value: 'loan_officer', label: 'Loan Officer', description: 'Manage loans & contacts' },
-  { value: 'processor', label: 'Processor', description: 'Process loans' },
-  { value: 'viewer', label: 'Viewer', description: 'Read-only access' },
-  { value: 'user', label: 'User', description: 'Basic access' },
-];
-
-const getRoleBadgeColor = (role?: string) => {
-  switch (role) {
-    case 'super_admin':
-      return 'bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-md';
-    case 'tenant_admin':
-      return 'bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-md';
-    case 'loan_officer':
-      return 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md';
-    case 'processor':
-      return 'bg-gradient-to-r from-cyan-500 to-teal-600 text-white shadow-md';
-    case 'viewer':
-      return 'bg-gradient-to-r from-slate-400 to-slate-500 text-white shadow-md';
-    default:
-      return 'bg-gradient-to-r from-gray-400 to-gray-500 text-white shadow-md';
-  }
+// Role display names and colors
+const ROLE_CONFIG: Record<string, { label: string; color: string; icon: typeof Shield }> = {
+  super_admin: { label: 'Super Admin', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: Crown },
+  platform_admin: { label: 'Platform Admin', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400', icon: Shield },
+  support: { label: 'Support', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: Shield },
+  tenant_admin: { label: 'Tenant Admin', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Building2 },
+  admin: { label: 'Admin', color: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400', icon: Shield },
+  user: { label: 'User', color: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300', icon: Users },
+  viewer: { label: 'Viewer', color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400', icon: Eye },
+  loan_officer: { label: 'Loan Officer', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400', icon: Users },
+  processor: { label: 'Processor', color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400', icon: Users },
 };
 
-const getRoleLabel = (role?: string) => {
-  const option = roleOptions.find(r => r.value === role);
-  return option?.label || 'User';
-};
-
-export function UserManagementSection({
-  users,
-  tenants,
-  onCreateUser,
-  onUpdateUser,
-  onDeleteUser,
-}: UserManagementSectionProps) {
+export function UserManagementSection() {
+  const { user: currentUser, isSuperAdmin } = useAuth();
+  const { toast } = useToast();
+  
+  // Use admin tenant context for tenant awareness
+  const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName } = useAdminTenant();
+  
+  // State
+  const [superAdmins, setSuperAdmins] = useState<UserDisplay[]>([]);
+  const [tenantUsers, setTenantUsers] = useState<UserDisplay[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Filters - for tenant admins, always use 'all' since they can only see their own tenant's users anyway
+  // The API already restricts them to their tenant, so no need to filter client-side
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTenant, setSelectedTenant] = useState<string>('all');
+  
+  // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<UserDisplay | null>(null);
   
+  // Form state
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     full_name: '',
-    tenant_id: '',
     role: 'user',
+    tenant_slug: '',
+    is_super_admin: false,
   });
 
-  const filteredUsers = users.filter(user =>
-    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (user.full_name && user.full_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-    (user.role && user.role.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  // Load data on mount and when tenant context changes
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTenantAdmin, selectedTenantId]);
 
-  const handleCreate = async () => {
+  const loadData = async () => {
+    setLoading(true);
     try {
-      setSaving(true);
-      await onCreateUser(formData);
-      setCreateDialogOpen(false);
-      setFormData({ email: '', password: '', full_name: '', tenant_id: '', role: 'user' });
+      if (isPlatformAdmin) {
+        // Platform admins can see all users
+        await Promise.all([
+          loadSuperAdmins(),
+          loadTenants(),
+        ]);
+      } else if (isTenantAdmin) {
+        // Tenant admins only see their own tenant's users
+        await loadTenantUsersOnly();
+      }
     } catch (error: any) {
-      console.error('Error creating user:', error);
-      alert(`Error creating user: ${error.message || 'Unknown error'}`);
+      toast({
+        title: 'Error',
+        description: 'Failed to load user data',
+        variant: 'destructive'
+      });
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const handleEdit = async () => {
-    if (!selectedUser) return;
+  const loadSuperAdmins = async () => {
+    if (!isPlatformAdmin) return; // Only platform admins can see super admins
+    
     try {
-      setSaving(true);
-      await onUpdateUser(selectedUser.id, {
-        email: formData.email,
-        full_name: formData.full_name,
-        tenant_id: formData.tenant_id || null,
-        role: formData.role,
+      const response = await api.request('/api/admin/super-admins');
+      const users = response.users.map((u: any) => ({
+        ...u,
+        is_super_admin: true,
+      }));
+      setSuperAdmins(users);
+    } catch (error: any) {
+      console.error('Failed to load super admins:', error);
+      setSuperAdmins([]);
+    }
+  };
+  
+  const loadTenantUsersOnly = async () => {
+    // For tenant admins, load only their tenant's users using the correct endpoint
+    const tenantId = selectedTenantId || currentUser?.tenant_id;
+    
+    if (!tenantId) {
+      console.error('No tenant ID available for tenant admin');
+      setTenantUsers([]);
+      return;
+    }
+    
+    try {
+      // Use the tenant-specific users endpoint
+      const response = await api.request(`/api/admin/tenants/${tenantId}/users`);
+      setTenantUsers(response.users || []);
+      
+      // Set the tenant info from response or from current user
+      if (response.tenant) {
+        setTenants([{
+          id: response.tenant.id,
+          name: response.tenant.name,
+          slug: response.tenant.slug || response.tenant.id,
+          status: 'active',
+          database_name: '',
+          created_at: '',
+        }]);
+      } else if (currentUser?.tenant_id && currentUser?.tenant_name) {
+        setTenants([{
+          id: currentUser.tenant_id,
+          name: currentUser.tenant_name,
+          slug: currentUser.tenant_id,
+          status: 'active',
+          database_name: '',
+          created_at: '',
+        }]);
+      }
+    } catch (error: any) {
+      console.error('Failed to load tenant users:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load users. Please try again.',
+        variant: 'destructive',
+      });
+      setTenantUsers([]);
+    }
+  };
+
+  const loadTenants = async () => {
+    try {
+      // Load all data in one call
+      const response = await api.request('/api/admin/all-users');
+      
+      setTenants(response.tenants || []);
+      
+      // Super admins are already loaded separately, but we can update if needed
+      if (response.superAdmins) {
+        setSuperAdmins(response.superAdmins.map((u: any) => ({ ...u, is_super_admin: true })));
+      }
+      
+      // Tenant users come with tenant info attached
+      setTenantUsers(response.tenantUsers || []);
+    } catch (error: any) {
+      console.error('Failed to load tenants and users:', error);
+      // Fallback: try to load tenants separately
+      try {
+        const tenantsResponse = await api.request('/api/admin/tenants');
+        setTenants(tenantsResponse.tenants || []);
+        setTenantUsers([]);
+      } catch (fallbackError) {
+        setTenants([]);
+        setTenantUsers([]);
+      }
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadData();
+      toast({
+        title: 'Refreshed',
+        description: 'User data updated'
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    try {
+      // Tenant admins can only create tenant users (never super admins)
+      if (formData.is_super_admin && !isPlatformAdmin) {
+        toast({ title: 'Error', description: 'You do not have permission to create super admins', variant: 'destructive' });
+        return;
+      }
+      
+      if (formData.is_super_admin) {
+        // Create super admin in management database (platform admins only)
+        await api.request('/api/admin/super-admins', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
+            full_name: formData.full_name,
+            role: formData.role || 'platform_admin',
+          }),
+        });
+      } else {
+        // Determine tenant ID:
+        // - For tenant admins: use their own tenant ID
+        // - For platform admins: use selected tenant from form
+        let tenantId: string | null = null;
+        
+        if (isTenantAdmin) {
+          // Tenant admins always create users in their own tenant
+          tenantId = selectedTenantId || currentUser?.tenant_id || null;
+        } else if (formData.tenant_slug) {
+          // Platform admins select tenant from dropdown
+          const tenant = tenants.find(t => t.slug === formData.tenant_slug);
+          tenantId = tenant?.id || null;
+        }
+        
+        if (!tenantId) {
+          toast({ title: 'Error', description: 'Please select a tenant', variant: 'destructive' });
+          return;
+        }
+        
+        // Create user in tenant database
+        await api.request(`/api/admin/tenants/${tenantId}/users`, {
+          method: 'POST',
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
+            full_name: formData.full_name,
+            role: formData.role || 'user',
+          }),
+        });
+      }
+      
+      toast({
+        title: 'User Created',
+        description: `User ${formData.email} has been created successfully`
+      });
+      setCreateDialogOpen(false);
+      resetForm();
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create user',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleEditUser = async () => {
+    if (!selectedUser) return;
+    
+    try {
+      const updateData: any = {};
+      if (formData.email !== selectedUser.email) updateData.email = formData.email;
+      if (formData.full_name !== selectedUser.full_name) updateData.full_name = formData.full_name;
+      if (formData.role !== selectedUser.role) updateData.role = formData.role;
+      if (formData.password) updateData.password = formData.password;
+      
+      if (selectedUser.is_super_admin) {
+        // Update super admin
+        await api.request(`/api/admin/super-admins/${selectedUser.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(updateData),
+        });
+      } else {
+        // Update tenant user
+        await api.request(`/api/admin/tenants/${selectedUser.tenant_id}/users/${selectedUser.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(updateData),
+        });
+      }
+      
+      toast({
+        title: 'User Updated',
+        description: `User ${selectedUser.email} has been updated`
       });
       setEditDialogOpen(false);
       setSelectedUser(null);
-      setFormData({ email: '', password: '', full_name: '', tenant_id: '', role: 'user' });
+      await loadData();
     } catch (error: any) {
-      console.error('Error updating user:', error);
-      alert(`Error updating user: ${error.message || 'Unknown error'}`);
-    } finally {
-      setSaving(false);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update user',
+        variant: 'destructive'
+      });
     }
   };
 
-  const handleDelete = async () => {
-    if (!selectedUser) return;
+  const handleDeleteUser = async (user: UserDisplay) => {
+    if (!confirm(`Are you sure you want to delete ${user.email}?`)) return;
+    
     try {
-      setSaving(true);
-      await onDeleteUser(selectedUser.id);
-      setDeleteDialogOpen(false);
-      setSelectedUser(null);
-    } finally {
-      setSaving(false);
+      if (user.is_super_admin) {
+        await api.request(`/api/admin/super-admins/${user.id}`, { method: 'DELETE' });
+      } else {
+        await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, { method: 'DELETE' });
+      }
+      
+      toast({
+        title: 'User Deleted',
+        description: `User ${user.email} has been deleted`
+      });
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete user',
+        variant: 'destructive'
+      });
     }
   };
 
-  const openEditDialog = (user: User) => {
+  const handleToggleActive = async (user: UserDisplay) => {
+    try {
+      const newStatus = !user.is_active;
+      
+      if (user.is_super_admin) {
+        await api.request(`/api/admin/super-admins/${user.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ is_active: newStatus }),
+        });
+      } else {
+        await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ is_active: newStatus }),
+        });
+      }
+      
+      toast({
+        title: newStatus ? 'User Activated' : 'User Deactivated',
+        description: `User ${user.email} has been ${newStatus ? 'activated' : 'deactivated'}`
+      });
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update user status',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      email: '',
+      password: '',
+      full_name: '',
+      role: 'user',
+      tenant_slug: '',
+      is_super_admin: false,
+    });
+  };
+
+  const openEditDialog = (user: UserDisplay) => {
     setSelectedUser(user);
     setFormData({
       email: user.email,
       password: '',
       full_name: user.full_name || '',
-      tenant_id: user.tenant_id || '',
-      role: user.role || 'user',
+      role: user.role,
+      tenant_slug: user.tenant_slug || '',
+      is_super_admin: user.is_super_admin || false,
     });
     setEditDialogOpen(true);
   };
 
-  const openDeleteDialog = (user: User) => {
-    setSelectedUser(user);
-    setDeleteDialogOpen(true);
+  // Filter users
+  const filteredTenantUsers = tenantUsers.filter(user => {
+    if (selectedTenant !== 'all' && user.tenant_slug !== selectedTenant) return false;
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      return (
+        user.email.toLowerCase().includes(query) ||
+        user.full_name?.toLowerCase().includes(query) ||
+        user.tenant_name?.toLowerCase().includes(query)
+      );
+    }
+    return true;
+  });
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'Never';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
+  if (loading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-center h-64"
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+      </motion.div>
+    );
+  }
+
   return (
-    <>
-      <Card className="border-blue-200/40 dark:border-slate-700/50 bg-white dark:bg-slate-800/70 backdrop-blur-sm shadow-[0_8px_24px_rgba(59,130,246,0.08)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.3)] hover:shadow-[0_12px_32px_rgba(59,130,246,0.15)] dark:hover:shadow-[0_12px_32px_rgba(0,0,0,0.4)] transition-all duration-300 rounded-xl">
-        <CardHeader className="border-b border-blue-100/50 dark:border-slate-700/50 pb-6 bg-gradient-to-r from-blue-50/30 to-purple-50/30">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-xl font-extralight text-slate-900 dark:text-white tracking-tight mb-1.5">
-                User Management
-              </CardTitle>
-              <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light tracking-wide">
-                Manage system users, roles, and permissions
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 w-64 text-base font-extralight"
-                />
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6"
+    >
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-light text-slate-900 dark:text-white">
+            User Management
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Manage platform users and tenant users
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setCreateDialogOpen(true)}
+          >
+            <UserPlus className="h-4 w-4 mr-2" />
+            Add User
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats - Shown differently for platform admins vs tenant admins */}
+      <div className={`grid gap-4 ${isPlatformAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+        {isPlatformAdmin && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+                  <Crown className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Super Admins</p>
+                  <p className="text-2xl font-semibold">{superAdmins.length}</p>
+                </div>
               </div>
-              <Button
-                onClick={() => setCreateDialogOpen(true)}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-light shadow-lg hover:shadow-xl transition-all duration-300 rounded-xl"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Create User
-              </Button>
+            </CardContent>
+          </Card>
+        )}
+        {isPlatformAdmin && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                  <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Tenants</p>
+                  <p className="text-2xl font-semibold">{tenants.length}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm text-slate-500">{isTenantAdmin ? 'Organization Users' : 'Tenant Users'}</p>
+                <p className="text-2xl font-semibold">{tenantUsers.length}</p>
+              </div>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-slate-200 dark:border-slate-700">
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">User</TableHead>
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">Email</TableHead>
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">Role</TableHead>
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">Tenant</TableHead>
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">Status</TableHead>
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">Created</TableHead>
-                  <TableHead className="text-base font-extralight text-slate-600 dark:text-slate-400">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredUsers.map((user) => (
-                  <TableRow key={user.id} className="border-blue-100/30 dark:border-slate-700 hover:bg-blue-50/40 dark:hover:bg-slate-700/20 transition-colors duration-200">
-                    <TableCell className="font-extralight text-slate-900 dark:text-white">
-                      {user.full_name || 'N/A'}
-                    </TableCell>
-                    <TableCell className="text-base font-extralight text-slate-600 dark:text-slate-400">
-                      {user.email}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="default" className={`${getRoleBadgeColor(user.role)} border-0 font-medium px-3 py-1 rounded-full`}>
-                        <Shield className="h-3 w-3 mr-1.5" />
-                        {getRoleLabel(user.role)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-base font-extralight text-slate-600 dark:text-slate-400">
-                      {user.tenant_name || <span className="text-slate-400 dark:text-slate-500 italic">No tenant</span>}
-                    </TableCell>
-                    <TableCell>
-                      {user.email_confirmed_at ? (
-                        <Badge variant="default" className="bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm font-medium">
-                          <CheckCircle2 className="h-3 w-3 mr-1" />
-                          Verified
-                        </Badge>
-                      ) : (
-                        <Badge variant="default" className="bg-gradient-to-r from-amber-500 to-orange-600 text-white border-0 shadow-sm font-medium">
-                          <Clock className="h-3 w-3 mr-1" />
-                          Pending
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-base font-extralight text-slate-600 dark:text-slate-400">
-                      {new Date(user.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-9 w-9 p-0 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200"
-                          onClick={() => openEditDialog(user)}
-                        >
-                          <Edit className="h-4 w-4" strokeWidth={2} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-9 w-9 p-0 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/20 transition-all duration-200"
-                          onClick={() => openDeleteDialog(user)}
-                        >
-                          <Trash2 className="h-4 w-4" strokeWidth={2} />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredUsers.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-sm text-slate-500 dark:text-slate-400 font-light py-8">
-                      {searchQuery ? 'No users found matching your search' : 'No users found'}
-                    </TableCell>
-                  </TableRow>
+          </CardContent>
+        </Card>
+        {isTenantAdmin && currentTenantName && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+                  <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Organization</p>
+                  <p className="text-lg font-medium">{currentTenantName}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Tabs - Platform admins see both, tenant admins only see tenant users */}
+      <Tabs defaultValue={isPlatformAdmin ? "super-admins" : "tenant-users"} className="w-full">
+        <TabsList className={`grid w-full ${isPlatformAdmin ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {isPlatformAdmin && (
+            <TabsTrigger value="super-admins">
+              <Crown className="h-4 w-4 mr-2" />
+              Cohi Admins ({superAdmins.length})
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="tenant-users">
+            <Users className="h-4 w-4 mr-2" />
+            {isTenantAdmin ? `Organization Users (${tenantUsers.length})` : `Tenant Users (${tenantUsers.length})`}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Super Admins Tab - Only for platform admins */}
+        {isPlatformAdmin && (
+          <TabsContent value="super-admins" className="space-y-4 mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Cohi Platform Admins</CardTitle>
+                <CardDescription>
+                  Internal team members with platform-wide access
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Last Login</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {superAdmins.map(user => {
+                      const roleConfig = ROLE_CONFIG[user.role] || ROLE_CONFIG.user;
+                    return (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{user.full_name || user.email}</p>
+                            <p className="text-sm text-slate-500">{user.email}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={roleConfig.color}>
+                            {roleConfig.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {user.is_active ? (
+                            <Badge variant="outline" className="text-emerald-600 border-emerald-200">
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Active
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-slate-500 border-slate-200">
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Inactive
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-500">
+                          {formatDate(user.last_login_at)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(user)}
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {/* Tenant Users Tab */}
+        <TabsContent value="tenant-users" className="space-y-4 mt-6">
+          {/* Filters */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    placeholder="Search users..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                {/* Tenant filter - only shown for platform admins */}
+                {isPlatformAdmin && (
+                  <Select value={selectedTenant} onValueChange={setSelectedTenant}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Filter by tenant" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Tenants</SelectItem>
+                      {tenants.map(tenant => (
+                        <SelectItem key={tenant.slug} value={tenant.slug}>
+                          {tenant.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Users Table */}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Tenant</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Last Login</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredTenantUsers.map(user => {
+                    const roleConfig = ROLE_CONFIG[user.role] || ROLE_CONFIG.user;
+                    return (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{user.full_name || user.email}</p>
+                            <p className="text-sm text-slate-500">{user.email}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            <Building2 className="h-3 w-3 mr-1" />
+                            {user.tenant_name}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={roleConfig.color}>
+                            {roleConfig.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {user.is_active ? (
+                            <Badge variant="outline" className="text-emerald-600 border-emerald-200">
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Active
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-slate-500 border-slate-200">
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Inactive
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-500">
+                          {formatDate(user.last_login_at)}
+                        </TableCell>
+                        <TableCell className="text-right space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(user)}
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleToggleActive(user)}
+                          >
+                            {user.is_active ? (
+                              <XCircle className="h-4 w-4 text-slate-500" />
+                            ) : (
+                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {filteredTenantUsers.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-slate-500">
+                        {searchQuery || selectedTenant !== 'all'
+                          ? 'No users match your filters'
+                          : 'No tenant users found'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Create User Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] rounded-2xl border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-800 shadow-2xl">
-          <DialogHeader className="space-y-4 pb-6 px-2">
-            <DialogTitle className="text-3xl font-extralight tracking-tight text-slate-900 dark:text-white">Create New User</DialogTitle>
-            <DialogDescription className="text-base text-slate-600 dark:text-slate-400 font-light leading-relaxed">
-              Add a new user to the system with specific role and permissions
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create User</DialogTitle>
+            <DialogDescription>
+              {isTenantAdmin 
+                ? `Add a new user to ${currentTenantName || 'your organization'}`
+                : 'Add a new user to the platform'
+              }
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-6 py-2 px-2 max-h-[60vh] overflow-y-auto">
-            <div className="space-y-3">
-              <Label htmlFor="create-email" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Email Address <span className="text-red-500">*</span>
-              </Label>
+
+          <div className="space-y-4">
+            {/* User Type selector - only visible to platform admins */}
+            {isPlatformAdmin && (
+              <div className="space-y-2">
+                <Label>User Type</Label>
+                <Select
+                  value={formData.is_super_admin ? 'super_admin' : 'tenant'}
+                  onValueChange={(v) => setFormData({ 
+                    ...formData, 
+                    is_super_admin: v === 'super_admin',
+                    role: v === 'super_admin' ? 'super_admin' : 'user'
+                  })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="super_admin">Cohi Admin (Super Admin)</SelectItem>
+                    <SelectItem value="tenant">Tenant User</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Tenant selector - only for platform admins creating tenant users */}
+            {isPlatformAdmin && !formData.is_super_admin && (
+              <div className="space-y-2">
+                <Label>Tenant</Label>
+                <Select
+                  value={formData.tenant_slug}
+                  onValueChange={(v) => setFormData({ ...formData, tenant_slug: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select tenant" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tenants.map(tenant => (
+                      <SelectItem key={tenant.slug} value={tenant.slug}>
+                        {tenant.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Email</Label>
               <Input
-                id="create-email"
-                type="email"
-                placeholder="user@example.com"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-blue-400/20 transition-all text-base px-4"
+                placeholder="user@example.com"
               />
             </div>
-            <div className="space-y-3">
-              <Label htmlFor="create-password" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Password <span className="text-red-500">*</span>
-              </Label>
+
+            <div className="space-y-2">
+              <Label>Full Name</Label>
               <Input
-                id="create-password"
-                type="password"
-                placeholder="••••••••"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className={`h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-blue-400/20 transition-all text-base px-4 ${
-                  formData.password && formData.password.length < 6 ? 'border-red-500 dark:border-red-500' : ''
-                }`}
-              />
-              <p className={`text-xs mt-1.5 ${
-                formData.password && formData.password.length < 6 
-                  ? 'text-red-500 dark:text-red-400' 
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}>
-                Minimum 6 characters {formData.password && formData.password.length < 6 ? `(${formData.password.length}/6)` : ''}
-              </p>
-            </div>
-            <div className="space-y-3">
-              <Label htmlFor="create-full-name" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Full Name
-              </Label>
-              <Input
-                id="create-full-name"
-                placeholder="John Doe"
                 value={formData.full_name}
                 onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:focus:ring-blue-400/20 transition-all text-base px-4"
+                placeholder="John Doe"
               />
             </div>
-            <div className="space-y-3">
-              <Label htmlFor="create-role" className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                <Shield className="h-4 w-4 text-blue-500" />
-                User Role <span className="text-red-500">*</span>
-              </Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                <SelectTrigger id="create-role" className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {roleOptions.map((role) => (
-                    <SelectItem key={role.value} value={role.value} className="rounded-lg my-1 py-3">
-                      <div className="flex flex-col py-1">
-                        <span className="font-medium text-slate-900 dark:text-white">{role.label}</span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-light">{role.description}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">Determines user permissions and access level</p>
+
+            <div className="space-y-2">
+              <Label>Password</Label>
+              <Input
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="••••••••"
+              />
             </div>
-            <div className="space-y-3">
-              <Label htmlFor="create-tenant" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Tenant (Optional)
-              </Label>
-              <Select value={formData.tenant_id || "none"} onValueChange={(value) => setFormData({ ...formData, tenant_id: value === "none" ? "" : value })}>
-                <SelectTrigger id="create-tenant" className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base">
-                  <SelectValue placeholder="No tenant" />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="none" className="rounded-lg py-2.5">
-                    <span className="text-slate-400 italic">No tenant</span>
-                  </SelectItem>
-                  {tenants.map((tenant) => (
-                    <SelectItem key={tenant.id} value={tenant.id} className="rounded-lg my-1 py-2.5">
-                      {tenant.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">Leave empty for super admin users</p>
-            </div>
+
+            {/* Role selector - different options for platform admins vs tenant admins */}
+            {!formData.is_super_admin && (
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select
+                  value={formData.role}
+                  onValueChange={(v) => setFormData({ ...formData, role: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* Tenant admins can create other tenant admins for their org */}
+                    <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                    <SelectItem value="loan_officer">Loan Officer</SelectItem>
+                    <SelectItem value="processor">Processor</SelectItem>
+                    <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
-          <DialogFooter className="gap-3 pt-6 px-2 border-t border-slate-200 dark:border-slate-700 mt-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setCreateDialogOpen(false)} 
-              disabled={saving}
-              className="h-11 px-6 rounded-xl font-medium border-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleCreate} 
-              disabled={saving || !formData.email || !formData.password || formData.password.length < 6}
-              className="h-11 px-6 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-300 rounded-xl"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create User
-                </>
-              )}
+            <Button onClick={handleCreateUser}>
+              Create User
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -425,169 +918,84 @@ export function UserManagementSection({
 
       {/* Edit User Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] rounded-2xl border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-800 shadow-2xl">
-          <DialogHeader className="space-y-4 pb-6 px-2">
-            <DialogTitle className="text-3xl font-extralight tracking-tight text-slate-900 dark:text-white">Edit User</DialogTitle>
-            <DialogDescription className="text-base text-slate-600 dark:text-slate-400 font-light leading-relaxed">
-              Update user information, role, and permissions
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>
+              Update user information
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-6 py-2 px-2 max-h-[60vh] overflow-y-auto">
-            <div className="space-y-3">
-              <Label htmlFor="edit-email" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Email Address
-              </Label>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Email</Label>
               <Input
-                id="edit-email"
-                type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base px-4"
+                disabled
               />
             </div>
-            <div className="space-y-3">
-              <Label htmlFor="edit-full-name" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Full Name
-              </Label>
+
+            <div className="space-y-2">
+              <Label>Full Name</Label>
               <Input
-                id="edit-full-name"
                 value={formData.full_name}
                 onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base px-4"
               />
             </div>
-            <div className="space-y-3">
-              <Label htmlFor="edit-role" className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                <Shield className="h-4 w-4 text-blue-500" />
-                User Role
-              </Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                <SelectTrigger id="edit-role" className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base">
+
+            <div className="space-y-2">
+              <Label>New Password (leave blank to keep current)</Label>
+              <Input
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="••••••••"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select
+                value={formData.role}
+                onValueChange={(v) => setFormData({ ...formData, role: v })}
+              >
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {roleOptions.map((role) => (
-                    <SelectItem key={role.value} value={role.value} className="rounded-lg my-1 py-3">
-                      <div className="flex flex-col py-1">
-                        <span className="font-medium text-slate-900 dark:text-white">{role.label}</span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-light">{role.description}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-3">
-              <Label htmlFor="edit-tenant" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Tenant
-              </Label>
-              <Select value={formData.tenant_id || "none"} onValueChange={(value) => setFormData({ ...formData, tenant_id: value === "none" ? "" : value })}>
-                <SelectTrigger id="edit-tenant" className="h-12 rounded-xl border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base">
-                  <SelectValue placeholder="No tenant" />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="none" className="rounded-lg py-2.5">
-                    <span className="text-slate-400 italic">No tenant</span>
-                  </SelectItem>
-                  {tenants.map((tenant) => (
-                    <SelectItem key={tenant.id} value={tenant.id} className="rounded-lg my-1 py-2.5">
-                      {tenant.name}
-                    </SelectItem>
-                  ))}
+                <SelectContent>
+                  {formData.is_super_admin ? (
+                    <>
+                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      <SelectItem value="platform_admin">Platform Admin</SelectItem>
+                      <SelectItem value="support">Support</SelectItem>
+                    </>
+                  ) : (
+                    <>
+                      <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                      <SelectItem value="loan_officer">Loan Officer</SelectItem>
+                      <SelectItem value="processor">Processor</SelectItem>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
             </div>
           </div>
-          <DialogFooter className="gap-3 pt-6 px-2 border-t border-slate-200 dark:border-slate-700 mt-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setEditDialogOpen(false)} 
-              disabled={saving}
-              className="h-11 px-6 rounded-xl font-medium border-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleEdit} 
-              disabled={saving || !formData.email}
-              className="h-11 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-300 rounded-xl"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Save Changes
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Delete User Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[450px] rounded-2xl border-red-200/60 dark:border-red-700/50 bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl shadow-2xl">
-          <DialogHeader className="space-y-3 pb-2">
-            <DialogTitle className="text-2xl font-light tracking-tight text-red-600 dark:text-red-400">Delete User</DialogTitle>
-            <DialogDescription className="text-sm text-slate-600 dark:text-slate-400 font-light tracking-wide">
-              Are you sure you want to delete this user? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedUser && (
-            <div className="py-4">
-              <div className="bg-gradient-to-br from-red-50 to-rose-50/50 dark:from-red-900/20 dark:to-rose-900/10 border border-red-200/60 dark:border-red-700/50 rounded-xl p-5 space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-600 dark:text-slate-400 font-light min-w-[60px]">Email:</span>
-                  <span className="font-extralight text-slate-900 dark:text-white">{selectedUser.email}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-600 dark:text-slate-400 font-light min-w-[60px]">Name:</span>
-                  <span className="font-extralight text-slate-900 dark:text-white">{selectedUser.full_name || 'N/A'}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-600 dark:text-slate-400 font-light min-w-[60px]">Role:</span>
-                  <Badge className={`${getRoleBadgeColor(selectedUser.role)} border-0 font-medium px-3 py-1 rounded-full`}>
-                    <Shield className="h-3 w-3 mr-1.5" />
-                    {getRoleLabel(selectedUser.role)}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter className="gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setDeleteDialogOpen(false)} 
-              disabled={saving}
-              className="rounded-xl font-light"
-            >
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleDelete} 
-              disabled={saving}
-              className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-light shadow-lg hover:shadow-xl transition-all duration-300 rounded-xl"
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete User
-                </>
-              )}
+            <Button onClick={handleEditUser}>
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </motion.div>
   );
 }
+
+export default UserManagementSection;

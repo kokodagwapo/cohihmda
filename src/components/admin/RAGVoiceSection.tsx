@@ -15,7 +15,6 @@ import {
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   Loader2, 
   Brain, 
@@ -29,13 +28,12 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
+import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
 interface RAGVoiceSectionProps {
   ragVoiceSettings: any;
   ragVoiceCosts: any[];
   loading: boolean;
-  isSuperAdmin: boolean;
-  tenants: any[];
   onSave: (settings: any) => Promise<any>;
   onRefresh: (useCache?: boolean, tenantId?: string | null) => Promise<any>;
   onSaveApiKeys?: (openaiKey: string, geminiKey: string) => Promise<any>;
@@ -45,14 +43,12 @@ export const RAGVoiceSection = ({
   ragVoiceSettings,
   ragVoiceCosts,
   loading,
-  isSuperAdmin,
-  tenants,
   onRefresh,
 }: RAGVoiceSectionProps) => {
   const { toast } = useToast();
   
-  // Tenant Selection State (for Super Admin)
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  // Use admin tenant context for tenant selection
+  const { selectedTenantId, isPlatformAdmin, currentTenantName, tenants } = useAdminTenant();
   
   // API Keys Modal State
   const [apiKeysModalOpen, setApiKeysModalOpen] = useState(false);
@@ -67,7 +63,7 @@ export const RAGVoiceSection = ({
     setSavingKeys(true);
     try {
       const targetTenantId = selectedTenantId || undefined;
-      const url = targetTenantId && isSuperAdmin
+      const url = targetTenantId && isPlatformAdmin
         ? `/api/rag/settings?tenant_id=${targetTenantId}`
         : '/api/rag/settings';
       await api.request(url, {
@@ -79,8 +75,8 @@ export const RAGVoiceSection = ({
       });
       toast({
         title: 'Success',
-        description: selectedTenantId && isSuperAdmin
-          ? `API keys saved successfully for ${tenants.find(t => t.id === selectedTenantId)?.name || 'selected tenant'}.`
+        description: selectedTenantId && isPlatformAdmin
+          ? `API keys saved successfully for ${currentTenantName || 'selected tenant'}.`
           : 'API keys saved successfully. Ailethia voice agentic is now ready to use!',
       });
       setApiKeysModalOpen(false);
@@ -99,7 +95,7 @@ export const RAGVoiceSection = ({
   const handleSaveTopicsAndRules = async () => {
     try {
       const targetTenantId = selectedTenantId || undefined;
-      const url = targetTenantId && isSuperAdmin
+      const url = targetTenantId && isPlatformAdmin
         ? `/api/rag/settings?tenant_id=${targetTenantId}`
         : '/api/rag/settings';
       await api.request(url, {
@@ -192,60 +188,13 @@ https://www.optimallending.com/executive-insights`;
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* Tenant Selector for Super Admin */}
-      {isSuperAdmin && (
-        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <CardHeader>
-            <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-              Support Access
-            </CardTitle>
-            <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-              Select a tenant to view or manage their RAG & Voice Agentic settings for support purposes
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <Select
-                value={selectedTenantId || '__super_admin__'}
-                onValueChange={async (value) => {
-                  const actualValue = value === '__super_admin__' ? null : value;
-                  setSelectedTenantId(actualValue);
-                  await onRefresh(false, actualValue);
-                }}
-              >
-                <SelectTrigger className="w-full max-w-md font-light">
-                  <SelectValue placeholder="Select tenant for support access..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__super_admin__">My Account (Super Admin)</SelectItem>
-                  {tenants && Array.isArray(tenants) && tenants.length > 0 ? tenants.map((tenant) => (
-                    <SelectItem key={tenant.id} value={tenant.id}>
-                      {tenant.name}
-                    </SelectItem>
-                  )) : null}
-                </SelectContent>
-              </Select>
-              {selectedTenantId && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    setSelectedTenantId(null);
-                    await onRefresh(true, null);
-                  }}
-                  className="font-extralight"
-                >
-                  Clear Selection
-                </Button>
-              )}
-            </div>
-            {selectedTenantId && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-light">
-                ⚠️ You are viewing settings for: {tenants.find(t => t.id === selectedTenantId)?.name || 'Selected Tenant'}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      {/* Tenant context info for platform admins */}
+      {isPlatformAdmin && selectedTenantId && (
+        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <p className="text-sm text-amber-700 dark:text-amber-300 font-light">
+            ⚠️ Viewing settings for: <strong>{currentTenantName || 'Selected Tenant'}</strong>
+          </p>
+        </div>
       )}
 
       {loading && !ragVoiceSettings ? (
@@ -260,11 +209,11 @@ https://www.optimallending.com/executive-insights`;
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-                    API Keys {selectedTenantId && isSuperAdmin && <span className="text-xs text-amber-600">(Support Mode)</span>}
+                    API Keys {selectedTenantId && isPlatformAdmin && <span className="text-xs text-amber-600">(Support Mode)</span>}
                   </CardTitle>
                   <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
                     Configure OpenAI and Gemini API keys for RAG and voice agentic features
-                    {selectedTenantId && isSuperAdmin && ' - These keys are tenant-specific'}
+                    {selectedTenantId && isPlatformAdmin && ' - These keys are tenant-specific'}
                   </CardDescription>
                 </div>
                 <Dialog open={apiKeysModalOpen} onOpenChange={setApiKeysModalOpen}>
@@ -276,7 +225,7 @@ https://www.optimallending.com/executive-insights`;
                       onClick={async () => {
                         try {
                           const targetTenantId = selectedTenantId || undefined;
-                          const url = targetTenantId && isSuperAdmin
+                          const url = targetTenantId && isPlatformAdmin
                             ? `/api/rag/settings?tenant_id=${targetTenantId}`
                             : '/api/rag/settings';
                           const response = await api.request<{ settings: any }>(url);

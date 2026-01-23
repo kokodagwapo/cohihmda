@@ -5,14 +5,28 @@ import jwt from 'jsonwebtoken';
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-  throw new Error('JWT_SECRET environment variable is required');
+    throw new Error('JWT_SECRET environment variable is required');
   }
   return secret;
+}
+
+// JWT payload structure (matches what's signed in auth routes)
+interface JwtTokenPayload {
+  userId: string;
+  email: string;
+  role: string;
+  isSuperAdmin: boolean;
+  tenantId?: string;
+  tenantSlug?: string;
 }
 
 export interface AuthRequest extends Request {
   userId?: string;
   userEmail?: string;
+  userRole?: string;
+  isSuperAdmin?: boolean;
+  tenantId?: string;
+  tenantSlug?: string;
 }
 
 export function authenticateToken(req: AuthRequest, res: Response, next: NextFunction) {
@@ -24,9 +38,13 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
   }
   
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as { userId: string; email: string };
+    const decoded = jwt.verify(token, getJwtSecret()) as JwtTokenPayload;
     req.userId = decoded.userId;
     req.userEmail = decoded.email;
+    req.userRole = decoded.role;
+    req.isSuperAdmin = decoded.isSuperAdmin;
+    req.tenantId = decoded.tenantId;
+    req.tenantSlug = decoded.tenantSlug;
     next();
   } catch (error) {
     return res.status(403).json({ error: 'Invalid token' });

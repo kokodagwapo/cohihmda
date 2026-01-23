@@ -1395,13 +1395,15 @@ async function runMigrations() {
     // Note: public.users table, indexes, and migrations are created earlier (before profiles)
     
     // Create audit logging tables
+    // Note: user_id does NOT have a foreign key because users can be in management DB (coheus_users)
+    // or tenant DBs (tenant_*.users). We store the user_id as a UUID for reference but don't enforce FK.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.audit_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+        user_id UUID,
         user_email TEXT,
         user_role TEXT,
-        tenant_id UUID REFERENCES public.tenants(id) ON DELETE SET NULL,
+        tenant_id UUID,
         action TEXT NOT NULL,
         resource TEXT NOT NULL,
         resource_id TEXT,
@@ -1416,6 +1418,15 @@ async function runMigrations() {
         timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    
+    // Drop foreign key constraints if they exist (for migration from older schema)
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE public.audit_logs DROP CONSTRAINT IF EXISTS audit_logs_user_id_fkey;
+        ALTER TABLE public.audit_logs DROP CONSTRAINT IF EXISTS audit_logs_tenant_id_fkey;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$;
+    `).catch(() => {});
     
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON public.audit_logs(user_id)
@@ -1522,10 +1533,11 @@ async function runMigrations() {
     }
     
     // Create user_preferences table
+    // Note: No FK to users table since users are now in coheus_users
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.user_preferences (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL,
         preference_key TEXT NOT NULL,
         preference_value JSONB NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -1533,6 +1545,12 @@ async function runMigrations() {
         UNIQUE(user_id, preference_key)
       )
     `);
+    
+    // Drop old FK constraint if it exists (migration from old schema)
+    await pool.query(`
+      ALTER TABLE public.user_preferences 
+      DROP CONSTRAINT IF EXISTS user_preferences_user_id_fkey
+    `).catch(() => {});
     
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_user_preferences_user_key ON public.user_preferences(user_id, preference_key)

@@ -15,7 +15,8 @@
     "seed:users": "node ../scripts/seed-default-users.js",
     "seed:users:prod": "NODE_ENV=production node ../scripts/seed-default-users.js",
     "migrate:tenants": "tsx scripts/migrate-tenant-schemas.ts",
-    "migrate:tenants:report": "tsx scripts/migrate-tenant-schemas.ts --report"
+    "migrate:tenants:report": "tsx scripts/migrate-tenant-schemas.ts --report",
+    "seed:local": "tsx scripts/seed-local-dev.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.958.0",

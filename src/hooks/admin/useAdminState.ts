@@ -2,8 +2,14 @@ import { useState, useCallback } from 'react';
 
 export type AdminSection = 
   | 'overview' 
+  | 'org-overview'  // Tenant admin overview (their org only)
   | 'tenants' 
-  | 'users' 
+  | 'users'
+  | 'roles'
+  | 'sso'
+  | 'org'
+  | 'data-quality'
+  | 'data-config'  // Tenant data configuration (field mappings, ranges, filters, scoring)
   | 'system' 
   | 'security' 
   | 'monitoring' 

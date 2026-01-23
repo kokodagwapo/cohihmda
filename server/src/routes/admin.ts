@@ -449,4 +449,470 @@ router.delete('/users/:id', authenticateToken, requireRole('super_admin', 'tenan
   }
 });
 
+// ============================================================================
+// NEW MULTI-DATABASE USER MANAGEMENT APIs
+// ============================================================================
+
+/**
+ * GET /api/admin/super-admins
+ * Get all super admins (from management database coheus_users table)
+ */
+router.get('/super-admins', authenticateToken, requireRole('super_admin'), async (req: AuthRequest, res) => {
+  try {
+    const result = await managementPool.query(`
+      SELECT 
+        id,
+        email,
+        full_name,
+        role,
+        is_active,
+        last_login_at,
+        created_at,
+        updated_at
+      FROM coheus_users
+      ORDER BY created_at DESC
+    `);
+    
+    res.json({ users: result.rows });
+  } catch (error: any) {
+    logError('Error fetching super admins', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to fetch super admins', details: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/super-admins
+ * Create a new super admin (in management database)
+ */
+router.post('/super-admins', authenticateToken, requireRole('super_admin'), async (req: AuthRequest, res) => {
+  try {
+    const schema = z.object({
+      email: z.string().min(1),
+      password: z.string().min(6),
+      full_name: z.string().optional(),
+      role: z.enum(['super_admin', 'platform_admin', 'support']).default('platform_admin'),
+    });
+    
+    const validated = schema.parse(req.body);
+    const hashedPassword = await bcrypt.hash(validated.password, 10);
+    
+    const result = await managementPool.query(`
+      INSERT INTO coheus_users (email, encrypted_password, full_name, role, is_active)
+      VALUES ($1, $2, $3, $4, true)
+      RETURNING id, email, full_name, role, is_active, created_at
+    `, [validated.email, hashedPassword, validated.full_name || null, validated.role]);
+    
+    logInfo('Super admin created', { createdBy: req.userId, newUser: validated.email });
+    
+    res.status(201).json({ user: result.rows[0] });
+  } catch (error: any) {
+    if (error.code === '23505') {
+      res.status(409).json({ error: 'User with this email already exists' });
+    } else if (error.name === 'ZodError') {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+    } else {
+      logError('Error creating super admin', error, { userId: req.userId });
+      res.status(500).json({ error: 'Failed to create super admin', details: error.message });
+    }
+  }
+});
+
+/**
+ * PUT /api/admin/super-admins/:id
+ * Update a super admin
+ */
+router.put('/super-admins/:id', authenticateToken, requireRole('super_admin'), async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const schema = z.object({
+      email: z.string().min(1).optional(),
+      password: z.string().min(6).optional(),
+      full_name: z.string().optional(),
+      role: z.enum(['super_admin', 'platform_admin', 'support']).optional(),
+      is_active: z.boolean().optional(),
+    });
+    
+    const validated = schema.parse(req.body);
+    const updates: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+    
+    if (validated.email !== undefined) {
+      updates.push(`email = $${paramIndex++}`);
+      params.push(validated.email);
+    }
+    if (validated.full_name !== undefined) {
+      updates.push(`full_name = $${paramIndex++}`);
+      params.push(validated.full_name);
+    }
+    if (validated.role !== undefined) {
+      updates.push(`role = $${paramIndex++}`);
+      params.push(validated.role);
+    }
+    if (validated.is_active !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      params.push(validated.is_active);
+    }
+    if (validated.password) {
+      const hashedPassword = await bcrypt.hash(validated.password, 10);
+      updates.push(`encrypted_password = $${paramIndex++}`);
+      params.push(hashedPassword);
+    }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    
+    updates.push(`updated_at = NOW()`);
+    params.push(id);
+    
+    const result = await managementPool.query(`
+      UPDATE coheus_users 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING id, email, full_name, role, is_active, created_at, updated_at
+    `, params);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Super admin not found' });
+    }
+    
+    res.json({ user: result.rows[0] });
+  } catch (error: any) {
+    logError('Error updating super admin', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to update super admin', details: error.message });
+  }
+});
+
+/**
+ * DELETE /api/admin/super-admins/:id
+ * Delete a super admin
+ */
+router.delete('/super-admins/:id', authenticateToken, requireRole('super_admin'), async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (id === req.userId) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+    
+    const result = await managementPool.query(
+      'DELETE FROM coheus_users WHERE id = $1 RETURNING id, email',
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Super admin not found' });
+    }
+    
+    logInfo('Super admin deleted', { deletedBy: req.userId, deletedUser: result.rows[0].email });
+    
+    res.json({ message: 'Super admin deleted successfully' });
+  } catch (error: any) {
+    logError('Error deleting super admin', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to delete super admin', details: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/tenants/:tenantId/users
+ * Get all users for a specific tenant (from tenant database)
+ */
+router.get('/tenants/:tenantId/users', authenticateToken, requireRole('super_admin', 'platform_admin', 'tenant_admin'), async (req: AuthRequest, res) => {
+  try {
+    const { tenantId } = req.params;
+    
+    // Tenant admins can only access their own tenant's users
+    if (req.userRole === 'tenant_admin' && req.tenantId !== tenantId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only access users from your own organization' 
+      });
+    }
+    
+    // Get tenant pool
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    
+    const result = await tenantPool.query(`
+      SELECT 
+        id,
+        email,
+        full_name,
+        role,
+        is_active,
+        last_login_at,
+        created_at,
+        updated_at
+      FROM users
+      ORDER BY created_at DESC
+    `);
+    
+    // Get tenant info for response
+    const tenantInfo = await managementPool.query(
+      'SELECT id, name, slug FROM coheus_tenants WHERE id = $1',
+      [tenantId]
+    );
+    
+    res.json({ 
+      users: result.rows,
+      tenant: tenantInfo.rows[0] || null
+    });
+  } catch (error: any) {
+    logError('Error fetching tenant users', error, { userId: req.userId, tenantId: req.params.tenantId });
+    res.status(500).json({ error: 'Failed to fetch tenant users', details: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/tenants/:tenantId/users
+ * Create a new user in a specific tenant
+ */
+router.post('/tenants/:tenantId/users', authenticateToken, requireRole('super_admin', 'platform_admin', 'tenant_admin'), async (req: AuthRequest, res) => {
+  try {
+    const { tenantId } = req.params;
+    
+    // Tenant admins can only create users in their own tenant
+    if (req.userRole === 'tenant_admin' && req.tenantId !== tenantId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only create users in your own organization' 
+      });
+    }
+    
+    const schema = z.object({
+      email: z.string().email(),
+      password: z.string().min(6),
+      full_name: z.string().optional(),
+      role: z.enum(['tenant_admin', 'admin', 'user', 'viewer', 'loan_officer', 'processor']).default('user'),
+    });
+    
+    const validated = schema.parse(req.body);
+    const hashedPassword = await bcrypt.hash(validated.password, 10);
+    
+    // Get tenant pool
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    
+    const result = await tenantPool.query(`
+      INSERT INTO users (email, encrypted_password, full_name, role, is_active)
+      VALUES ($1, $2, $3, $4, true)
+      RETURNING id, email, full_name, role, is_active, created_at
+    `, [validated.email, hashedPassword, validated.full_name || null, validated.role]);
+    
+    // Get tenant info for logging
+    const tenantInfo = await managementPool.query(
+      'SELECT name FROM coheus_tenants WHERE id = $1',
+      [tenantId]
+    );
+    
+    logInfo('Tenant user created', { 
+      createdBy: req.userId, 
+      newUser: validated.email,
+      tenantId,
+      tenantName: tenantInfo.rows[0]?.name
+    });
+    
+    res.status(201).json({ user: result.rows[0] });
+  } catch (error: any) {
+    if (error.code === '23505') {
+      res.status(409).json({ error: 'User with this email already exists in this tenant' });
+    } else if (error.name === 'ZodError') {
+      res.status(400).json({ error: 'Validation error', details: error.errors });
+    } else {
+      logError('Error creating tenant user', error, { userId: req.userId, tenantId: req.params.tenantId });
+      res.status(500).json({ error: 'Failed to create tenant user', details: error.message });
+    }
+  }
+});
+
+/**
+ * PUT /api/admin/tenants/:tenantId/users/:userId
+ * Update a user in a specific tenant
+ */
+router.put('/tenants/:tenantId/users/:userId', authenticateToken, requireRole('super_admin', 'platform_admin', 'tenant_admin'), async (req: AuthRequest, res) => {
+  try {
+    const { tenantId, userId } = req.params;
+    
+    // Tenant admins can only update users in their own tenant
+    if (req.userRole === 'tenant_admin' && req.tenantId !== tenantId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only update users in your own organization' 
+      });
+    }
+    
+    const schema = z.object({
+      email: z.string().email().optional(),
+      password: z.string().min(6).optional(),
+      full_name: z.string().optional(),
+      role: z.enum(['tenant_admin', 'admin', 'user', 'viewer', 'loan_officer', 'processor']).optional(),
+      is_active: z.boolean().optional(),
+    });
+    
+    const validated = schema.parse(req.body);
+    const updates: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+    
+    if (validated.email !== undefined) {
+      updates.push(`email = $${paramIndex++}`);
+      params.push(validated.email);
+    }
+    if (validated.full_name !== undefined) {
+      updates.push(`full_name = $${paramIndex++}`);
+      params.push(validated.full_name);
+    }
+    if (validated.role !== undefined) {
+      updates.push(`role = $${paramIndex++}`);
+      params.push(validated.role);
+    }
+    if (validated.is_active !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      params.push(validated.is_active);
+    }
+    if (validated.password) {
+      const hashedPassword = await bcrypt.hash(validated.password, 10);
+      updates.push(`encrypted_password = $${paramIndex++}`);
+      params.push(hashedPassword);
+    }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+    
+    updates.push(`updated_at = NOW()`);
+    params.push(userId);
+    
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    
+    const result = await tenantPool.query(`
+      UPDATE users 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING id, email, full_name, role, is_active, created_at, updated_at
+    `, params);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ user: result.rows[0] });
+  } catch (error: any) {
+    logError('Error updating tenant user', error, { userId: req.userId, tenantId: req.params.tenantId });
+    res.status(500).json({ error: 'Failed to update tenant user', details: error.message });
+  }
+});
+
+/**
+ * DELETE /api/admin/tenants/:tenantId/users/:userId
+ * Delete a user from a specific tenant
+ */
+router.delete('/tenants/:tenantId/users/:userId', authenticateToken, requireRole('super_admin', 'platform_admin', 'tenant_admin'), async (req: AuthRequest, res) => {
+  try {
+    const { tenantId, userId } = req.params;
+    
+    // Tenant admins can only delete users in their own tenant
+    if (req.userRole === 'tenant_admin' && req.tenantId !== tenantId) {
+      return res.status(403).json({ 
+        error: 'Forbidden', 
+        message: 'You can only delete users in your own organization' 
+      });
+    }
+    
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    
+    const result = await tenantPool.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id, email',
+      [userId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    logInfo('Tenant user deleted', { deletedBy: req.userId, deletedUser: result.rows[0].email, tenantId });
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (error: any) {
+    logError('Error deleting tenant user', error, { userId: req.userId, tenantId: req.params.tenantId });
+    res.status(500).json({ error: 'Failed to delete tenant user', details: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/all-users
+ * Get all users across all tenants (super admin only)
+ * Returns super admins + all tenant users with tenant info
+ */
+router.get('/all-users', authenticateToken, requireRole('super_admin', 'platform_admin'), async (req: AuthRequest, res) => {
+  try {
+    // Get super admins from management DB
+    const superAdminsResult = await managementPool.query(`
+      SELECT 
+        id,
+        email,
+        full_name,
+        role,
+        is_active,
+        last_login_at,
+        created_at,
+        NULL as tenant_id,
+        NULL as tenant_name,
+        NULL as tenant_slug,
+        true as is_super_admin
+      FROM coheus_users
+      ORDER BY created_at DESC
+    `);
+    
+    // Get all tenants
+    const tenantsResult = await managementPool.query(`
+      SELECT id, name, slug, database_name 
+      FROM coheus_tenants 
+      WHERE status = 'active'
+    `);
+    
+    // Get users from each tenant
+    const allTenantUsers: any[] = [];
+    
+    for (const tenant of tenantsResult.rows) {
+      try {
+        const tenantPool = await tenantDbManager.getTenantPool(tenant.id);
+        const usersResult = await tenantPool.query(`
+          SELECT 
+            id,
+            email,
+            full_name,
+            role,
+            is_active,
+            last_login_at,
+            created_at
+          FROM users
+          ORDER BY created_at DESC
+        `);
+        
+        // Add tenant info to each user
+        usersResult.rows.forEach(user => {
+          allTenantUsers.push({
+            ...user,
+            tenant_id: tenant.id,
+            tenant_name: tenant.name,
+            tenant_slug: tenant.slug,
+            is_super_admin: false,
+          });
+        });
+      } catch (err: any) {
+        logWarn('Could not fetch users from tenant', { tenantId: tenant.id, error: err.message });
+      }
+    }
+    
+    res.json({
+      superAdmins: superAdminsResult.rows,
+      tenantUsers: allTenantUsers,
+      tenants: tenantsResult.rows,
+    });
+  } catch (error: any) {
+    logError('Error fetching all users', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to fetch users', details: error.message });
+  }
+});
+
 export default router;

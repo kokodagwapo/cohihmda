@@ -30,6 +30,7 @@ import { ReportsSidebar, DashboardVisibility } from '@/components/dashboard/Repo
 import { ReportModal } from '@/components/dashboard/ReportModal';
 import { ReportData, allReports } from '@/data/reportSimulations';
 import { useEdit } from '@/contexts/EditContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { EditableText, EditableNumber } from '@/components/ui/EditableText';
 import { LOSFunnelData, LOSApiResponse, mapLOSDataToUniversalSchema } from '@/lib/losSchema';
 import { FunnelVisualization } from '@/components/FunnelVisualization';
@@ -74,23 +75,53 @@ const Dashboard = () => {
   const {
     toast
   } = useToast();
-  const {
-    isAuthenticated: contextAuthenticated,
-    setIsAuthenticated: setContextAuthenticated
-  } = useEdit();
+  const { isAuthenticated: authContextAuthenticated, user, logout: authLogout } = useAuth();
+  // Keep useEdit for content editing only (auth properties are deprecated)
+  const editContext = useEdit();
   // Use custom hooks for state management
   const dashboardState = useDashboardState();
   const dashboardFilters = useDashboardFilters();
   const { dashboardVisibility, isLoadingVisibility, handleVisibilityChange } = useDashboardVisibility();
   
-  // Local state for authentication and error handling
-  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-authenticate by default
-  const [authChecked, setAuthChecked] = useState(false);
-  const [loading, setLoading] = useState(false); // No loading needed since we're auto-authenticating
+  // Local state for loading and error handling
+  // Note: Authentication is now handled by ProtectedRoute wrapper in App.tsx
+  // If we reach this component, user is already authenticated via AuthContext
+  const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState<Error | null>(null);
   
+  // Use auth from AuthContext - this component is protected by ProtectedRoute
+  const isAuthenticated = authContextAuthenticated;
+  
   // Tenant selection state for admins
+  // For tenant_admin users, this is automatically set to their tenant_id
+  const isTenantAdmin = user?.role === 'tenant_admin';
+  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  
+  // Track user ID to detect user changes and reset state
+  const [prevUserId, setPrevUserId] = useState<string | null>(null);
+  
+  // Reset tenant selection when user changes (login/logout/switch)
+  useEffect(() => {
+    const currentUserId = user?.id || null;
+    
+    if (currentUserId !== prevUserId) {
+      console.log('[Dashboard] User changed, resetting tenant selection', { 
+        from: prevUserId, 
+        to: currentUserId,
+        newRole: user?.role 
+      });
+      
+      // Set tenant based on new user's role
+      if (user?.role === 'tenant_admin' && user?.tenant_id) {
+        setSelectedTenantId(user.tenant_id);
+      } else {
+        setSelectedTenantId(null);
+      }
+      
+      setPrevUserId(currentUserId);
+    }
+  }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
   
   // Channel filter state - uses consolidated channel groups (Retail, TPO, etc.)
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
@@ -175,25 +206,14 @@ const Dashboard = () => {
     bottom: 50
   };
 
-  // Check if user is authenticated via API
+  // Authentication is now fully handled by AuthContext and ProtectedRoute
+  // This component only renders when user is already authenticated
+  // No need to check auth here - just set up the dashboard state
   useEffect(() => {
-    const checkAuth = async () => {
-      // Auto-authenticate - no PIN required
-      setIsAuthenticated(true);
-      setContextAuthenticated(true);
+    if (isAuthenticated) {
       sessionStorage.setItem('dashboard_auth', 'authenticated');
-      setLoading(false);
-      setAuthChecked(true);
-
-      // Try to get user info if API is available (optional)
-      try {
-        await api.getCurrentUser();
-      } catch (error) {
-        // API not available - that's fine, continue without it
-      }
-    };
-    checkAuth();
-  }, [setContextAuthenticated]);
+    }
+  }, [isAuthenticated]);
 
   // Fetch briefing context data (insights and funnel data)
   const [briefingLoading, setBriefingLoading] = useState(false);
@@ -908,12 +928,7 @@ const Dashboard = () => {
     }
   };
   const handleLogout = async () => {
-    try {
-      await api.signOut();
-    } catch (error) {
-      // Continue with logout even if API call fails
-    }
-    setIsAuthenticated(false);
+    await authLogout();
     sessionStorage.removeItem('dashboard_auth');
     toast({
       title: 'Logged out',
@@ -946,12 +961,17 @@ const Dashboard = () => {
         onReportClick={handleReportClick}
         headerContent={
           <div className="flex items-center gap-4 flex-wrap">
-            <TenantSelector
-              selectedTenantId={selectedTenantId}
-              onTenantChange={setSelectedTenantId}
-              compact={true}
-            />
-            <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
+            {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
+            {isPlatformAdmin && (
+              <>
+                <TenantSelector
+                  selectedTenantId={selectedTenantId}
+                  onTenantChange={setSelectedTenantId}
+                  compact={true}
+                />
+                <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
+              </>
+            )}
             <ChannelSelector
               selectedChannel={selectedChannel}
               onChannelChange={setSelectedChannel}

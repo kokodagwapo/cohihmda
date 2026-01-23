@@ -3,24 +3,22 @@ import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
-import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, Globe, CheckCircle2, XCircle, Clock, Network, Building2, BarChart3, Folder, Trash2, AlertTriangle } from 'lucide-react';
+import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, Globe, CheckCircle2, XCircle, Clock, Network, BarChart3, Folder, Trash2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CreateLOSConnectionDialog } from './CreateLOSConnectionDialog';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
 import { LoanDetailsTable } from './LoanDetailsTable';
 import { FieldPopulationStats } from './FieldPopulationStats';
+import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
 interface LOSSettingsSectionProps {
   losConnections: any[];
   losTypes: any;
   loading: boolean;
-  tenants?: Array<{ id: string; name: string }>;
-  selectedTenantId?: string | null;
   tenantMetrics?: {
     connections: {
       total_connections: number;
@@ -46,7 +44,7 @@ interface LOSSettingsSectionProps {
   onCreate: (data: any, tenantId?: string) => Promise<any>;
   onUpdate?: (connectionId: string, updates: any, tenantId?: string) => Promise<any>;
   onDelete?: (connectionId: string, tenantId?: string) => Promise<any>;
-  onTenantChange?: (tenantId: string | null) => void;
+  onLoadLosData?: (tenantId?: string) => Promise<any>;
   onLoadMetrics?: (tenantId: string) => Promise<void>;
 }
 
@@ -54,8 +52,6 @@ export const LOSSettingsSection = ({
   losConnections,
   losTypes,
   loading,
-  tenants = [],
-  selectedTenantId: propSelectedTenantId,
   tenantMetrics,
   loadingMetrics = false,
   onTest,
@@ -64,17 +60,19 @@ export const LOSSettingsSection = ({
   onCreate,
   onUpdate,
   onDelete,
-  onTenantChange,
+  onLoadLosData,
   onLoadMetrics,
 }: LOSSettingsSectionProps) => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [newConnectionOpen, setNewConnectionOpen] = useState(false);
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(propSelectedTenantId || null);
   const [fieldMappingConnectionId, setFieldMappingConnectionId] = useState<string | null>(null);
   const [folderSelectionConnectionId, setFolderSelectionConnectionId] = useState<string | null>(null);
   const [clearingDatabase, setClearingDatabase] = useState(false);
+
+  // Use admin tenant context for tenant selection
+  const { selectedTenantId, setSelectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName, tenants } = useAdminTenant();
 
   // Check URL params for connection and tab
   useEffect(() => {
@@ -87,12 +85,12 @@ export const LOSSettingsSection = ({
     }
   }, [searchParams]);
 
-  // Sync selectedTenantId with prop
+  // Load LOS data when tenant changes
   useEffect(() => {
-    if (propSelectedTenantId !== undefined) {
-      setSelectedTenantId(propSelectedTenantId);
+    if (selectedTenantId && onLoadLosData) {
+      onLoadLosData(selectedTenantId);
     }
-  }, [propSelectedTenantId]);
+  }, [selectedTenantId, onLoadLosData]);
 
   const handleTestConnection = async (connectionId: string) => {
     if (!selectedTenantId) {
@@ -172,23 +170,6 @@ export const LOSSettingsSection = ({
     }
   };
 
-  const handleTenantChange = async (tenantId: string) => {
-    setSelectedTenantId(tenantId);
-    if (onTenantChange) {
-      onTenantChange(tenantId);
-    }
-    if (onLoadMetrics && tenantId) {
-      await onLoadMetrics(tenantId);
-    }
-  };
-
-  const handleClearTenant = () => {
-    setSelectedTenantId(null);
-    if (onTenantChange) {
-      onTenantChange(null);
-    }
-  };
-
   const handleClearDatabase = async () => {
     if (!selectedTenantId) {
       toast({
@@ -249,55 +230,6 @@ export const LOSSettingsSection = ({
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* Tenant Selector */}
-      {tenants && tenants.length > 0 && (
-        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <CardHeader>
-            <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              Select Tenant
-            </CardTitle>
-            <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-              Choose a tenant to manage their LOS connections
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <Select
-                value={selectedTenantId || ''}
-                onValueChange={handleTenantChange}
-              >
-                <SelectTrigger className="w-full max-w-md font-light">
-                  <SelectValue placeholder="Select a tenant..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {tenants.map((tenant) => (
-                    <SelectItem key={tenant.id} value={tenant.id}>
-                      {tenant.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedTenantId && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleClearTenant}
-                  className="font-extralight"
-                >
-                  Clear Selection
-                </Button>
-              )}
-            </div>
-            {selectedTenantId && (
-              <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 font-light">
-                Managing connections for: {tenants.find(t => t.id === selectedTenantId)?.name || 'Selected Tenant'}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Tenant Metrics */}
       {selectedTenantId && tenantMetrics && (
         <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -373,12 +305,14 @@ export const LOSSettingsSection = ({
                 LOS Connections
               </CardTitle>
               <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-                {selectedTenantId 
-                  ? `Manage Loan Origination System integrations for selected tenant`
-                  : 'Select a tenant above to manage their LOS connections'}
+                {isTenantAdmin
+                  ? 'View your LOS connection and manage field mappings'
+                  : selectedTenantId 
+                    ? `Manage LOS integrations for ${currentTenantName || 'selected tenant'}`
+                    : 'Select a tenant from the header to manage their LOS connections'}
               </CardDescription>
             </div>
-            {selectedTenantId && (
+            {selectedTenantId && !isTenantAdmin && (
               <Button 
                 size="sm" 
                 className="font-extralight"
@@ -545,7 +479,7 @@ export const LOSSettingsSection = ({
                               </Button>
                             </>
                           )}
-                          {onUpdate && (
+                          {onUpdate && !isTenantAdmin && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -562,7 +496,7 @@ export const LOSSettingsSection = ({
                               <Edit className="h-4 w-4" />
                             </Button>
                           )}
-                          {onDelete && (
+                          {onDelete && !isTenantAdmin && (
                             <Button
                               variant="ghost"
                               size="sm"

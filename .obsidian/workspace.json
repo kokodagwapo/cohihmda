@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/deployment/TERRAFORM_MODULES.md",
+                "file": "docs/architecture/CLIENT_ADMIN_REQUIREMENTS.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "TERRAFORM_MODULES"
+              "title": "CLIENT_ADMIN_REQUIREMENTS"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "docs/deployment/TERRAFORM_MODULES.md",
+                "file": "docs/architecture/CLIENT_ADMIN_REQUIREMENTS.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for TERRAFORM_MODULES"
+              "title": "Backlinks for CLIENT_ADMIN_REQUIREMENTS"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "docs/deployment/TERRAFORM_MODULES.md",
+                "file": "docs/architecture/CLIENT_ADMIN_REQUIREMENTS.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from TERRAFORM_MODULES"
+              "title": "Outgoing links from CLIENT_ADMIN_REQUIREMENTS"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/deployment/TERRAFORM_MODULES.md",
+                "file": "docs/architecture/CLIENT_ADMIN_REQUIREMENTS.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of TERRAFORM_MODULES"
+              "title": "Outline of CLIENT_ADMIN_REQUIREMENTS"
             }
           }
         ]
@@ -185,19 +185,29 @@
   },
   "active": "ac7c8f531f32f8f4",
   "lastOpenFiles": [
-    "vite.config.ts.timestamp-1769178149052-098e38762655b.mjs",
-    "scripts/count-schema-fields.js",
+    "vite.config.ts.timestamp-1769197823508-6ff1edc81e81b.mjs",
+    "vite.config.ts.timestamp-1769196207504-c2b56ccdd836.mjs",
+    "src/components/admin/TenantSelectorCard.tsx",
+    "src/contexts/AdminTenantContext.tsx",
+    "vite.config.ts.timestamp-1769194400984-6fafabdcc9581.mjs",
+    "vite.config.ts.timestamp-1769193911974-6a72fe953e124.mjs",
+    "src/components/admin/tenant-config/FieldMappingTab.tsx",
+    "vite.config.ts.timestamp-1769192095337-92fafbd556861.mjs",
+    "server/src/services/scoring/index.ts",
+    "server/src/services/scoring/topTieringService.ts",
+    "server/src/services/scoring/loanComplexityService.ts",
+    "docs/maylins-tenantadminconfig-requirements.md",
+    "docs/architecture/OVERVIEW.md",
+    "docs/deployment/TERRAFORM_MODULES.md",
     "docs/data/README.md",
     "docs/data/integrations/SERVICING_INTEGRATION.md",
     "docs/data/integrations/MERIDIANLINK_INTEGRATION.md",
     "docs/data/integrations/ENCOMPASS_INTEGRATION.md",
-    "docs/data/integrations",
     "docs/data/DATA_QUALITY.md",
     "docs/data/CSV_IMPORT.md",
     "docs/data/INCREMENTAL_SYNC.md",
     "docs/data/UNIVERSAL_CONNECTOR.md",
     "docs/data/OVERVIEW.md",
-    "docs/data",
     "docs/architecture/INTERNAL_ADMIN_REQUIREMENTS.md",
     "docs/architecture/CLIENT_ADMIN_REQUIREMENTS.md",
     "docs/security/ROW_LEVEL_SECURITY.md",

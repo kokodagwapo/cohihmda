@@ -6,10 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Loader2, Search, Database, Play, Building2, Calendar as CalendarIcon, X, Sparkles, MessageSquare, Lightbulb, Send, Bot, User } from 'lucide-react';
+import { Loader2, Search, Database, Play, Calendar as CalendarIcon, X, Sparkles, MessageSquare, Lightbulb, Send, Bot, User, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { useTenants } from '@/hooks/admin/useTenants';
+import { useAdminTenant } from '@/contexts/AdminTenantContext';
 import { useMetrics, MetricResult } from '@/hooks/useMetrics';
 import { PeriodValue, getPeriodRange } from '@/utils/closingFalloutFilters';
 import { format } from 'date-fns';
@@ -55,13 +55,14 @@ export const MetricsCatalogSection = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodValue>('ytd');
   const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ start: null, end: null });
   const [testingMetrics, setTestingMetrics] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, MetricResult>>({});
   const { toast } = useToast();
-  const { tenants, loadTenants } = useTenants();
+  
+  // Use admin tenant context for tenant selection
+  const { selectedTenantId, currentTenantName, isTenantAdmin } = useAdminTenant();
   const { queryMetric, loading: metricsLoading } = useMetrics(selectedTenantId);
 
   // AI Features State
@@ -81,7 +82,6 @@ export const MetricsCatalogSection = () => {
 
   useEffect(() => {
     loadCatalog();
-    loadTenants();
     loadStaticDescriptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -484,37 +484,28 @@ export const MetricsCatalogSection = () => {
         )}
       </AnimatePresence>
 
-      {/* Tenant and Date Range Selection */}
+      {/* Test Configuration */}
       <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
         <CardHeader>
           <CardTitle className="text-lg font-light text-slate-900 dark:text-white">Test Configuration</CardTitle>
           <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-            Select a tenant and date range to test metrics
+            {selectedTenantId 
+              ? `Testing metrics for ${currentTenantName || 'selected tenant'}`
+              : 'Select a tenant from the header to test metrics'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Tenant Selector */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 min-w-[120px]">
-              <Building2 className="h-4 w-4 text-slate-400" />
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Tenant:</span>
+          {/* No tenant selected warning */}
+          {!selectedTenantId && (
+            <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <span className="text-sm text-amber-700 dark:text-amber-300">
+                {isTenantAdmin 
+                  ? 'Your tenant data will be used for testing metrics.'
+                  : 'Please select a tenant from the selector above to test metrics.'}
+              </span>
             </div>
-            <Select
-              value={selectedTenantId || ''}
-              onValueChange={setSelectedTenantId}
-            >
-              <SelectTrigger className="w-full max-w-md font-light">
-                <SelectValue placeholder="Select a tenant..." />
-              </SelectTrigger>
-              <SelectContent>
-                {tenants.map((tenant) => (
-                  <SelectItem key={tenant.id} value={tenant.id}>
-                    {tenant.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          )}
 
           {/* Date Range Selector */}
           <div className="flex items-center gap-4 flex-wrap">

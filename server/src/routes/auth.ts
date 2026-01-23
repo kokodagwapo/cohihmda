@@ -1,5 +1,13 @@
+/**
+ * Authentication Routes
+ * 
+ * Handles authentication for both:
+ * - Super Admins (Cohi internal) - stored in coheus_management.coheus_users
+ * - Tenant Users - stored in each tenant's database
+ */
+
 import { Router } from 'express';
-import { pool, retryQuery } from '../config/database.js';
+import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -8,755 +16,511 @@ import { auditLog, logFailedLogin, createSession, endSession, getRecentFailedLog
 import { logError, logWarn, logInfo, logDebug } from '../services/logger.js';
 import crypto from 'crypto';
 
+const { Pool } = pg;
 const router = Router();
 
-type AuthUserRow = {
+// User types for authentication
+interface SuperAdminUser {
   id: string;
   email: string;
   encrypted_password: string;
+  full_name: string | null;
+  role: 'super_admin' | 'platform_admin' | 'support';
+  is_active: boolean;
+}
+
+interface TenantUser {
+  id: string;
+  email: string;
+  encrypted_password: string;
+  full_name: string | null;
+  role: 'tenant_admin' | 'admin' | 'user' | 'viewer' | 'loan_officer' | 'processor';
+  is_active: boolean;
+  tenant_id: string;
+  tenant_name: string;
+  tenant_slug: string;
+}
+
+type AuthUser = (SuperAdminUser & { tenant_id?: null; tenant_name?: null; tenant_slug?: null }) | TenantUser;
+
+// JWT payload structure
+interface JwtPayload {
+  userId: string;
+  email: string;
   role: string;
-  tenant_id: string | null;
-};
+  tenantId?: string;
+  tenantSlug?: string;
+  isSuperAdmin: boolean;
+}
+
+// Database pools
+let managementPool: pg.Pool | null = null;
+const tenantPools: Map<string, pg.Pool> = new Map();
+
+function getManagementPool(): pg.Pool {
+  if (!managementPool) {
+    const dbHost = (process.env.DB_HOST || 'localhost').trim();
+    const rawHost = dbHost === 'localhost' || dbHost === '127.0.0.1' ? '127.0.0.1' : dbHost;
+    
+    managementPool = new Pool({
+      host: rawHost,
+      port: parseInt(process.env.DB_PORT || '5432'),
+      database: process.env.MANAGEMENT_DB_NAME || 'coheus_management',
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || 'postgres',
+      ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    managementPool.on('error', (err: any) => {
+      logError('[Auth] Management pool error', err, {});
+    });
+  }
+  return managementPool;
+}
+
+async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
+  // Check cache first
+  if (tenantPools.has(tenantSlug)) {
+    return tenantPools.get(tenantSlug)!;
+  }
+
+  try {
+    // Get tenant connection info from management DB
+    const mgmtPool = getManagementPool();
+    const result = await mgmtPool.query(
+      `SELECT database_name, database_host, database_port, database_user, database_password_encrypted, status
+       FROM coheus_tenants 
+       WHERE slug = $1 AND status = 'active'`,
+      [tenantSlug]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const tenant = result.rows[0];
+    const dbHost = tenant.database_host || '127.0.0.1';
+    
+    const pool = new Pool({
+      host: dbHost === 'localhost' ? '127.0.0.1' : dbHost,
+      port: tenant.database_port || 5432,
+      database: tenant.database_name,
+      user: tenant.database_user || process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || 'postgres', // TODO: Decrypt tenant password
+      ssl: dbHost !== '127.0.0.1' && dbHost !== 'localhost' ? { rejectUnauthorized: false } : false,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    tenantPools.set(tenantSlug, pool);
+    return pool;
+  } catch (error: any) {
+    logError('[Auth] Failed to get tenant pool', error, { tenantSlug });
+    return null;
+  }
+}
 
 // Get JWT_SECRET lazily to allow dotenv to load first
 function getJwtSecret(): string {
-  try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      const error = new Error('JWT_SECRET environment variable is required');
-      logError('JWT_SECRET missing', error, {
-        nodeEnv: process.env.NODE_ENV,
-        allEnvKeys: Object.keys(process.env).filter(k => k.includes('JWT') || k.includes('SECRET')),
-      });
-      throw error;
-    }
-    if (typeof secret !== 'string') {
-      const error = new Error('JWT_SECRET must be a string');
-      logError('JWT_SECRET wrong type', error, { 
-        type: typeof secret,
-        value: String(secret).substring(0, 10) + '...',
-      });
-      throw error;
-    }
-    // Check for whitespace issues (common when copying from AWS console)
-    const trimmedSecret = secret.trim();
-    if (trimmedSecret.length < 32) {
-      const error = new Error('JWT_SECRET must be at least 32 characters long');
-      logError('JWT_SECRET too short', error, { 
-        secretLength: secret.length,
-        trimmedLength: trimmedSecret.length,
-        hasLeadingWhitespace: secret.length !== secret.trimStart().length,
-        hasTrailingWhitespace: secret.length !== secret.trimEnd().length,
-      });
-      throw error;
-    }
-    
-    // Warn if secret has internal whitespace (might be a copy-paste issue)
-    if (/\s/.test(trimmedSecret)) {
-      logWarn('JWT_SECRET contains whitespace - this may cause issues', {
-        secretLength: trimmedSecret.length,
-        hasInternalWhitespace: /\s/.test(trimmedSecret),
-      });
-    }
-    
-    return trimmedSecret;
-  } catch (error: any) {
-    // Re-throw with additional context
-    logError('Error in getJwtSecret', error, {
-      errorType: error?.constructor?.name,
-      errorMessage: error?.message,
-    });
-    throw error;
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is required');
   }
+  const trimmedSecret = secret.trim();
+  if (trimmedSecret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters long');
+  }
+  return trimmedSecret;
 }
 
-async function upsertDevEnvAdminUser(email: string, plainPassword: string): Promise<AuthUserRow> {
-  const tenantName = 'Default';
-  const fullName = 'Dev Admin';
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // Ensure tenant exists (case-insensitive)
-    const existingTenant = await client.query(
-      'SELECT id FROM public.tenants WHERE LOWER(name) = LOWER($1) LIMIT 1',
-      [tenantName]
-    );
-
-    let tenantId: string;
-    if (existingTenant.rows.length > 0) {
-      tenantId = existingTenant.rows[0].id;
-    } else {
-      const createdTenant = await client.query(
-        `INSERT INTO public.tenants (name, created_at, updated_at)
-         VALUES ($1, NOW(), NOW())
-         RETURNING id`,
-        [tenantName]
-      );
-      tenantId = createdTenant.rows[0].id;
-    }
-
-    // bcrypt hash required (public.users.encrypted_password is NOT NULL)
-    const passwordHash = await bcrypt.hash(plainPassword, 10);
-
-    const userResult = await client.query(
-      `INSERT INTO public.users (email, encrypted_password, full_name, role, is_active, tenant_id, created_at, updated_at)
-       VALUES ($1, $2, $3, 'admin', true, $4, NOW(), NOW())
-       ON CONFLICT (email) DO UPDATE SET
-         encrypted_password = EXCLUDED.encrypted_password,
-         full_name = EXCLUDED.full_name,
-         role = 'admin',
-         is_active = true,
-         tenant_id = EXCLUDED.tenant_id,
-         updated_at = NOW()
-       RETURNING id, email, encrypted_password, role, tenant_id`,
-      [email, passwordHash, fullName, tenantId]
-    );
-
-    const user = userResult.rows[0] as AuthUserRow;
-
-    // Best-effort profile upsert (don't fail login if profiles table missing)
-    try {
-      const existingProfile = await client.query(
-        'SELECT id FROM public.profiles WHERE user_id = $1 LIMIT 1',
-        [user.id]
-      );
-
-      if (existingProfile.rows.length > 0) {
-        await client.query(
-          `UPDATE public.profiles
-           SET full_name = $2, tenant_id = $3, updated_at = NOW()
-           WHERE user_id = $1`,
-          [user.id, fullName, tenantId]
-        );
-      } else {
-        await client.query(
-          `INSERT INTO public.profiles (user_id, full_name, tenant_id, created_at, updated_at)
-           VALUES ($1, $2, $3, NOW(), NOW())`,
-          [user.id, fullName, tenantId]
-        );
-      }
-    } catch (profileError: any) {
-      logWarn('Dev env login: failed to upsert profile (non-fatal)', {
-        email,
-        errorMessage: profileError?.message,
-        errorCode: profileError?.code,
-      });
-    }
-
-    await client.query('COMMIT');
-    return user;
-  } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // ignore rollback failures
-    }
-    throw error;
-  } finally {
-    client.release();
-  }
-}
+// Validation schemas
+const signInSchema = z.object({
+  email: z.string().min(1, 'Email is required'),
+  password: z.string().min(1, 'Password is required'),
+  tenantSlug: z.string().optional(), // Optional - if not provided, check super admin first
+});
 
 const signUpSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  full_name: z.string().optional()
+  email: z.string().email('Invalid email'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  fullName: z.string().optional(),
+  tenantSlug: z.string().optional(),
 });
 
-const signInSchema = z.object({
-  email: z.string().email(),
-  password: z.string()
-});
-
-// Sign up (with rate limiting)
-router.post('/signup', authLimiter, async (req, res) => {
+/**
+ * Find user in management DB (super admins)
+ */
+async function findSuperAdmin(email: string): Promise<SuperAdminUser | null> {
   try {
-    const { email, password, full_name } = signUpSchema.parse(req.body);
-    
-    // Check if user exists
-    const existingUser = await pool.query(
-      'SELECT id FROM public.users WHERE email = $1',
+    const pool = getManagementPool();
+    const result = await pool.query(
+      `SELECT id, email, encrypted_password, full_name, role, is_active
+       FROM coheus_users 
+       WHERE email = $1`,
       [email]
     );
     
-    if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: 'User already exists' });
+    if (result.rows.length === 0) {
+      return null;
     }
     
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    return result.rows[0] as SuperAdminUser;
+  } catch (error: any) {
+    logError('[Auth] Failed to find super admin', error, { email });
+    return null;
+  }
+}
+
+/**
+ * Find user in a tenant's database
+ */
+async function findTenantUser(email: string, tenantSlug?: string): Promise<TenantUser | null> {
+  try {
+    const mgmtPool = getManagementPool();
     
-    // Create user
-    const userResult = await pool.query(
-      `INSERT INTO public.users (email, encrypted_password, created_at, updated_at)
-       VALUES ($1, $2, NOW(), NOW())
-       RETURNING id, email`,
-      [email, hashedPassword]
-    );
+    // If no tenant slug provided, search all active tenants
+    let tenants: Array<{ id: string; slug: string; name: string; database_name: string }>;
     
-    const user = userResult.rows[0];
-    
-    // Create profile if full_name provided
-    if (full_name) {
-      await pool.query(
-        `INSERT INTO public.profiles (user_id, full_name, created_at)
-         VALUES ($1, $2, NOW())`,
-        [user.id, full_name]
+    if (tenantSlug) {
+      const result = await mgmtPool.query(
+        `SELECT id, slug, name, database_name FROM coheus_tenants WHERE slug = $1 AND status = 'active'`,
+        [tenantSlug]
       );
+      tenants = result.rows;
+    } else {
+      // Search all tenants - in production, might want to limit this
+      const result = await mgmtPool.query(
+        `SELECT id, slug, name, database_name FROM coheus_tenants WHERE status = 'active' ORDER BY name`
+      );
+      tenants = result.rows;
     }
+
+    // Search each tenant's database for the user
+    for (const tenant of tenants) {
+      const tenantPool = await getTenantPool(tenant.slug);
+      if (!tenantPool) continue;
+
+      try {
+        const userResult = await tenantPool.query(
+          `SELECT id, email, encrypted_password, full_name, role, is_active
+           FROM users 
+           WHERE email = $1`,
+          [email]
+        );
+
+        if (userResult.rows.length > 0) {
+          const user = userResult.rows[0];
+          return {
+            ...user,
+            tenant_id: tenant.id,
+            tenant_name: tenant.name,
+            tenant_slug: tenant.slug,
+          } as TenantUser;
+        }
+      } catch (error: any) {
+        // Tenant DB might not have users table yet
+        logDebug('[Auth] Tenant user lookup failed', { tenant: tenant.slug, error: error.message });
+      }
+    }
+
+    return null;
+  } catch (error: any) {
+    logError('[Auth] Failed to find tenant user', error, { email, tenantSlug });
+    return null;
+  }
+}
+
+/**
+ * Sign In
+ */
+router.post('/signin', authLimiter, async (req, res) => {
+  try {
+    const { email, password, tenantSlug } = signInSchema.parse(req.body);
     
-    const token = jwt.sign({ userId: user.id, email: user.email }, getJwtSecret(), { expiresIn: '7d' });
-    
-    res.json({ user, token });
+    logInfo('[Auth] Sign in attempt', { email, tenantSlug: tenantSlug || 'auto-detect' });
+
+    let user: AuthUser | null = null;
+    let isSuperAdmin = false;
+
+    // Strategy: Check super admin first (unless tenant slug is explicitly provided)
+    if (!tenantSlug) {
+      user = await findSuperAdmin(email);
+      if (user) {
+        isSuperAdmin = true;
+        logDebug('[Auth] Found super admin', { email });
+      }
+    }
+
+    // If not a super admin, check tenant users
+    if (!user) {
+      user = await findTenantUser(email, tenantSlug);
+      if (user) {
+        logDebug('[Auth] Found tenant user', { email, tenant: (user as TenantUser).tenant_slug });
+      }
+    }
+
+    // User not found
+    if (!user) {
+      await logFailedLogin({
+        email,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        failureReason: 'user_not_found',
+      }).catch(() => {});
+      
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Check if user is active
+    if (!user.is_active) {
+      await logFailedLogin({
+        email,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        failureReason: 'user_inactive',
+      }).catch(() => {});
+      
+      return res.status(401).json({ error: 'Account is disabled. Please contact your administrator.' });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.encrypted_password);
+    if (!isValidPassword) {
+      await logFailedLogin({
+        email,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        failureReason: 'invalid_password',
+      }).catch(() => {});
+      
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Generate JWT token
+    const jwtPayload: JwtPayload = {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      isSuperAdmin,
+    };
+
+    if (!isSuperAdmin && 'tenant_id' in user) {
+      jwtPayload.tenantId = user.tenant_id;
+      jwtPayload.tenantSlug = user.tenant_slug;
+    }
+
+    const token = jwt.sign(jwtPayload, getJwtSecret(), { expiresIn: '7d' });
+
+    // Update last login
+    try {
+      if (isSuperAdmin) {
+        const mgmtPool = getManagementPool();
+        await mgmtPool.query(
+          `UPDATE coheus_users SET last_login_at = NOW() WHERE id = $1`,
+          [user.id]
+        );
+      } else if ('tenant_slug' in user) {
+        const tenantPool = await getTenantPool(user.tenant_slug);
+        if (tenantPool) {
+          await tenantPool.query(
+            `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
+            [user.id]
+          );
+        }
+      }
+    } catch (error) {
+      // Non-critical, don't fail login
+    }
+
+    // Create session record
+    try {
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      await createSession({
+        userId: user.id,
+        tenantId: 'tenant_id' in user ? user.tenant_id : null,
+        tokenHash,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+    } catch (error) {
+      // Non-critical
+    }
+
+    // Audit log
+    await auditLog({
+      userId: user.id,
+      userEmail: user.email,
+      userRole: user.role,
+      tenantId: 'tenant_id' in user ? user.tenant_id : null,
+      action: 'login',
+      resource: 'auth',
+      description: `User logged in successfully${isSuperAdmin ? ' (super admin)' : ''}`,
+      status: 'success',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+
+    logInfo('[Auth] Sign in successful', { 
+      email, 
+      role: user.role, 
+      isSuperAdmin,
+      tenant: 'tenant_slug' in user ? user.tenant_slug : null 
+    });
+
+    // Return user info (without password)
+    const responseUser = {
+      id: user.id,
+      email: user.email,
+      full_name: user.full_name,
+      role: user.role,
+      is_super_admin: isSuperAdmin,
+      tenant_id: 'tenant_id' in user ? user.tenant_id : null,
+      tenant_name: 'tenant_name' in user ? user.tenant_name : null,
+      tenant_slug: 'tenant_slug' in user ? user.tenant_slug : null,
+    };
+
+    return res.json({ user: responseUser, token });
+
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
-    logError('Signup error', error, { email: req.body?.email });
-    res.status(500).json({ error: 'Internal server error' });
+    
+    logError('[Auth] Sign in error', error, { email: req.body?.email });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Sign in (with rate limiting)
-// Note: authLimiter is applied, but we also check database for failed attempts
-router.post('/signin', authLimiter, async (req, res) => {
-  // Ensure we always send a response, even if something goes wrong
-  let responseSent = false;
-  const safeSend = (status: number, data: any) => {
-    if (!responseSent && !res.headersSent) {
-      responseSent = true;
-      try {
-        return res.status(status).json(data);
-      } catch (sendError) {
-        logError('Error sending response in safeSend', sendError, { status, attemptedData: data });
-        return null;
-      }
-    }
-    return null;
-  };
-
-  // Log environment state (without exposing secrets)
-  const envState = {
-    hasJwtSecret: !!process.env.JWT_SECRET,
-    jwtSecretLength: process.env.JWT_SECRET?.length || 0,
-    jwtSecretFirstChar: process.env.JWT_SECRET ? process.env.JWT_SECRET[0] : undefined,
-    jwtSecretLastChar: process.env.JWT_SECRET ? process.env.JWT_SECRET[process.env.JWT_SECRET.length - 1] : undefined,
-    hasDbHost: !!process.env.DB_HOST,
-    hasDbName: !!process.env.DB_NAME,
-    hasDbUser: !!process.env.DB_USER,
-    hasDbPassword: !!process.env.DB_PASSWORD,
-    nodeEnv: process.env.NODE_ENV,
-    isAws: !!process.env.AWS_REGION || !!process.env.ELASTIC_BEANSTALK_ENVIRONMENT,
-    // Check for common environment variable issues
-    jwtSecretHasWhitespace: process.env.JWT_SECRET ? /\s/.test(process.env.JWT_SECRET) : undefined,
-  };
-
-  try {
-    // Log that we received the request with environment diagnostics
-    logInfo('Signin endpoint called', { 
-      method: req.method, 
-      path: req.path,
-      hasBody: !!req.body,
-      bodyKeys: req.body ? Object.keys(req.body) : [],
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-      envState,
-    });
-
-    // Validate request body exists and is an object
-    if (!req.body) {
-      logError('Signin request missing body', undefined, { 
-        ipAddress: req.ip,
-        contentType: req.get('content-type'),
-        contentLength: req.get('content-length'),
-      });
-      return safeSend(400, { error: 'Request body is required' });
-    }
-    
-    if (typeof req.body !== 'object' || Array.isArray(req.body)) {
-      logError('Signin request body is not an object', undefined, {
-        ipAddress: req.ip,
-        bodyType: typeof req.body,
-        isArray: Array.isArray(req.body),
-        bodyValue: JSON.stringify(req.body).substring(0, 200),
-      });
-      return safeSend(400, { error: 'Request body must be a JSON object' });
-    }
-
-    // Validate and parse request body
-    let email: string;
-    let password: string;
-    try {
-      const parsed = signInSchema.parse(req.body);
-      email = parsed.email;
-      password = parsed.password;
-      logDebug('Signin request received', { email, ipAddress: req.ip });
-    } catch (parseError: any) {
-      logError('Signin request validation failed', parseError, {
-        body: req.body,
-        bodyType: typeof req.body,
-        bodyKeys: req.body ? Object.keys(req.body) : [],
-        ipAddress: req.ip,
-      });
-      if (parseError instanceof z.ZodError) {
-        return safeSend(400, { error: parseError.errors[0].message });
-      }
-      return safeSend(400, { error: 'Invalid request body format' });
-    }
-    
-    // Optional dev-only login via Elastic Beanstalk environment properties (explicitly enabled)
-    const devEnvLoginEnabled =
-      process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEV_ENV_LOGIN === 'true';
-
-    const envUserName = process.env.USER_NAME_DEV?.trim();
-    const envPassword = process.env.USER_PWD_DEV;
-
-    if (devEnvLoginEnabled && (!envUserName || !envPassword)) {
-      logWarn('Dev env login enabled but USER_NAME_DEV/USER_PWD_DEV not set', {
-        hasUserName: !!envUserName,
-        hasUserPwd: !!envPassword,
-      });
-    }
-
-    let user: AuthUserRow | null = null;
-    let passwordVerified = false;
-    let authMode: 'db' | 'dev_env' = 'db';
-
-    if (devEnvLoginEnabled && envUserName && envPassword && email === envUserName && password === envPassword) {
-      authMode = 'dev_env';
-      passwordVerified = true; // validated by matching env vars
-      try {
-        logInfo('Dev env login matched USER_NAME_DEV/USER_PWD_DEV; bootstrapping admin user', {
-          email,
-          ipAddress: req.ip,
-        });
-        user = await upsertDevEnvAdminUser(email, password);
-      } catch (devEnvError: any) {
-        logError('Dev env login bootstrap failed', devEnvError, {
-          email,
-          errorMessage: devEnvError?.message,
-          errorCode: devEnvError?.code,
-        });
-        return safeSend(500, { error: 'Failed to initialize dev environment login' });
-      }
-    }
-
-    // Bypass rate limiting for admin emails (for emergency access) and dev env login
-    const isAdminEmail = email === 'admin@ailethia.com' || authMode === 'dev_env';
-    
-    // Check for too many failed login attempts (rate limiting)
-    // Skip this check for admin emails to allow emergency access
-    if (!isAdminEmail) {
-      try {
-        logDebug('Checking rate limits', { email });
-        const recentFailures = await getRecentFailedLogins(email, 15);
-        logDebug('Rate limit check result', { email, recentFailures });
-        if (recentFailures >= 5) {
-          await logFailedLogin({
-            email,
-            ipAddress: req.ip,
-            userAgent: req.get('user-agent'),
-            failureReason: 'rate_limited',
-          });
-          return safeSend(429, { error: 'Too many failed login attempts. Please try again in 15 minutes.' });
-        }
-      } catch (rateLimitError: any) {
-        // If rate limiting table doesn't exist yet, just log and continue
-        logWarn('Rate limiting check failed (table may not exist)', { 
-          email, 
-          error: rateLimitError?.message,
-          errorCode: rateLimitError?.code,
-          errorType: rateLimitError?.constructor?.name,
-        });
-      }
-    }
-    
-    if (!passwordVerified) {
-      // Use retryQuery helper for database connection resilience
-      let result;
-      try {
-        logDebug('Attempting to query user', { email });
-        // Check if pool is initialized
-        if (!pool) {
-          logError('Database pool is not initialized', undefined, { email });
-          return safeSend(503, { 
-            error: 'Database connection not available. Please try again in a moment.',
-            retry: true
-          });
-        }
-        
-        result = await retryQuery(
-          () => pool.query(
-            // Query public.users - simplified query
-            `SELECT 
-              u.id, 
-              u.email, 
-              u.encrypted_password, 
-              u.role, 
-              COALESCE(u.tenant_id, p.tenant_id) as tenant_id 
-            FROM public.users u 
-            LEFT JOIN public.profiles p ON u.id = p.user_id 
-            WHERE u.email = $1`,
-            [email]
-          ),
-          3, // max retries
-          1000 // delay between retries
-        );
-        logDebug('Query successful', { email, userCount: result.rows.length });
-      } catch (dbError: any) {
-        logError('Database query failed', dbError, {
-          email,
-          errorType: dbError?.constructor?.name,
-          errorCode: dbError?.code,
-          errorDetail: dbError?.detail,
-        });
-        
-        const isConnectionError = 
-          dbError?.message?.includes('timeout') ||
-          dbError?.message?.includes('ECONNREFUSED') ||
-          dbError?.message?.includes('connection') ||
-          dbError?.code === 'ETIMEDOUT' ||
-          dbError?.code === 'ECONNREFUSED';
-        
-        if (isConnectionError) {
-          logError('Database connection error during signin after retries', dbError, { email });
-          return safeSend(503, { 
-            error: 'Service temporarily unavailable. Database connection failed. Please try again in a moment.',
-            retry: true
-          });
-        }
-        
-        // Check if table doesn't exist
-        if (dbError?.message?.includes('does not exist') || dbError?.code === '42P01') {
-          logError('Table public.users does not exist. Please run database migrations.', dbError, { email });
-          return safeSend(503, { 
-            error: 'Database not initialized. Please restart the server to run migrations.',
-            retry: false
-          });
-        }
-        
-        // Re-throw to be caught by outer catch
-        throw dbError;
-      }
-      
-      if (result.rows.length === 0) {
-        await logFailedLogin({
-          email,
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          failureReason: 'user_not_found',
-        });
-        return safeSend(401, { error: 'Invalid email or password' });
-      }
-      
-      user = result.rows[0] as AuthUserRow;
-      
-      // Check if password hash exists
-      if (!user.encrypted_password) {
-        logError('User found but no password hash', undefined, { email, userId: user.id });
-        await logFailedLogin({
-          email,
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          failureReason: 'invalid_password',
-        });
-        return safeSend(401, { error: 'Invalid email or password' });
-      }
-      
-      const isValid = await bcrypt.compare(password, user.encrypted_password);
-      
-      if (!isValid) {
-        await logFailedLogin({
-          email,
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          failureReason: 'invalid_password',
-        });
-        return safeSend(401, { error: 'Invalid email or password' });
-      }
-
-      passwordVerified = true;
-    }
-
-    if (!user) {
-      logError('Signin: user is missing after verification', undefined, { email, authMode });
-      return safeSend(500, { error: 'Internal server error. Please try again.' });
-    }
-    
-    // Generate JWT token
-    let token;
-    try {
-      logDebug('Generating JWT token', { email, userId: user.id, authMode });
-      const jwtSecret = getJwtSecret();
-      if (!jwtSecret || jwtSecret.length < 32) {
-        logError('JWT_SECRET is missing or too short', undefined, { 
-          email, 
-          userId: user.id,
-          secretLength: jwtSecret?.length || 0,
-          hasSecret: !!jwtSecret,
-        });
-        return safeSend(500, { error: 'Server configuration error. Please contact support.' });
-      }
-      logDebug('JWT_SECRET validated', { email, secretLength: jwtSecret.length });
-      token = jwt.sign({ userId: user.id, email: user.email }, jwtSecret, { expiresIn: '7d' });
-      logDebug('JWT token generated successfully', { email, userId: user.id, tokenLength: token.length });
-    } catch (jwtError: any) {
-      logError('JWT signing error', jwtError, { 
-        email, 
-        userId: user.id,
-        errorType: jwtError?.constructor?.name,
-        errorMessage: jwtError?.message,
-        errorStack: jwtError?.stack,
-      });
-      // Check if it's a missing secret error
-      if (jwtError.message?.includes('JWT_SECRET') || jwtError.message?.includes('required')) {
-        return safeSend(500, { error: 'Server configuration error. Please contact support.' });
-      }
-      return safeSend(500, { error: 'Failed to generate authentication token' });
-    }
-    
-    // Create session record (SOC 2 requirement) - don't block on errors
-    try {
-      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-      
-      await createSession({
-        userId: user.id,
-        tenantId: user.tenant_id || null,
-        tokenHash,
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-        expiresAt,
-      });
-    } catch (sessionError: any) {
-      // Log but don't fail - session creation is not critical for login
-      logWarn('Session creation failed (non-critical)', { email, userId: user.id, error: sessionError?.message });
-    }
-    
-    // Log successful login - don't block on errors
-    try {
-      await auditLog({
-        userId: user.id,
-        userEmail: user.email,
-        userRole: user.role,
-        tenantId: user.tenant_id || null,
-        action: 'login',
-        resource: 'auth',
-        description: 'User logged in successfully',
-        status: 'success',
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-      });
-    } catch (auditError: any) {
-      // Log but don't fail - audit logging is not critical for login
-      logWarn('Audit logging failed (non-critical)', { email, userId: user.id, error: auditError?.message });
-    }
-    
-    // Ensure we have a token before sending response
-    if (!token) {
-      logError('Token is missing after generation', undefined, { email, userId: user.id });
-      return safeSend(500, { error: 'Failed to generate authentication token' });
-    }
-    
-    return safeSend(200, { user: { id: user.id, email: user.email }, token });
-  } catch (error: any) {
-    // Log the error with full context
-    logError('Signin error', error, {
-      email: req.body?.email,
-      errorType: error?.constructor?.name,
-      errorCode: error?.code,
-      errorDetail: error?.detail,
-      errorMessage: error?.message,
-      errorStack: error?.stack,
-    });
-    
-    // If response already sent, don't try to send another
-    if (responseSent || res.headersSent) {
-      logWarn('Response already sent, cannot send error response', { email: req.body?.email });
-      return;
-    }
-    
-    // Handle Zod validation errors
-    if (error instanceof z.ZodError) {
-      return safeSend(400, { error: error.errors[0].message });
-    }
-    
-    // Handle JWT_SECRET errors
-    if (error.message?.includes('JWT_SECRET') || 
-        error.message?.includes('required') ||
-        error.message?.includes('at least 32 characters')) {
-      logError('JWT_SECRET configuration error during signin', error, { email: req.body?.email });
-      return safeSend(500, { 
-        error: 'Server configuration error. Please contact support.',
-        retry: false
-      });
-    }
-    
-    // Handle database connection errors
-    if (error.message === 'DATABASE_CONNECTION_ERROR' ||
-        error.message?.includes('password authentication failed') ||
-        error.message?.includes('connection') ||
-        error.code === 'ECONNREFUSED' ||
-        error.code === 'ETIMEDOUT') {
-      logError('Database connection error during signin', error, { email: req.body?.email });
-      return safeSend(503, { 
-        error: 'Service temporarily unavailable. Database connection failed. Please try again in a moment.',
-        retry: true
-      });
-    }
-    
-    // Handle missing table error
-    if (error.message?.includes('DATABASE_TABLE_MISSING') || 
-        error.message?.includes('does not exist') ||
-        error.code === '42P01') {
-      logError('Database table missing during signin', error, { email: req.body?.email });
-      return safeSend(503, { 
-        error: 'Database not initialized. Please restart the server to run migrations.',
-        retry: false
-      });
-    }
-    
-    // Check if it's already a response error
-    if (error.status) {
-      return safeSend(error.status, { error: error.message });
-    }
-    
-    // Return user-friendly error (don't expose stack traces in production)
-    const errorResponse: any = { 
-      error: 'Internal server error. Please try again.'
-    };
-    
-    if (process.env.NODE_ENV === 'development') {
-      errorResponse.details = error?.message;
-      errorResponse.code = error?.code;
-      if (error?.stack) {
-        errorResponse.stack = error.stack.split('\n').slice(0, 5).join('\n'); // First 5 lines only
-      }
-    }
-    
-    // Final attempt to send error response
-    try {
-      return safeSend(500, errorResponse);
-    } catch (sendError) {
-      logError('Failed to send error response after all attempts', sendError, { 
-        email: req.body?.email,
-        originalError: error?.message,
-        sendErrorType: sendError?.constructor?.name,
-        sendErrorMessage: sendError?.message,
-      });
-      // If we still can't send, at least try to end the response
-      if (!res.headersSent) {
-        try {
-          res.status(500).end();
-        } catch (finalError: any) {
-          logError('Completely failed to send any response', finalError, { 
-            email: req.body?.email,
-            finalErrorType: finalError?.constructor?.name,
-            finalErrorMessage: finalError?.message,
-          });
-        }
-      }
-    }
-  }
-});
-
-// Get current user
+/**
+ * Get Current User
+ */
 router.get('/me', async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    
-    const decoded = jwt.verify(token, getJwtSecret()) as { userId: string; email: string };
-    
-      // Try to get user from database with timeout handling
-      try {
-        const result = await retryQuery(
-          () => pool.query(
-            `SELECT u.id, u.email, u.role, p.full_name, p.avatar_url, p.tenant_id
-             FROM public.users u
-             LEFT JOIN public.profiles p ON u.id = p.user_id
-             WHERE u.id = $1`,
-            [decoded.userId]
-          ),
-          2, // max retries
-          500 // delay between retries
+
+    const decoded = jwt.verify(token, getJwtSecret()) as JwtPayload;
+
+    // Fetch fresh user data
+    let user: any = null;
+
+    if (decoded.isSuperAdmin) {
+      const mgmtPool = getManagementPool();
+      const result = await mgmtPool.query(
+        `SELECT id, email, full_name, role, is_active, last_login_at, created_at
+         FROM coheus_users WHERE id = $1`,
+        [decoded.userId]
+      );
+      if (result.rows.length > 0) {
+        user = {
+          ...result.rows[0],
+          is_super_admin: true,
+          tenant_id: null,
+          tenant_name: null,
+          tenant_slug: null,
+        };
+      }
+    } else if (decoded.tenantSlug) {
+      const tenantPool = await getTenantPool(decoded.tenantSlug);
+      if (tenantPool) {
+        const result = await tenantPool.query(
+          `SELECT id, email, full_name, role, is_active, last_login_at, created_at
+           FROM users WHERE id = $1`,
+          [decoded.userId]
         );
-        
-        if (result.rows.length === 0) {
-          return res.status(404).json({ error: 'User not found' });
+        if (result.rows.length > 0) {
+          // Get tenant info
+          const mgmtPool = getManagementPool();
+          const tenantResult = await mgmtPool.query(
+            `SELECT id, name, slug FROM coheus_tenants WHERE slug = $1`,
+            [decoded.tenantSlug]
+          );
+          const tenant = tenantResult.rows[0];
+          
+          user = {
+            ...result.rows[0],
+            is_super_admin: false,
+            tenant_id: tenant?.id,
+            tenant_name: tenant?.name,
+            tenant_slug: tenant?.slug,
+          };
         }
-        
-        res.json({ user: result.rows[0] });
-    } catch (dbError: any) {
-      // If database query fails, return user info from token (degraded mode)
-      logWarn('Database query failed for /me, returning token-based user info', { userId: decoded.userId, error: dbError.message });
-      res.json({ 
-        user: { 
-          id: decoded.userId, 
-          email: decoded.email,
-          // Note: full_name, avatar_url, tenant_id may be unavailable
-        } 
-      });
+      }
     }
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json({ user });
+
   } catch (error: any) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Invalid token' });
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    logError('Error in /me endpoint', error, {});
-    res.status(500).json({ error: 'Internal server error' });
+    logError('[Auth] /me error', error, {});
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Sign out (with session tracking)
+/**
+ * Sign Out
+ */
 router.post('/signout', async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
     
     if (token) {
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      
-      // End session
-      await endSession(tokenHash, 'manual');
-      
-      // Try to decode token for audit log
+      await endSession(tokenHash, 'manual').catch(() => {});
+
       try {
-        const decoded = jwt.verify(token, getJwtSecret()) as { userId: string; email: string };
-        
-        // Get user details for audit log
-        const userResult = await pool.query(
-          'SELECT u.role, p.tenant_id FROM public.users u LEFT JOIN public.profiles p ON u.id = p.user_id WHERE u.id = $1',
-          [decoded.userId]
-        );
-        
-        if (userResult.rows.length > 0) {
-          await auditLog({
-            userId: decoded.userId,
-            userEmail: decoded.email,
-            userRole: userResult.rows[0].role,
-            tenantId: userResult.rows[0].tenant_id || null,
-            action: 'logout',
-            resource: 'auth',
-            description: 'User logged out',
-            status: 'success',
-            ipAddress: req.ip,
-            userAgent: req.get('user-agent'),
-          });
-        }
+        const decoded = jwt.verify(token, getJwtSecret()) as JwtPayload;
+        await auditLog({
+          userId: decoded.userId,
+          userEmail: decoded.email,
+          userRole: decoded.role,
+          tenantId: decoded.tenantId || null,
+          action: 'logout',
+          resource: 'auth',
+          description: 'User logged out',
+          status: 'success',
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+        }).catch(() => {});
       } catch (error) {
-        // Token might be expired or invalid, that's okay
+        // Token might be expired, that's okay
       }
     }
-    
-    res.json({ message: 'Signed out successfully' });
+
+    return res.json({ message: 'Signed out successfully' });
   } catch (error) {
-    logError('Signout error', error, {});
-    res.json({ message: 'Signed out successfully' }); // Always return success for signout
+    return res.json({ message: 'Signed out successfully' });
+  }
+});
+
+/**
+ * List all tenants (for login dropdown - public endpoint)
+ */
+router.get('/tenants', async (req, res) => {
+  try {
+    const mgmtPool = getManagementPool();
+    const result = await mgmtPool.query(
+      `SELECT slug, name FROM coheus_tenants WHERE status = 'active' ORDER BY name`
+    );
+    
+    return res.json({ tenants: result.rows });
+  } catch (error: any) {
+    logError('[Auth] Failed to list tenants', error, {});
+    return res.json({ tenants: [] });
   }
 });
 
 export default router;
-

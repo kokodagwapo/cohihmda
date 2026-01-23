@@ -1,40 +1,30 @@
-/**
- * EditContext - Backward compatibility layer
- * 
- * DEPRECATED: This context is being phased out.
- * - For authentication: Use AuthContext (useAuth hook)
- * - For content editing: Use ContentContext (useContent hook)
- * 
- * This file maintains backward compatibility during migration.
- */
-
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { useAuth } from './AuthContext';
+
+/**
+ * ContentContext - Manages editable content state for the dashboard
+ * 
+ * Note: Authentication has been moved to AuthContext.
+ * This context now only handles content editing functionality.
+ */
 
 interface EditableContent {
   [key: string]: string | number;
 }
 
-interface EditContextType {
+interface ContentContextType {
   isEditMode: boolean;
   setIsEditMode: (value: boolean) => void;
   editableContent: EditableContent;
   updateContent: (key: string, value: string | number) => void;
-  /** @deprecated Use useAuth() from AuthContext instead */
-  isAuthenticated: boolean;
-  /** @deprecated Use useAuth() from AuthContext instead */
-  setIsAuthenticated: (value: boolean) => void;
-  /** @deprecated Use useAuth().logout() from AuthContext instead */
-  logout: () => void;
   isSaving: boolean;
   lastSaved: Date | null;
 }
 
-const EditContext = createContext<EditContextType | undefined>(undefined);
+const ContentContext = createContext<ContentContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'editable_dashboard_content';
 
-export function EditProvider({ children }: { children: ReactNode }) {
+export function ContentProvider({ children }: { children: ReactNode }) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -82,34 +72,26 @@ export function EditProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <EditContext.Provider value={{
+    <ContentContext.Provider value={{
       isEditMode,
       setIsEditMode,
       editableContent,
       updateContent,
-      // Deprecated auth properties - will be removed in future
-      isAuthenticated: false, // Always false - use AuthContext
-      setIsAuthenticated: () => {
-        console.warn('setIsAuthenticated is deprecated. Use AuthContext instead.');
-      },
-      logout: () => {
-        console.warn('logout is deprecated. Use AuthContext.logout() instead.');
-      },
       isSaving,
       lastSaved
     }}>
       {children}
-    </EditContext.Provider>
+    </ContentContext.Provider>
   );
 }
 
-/**
- * @deprecated Use useAuth() for authentication, useContent() for content editing
- */
-export function useEdit() {
-  const context = useContext(EditContext);
+export function useContent() {
+  const context = useContext(ContentContext);
   if (context === undefined) {
-    throw new Error('useEdit must be used within an EditProvider');
+    throw new Error('useContent must be used within a ContentProvider');
   }
   return context;
 }
+
+// Backward compatibility - deprecated, use useContent instead
+export const useEdit = useContent;

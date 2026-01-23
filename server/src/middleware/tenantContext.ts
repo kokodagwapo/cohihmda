@@ -42,41 +42,17 @@ export async function attachTenantContext(
     // Check if tenant_id is provided in query params (for admin tenant selection)
     const queryTenantId = req.query.tenant_id as string | undefined;
     
-    // Get user role to check if they can override tenant
-    // Note: Users are stored in the default database, not management DB
-    let userRole: string | null = null;
-    try {
-      // Try to get user role from default database first (where users are stored)
-      const { pool: defaultPool } = await import('../config/database.js');
-      const userResult = await defaultPool.query(
-        `SELECT role FROM public.users WHERE id = $1`,
-        [req.userId]
-      );
-      userRole = userResult.rows[0]?.role || null;
-    } catch (error: any) {
-      // Fallback: try management DB (in case users are there)
-      try {
-        const userResult = await managementPool.query(
-          `SELECT role FROM public.users WHERE id = $1`,
-          [req.userId]
-        );
-        userRole = userResult.rows[0]?.role || null;
-      } catch (fallbackError: any) {
-        // Only log if it's not a connection timeout (which is expected if DB is down)
-        if (!fallbackError.message?.includes('timeout') && !fallbackError.message?.includes('ECONNREFUSED')) {
-          console.warn('[TenantContext] Could not get user role from either database:', fallbackError.message);
-        }
-      }
-    }
+    // Use role and tenant from JWT (set by authenticateToken middleware)
+    // This avoids expensive database lookups since we already have the info
+    const userRole = req.userRole || 'user';
+    const jwtTenantId = req.tenantId || null;
+    
+    console.log('[TenantContext] Using JWT data:', { userId: req.userId, userRole, jwtTenantId, queryTenantId });
 
-    // Map 'admin' role to 'super_admin' for consistency with RBAC
-    if (userRole === 'admin') {
-      userRole = 'super_admin';
-    }
-
-    // If queryTenantId is provided and user is admin, use it
+    // If queryTenantId is provided and user is admin/platform staff, use it
+    const isPlatformStaff = ['super_admin', 'platform_admin', 'support'].includes(userRole);
     let tenantId: string | null = null;
-    if (queryTenantId && (userRole === 'super_admin' || userRole === 'tenant_admin')) {
+    if (queryTenantId && (isPlatformStaff || userRole === 'tenant_admin')) {
       console.log('[TenantContext] Admin user selecting tenant:', { userId: req.userId, userRole, queryTenantId });
       // Verify tenant exists
       const tenantCheck = await managementPool.query(
@@ -94,32 +70,23 @@ export async function attachTenantContext(
       console.warn('[TenantContext] Non-admin user attempted to use tenant_id query param:', { userId: req.userId, userRole, queryTenantId });
     }
 
-    // If no query tenant, get tenant_id from user profile
-    if (!tenantId) {
-      try {
-        // Check user_tenant_mappings in management DB first
-        const mappingResult = await managementPool.query(
-          `SELECT tenant_id FROM user_tenant_mappings WHERE user_id = $1 AND is_primary = true LIMIT 1`,
-          [req.userId]
-        );
-        if (mappingResult.rows.length > 0) {
-          tenantId = mappingResult.rows[0].tenant_id;
-        }
-      } catch (error) {
-        // Fallback: check profiles table (legacy)
-        try {
-          const profileResult = await managementPool.query(
-            `SELECT tenant_id FROM public.profiles WHERE user_id = $1`,
-            [req.userId]
-          );
-          tenantId = profileResult.rows[0]?.tenant_id || null;
-        } catch (error) {
-          console.warn('[TenantContext] Could not get tenant from management DB');
-        }
-      }
+    // If no query tenant, use tenant_id from JWT (for tenant users)
+    if (!tenantId && jwtTenantId) {
+      console.log('[TenantContext] Using tenant from JWT:', jwtTenantId);
+      tenantId = jwtTenantId;
     }
 
     if (!tenantId) {
+      // Super admins without a tenant_id query param should not be blocked
+      // They just need to select a tenant in the UI
+      if (userRole === 'super_admin' || userRole === 'platform_admin' || userRole === 'support') {
+        console.log('[TenantContext] Platform user without tenant selected:', { userId: req.userId, userRole });
+        return res.status(400).json({ 
+          error: 'No tenant selected', 
+          message: 'Please select a tenant to view data',
+          requiresTenantSelection: true
+        });
+      }
       console.warn('[TenantContext] No tenant found for user:', { userId: req.userId, userRole, queryTenantId });
       return res.status(403).json({ error: 'Tenant not found for user' });
     }

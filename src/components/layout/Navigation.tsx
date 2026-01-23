@@ -2,10 +2,9 @@ import { Button } from '@/components/ui/button';
 import { Settings, LayoutDashboard, ArrowRight, Home, LogOut, Menu, X, Brain } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { api } from '@/lib/api';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { useEdit } from '@/contexts/EditContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -15,68 +14,43 @@ export interface NavigationProps {
 export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as NavigationProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [apiAuthenticated, setApiAuthenticated] = useState(false);
+  const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const [userName, setUserName] = useState<string | null>(null);
-  const { isAuthenticated: pinAuthenticated, logout: pinLogout } = useEdit();
+  
   const isDashboard = location.pathname === '/insights';
   const isLandingPage = location.pathname === '/';
   const isAdminPage = location.pathname.startsWith('/admin');
 
-  // Either PIN or API authentication grants access
-  const isAuthenticated = pinAuthenticated || apiAuthenticated;
-
+  // Get user display name from auth context
   useEffect(() => {
-    checkAuth();
-    const interval = setInterval(checkAuth, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const response = await api.getCurrentUser();
-      setApiAuthenticated(true);
-      console.log('User data:', response.user); // Debug log
+    if (user) {
       // Extract first name from full_name or use email prefix
-      if (response.user?.full_name) {
-        const firstName = response.user.full_name.split(' ')[0];
+      if (user.full_name) {
+        const firstName = user.full_name.split(' ')[0];
         setUserName(firstName);
-        console.log('Set userName from full_name:', firstName);
-      } else if (response.user?.email) {
-        const emailPrefix = response.user.email.split('@')[0];
+      } else if (user.email) {
+        const emailPrefix = user.email.split('@')[0];
         const capitalizedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
         setUserName(capitalizedName);
-        console.log('Set userName from email:', capitalizedName);
       }
-    } catch (error) {
-      console.log('Auth check failed (this is normal for PIN users):', error);
-      setApiAuthenticated(false);
-      // Don't clear userName here - keep it if it was set before
+    } else {
+      setUserName(null);
     }
-  };
+  }, [user]);
 
-  // Check for stored user name preference (for PIN users or fallback)
+  // Fallback for display name
   useEffect(() => {
     if (isAuthenticated && !userName) {
-      // First check localStorage for stored name
+      // Check localStorage for stored name preference
       const storedName = localStorage.getItem('user_display_name');
       if (storedName) {
         setUserName(storedName);
-        console.log('Set userName from localStorage:', storedName);
-      } else {
-        // Default fallback name
-        setUserName('Jim');
       }
     }
   }, [isAuthenticated, userName]);
 
   const handleLogout = async () => {
-    try {
-      await api.signOut();
-    } catch (error) {
-      // Still logout locally
-    }
-    pinLogout();
-    setApiAuthenticated(false);
+    await logout();
     
     // Redirect to admin login if logging out from admin page
     if (isAdminPage) {
@@ -130,31 +104,7 @@ export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as N
 
           <div className="hidden md:flex items-center gap-2">
             <ThemeToggle />
-            {pinAuthenticated ? (
-              <>
-                {/* Home + Logout group */}
-                <div className="flex items-center">
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => navigate('/')} 
-                    className="text-[13px] font-light tracking-wide px-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
-                    aria-label="Home"
-                  >
-                    <Home className="h-3.5 w-3.5 text-pink-300 dark:text-pink-400/70" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={handleLogout} 
-                    className="text-[13px] font-light tracking-wide px-2 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 rounded-lg transition-colors"
-                  >
-                    <LogOut className="h-3.5 w-3.5 text-rose-300 dark:text-rose-400/70" />
-                  </Button>
-                </div>
-                
-              </>
-            ) : apiAuthenticated ? (
+            {isAuthenticated ? (
               <>
                 <Button 
                   variant="ghost" 
@@ -165,36 +115,16 @@ export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as N
                 >
                   <Home className="h-3.5 w-3.5 text-pink-300 dark:text-pink-400/70" />
                 </Button>
-                {!isAdminPage && (
-                  <>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => navigate('/admin')} 
-                      className="text-[13px] font-light tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
-                    >
-                      <LayoutDashboard className="h-3.5 w-3.5 mr-1.5 text-blue-300 dark:text-blue-400/70" />
-                      Admin
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => navigate('/rag')} 
-                      className="text-[13px] font-light tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
-                    >
-                      <Brain className="h-3.5 w-3.5 mr-1.5 text-orange-300 dark:text-orange-400/70" />
-                      RAG
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => navigate('/settings')} 
-                      className="text-[13px] font-light tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
-                    >
-                      <Settings className="h-3.5 w-3.5 mr-1.5 text-purple-300 dark:text-purple-400/70" />
-                      Settings
-                    </Button>
-                  </>
+                {!isAdminPage && isAdmin() && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => navigate('/admin')} 
+                    className="text-[13px] font-light tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
+                  >
+                    <LayoutDashboard className="h-3.5 w-3.5 mr-1.5 text-blue-300 dark:text-blue-400/70" />
+                    Admin
+                  </Button>
                 )}
                 <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
                 <Button 
@@ -231,6 +161,15 @@ export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as N
                     Insights
                   </Button>
                 )}
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => navigate('/login')} 
+                  className="text-[13px] font-light tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
+                >
+                  <LogOut className="h-3.5 w-3.5 mr-1 text-emerald-300 dark:text-emerald-400/70" />
+                  Sign In
+                </Button>
               </>
             )}
           </div>
@@ -254,20 +193,16 @@ export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as N
               </Button>
             )}
             <ThemeToggle />
-            {pinAuthenticated ? (
-              <>
-                {/* Logout button only on mobile */}
-                <div className="flex items-center">
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={handleLogout}
-                    className="text-[12px] font-light tracking-wide px-1.5 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg h-8"
-                  >
-                    <LogOut className="h-3.5 w-3.5 text-rose-300 dark:text-rose-400/70" />
-                  </Button>
-                </div>
-              </>
+            {isAuthenticated ? (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={handleLogout}
+                className="text-[12px] font-light tracking-wide px-2.5 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg h-8"
+              >
+                <LogOut className="h-3.5 w-3.5 mr-1 text-rose-300 dark:text-rose-400/70" />
+                Logout
+              </Button>
             ) : (
               <>
                 {!isDashboard && (
@@ -281,17 +216,14 @@ export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as N
                     Insights
                   </Button>
                 )}
-                {apiAuthenticated && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={handleLogout}
-                    className="text-[12px] font-light tracking-wide px-2.5 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg h-8"
-                  >
-                    <LogOut className="h-3.5 w-3.5 mr-1 text-rose-300 dark:text-rose-400/70" />
-                    Logout
-                  </Button>
-                )}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => navigate('/login')}
+                  className="text-[12px] font-light tracking-wide px-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg h-8"
+                >
+                  Sign In
+                </Button>
               </>
             )}
           </div>
