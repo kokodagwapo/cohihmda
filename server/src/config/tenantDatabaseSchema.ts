@@ -1234,6 +1234,144 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       ON CONFLICT (component_name, condition_value) DO NOTHING
     `).catch(() => {});
 
+    // =========================================================================
+    // AI Data Chat Tables
+    // =========================================================================
+
+    // Saved visualizations for custom dashboard
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.saved_visualizations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT,
+        question TEXT NOT NULL,
+        visualization_type TEXT NOT NULL,
+        visualization_config JSONB NOT NULL,
+        query_config JSONB NOT NULL,
+        data_snapshot JSONB,
+        position INTEGER DEFAULT 0,
+        width INTEGER DEFAULT 1,
+        height INTEGER DEFAULT 1,
+        is_pinned BOOLEAN DEFAULT false,
+        refresh_interval INTEGER,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_visualizations_user_id ON public.saved_visualizations(user_id)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_saved_visualizations_position ON public.saved_visualizations(position)
+    `).catch(() => {});
+
+    // Chat history for data chat sessions
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.chat_history (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        session_id UUID NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        visualization_id UUID REFERENCES public.saved_visualizations(id) ON DELETE SET NULL,
+        metadata JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON public.chat_history(user_id)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_chat_history_session_id ON public.chat_history(session_id)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_chat_history_created_at ON public.chat_history(created_at DESC)
+    `).catch(() => {});
+
+    // =========================================================================
+    // Role-Based Access Control Tables (RLS)
+    // =========================================================================
+
+    // Custom tenant roles with section access and permissions
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.tenant_roles (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        section_access TEXT[] DEFAULT '{}',
+        permissions JSONB DEFAULT '{}',
+        is_system_role BOOLEAN DEFAULT false,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(name)
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_tenant_roles_name ON public.tenant_roles(name)
+    `).catch(() => {});
+
+    // User role assignments
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.user_role_assignments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        role_id UUID NOT NULL REFERENCES public.tenant_roles(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, role_id)
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user_id ON public.user_role_assignments(user_id)
+    `).catch(() => {});
+
+    // Row-level filters for roles
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.role_field_filters (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        role_id UUID NOT NULL REFERENCES public.tenant_roles(id) ON DELETE CASCADE,
+        field_name VARCHAR(255) NOT NULL,
+        operator VARCHAR(50) NOT NULL,
+        value TEXT,
+        dynamic_source VARCHAR(100),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_role_field_filters_role_id ON public.role_field_filters(role_id)
+    `).catch(() => {});
+
+    // Seed default roles
+    await pool.query(`
+      INSERT INTO public.tenant_roles (name, description, section_access, permissions, is_system_role)
+      VALUES 
+        ('Admin', 'Full access to all features and data', 
+         ARRAY['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_quality', 'users', 'settings', 'data_chat'],
+         '{"fieldRestrictions": []}', true),
+        ('Manager', 'Access to insights and team data',
+         ARRAY['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_chat'],
+         '{"fieldRestrictions": []}', true),
+        ('Loan Officer', 'Access to own loans only',
+         ARRAY['insights', 'loans', 'funnel', 'data_chat'],
+         '{"fieldRestrictions": ["branch_price_concession", "corporate_price_concession", "net_buy", "net_sell"]}', true),
+        ('Processor', 'Access to assigned loans',
+         ARRAY['insights', 'loans', 'funnel'],
+         '{"fieldRestrictions": ["branch_price_concession", "corporate_price_concession", "net_buy", "net_sell", "srp_from_investor"]}', true),
+        ('Viewer', 'Read-only access to insights',
+         ARRAY['insights'],
+         '{"fieldRestrictions": ["branch_price_concession", "corporate_price_concession", "net_buy", "net_sell", "srp_from_investor", "pa_srp_amt", "pa_sell_amt"]}', true)
+      ON CONFLICT (name) DO NOTHING
+    `).catch(() => {});
+
     // Create derived field functions
     await createTenantDerivedFieldFunctions(pool);
 

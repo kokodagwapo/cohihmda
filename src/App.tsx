@@ -15,6 +15,8 @@ import Dashboard from "./pages/Dashboard";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Loans from "./pages/Loans";
+import MyDashboard from "./pages/MyDashboard";
+import DataChat from "./pages/DataChat";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
@@ -71,6 +73,16 @@ const App = () => (
               <Route path="/loans" element={
                 <ProtectedRoute>
                   <Loans />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-dashboard" element={
+                <ProtectedRoute>
+                  <MyDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/data-chat" element={
+                <ProtectedRoute>
+                  <DataChat />
                 </ProtectedRoute>
               } />
               

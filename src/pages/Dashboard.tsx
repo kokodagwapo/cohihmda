@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -1158,6 +1158,15 @@ const Dashboard = () => {
         profitabilityData: profitabilityData[profitabilityData.length - 1] // Latest month
        }} />
        */}
+
+      {/* Floating Data Chat Button - Links to full page */}
+      <Link
+        to="/data-chat"
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all hover:scale-105 group"
+      >
+        <Sparkles className="w-5 h-5" />
+        <span className="font-medium">Ask about your data</span>
+      </Link>
       </DashboardLayout>
     </DashboardContainer>
   );

@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { Settings, LayoutDashboard, ArrowRight, Home, LogOut, Menu, X, Brain } from 'lucide-react';
+import { Settings, LayoutDashboard, ArrowRight, Home, LogOut, Menu, X, Brain, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
@@ -114,6 +114,15 @@ export function Navigation({ onMenuToggle, menuOpen }: NavigationProps = {} as N
                   aria-label="Home"
                 >
                   <Home className="h-3.5 w-3.5 text-pink-300 dark:text-pink-400/70" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => navigate('/data-chat')} 
+                  className="text-[13px] font-light tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg transition-colors"
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-1.5 text-purple-300 dark:text-purple-400/70" />
+                  Data Chat
                 </Button>
                 {!isAdminPage && isAdmin() && (
                   <Button 

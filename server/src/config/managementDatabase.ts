@@ -10,38 +10,161 @@ const { Pool } = pg;
 
 // Management database connection pool (separate from tenant databases)
 let managementPool: pg.Pool | null = null;
+let poolLastHealthCheck = 0;
+let poolHealthy = true;
+const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+
+function createManagementPool(): pg.Pool {
+  const dbHost = (process.env.DB_HOST || 'localhost').trim();
+  const rawHost = dbHost === 'localhost' || dbHost === '127.0.0.1' ? '127.0.0.1' : dbHost;
+  
+  const managementDbName = process.env.MANAGEMENT_DB_NAME || 'coheus_management';
+  
+  const newPool = new Pool({
+    host: rawHost,
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: managementDbName,
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'postgres',
+    ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
+    max: 20, // Increased pool size
+    min: 2, // Keep minimum connections alive
+    idleTimeoutMillis: 60000, // 60 seconds idle timeout
+    connectionTimeoutMillis: 10000, // 10 seconds connection timeout (faster fail)
+    allowExitOnIdle: false, // Keep pool alive
+  });
+
+  newPool.on('error', (err: any) => {
+    console.error('[ManagementDB] Pool error:', err.message);
+    poolHealthy = false;
+  });
+  
+  newPool.on('connect', () => {
+    poolHealthy = true;
+  });
+
+  console.log(`[ManagementDB] Created pool for database: ${managementDbName} at ${rawHost}`);
+  return newPool;
+}
 
 function getManagementPool(): pg.Pool {
   if (!managementPool) {
-    const dbHost = (process.env.DB_HOST || 'localhost').trim();
-    const rawHost = dbHost === 'localhost' || dbHost === '127.0.0.1' ? '127.0.0.1' : dbHost;
-    
-    const managementDbName = process.env.MANAGEMENT_DB_NAME || 'coheus_management';
-    
-    managementPool = new Pool({
-      host: rawHost,
-      port: parseInt(process.env.DB_PORT || '5432'),
-      database: managementDbName,
-      user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'postgres',
-      ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 30000,
-    });
-
-    managementPool.on('error', (err: any) => {
-      console.error('[ManagementDB] Pool error:', err);
-    });
+    managementPool = createManagementPool();
+    poolLastHealthCheck = Date.now();
+    poolHealthy = true;
   }
   return managementPool;
 }
 
-export const pool = new Proxy({} as pg.Pool, {
-  get(_target, prop) {
-    return getManagementPool()[prop as keyof pg.Pool];
+/**
+ * Check pool health and recreate if necessary
+ */
+async function ensurePoolHealth(): Promise<void> {
+  const now = Date.now();
+  
+  // Only check health periodically to avoid overhead
+  if (now - poolLastHealthCheck < HEALTH_CHECK_INTERVAL && poolHealthy) {
+    return;
   }
-}) as pg.Pool;
+  
+  poolLastHealthCheck = now;
+  
+  if (!managementPool) {
+    managementPool = createManagementPool();
+    return;
+  }
+  
+  try {
+    // Quick health check with short timeout
+    const client = await Promise.race([
+      managementPool.connect(),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Health check timeout')), 3000)
+      )
+    ]);
+    
+    try {
+      await client.query('SELECT 1');
+      poolHealthy = true;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.warn('[ManagementDB] Health check failed, recreating pool:', err.message);
+    poolHealthy = false;
+    
+    // Close old pool and create new one
+    try {
+      await managementPool.end();
+    } catch (closeErr) {
+      // Ignore close errors
+    }
+    
+    managementPool = createManagementPool();
+    poolHealthy = true;
+  }
+}
+
+/**
+ * Execute a query with automatic retry on connection failure
+ */
+async function queryWithRetry<T>(
+  queryFn: (pool: pg.Pool) => Promise<T>,
+  maxRetries = 2
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await ensurePoolHealth();
+      return await queryFn(getManagementPool());
+    } catch (err: any) {
+      lastError = err;
+      
+      // Check if this is a connection error that might benefit from retry
+      const isConnectionError = 
+        err.code === 'ECONNREFUSED' ||
+        err.code === 'ECONNRESET' ||
+        err.code === 'ETIMEDOUT' ||
+        err.message?.includes('timeout') ||
+        err.message?.includes('Connection terminated');
+      
+      if (isConnectionError && attempt < maxRetries) {
+        console.warn(`[ManagementDB] Connection error (attempt ${attempt + 1}/${maxRetries + 1}):`, err.message);
+        poolHealthy = false;
+        
+        // Brief delay before retry
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+        continue;
+      }
+      
+      throw err;
+    }
+  }
+  
+  throw lastError || new Error('Query failed after retries');
+}
+
+// Create a wrapper pool that includes retry logic
+export const pool = {
+  query: async (text: string | pg.QueryConfig, values?: any[]): Promise<pg.QueryResult> => {
+    return queryWithRetry(p => p.query(text as string, values));
+  },
+  connect: async (): Promise<pg.PoolClient> => {
+    await ensurePoolHealth();
+    return getManagementPool().connect();
+  },
+  end: async (): Promise<void> => {
+    if (managementPool) {
+      await managementPool.end();
+      managementPool = null;
+    }
+  },
+  // Expose raw pool for cases that need it
+  get _pool() {
+    return getManagementPool();
+  }
+} as unknown as pg.Pool;
 
 /**
  * Initialize management database schema
