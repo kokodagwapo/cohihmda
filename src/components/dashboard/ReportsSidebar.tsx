@@ -25,6 +25,7 @@ interface ReportsSidebarProps {
   onSectionOrderChange?: (order: SectionId[]) => void;
   mobileMenuOpen?: boolean;
   onMobileMenuToggle?: () => void;
+  onSectionClick?: (sectionId: string) => void;
 }
 
 // Complete realtime data for each report
@@ -237,7 +238,8 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   sectionOrder: externalOrder,
   onSectionOrderChange,
   mobileMenuOpen: externalMobileOpen,
-  onMobileMenuToggle
+  onMobileMenuToggle,
+  onSectionClick
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [internalMobileOpen, setInternalMobileOpen] = useState(false);

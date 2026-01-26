@@ -56,6 +56,19 @@ export const ChannelSelector = ({
         
         setChannels(data.channels || []);
         setChannelGroups(data.channelGroups || []);
+        
+        // Auto-select the most populated channel group as default if no channel is selected
+        if (!selectedChannel && useChannelGroups && data.channelGroups && data.channelGroups.length > 0) {
+          // Find the channel group with the most loans
+          const mostPopulated = data.channelGroups.reduce((max, group) => 
+            group.loanCount > max.loanCount ? group : max
+          , data.channelGroups[0]);
+          
+          if (mostPopulated && mostPopulated.loanCount > 0) {
+            console.log('[ChannelSelector] Auto-selecting most populated channel:', mostPopulated.group, 'with', mostPopulated.loanCount, 'loans');
+            onChannelChange(mostPopulated.group);
+          }
+        }
       } catch (err: any) {
         console.error('[ChannelSelector] Error fetching channels:', err);
         setError(err.message || 'Failed to load channels');

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Phone, FileCheck, AlertTriangle, TrendingUp, Users, DollarSign, Clock, BarChart3, ArrowUp, ArrowDown, Target, MessageSquare, X, FileSpreadsheet, FileText, Presentation, Bell, BellOff, Activity, CheckCircle2, Info, Zap, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Newspaper, Building2, ExternalLink, Pause, Play, Minimize2, Maximize2, KeyRound, CalendarDays, Pin, Archive, Medal, Award, Star, Crown, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Settings, Check, RefreshCw, MoreVertical, Search, Database, Loader2, ClipboardList } from 'lucide-react';
+import { Phone, FileCheck, AlertTriangle, TrendingUp, Users, DollarSign, Clock, BarChart3, ArrowUp, ArrowDown, Target, MessageSquare, X, FileSpreadsheet, FileText, Presentation, Bell, BellOff, Activity, CheckCircle2, Info, Zap, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Newspaper, Building2, ExternalLink, Pause, Play, Minimize2, Maximize2, KeyRound, CalendarDays, Pin, Archive, Medal, Award, Star, Crown, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Settings, Check, RefreshCw, MoreVertical, Search, Database, Loader2 } from 'lucide-react';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -33,7 +33,7 @@ import { useEdit } from '@/contexts/EditContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { EditableText, EditableNumber } from '@/components/ui/EditableText';
 import { LOSFunnelData, LOSApiResponse, mapLOSDataToUniversalSchema } from '@/lib/losSchema';
-import { FunnelVisualization } from '@/components/FunnelVisualization';
+import { FunnelVisualizationLegacy } from '@/components/FunnelVisualizationLegacy';
 import { FunnelDataPoint } from '@/types/funnel';
 import { useTheme } from '@/components/theme-provider';
 import { formatCompactNumber, formatCompactNumberNoCurrency } from '@/utils/formatting';
@@ -47,7 +47,7 @@ import { DataTable } from '@/components/dashboard/DataTable';
 import { ExecutiveDashboard } from '@/components/dashboard/ExecutiveDashboard';
 import { AletheiaPromptsCard } from '@/components/dashboard/AletheiaPromptsCard';
 import { LeaderBoardSection } from '@/components/dashboard/LeaderBoardSection';
-import { LoanFunnelView } from '@/components/dashboard/views/LoanFunnelView';
+import { LoanFunnelViewLegacy } from '@/components/dashboard/views/LoanFunnelViewLegacy';
 import { ClosingFalloutForecast } from '@/components/dashboard/ClosingFalloutForecast';
 import { TopTieringModal } from '@/components/dashboard/modals/TopTieringModal';
 import { TrendsModal } from '@/components/dashboard/modals/TrendsModal';
@@ -70,17 +70,14 @@ import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
 // - src/components/dashboard/views/SalesView.tsx
 // - src/components/dashboard/views/OpsView.tsx
 
-const Dashboard = () => {
+const DashboardLegacy = () => {
   const navigate = useNavigate();
   const {
     toast
   } = useToast();
-  
-  // Use AuthContext for proper authentication (not useEdit)
   const { isAuthenticated: authContextAuthenticated, user, logout: authLogout } = useAuth();
   // Keep useEdit for content editing only (auth properties are deprecated)
   const editContext = useEdit();
-  
   // Use custom hooks for state management
   const dashboardState = useDashboardState();
   const dashboardFilters = useDashboardFilters();
@@ -94,9 +91,6 @@ const Dashboard = () => {
   
   // Use auth from AuthContext - this component is protected by ProtectedRoute
   const isAuthenticated = authContextAuthenticated;
-  
-  // User state for greeting - derive from AuthContext user
-  const [displayName, setDisplayName] = useState<string | null>(null);
   
   // Tenant selection state for admins
   // For tenant_admin users, this is automatically set to their tenant_id
@@ -202,18 +196,6 @@ const Dashboard = () => {
   // Helper function to get filter-based KPI values for reports
   // Now imported from utils/dashboardHelpers.ts
   
-  // Get greeting based on time of day
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) {
-      return 'Good morning';
-    } else if (hour < 17) {
-      return 'Good afternoon';
-    } else {
-      return 'Good evening';
-    }
-  };
-  
   // Report sidebar and modal - state is now managed by useDashboardState hook
   const totalEmployees = 100;
 
@@ -223,20 +205,6 @@ const Dashboard = () => {
     middle: 30,
     bottom: 50
   };
-
-  // Set up display name from user data
-  useEffect(() => {
-    if (user?.full_name) {
-      const first = String(user.full_name).trim().split(/\s+/)[0];
-      setDisplayName(first || null);
-    } else if (user?.email) {
-      const emailPrefix = String(user.email).split("@")[0] ?? "";
-      const capitalizedName = emailPrefix ? emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1) : "";
-      setDisplayName(capitalizedName || null);
-    } else {
-      setDisplayName(null);
-    }
-  }, [user?.full_name, user?.email]);
 
   // Authentication is now fully handled by AuthContext and ProtectedRoute
   // This component only renders when user is already authenticated
@@ -271,7 +239,7 @@ const Dashboard = () => {
       setBriefingError(null);
       
       try {
-        // Fetch insights/dialogues with tenant support
+        // Fetch insights/dialogues
         const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
         const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
         const dialogues = insightsData?.insights?.map((insight: any) => ({
@@ -280,7 +248,7 @@ const Dashboard = () => {
           priority: insight.priority || 'standard'
         })) || [];
 
-        // Fetch funnel data with tenant support
+        // Fetch funnel data
         let funnelStory = null;
         try {
           const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`);
@@ -978,22 +946,6 @@ const Dashboard = () => {
     setReportModalOpen(true);
   };
 
-  // Scroll to section handler for sidebar navigation
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      // Account for fixed header (64px = 4rem = pt-16)
-      const headerOffset = 80;
-      const elementPosition = element.getBoundingClientRect().top;
-      const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
-
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: 'smooth'
-      });
-    }
-  };
-
   return (
     <DashboardContainer
       loading={loading}
@@ -1007,7 +959,6 @@ const Dashboard = () => {
         dashboardVisibility={dashboardVisibility}
         onVisibilityChange={handleVisibilityChange}
         onReportClick={handleReportClick}
-        onSectionClick={scrollToSection}
         headerContent={
           <div className="flex items-center gap-4 flex-wrap">
             {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
@@ -1088,21 +1039,12 @@ const Dashboard = () => {
         setTrendsModal={setTrendsModal}
       />
 
-      <div className="w-full h-full px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
+      <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-28 sm:pt-32 md:pt-36 pb-4 sm:pb-8 md:pb-12 relative z-10">
         {/* Insights Section - Minimalist */}
-        {isAuthenticated && <div className="section-insights mb-16 md:mb-20 w-full">
-            {/* Greeting */}
-            {dashboardVisibility.aletheiaInsights && (
-              <div className="mb-10 md:mb-12">
-                <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-white">
-                  {getGreeting()}{displayName ? `, ${displayName}` : ''}
-                </h1>
-              </div>
-            )}
-            
+        {isAuthenticated && <div className="section-insights mb-16 md:mb-20">
             {/* Ailethia Insights - First */}
             {dashboardVisibility.aletheiaInsights && (
-              <div id="aletheiaInsights" className="section-aletheia-insights mb-8 md:mb-12">
+              <div className="section-aletheia-insights mb-8 md:mb-12">
                 <AletheiaPromptsCard 
                   dateFilter={dateFilter} 
                   briefingContext={briefingContext || undefined}
@@ -1119,27 +1061,30 @@ const Dashboard = () => {
               </div>
             )}
             
-            {/* Mortgage News - Second */}
-            {dashboardVisibility.industryNews && <div id="industryNews" className="section-industry-news"><IndustryNewsCard /></div>}
-            
-            {/* Leaderboard - Third */}
-            {dashboardVisibility.leaderboard && <div id="leaderboard" className="section-leaderboard mt-12 sm:mt-16"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
+            {/* Industry News - Second */}
+            {dashboardVisibility.industryNews && <div className="section-industry-news"><IndustryNewsCard /></div>}
             
             {/* Dashboards Section */}
-            {(dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast) && (
-              <div className="section-dashboards mt-12 sm:mt-16 w-full">
+            {(dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast || dashboardVisibility.topTiering || dashboardVisibility.leaderboard) && (
+              <div className="section-dashboards mt-12 sm:mt-16">
                 <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">Dashboards</h2>
                 
                 {/* Business Overview */}
-                {dashboardVisibility.executiveDashboard && <div id="executiveDashboard" className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
+                {dashboardVisibility.executiveDashboard && <div className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
                 
                 {/* Closing & Fallout Forecast */}
-                {dashboardVisibility.closingFalloutForecast && <div id="closingFalloutForecast" className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}
+                {dashboardVisibility.closingFalloutForecast && <div className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}
+                
+                {/* TopTiering Loan Funnel - Full Width Section */}
+                {dashboardVisibility.topTiering && <div className="section-top-tiering mt-12 sm:mt-16 mb-4 sm:mb-8">
+                    <LoanFunnelViewLegacy view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} selectedTenantId={selectedTenantId} selectedChannel={selectedChannel} />
+                  </div>}
+                
+                {/* Leader Board Section */}
+                {dashboardVisibility.leaderboard && <div className="section-leaderboard"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
               </div>
             )}
           </div>}
-
-         
       </div>
 
       {/* Contact Modal */}
@@ -1226,4 +1171,4 @@ const Dashboard = () => {
     </DashboardContainer>
   );
 };
-export default Dashboard;
+export default DashboardLegacy;

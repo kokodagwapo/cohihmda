@@ -12,6 +12,7 @@ import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
+import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Loans from "./pages/Loans";
@@ -20,6 +21,16 @@ import DataChat from "./pages/DataChat";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
+// Top Tiering pages
+import LoanFunnel from "./pages/LoanFunnel";
+import TopTieringComparison from "./pages/TopTieringComparison";
+import OperationScorecard from "./pages/OperationScorecard";
+import OperationScorecardTrends from "./pages/OperationScorecardTrends";
+import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
+import SalesScorecard from "./pages/SalesScorecard";
+import SalesTrends from "./pages/SalesTrends";
+import CompanyScorecard from "./pages/CompanyScorecard";
+import CreditRiskManagement from "./pages/CreditRiskManagement";
 
 const queryClient = new QueryClient();
 
@@ -65,11 +76,16 @@ const App = () => (
               <Route path="/login" element={<Login />} />
               
               {/* Protected routes - require authentication */}
-              <Route path="/insights" element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } />
+                <Route path="/insights" element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } />
+                <Route path="/legacy" element={
+                  <ProtectedRoute>
+                    <DashboardLegacy />
+                  </ProtectedRoute>
+                } />
               <Route path="/loans" element={
                 <ProtectedRoute>
                   <Loans />
@@ -83,6 +99,53 @@ const App = () => (
               <Route path="/data-chat" element={
                 <ProtectedRoute>
                   <DataChat />
+                </ProtectedRoute>
+              } />
+              
+              {/* Top Tiering routes */}
+              <Route path="/loan-funnel" element={
+                <ProtectedRoute>
+                  <LoanFunnel />
+                </ProtectedRoute>
+              } />
+              <Route path="/credit-risk-management" element={
+                <ProtectedRoute>
+                  <CreditRiskManagement />
+                </ProtectedRoute>
+              } />
+              <Route path="/company-scorecard" element={
+                <ProtectedRoute>
+                  <CompanyScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/toptiering-comparison" element={
+                <ProtectedRoute>
+                  <TopTieringComparison />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/financial-modeling-sandbox" element={
+                <ProtectedRoute>
+                  <FinancialModelingSandbox />
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-scorecard" element={
+                <ProtectedRoute>
+                  <SalesScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-trends" element={
+                <ProtectedRoute>
+                  <SalesTrends />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/operation-scorecard" element={
+                <ProtectedRoute>
+                  <OperationScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/operation-scorecard-trends" element={
+                <ProtectedRoute>
+                  <OperationScorecardTrends />
                 </ProtectedRoute>
               } />
               

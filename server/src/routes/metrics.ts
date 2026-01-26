@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
-import { queryMetric, queryMetrics, queryMetricsByCategory, getMetricsCatalog, DateRange } from '../services/metrics/metricsService.js';
+import { queryMetric, queryMetrics, queryMetricsByCategory, queryMetricsGroupedBy, getMetricsCatalog, DateRange, queryFicoDistribution, queryLtvDistribution, queryDtiDistribution, queryLoanMix, queryCreditRiskStory, DistributionBucket, LoanMixRow, CreditRiskStoryData } from '../services/metrics/metricsService.js';
 import { explainMetric, explainMetricResult, chatAboutMetrics, getStaticMetricDescriptions, MetricChatMessage } from '../services/metrics/metricsAiService.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { pool } from '../config/database.js';
@@ -76,11 +76,11 @@ router.get('/:metricId', authenticateToken, attachTenantContext, apiLimiter, asy
     const { metricId } = req.params;
     const tenantPool = getTenantContext(req).tenantPool;
     
-    // Parse date range from query params
+    // Parse date range from query params - keep as strings to avoid timezone issues
     const dateRange: DateRange | undefined = req.query.startDate || req.query.endDate
       ? {
-          start: req.query.startDate ? new Date(req.query.startDate as string) : null,
-          end: req.query.endDate ? new Date(req.query.endDate as string) : null
+          start: (req.query.startDate as string) || null,
+          end: (req.query.endDate as string) || null
         }
       : undefined;
     
@@ -108,30 +108,54 @@ router.get('/:metricId', authenticateToken, attachTenantContext, apiLimiter, asy
 /**
  * POST /api/metrics/query
  * Query multiple metrics in a single call
- * Body: { metricIds: string[], dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
+ * Body: { metricIds: string[], dateRange?: { start?: string, end?: string }, dateField?: string, groupBy?: string, additionalFilters?: object }
  */
 router.post('/query', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    const { metricIds, dateRange, dateField, additionalFilters } = req.body;
+    const { metricIds, dateRange, dateField, groupBy, additionalFilters } = req.body;
     const tenantPool = getTenantContext(req).tenantPool;
     
     if (!Array.isArray(metricIds) || metricIds.length === 0) {
       return res.status(400).json({ error: 'metricIds must be a non-empty array' });
     }
     
-    // Parse date range if provided
+    // Pass date range as strings (YYYY-MM-DD format) - don't convert to Date objects
+    // to avoid timezone issues when PostgreSQL compares timestamps
     const parsedDateRange: DateRange | undefined = dateRange
       ? {
-          start: dateRange.start ? new Date(dateRange.start) : null,
-          end: dateRange.end ? new Date(dateRange.end) : null
+          start: dateRange.start || null,
+          end: dateRange.end || null
         }
       : undefined;
     
-    const results = await queryMetrics(tenantPool, metricIds, { 
+    // Debug logging to trace date range issues
+    console.log('[Metrics POST /query] Request:', {
+      metricIds: metricIds.slice(0, 3).join(', ') + (metricIds.length > 3 ? '...' : ''),
+      dateRange: dateRange,
+      parsedDateRange: parsedDateRange,
+      groupBy,
+      additionalFilters
+    });
+    
+    const options = { 
       dateRange: parsedDateRange, 
       dateField,
       additionalFilters
-    });
+    };
+    
+    // If groupBy is specified, return grouped results
+    if (groupBy) {
+      const allowedGroupBy = ['branch', 'loan_officer', 'channel', 'loan_type', 'loan_purpose', 'occupancy_type', 'processor', 'underwriter', 'investor'];
+      if (!allowedGroupBy.includes(groupBy)) {
+        return res.status(400).json({ error: `Invalid groupBy. Allowed: ${allowedGroupBy.join(', ')}` });
+      }
+      
+      const groupedResults = await queryMetricsGroupedBy(tenantPool, metricIds, groupBy as any, options);
+      return res.json({ metrics: groupedResults, groupedBy: groupBy });
+    }
+    
+    // Non-grouped query (existing behavior)
+    const results = await queryMetrics(tenantPool, metricIds, options);
     res.json({ metrics: results });
   } catch (error: any) {
     console.error('[Metrics] Error querying metrics:', error);
@@ -149,11 +173,11 @@ router.get('/category/:category', authenticateToken, attachTenantContext, apiLim
     const { category } = req.params;
     const tenantPool = getTenantContext(req).tenantPool;
     
-    // Parse date range from query params
+    // Parse date range from query params - keep as strings to avoid timezone issues
     const dateRange: DateRange | undefined = req.query.startDate || req.query.endDate
       ? {
-          start: req.query.startDate ? new Date(req.query.startDate as string) : null,
-          end: req.query.endDate ? new Date(req.query.endDate as string) : null
+          start: (req.query.startDate as string) || null,
+          end: (req.query.endDate as string) || null
         }
       : undefined;
     
@@ -175,6 +199,173 @@ router.get('/category/:category', authenticateToken, attachTenantContext, apiLim
   } catch (error: any) {
     console.error(`[Metrics] Error querying category ${req.params.category}:`, error);
     res.status(500).json({ error: error.message || 'Failed to query category metrics' });
+  }
+});
+
+// ============== Credit Risk Distribution Endpoints ==============
+
+/**
+ * POST /api/metrics/distributions
+ * Query all three distributions (FICO, LTV, DTI) in a single call
+ * Body: { dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
+ */
+router.post('/distributions', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { dateRange, dateField, additionalFilters } = req.body;
+    const tenantPool = getTenantContext(req).tenantPool;
+    
+    const parsedDateRange = dateRange
+      ? { start: dateRange.start || null, end: dateRange.end || null }
+      : undefined;
+    
+    const options = { dateRange: parsedDateRange, dateField, additionalFilters };
+    
+    // Query all three distributions in parallel
+    const [ficoDistribution, ltvDistribution, dtiDistribution] = await Promise.all([
+      queryFicoDistribution(tenantPool, options),
+      queryLtvDistribution(tenantPool, options),
+      queryDtiDistribution(tenantPool, options)
+    ]);
+    
+    res.json({
+      ficoDistribution,
+      ltvDistribution,
+      dtiDistribution
+    });
+  } catch (error: any) {
+    console.error('[Metrics] Error querying distributions:', error);
+    res.status(500).json({ error: error.message || 'Failed to query distributions' });
+  }
+});
+
+/**
+ * POST /api/metrics/loan-mix
+ * Query Loan Mix data grouped by dimension
+ * Body: { groupBy: 'loan_type' | 'loan_purpose' | 'occupancy_type', dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
+ */
+router.post('/loan-mix', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { groupBy, dateRange, dateField, additionalFilters } = req.body;
+    const tenantPool = getTenantContext(req).tenantPool;
+    
+    const allowedGroupBy = ['loan_type', 'loan_purpose', 'occupancy_type'];
+    if (!groupBy || !allowedGroupBy.includes(groupBy)) {
+      return res.status(400).json({ error: `groupBy is required. Allowed: ${allowedGroupBy.join(', ')}` });
+    }
+    
+    const parsedDateRange = dateRange
+      ? { start: dateRange.start || null, end: dateRange.end || null }
+      : undefined;
+    
+    const options = { dateRange: parsedDateRange, dateField, additionalFilters };
+    
+    const loanMix = await queryLoanMix(tenantPool, groupBy as any, options);
+    
+    res.json({ loanMix, groupedBy: groupBy });
+  } catch (error: any) {
+    console.error('[Metrics] Error querying loan mix:', error);
+    res.status(500).json({ error: error.message || 'Failed to query loan mix' });
+  }
+});
+
+/**
+ * POST /api/metrics/credit-risk
+ * Combined Credit Risk data endpoint - fetches KPIs, distributions, and all loan mix tables
+ * Body: { dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object, applicationType?: string }
+ */
+router.post('/credit-risk', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { dateRange, dateField, additionalFilters, applicationType } = req.body;
+    const tenantPool = getTenantContext(req).tenantPool;
+    
+    // Handle application type filter - maps to Qlik's DateType field
+    // 'Applications Taken' -> DateType={'Application'} -> application_date
+    // 'Funded Production' -> DateType={'Funding'} -> funding_date
+    // 'Lost Opportunities' -> [Withdrawn Flag]={1} with ANY date in range (Qlik associative model)
+    // 'All Loans' -> DateType={'Started'} -> started_date
+    let effectiveDateField = dateField || 'application_date';
+    let effectiveFilters = { ...additionalFilters };
+    
+    if (applicationType === 'Funded Production') {
+      effectiveDateField = 'funding_date';
+    } else if (applicationType === 'Lost Opportunities') {
+      // Credit Risk Management Lost Opportunities:
+      // Qlik uses [Withdrawn Flag]={1},[$(vToDate)]={'Yes'} without specifying DateType
+      // In Qlik's associative model, this means loans with Withdrawn Flag=1 where ANY date is in range
+      // We need to check ALL date fields with OR logic to replicate this behavior
+      effectiveDateField = 'any_date'; // Special flag to trigger multi-date filtering
+      effectiveFilters.withdrawn_filter = true;
+    } else if (applicationType === 'All Loans') {
+      effectiveDateField = 'started_date';
+    }
+    
+    const parsedDateRange = dateRange
+      ? { start: dateRange.start || null, end: dateRange.end || null }
+      : undefined;
+    
+    const options = { 
+      dateRange: parsedDateRange, 
+      dateField: effectiveDateField, 
+      additionalFilters: effectiveFilters 
+    };
+    
+    // KPI metric IDs
+    const kpiMetricIds = ['total_units', 'total_volume', 'wac', 'wa_fico', 'wa_ltv', 'wa_dti'];
+    
+    // Fetch all data in parallel
+    const [kpiResults, ficoDistribution, ltvDistribution, dtiDistribution, loanMixByType, loanMixByPurpose, loanMixByOccupancy, storyData] = await Promise.all([
+      queryMetrics(tenantPool, kpiMetricIds, options),
+      queryFicoDistribution(tenantPool, options),
+      queryLtvDistribution(tenantPool, options),
+      queryDtiDistribution(tenantPool, options),
+      queryLoanMix(tenantPool, 'loan_type', options),
+      queryLoanMix(tenantPool, 'loan_purpose', options),
+      queryLoanMix(tenantPool, 'occupancy_type', options),
+      queryCreditRiskStory(tenantPool, options)
+    ]);
+    
+    // Transform KPI results to a simple object
+    // queryMetrics returns Record<string, MetricResult>, not an array
+    const kpis: Record<string, number> = {};
+    Object.entries(kpiResults).forEach(([metricId, result]) => {
+      kpis[metricId] = typeof result.value === 'number' ? result.value : parseFloat(result.value as string) || 0;
+    });
+    
+    // Calculate largest categories from loan mix data (by VOLUME - matches Qlik!)
+    // Qlik uses Sum([Loan Amount]) to find the largest category, not Count([Loan Number])
+    const findLargestByVolume = (rows: LoanMixRow[]) => {
+      if (!rows || rows.length === 0) return { category: 'N/A', volumePercent: 0 };
+      const sorted = [...rows].sort((a, b) => b.volume - a.volume);
+      return { category: sorted[0].category, volumePercent: sorted[0].volumePercent };
+    };
+    
+    // Build complete story data
+    const creditRiskStory = {
+      largestLoanType: findLargestByVolume(loanMixByType),
+      largestLoanPurpose: findLargestByVolume(loanMixByPurpose),
+      largestOccupancy: findLargestByVolume(loanMixByOccupancy),
+      conventionalQualifiedPercent: storyData.conventionalQualifiedPercent,
+      governmentQualifiedPercent: storyData.governmentQualifiedPercent
+    };
+    
+    res.json({
+      kpis,
+      ficoDistribution,
+      ltvDistribution,
+      dtiDistribution,
+      loanMixByType,
+      loanMixByPurpose,
+      loanMixByOccupancy,
+      creditRiskStory,
+      filters: {
+        dateRange: parsedDateRange,
+        dateField: effectiveDateField,
+        applicationType
+      }
+    });
+  } catch (error: any) {
+    console.error('[Metrics] Error querying credit risk data:', error);
+    res.status(500).json({ error: error.message || 'Failed to query credit risk data' });
   }
 });
 
