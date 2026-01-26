@@ -1012,6 +1012,7 @@ router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async 
 /**
  * GET /api/loans/company-overview
  * Get company overview metrics (Active Loans, Submitted MTD, Funded MTD, Aging, Loan Types)
+ * Supports date range and channel filtering
  */
 router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
   try {
@@ -1045,19 +1046,54 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
     if (!tenantId) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
+    
+    // Parse date range and channel filters from query params
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const channelGroup = req.query.channel_group as string | undefined;
+    
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Use provided date range or default to current month
+    const effectiveStartDate = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const effectiveEndDate = endDate ? new Date(endDate) : now;
+    
+    // Build WHERE clause for channel filtering
+    const conditions: string[] = ['tenant_id = $1'];
+    const params: any[] = [tenantId];
+    let paramIndex = 2;
+    
+    // Channel Group filter - consolidated channel (Retail, TPO, etc.)
+    if (channelGroup && channelGroup !== 'All') {
+      if (channelGroup === 'Retail') {
+        conditions.push(`(channel ILIKE '%retail%' OR channel ILIKE '%brok%')`);
+      } else if (channelGroup === 'TPO') {
+        conditions.push(`(channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`);
+      } else if (channelGroup === '99-Missing') {
+        conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
+      } else if (channelGroup === 'Other') {
+        conditions.push(`(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`);
+      }
+    }
+    
+    const whereClause = conditions.join(' AND ');
 
-    // Get all loans
+    logInfo('[CompanyOverview] Query params', {
+      tenantId,
+      startDate: effectiveStartDate.toISOString(),
+      endDate: effectiveEndDate.toISOString(),
+      channelGroup
+    });
+
+    // Get all loans with channel filter applied
     const allLoansResult = await retryQuery(
       () => pool.query(
         `SELECT 
-          loan_id, borrower_name, loan_amount, loan_type, status, 
-          application_date, closing_date, interest_rate, raw_data
+          loan_id, borrower_name, loan_amount, loan_type, status, channel,
+          application_date, closing_date, lock_date, funding_date, interest_rate, raw_data
          FROM public.loans 
-         WHERE tenant_id = $1 
+         WHERE ${whereClause}
          ORDER BY application_date DESC`,
-        [tenantId]
+        params
       ),
       2, 500
     );
@@ -1065,9 +1101,10 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
     const allLoans = allLoansResult.rows;
 
     // Active Loans (excluding closed/denied/withdrawn) - smart detection
+    // Qlik: [Active Loan Flag] = 'Yes' means status is 'Active Loan' AND has application date
     // Use inferred status based on dates and raw status
     const getInferredStatus = (loan: any) => {
-      if (loan.closing_date) return 'Closed';
+      if (loan.closing_date || loan.funding_date) return 'Closed';
       if (loan.lock_date) return 'Locked';
       const rawStatus = (loan.status || '').toString().toUpperCase();
       // Handle all possible status values from both LOS imports and sample data
@@ -1081,23 +1118,31 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
       return 'Active'; // Default
     };
 
+    // Active Loans - filter by application date within date range
     const activeLoans = allLoans.filter(l => {
       const inferredStatus = getInferredStatus(l);
-      return ['Active', 'Locked', 'Submitted', 'Approved', 'CTC'].includes(inferredStatus);
+      if (!['Active', 'Locked', 'Submitted', 'Approved', 'CTC'].includes(inferredStatus)) return false;
+      
+      // If date range is provided, filter active loans by application date
+      if (l.application_date) {
+        const appDate = new Date(l.application_date);
+        return appDate >= effectiveStartDate && appDate <= effectiveEndDate;
+      }
+      return true; // Include loans without application date
     });
 
-    // Submitted Loans MTD (estimate: loans with application_date in current month)
+    // Submitted Loans - loans with application_date in the date range
     const submittedMTD = allLoans.filter(l => {
       if (!l.application_date) return false;
       const appDate = new Date(l.application_date);
-      return appDate >= monthStart;
+      return appDate >= effectiveStartDate && appDate <= effectiveEndDate;
     });
 
-    // Funded Loans MTD (loans with closing_date in current month)
+    // Funded Loans - loans with funding_date or closing_date in the date range
     const fundedMTD = allLoans.filter(l => {
-      if (!l.closing_date) return false;
-      const closeDate = new Date(l.closing_date);
-      return closeDate >= monthStart;
+      const fundDate = l.funding_date ? new Date(l.funding_date) : (l.closing_date ? new Date(l.closing_date) : null);
+      if (!fundDate) return false;
+      return fundDate >= effectiveStartDate && fundDate <= effectiveEndDate;
     });
 
     // Aging of Active Loans (days since application)
@@ -1122,54 +1167,70 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
       else agingRanges['>90']++;
     });
 
-    // Loan Type distribution for MTD Submitted
+    // Loan Type distribution for Submitted
     const submittedByType: Record<string, number> = {};
     submittedMTD.forEach(loan => {
       const type = loan.loan_type || 'Other';
       submittedByType[type] = (submittedByType[type] || 0) + 1;
     });
 
-    // Loan Type distribution for MTD Funded
+    // Loan Type distribution for Funded
     const fundedByType: Record<string, number> = {};
     fundedMTD.forEach(loan => {
       const type = loan.loan_type || 'Other';
       fundedByType[type] = (fundedByType[type] || 0) + 1;
     });
 
-    // Calculate averages
+    // Calculate averages with WAC formula: Sum(Loan Amount * Interest Rate) / Sum(Loan Amount)
     const activeVolume = activeLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-    const activeAvgRate = activeLoans.filter(l => l.interest_rate).length > 0
-      ? activeLoans.filter(l => l.interest_rate)
-          .reduce((sum, l) => sum + parseFloat(l.interest_rate || 0), 0) / activeLoans.filter(l => l.interest_rate).length
+    const activeWac = activeVolume > 0
+      ? activeLoans.reduce((sum, l) => {
+          const amount = parseFloat(l.loan_amount || 0);
+          const rate = parseFloat(l.interest_rate || 0);
+          return sum + (amount * rate);
+        }, 0) / activeVolume
       : 0;
 
     const submittedVolume = submittedMTD.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-    const submittedAvgRate = submittedMTD.filter(l => l.interest_rate).length > 0
-      ? submittedMTD.filter(l => l.interest_rate)
-          .reduce((sum, l) => sum + parseFloat(l.interest_rate || 0), 0) / submittedMTD.filter(l => l.interest_rate).length
+    const submittedWac = submittedVolume > 0
+      ? submittedMTD.reduce((sum, l) => {
+          const amount = parseFloat(l.loan_amount || 0);
+          const rate = parseFloat(l.interest_rate || 0);
+          return sum + (amount * rate);
+        }, 0) / submittedVolume
       : 0;
 
     const fundedVolume = fundedMTD.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-    const fundedAvgRate = fundedMTD.filter(l => l.interest_rate).length > 0
-      ? fundedMTD.filter(l => l.interest_rate)
-          .reduce((sum, l) => sum + parseFloat(l.interest_rate || 0), 0) / fundedMTD.filter(l => l.interest_rate).length
+    const fundedWac = fundedVolume > 0
+      ? fundedMTD.reduce((sum, l) => {
+          const amount = parseFloat(l.loan_amount || 0);
+          const rate = parseFloat(l.interest_rate || 0);
+          return sum + (amount * rate);
+        }, 0) / fundedVolume
       : 0;
+
+    logInfo('[CompanyOverview] Results', {
+      activeCount: activeLoans.length,
+      submittedCount: submittedMTD.length,
+      fundedCount: fundedMTD.length,
+      dateRange: { start: effectiveStartDate.toISOString(), end: effectiveEndDate.toISOString() }
+    });
 
     res.json({
       activeLoans: {
         count: activeLoans.length,
         volume: activeVolume,
-        avgInterestRate: activeAvgRate,
+        avgInterestRate: activeWac,
       },
       submittedMTD: {
         count: submittedMTD.length,
         volume: submittedVolume,
-        avgInterestRate: submittedAvgRate,
+        avgInterestRate: submittedWac,
       },
       fundedMTD: {
         count: fundedMTD.length,
         volume: fundedVolume,
-        avgInterestRate: fundedAvgRate,
+        avgInterestRate: fundedWac,
       },
       aging: agingRanges,
       submittedByType,
@@ -1184,55 +1245,128 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
 /**
  * GET /api/loans/operations-overview
  * Get operations overview metrics (Cycle Time, Active Pipeline, Processing Efficiency, Turn Time by Stage)
+ * Supports date range and channel filtering
  */
 router.get('/operations-overview', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
-
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
+    // Get tenant_id from query or user profile (supports super admins)
+    let tenantId = req.query.tenant_id as string;
+    
+    if (!tenantId) {
+      const profileResult = await pool.query(
+        'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+        [req.userId]
+      );
+      tenantId = profileResult.rows[0]?.tenant_id;
+    }
+    
+    // If still no tenant, check if user is super admin and use Default Tenant
+    if (!tenantId) {
+      const userResult = await pool.query(
+        'SELECT role FROM public.users WHERE id = $1',
+        [req.userId]
+      );
+      if (userResult.rows[0]?.role === 'super_admin') {
+        const defaultTenantResult = await pool.query(
+          `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`
+        );
+        if (defaultTenantResult.rows.length > 0) {
+          tenantId = defaultTenantResult.rows[0].id;
+        }
+      }
     }
 
-    const tenantId = profileResult.rows[0].tenant_id;
+    if (!tenantId) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
+    
+    // Parse date range and channel filters from query params
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const channelGroup = req.query.channel_group as string | undefined;
+    
+    const now = new Date();
+    // Use provided date range or default to current year
+    const effectiveStartDate = startDate ? new Date(startDate) : new Date(now.getFullYear(), 0, 1);
+    const effectiveEndDate = endDate ? new Date(endDate) : now;
+    
+    // Build WHERE clause for channel filtering
+    const conditions: string[] = ['tenant_id = $1'];
+    const params: any[] = [tenantId];
+    
+    // Channel Group filter - consolidated channel (Retail, TPO, etc.)
+    if (channelGroup && channelGroup !== 'All') {
+      if (channelGroup === 'Retail') {
+        conditions.push(`(channel ILIKE '%retail%' OR channel ILIKE '%brok%')`);
+      } else if (channelGroup === 'TPO') {
+        conditions.push(`(channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`);
+      } else if (channelGroup === '99-Missing') {
+        conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
+      } else if (channelGroup === 'Other') {
+        conditions.push(`(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`);
+      }
+    }
+    
+    const whereClause = conditions.join(' AND ');
 
-    // Get all loans
+    logInfo('[OperationsOverview] Query params', {
+      tenantId,
+      startDate: effectiveStartDate.toISOString(),
+      endDate: effectiveEndDate.toISOString(),
+      channelGroup
+    });
+
+    // Get all loans with channel filter applied
     const loansResult = await retryQuery(
       () => pool.query(
         `SELECT 
-          loan_id, borrower_name, loan_amount, loan_type, status, 
-          application_date, closing_date, lock_date, interest_rate, raw_data
+          loan_id, borrower_name, loan_amount, loan_type, status, channel,
+          application_date, closing_date, lock_date, funding_date, ctc_date, interest_rate, raw_data
          FROM public.loans 
-         WHERE tenant_id = $1 
+         WHERE ${whereClause}
          ORDER BY application_date DESC`,
-        [tenantId]
+        params
       ),
       2, 500
     );
 
-    const loans = loansResult.rows;
+    const allLoans = loansResult.rows;
 
-    // Active Pipeline - smart detection
-    const activeLoans = loans.filter(l => {
+    // Active Pipeline - smart detection, filtered by date range
+    const activeLoans = allLoans.filter(l => {
       const status = (l.status || '').toString().toUpperCase();
       const isStateCode = /^[A-Z]{2}$/.test(status);
+      const isActive = isStateCode 
+        ? !(l.closing_date || l.funding_date)
+        : !['CLOSED', 'FUNDED', 'ORIGINATED', 'WITHDRAWN', 'DENIED', 'COMPLETED'].includes(status);
       
-      if (isStateCode) {
-        // State code means it's likely active (has application but no closing)
-        return !l.closing_date;
+      if (!isActive) return false;
+      
+      // Filter by application date within date range
+      if (l.application_date) {
+        const appDate = new Date(l.application_date);
+        return appDate >= effectiveStartDate && appDate <= effectiveEndDate;
       }
-      
-      // Proper status values - exclude closed statuses
-      return !['CLOSED', 'FUNDED', 'ORIGINATED', 'WITHDRAWN', 'DENIED', 'COMPLETED'].includes(status);
+      return true;
     });
     const activeVolume = activeLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
 
-    // Calculate average cycle time (application to closing)
-    const loansWithDates = loans.filter(l => l.application_date && l.closing_date);
-    const cycleTimes = loansWithDates.map(l => daysBetween(l.application_date, l.closing_date)).filter(d => d !== null) as number[];
+    // Calculate average cycle time (application to closing/funding) for loans within date range
+    const loansWithDates = allLoans.filter(l => {
+      if (!l.application_date) return false;
+      const fundDate = l.funding_date || l.closing_date;
+      if (!fundDate) return false;
+      
+      // Filter by funding date within date range
+      const fundDateObj = new Date(fundDate);
+      return fundDateObj >= effectiveStartDate && fundDateObj <= effectiveEndDate;
+    });
+    
+    const cycleTimes = loansWithDates.map(l => {
+      const fundDate = l.funding_date || l.closing_date;
+      return daysBetween(l.application_date, fundDate);
+    }).filter(d => d !== null && d > 0) as number[];
+    
     const avgCycleTime = cycleTimes.length > 0
       ? Math.round(cycleTimes.reduce((sum, d) => sum + d, 0) / cycleTimes.length)
       : 43; // Default fallback
@@ -1245,17 +1379,47 @@ router.get('/operations-overview', authenticateToken, apiLimiter, async (req: Au
       ? Math.round((withinTarget / cycleTimes.length) * 100)
       : 87; // Default fallback
 
-    // Turn Time by Stage (estimate based on cycle time breakdown)
-    // Application to Lock: ~28% of cycle time
-    // Lock to CTC: ~42% of cycle time
-    // CTC to Funding: ~30% of cycle time
+    // Turn Time by Stage - calculate actual times from milestone dates when available
+    // Qlik uses NetworkDays function but we'll use calendar days for simplicity
     const appToLockTarget = 10;
     const lockToCTCTarget = 15;
     const ctcToFundingTarget = 10;
 
-    const appToLockActual = Math.round(avgCycleTime * 0.28);
-    const lockToCTCActual = Math.round(avgCycleTime * 0.42);
-    const ctcToFundingActual = Math.round(avgCycleTime * 0.30);
+    // Calculate actual turn times from milestone dates
+    const appToLockTimes = loansWithDates
+      .filter(l => l.application_date && l.lock_date)
+      .map(l => daysBetween(l.application_date, l.lock_date))
+      .filter(d => d !== null && d > 0) as number[];
+    
+    const lockToCTCTimes = loansWithDates
+      .filter(l => l.lock_date && l.ctc_date)
+      .map(l => daysBetween(l.lock_date, l.ctc_date))
+      .filter(d => d !== null && d > 0) as number[];
+    
+    const ctcToFundingTimes = loansWithDates
+      .filter(l => l.ctc_date && (l.funding_date || l.closing_date))
+      .map(l => daysBetween(l.ctc_date, l.funding_date || l.closing_date))
+      .filter(d => d !== null && d > 0) as number[];
+
+    // Calculate averages or estimate from cycle time if no milestone dates available
+    const appToLockActual = appToLockTimes.length > 0
+      ? Math.round(appToLockTimes.reduce((sum, d) => sum + d, 0) / appToLockTimes.length)
+      : Math.round(avgCycleTime * 0.28);
+    
+    const lockToCTCActual = lockToCTCTimes.length > 0
+      ? Math.round(lockToCTCTimes.reduce((sum, d) => sum + d, 0) / lockToCTCTimes.length)
+      : Math.round(avgCycleTime * 0.42);
+    
+    const ctcToFundingActual = ctcToFundingTimes.length > 0
+      ? Math.round(ctcToFundingTimes.reduce((sum, d) => sum + d, 0) / ctcToFundingTimes.length)
+      : Math.round(avgCycleTime * 0.30);
+
+    logInfo('[OperationsOverview] Results', {
+      activeCount: activeLoans.length,
+      avgCycleTime,
+      processingEfficiency,
+      dateRange: { start: effectiveStartDate.toISOString(), end: effectiveEndDate.toISOString() }
+    });
 
     res.json({
       avgCycleTime: {
@@ -1420,6 +1584,1412 @@ router.put('/:loanId', authenticateToken, apiLimiter, async (req: AuthRequest, r
   } catch (error: any) {
     logError('Error updating loan', error, { userId: req.userId, loanId: req.params.id });
     res.status(500).json({ error: error.message || 'Failed to update loan' });
+  }
+});
+
+/**
+ * GET /api/loans/toptiering
+ * Get TopTiering data for Sales Scorecard with Pareto-based tier assignment
+ * 
+ * Based on Qlik logic:
+ * - DateType = 'Funding' (uses funding_date or closing_date)
+ * - Sort actors by revenue descending
+ * - Calculate cumulative % of total revenue
+ * - Assign tiers: Top (<=65%), Second (65-90%), Bottom (>90%)
+ * 
+ * Query Parameters:
+ * - actor: 'branch' | 'loan_officer' (default: 'branch')
+ * - startDate: ISO date string
+ * - endDate: ISO date string
+ * - channel_group: Optional channel filter
+ */
+router.get('/toptiering', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    // Get tenant_id from query parameter or profile
+    let tenantId = req.query.tenant_id as string | undefined;
+    
+    if (!tenantId) {
+      // Fall back to getting tenant_id from profile
+      const profileResult = await pool.query(
+        'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+        [req.userId]
+      );
+
+      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+        return res.status(404).json({ error: 'Tenant not found' });
+      }
+      tenantId = profileResult.rows[0].tenant_id;
+    }
+
+    const actor = (req.query.actor as string) || 'branch';
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const channelGroup = req.query.channel_group as string | undefined;
+
+    // Validate actor type
+    if (!['branch', 'loan_officer'].includes(actor)) {
+      return res.status(400).json({ error: 'Invalid actor type. Must be "branch" or "loan_officer"' });
+    }
+
+    // Determine the grouping column based on actor type
+    const actorColumn = actor === 'branch' ? 'branch' : 'loan_officer';
+
+    // Build date range filter
+    const now = new Date();
+    const effectiveEndDate = endDate ? new Date(endDate) : now;
+    const effectiveStartDate = startDate ? new Date(startDate) : new Date(now.getFullYear(), 0, 1);
+
+    logInfo('[TopTiering] Starting query', {
+      actor,
+      tenantId,
+      dateRange: { start: effectiveStartDate.toISOString(), end: effectiveEndDate.toISOString() },
+      channelGroup
+    });
+
+    // PHASE 1: Fetch ALL loans for tenant with minimal filtering
+    // This approach matches the working /company-overview endpoint
+    const allLoansResult = await retryQuery(
+      () => pool.query(
+        `SELECT 
+          loan_id, loan_amount, loan_type, current_loan_status, channel,
+          funding_date, closing_date, application_date, started_date,
+          branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
+          origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits
+         FROM public.loans 
+         WHERE tenant_id = $1`,
+        [tenantId]
+      ),
+      2, 500
+    );
+
+    const allLoans = allLoansResult.rows;
+    
+    logInfo('[TopTiering] Fetched all loans', {
+      totalLoans: allLoans.length,
+      sampleStatuses: allLoans.slice(0, 5).map(l => l.current_loan_status)
+    });
+
+    // PHASE 2: Apply channel filter in JavaScript
+    const channelFilteredLoans = allLoans.filter((l: any) => {
+      if (!channelGroup || channelGroup === 'All') return true;
+      
+      const channel = (l.channel || '').toLowerCase();
+      if (channelGroup === 'Retail') {
+        return channel.includes('retail') || channel.includes('brok');
+      } else if (channelGroup === 'TPO') {
+        return channel.includes('whole') || channel.includes('corresp');
+      } else if (channelGroup === '99-Missing') {
+        return !channel || channel.trim() === '';
+      } else if (channelGroup === 'Other') {
+        return channel && channel.trim() !== '' 
+          && !channel.includes('retail') && !channel.includes('brok')
+          && !channel.includes('whole') && !channel.includes('corresp');
+      }
+      return true;
+    });
+
+    // PHASE 3: Filter for FUNDED loans in date range
+    // A loan is "funded" if it has funding_date or closing_date
+    const fundedLoans = channelFilteredLoans.filter((l: any) => {
+      const fundDate = l.funding_date || l.closing_date;
+      if (!fundDate) return false;
+      const fd = new Date(fundDate);
+      return fd >= effectiveStartDate && fd <= effectiveEndDate;
+    });
+
+    logInfo('[TopTiering] After filtering', {
+      channelFiltered: channelFilteredLoans.length,
+      fundedInRange: fundedLoans.length
+    });
+
+    // PHASE 4: Filter for LOST OPPORTUNITY loans (withdrawn/denied) in date range
+    const lostOpportunityLoans = channelFilteredLoans.filter((l: any) => {
+      const status = (l.current_loan_status || '').toUpperCase();
+      const isLostOpportunity = status.includes('WITHDRAWN') || status.includes('DENIED') || 
+                                status.includes('CANCELLED') || status.includes('DECLINED');
+      if (!isLostOpportunity) return false;
+      
+      // Use application_date for lost opportunities
+      const appDate = l.application_date;
+      if (!appDate) return false;
+      const ad = new Date(appDate);
+      return ad >= effectiveStartDate && ad <= effectiveEndDate;
+    });
+
+    // Denied-only loans (subset of lost opportunity)
+    const deniedLoans = lostOpportunityLoans.filter((l: any) => {
+      const status = (l.current_loan_status || '').toUpperCase();
+      return status.includes('DENIED') || status.includes('DECLINED');
+    });
+
+    // PHASE 5: Count STARTED loans in date range (for pull-through calculation)
+    const startedLoans = channelFilteredLoans.filter((l: any) => {
+      const startedDate = l.started_date || l.application_date;
+      if (!startedDate) return false;
+      const sd = new Date(startedDate);
+      return sd >= effectiveStartDate && sd <= effectiveEndDate;
+    });
+
+    // Helper to calculate revenue for a loan
+    const calcLoanRevenue = (l: any): number => {
+      const origPoints = parseFloat(l.origination_points) || 0;
+      const origFeeBorr = parseFloat(l.orig_fee_borr_pd) || 0;
+      const origFeeSeller = parseFloat(l.orig_fees_seller) || 0;
+      const cdCredits = parseFloat(l.cd_lender_credits) || 0;
+      
+      // If revenue fields are populated, use them
+      if (origPoints + origFeeBorr + origFeeSeller > 0) {
+        return origPoints + origFeeBorr + origFeeSeller - cdCredits;
+      }
+      // Fallback: estimate revenue as 1% of loan amount
+      const loanAmount = parseFloat(l.loan_amount) || 0;
+      return loanAmount * 0.01;
+    };
+
+    // Helper to calculate turn time for a loan
+    const calcTurnTime = (l: any): number | null => {
+      const appDate = l.application_date;
+      const fundDate = l.funding_date || l.closing_date;
+      if (!appDate || !fundDate) return null;
+      const diffMs = new Date(fundDate).getTime() - new Date(appDate).getTime();
+      return Math.round(diffMs / (1000 * 60 * 60 * 24)); // days
+    };
+
+    // PHASE 6: Group funded loans by actor and calculate metrics
+    const actorMap = new Map<string, {
+      loans: any[];
+      revenue: number;
+      volume: number;
+      units: number;
+      turnTimes: number[];
+      ficoWeighted: { sum: number; weight: number };
+      ltvWeighted: { sum: number; weight: number };
+      dtiWeighted: { sum: number; weight: number };
+    }>();
+
+    fundedLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+
+      if (!actorMap.has(actorName)) {
+        actorMap.set(actorName, {
+          loans: [],
+          revenue: 0,
+          volume: 0,
+          units: 0,
+          turnTimes: [],
+          ficoWeighted: { sum: 0, weight: 0 },
+          ltvWeighted: { sum: 0, weight: 0 },
+          dtiWeighted: { sum: 0, weight: 0 },
+        });
+      }
+
+      const actor = actorMap.get(actorName)!;
+      const loanAmount = parseFloat(l.loan_amount) || 0;
+      const revenue = calcLoanRevenue(l);
+      const turnTime = calcTurnTime(l);
+
+      actor.loans.push(l);
+      actor.revenue += revenue;
+      actor.volume += loanAmount;
+      actor.units += 1;
+      
+      if (turnTime !== null && turnTime > 0) {
+        actor.turnTimes.push(turnTime);
+      }
+
+      // Weighted averages (weight by loan amount)
+      if (l.fico_score && loanAmount > 0) {
+        actor.ficoWeighted.sum += parseFloat(l.fico_score) * loanAmount;
+        actor.ficoWeighted.weight += loanAmount;
+      }
+      if (l.ltv_ratio && loanAmount > 0) {
+        actor.ltvWeighted.sum += parseFloat(l.ltv_ratio) * loanAmount;
+        actor.ltvWeighted.weight += loanAmount;
+      }
+      if (l.be_dti_ratio && loanAmount > 0) {
+        actor.dtiWeighted.sum += parseFloat(l.be_dti_ratio) * loanAmount;
+        actor.dtiWeighted.weight += loanAmount;
+      }
+    });
+
+    // PHASE 7: Calculate totals and sort by revenue for tier assignment
+    const actorMetrics = Array.from(actorMap.entries())
+      .map(([name, data]) => ({
+        name,
+        revenue: data.revenue,
+        volume: data.volume,
+        units: data.units,
+        revenueBps: data.volume > 0 ? (data.revenue / data.volume) * 10000 : 0,
+        revenuePerLoan: data.units > 0 ? data.revenue / data.units : 0,
+        avgTurnTime: data.turnTimes.length > 0 
+          ? data.turnTimes.reduce((a, b) => a + b, 0) / data.turnTimes.length 
+          : 0,
+        waFico: data.ficoWeighted.weight > 0 
+          ? data.ficoWeighted.sum / data.ficoWeighted.weight 
+          : 0,
+        waLtv: data.ltvWeighted.weight > 0 
+          ? data.ltvWeighted.sum / data.ltvWeighted.weight 
+          : 0,
+        waDti: data.dtiWeighted.weight > 0 
+          ? data.dtiWeighted.sum / data.dtiWeighted.weight 
+          : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    // Calculate total revenue for tier assignment
+    const totalRevenue = actorMetrics.reduce((sum, a) => sum + a.revenue, 0);
+    const totalVolume = actorMetrics.reduce((sum, a) => sum + a.volume, 0);
+    const totalUnits = actorMetrics.reduce((sum, a) => sum + a.units, 0);
+
+    // Assign tiers based on cumulative revenue percentage
+    let cumulativeRevenue = 0;
+    const actors = actorMetrics.map(a => {
+      cumulativeRevenue += a.revenue;
+      const cumulativePercent = totalRevenue > 0 ? (cumulativeRevenue / totalRevenue) * 100 : 0;
+      
+      let tier: 'top' | 'second' | 'bottom';
+      if (cumulativePercent <= 65) {
+        tier = 'top';
+      } else if (cumulativePercent <= 90) {
+        tier = 'second';
+      } else {
+        tier = 'bottom';
+      }
+
+      return {
+        ...a,
+        cumulativePercent,
+        tier,
+      };
+    });
+
+    // PHASE 8: Calculate Lost Opportunity metrics by actor
+    const lostOpportunityByActor = new Map<string, { units: number; revenue: number }>();
+    const deniedByActor = new Map<string, number>();
+
+    lostOpportunityLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+
+      if (!lostOpportunityByActor.has(actorName)) {
+        lostOpportunityByActor.set(actorName, { units: 0, revenue: 0 });
+      }
+      const lo = lostOpportunityByActor.get(actorName)!;
+      lo.units += 1;
+      lo.revenue += calcLoanRevenue(l);
+    });
+
+    deniedLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+      deniedByActor.set(actorName, (deniedByActor.get(actorName) || 0) + 1);
+    });
+
+    // PHASE 9: Calculate tier summaries
+    const topTierActors = actors.filter(a => a.tier === 'top');
+    const secondTierActors = actors.filter(a => a.tier === 'second');
+    const bottomTierActors = actors.filter(a => a.tier === 'bottom');
+
+    const calcTierSummary = (tierActors: typeof actors) => {
+      const tierNames = new Set(tierActors.map(a => a.name));
+      
+      // Lost opportunity for this tier
+      let lostUnits = 0;
+      let lostRevenue = 0;
+      let deniedUnits = 0;
+      
+      tierNames.forEach(name => {
+        const lo = lostOpportunityByActor.get(name);
+        if (lo) {
+          lostUnits += lo.units;
+          lostRevenue += lo.revenue;
+        }
+        deniedUnits += deniedByActor.get(name) || 0;
+      });
+
+      // Started loans for this tier (for pull-through)
+      const tierStartedLoans = startedLoans.filter((l: any) => tierNames.has(l[actorColumn]));
+      const tierFundedCount = tierActors.reduce((sum, a) => sum + a.units, 0);
+      const pullThrough = tierStartedLoans.length > 0 
+        ? (tierFundedCount / tierStartedLoans.length) * 100 
+        : 0;
+
+      // Calculate averages
+      const validTurnTimes = tierActors.filter(a => a.avgTurnTime > 0);
+      const validFicos = tierActors.filter(a => a.waFico > 0);
+      const validLtvs = tierActors.filter(a => a.waLtv > 0);
+      const validDtis = tierActors.filter(a => a.waDti > 0);
+
+      return {
+        count: tierActors.length,
+        revenue: tierActors.reduce((sum, a) => sum + a.revenue, 0),
+        volume: tierActors.reduce((sum, a) => sum + a.volume, 0),
+        units: tierActors.reduce((sum, a) => sum + a.units, 0),
+        percent: totalRevenue > 0 
+          ? (tierActors.reduce((sum, a) => sum + a.revenue, 0) / totalRevenue) * 100 
+          : 0,
+        avgTurnTime: validTurnTimes.length > 0 
+          ? validTurnTimes.reduce((sum, a) => sum + a.avgTurnTime, 0) / validTurnTimes.length 
+          : 0,
+        waFico: validFicos.length > 0 
+          ? validFicos.reduce((sum, a) => sum + a.waFico, 0) / validFicos.length 
+          : 0,
+        waLtv: validLtvs.length > 0 
+          ? validLtvs.reduce((sum, a) => sum + a.waLtv, 0) / validLtvs.length 
+          : 0,
+        waDti: validDtis.length > 0 
+          ? validDtis.reduce((sum, a) => sum + a.waDti, 0) / validDtis.length 
+          : 0,
+        lostOpportunityUnits: lostUnits,
+        lostOpportunityRevenue: lostRevenue,
+        deniedUnits: deniedUnits,
+        pullThrough: pullThrough,
+      };
+    };
+
+    const tierSummary = {
+      topTier: calcTierSummary(topTierActors),
+      secondTier: calcTierSummary(secondTierActors),
+      bottomTier: calcTierSummary(bottomTierActors),
+    };
+
+    // Overall totals including lost opportunity metrics
+    const totalLostOpportunityUnits = lostOpportunityLoans.length;
+    const totalLostOpportunityRevenue = lostOpportunityLoans.reduce((sum: number, l: any) => sum + calcLoanRevenue(l), 0);
+    const totalDeniedUnits = deniedLoans.length;
+    const totalPullThrough = startedLoans.length > 0 ? (fundedLoans.length / startedLoans.length) * 100 : 0;
+
+    // Calculate overall weighted averages
+    const allTurnTimes = actors.filter(a => a.avgTurnTime > 0);
+    const allFicos = actors.filter(a => a.waFico > 0);
+    const allLtvs = actors.filter(a => a.waLtv > 0);
+    const allDtis = actors.filter(a => a.waDti > 0);
+
+    const totals = {
+      revenue: totalRevenue,
+      volume: totalVolume,
+      units: totalUnits,
+      avgTurnTime: allTurnTimes.length > 0 
+        ? allTurnTimes.reduce((sum, a) => sum + a.avgTurnTime, 0) / allTurnTimes.length 
+        : 0,
+      waFico: allFicos.length > 0 
+        ? allFicos.reduce((sum, a) => sum + a.waFico, 0) / allFicos.length 
+        : 0,
+      waLtv: allLtvs.length > 0 
+        ? allLtvs.reduce((sum, a) => sum + a.waLtv, 0) / allLtvs.length 
+        : 0,
+      waDti: allDtis.length > 0 
+        ? allDtis.reduce((sum, a) => sum + a.waDti, 0) / allDtis.length 
+        : 0,
+      lostOpportunityUnits: totalLostOpportunityUnits,
+      lostOpportunityRevenue: totalLostOpportunityRevenue,
+      deniedUnits: totalDeniedUnits,
+      pullThrough: totalPullThrough,
+    };
+
+    logInfo('[TopTiering] Results', {
+      actor,
+      actorCount: actors.length,
+      dateRange: { start: effectiveStartDate.toISOString(), end: effectiveEndDate.toISOString() },
+      tierCounts: { top: topTierActors.length, second: secondTierActors.length, bottom: bottomTierActors.length },
+      totals: { revenue: totalRevenue, volume: totalVolume, units: totalUnits },
+      lostOpportunity: { units: totalLostOpportunityUnits, revenue: totalLostOpportunityRevenue },
+      denied: totalDeniedUnits,
+      pullThrough: totalPullThrough
+    });
+
+    res.json({
+      actors,
+      totals,
+      tierSummary,
+      dateRange: {
+        startDate: effectiveStartDate.toISOString(),
+        endDate: effectiveEndDate.toISOString(),
+      },
+    });
+  } catch (error: any) {
+    logError('Error fetching toptiering data', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to fetch toptiering data' });
+  }
+});
+
+/**
+ * GET /api/loans/sales-scorecard
+ * Get TTS (Top Tier Score) Sales Scorecard data with weighted scoring system
+ * 
+ * Based on Qlik Performance App "Sales Scorecard" sheet
+ * 
+ * TTS Component Ratings (each compared to company average, 100 = average):
+ * - Volume Rating: (Actor Avg Loan Amount / Company Avg Loan Amount) × 100
+ * - Margin Rating: (Actor Avg Revenue / Company Avg Revenue) × 100
+ * - Turn Time Rating: (Company Avg Turn Time / Actor Turn Time) × 100 (inverse - faster is better)
+ * - Pull-Through Rating: (Actor Pull-Through / Company Avg Pull-Through) × 100
+ * 
+ * TTS Formula (with compound weighting):
+ * TTS = (UnitRating × UnitWeight + VolumeRating × VolumeWeight + MarginRating × MarginWeight + 
+ *        ConcessionRating × ConcessionWeight + PullThroughRating × PullThroughWeight +
+ *        TurnTimeRating × TurnTimeWeight) / 100
+ * 
+ * Default Weights (from Qlik TTS Formula Documentation):
+ * - Unit: 20%, Volume: 20%, Margin: 20%, Concessions: 20%, Pull-Through: 15%, Turn Time: 5%
+ * 
+ * Tier Assignment (Score-Based Thresholds from Qlik):
+ * - Top Tier: TTS > 120
+ * - Second Tier (Above Average): TTS 100-120
+ * - Bottom Tier: TTS < 100 (combines Below Average 80-100 and Bottom Tier <80)
+ * 
+ * Date Type: FUNDING DATE (DateType={'Funding'} in Qlik)
+ * 
+ * Query Parameters:
+ * - actor: 'branch' | 'loan_officer' (default: 'loan_officer')
+ * - startDate: ISO date string (default: 13 months ago - rolling 13 months)
+ * - endDate: ISO date string (default: today)
+ * - channel_group: Optional channel filter
+ */
+router.get('/sales-scorecard', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    // Get tenant pool from context (same as other loan endpoints)
+    const tenantPool = getTenantContext(req).tenantPool;
+
+    const actor = (req.query.actor as string) || 'loan_officer';
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const channelGroup = req.query.channel_group as string | undefined;
+
+    // Validate actor type
+    if (!['branch', 'loan_officer'].includes(actor)) {
+      return res.status(400).json({ error: 'Invalid actor type. Must be "branch" or "loan_officer"' });
+    }
+
+    const actorColumn = actor === 'branch' ? 'branch' : 'loan_officer';
+
+    // Build date range - DEFAULT to rolling 13 months (per Qlik TTS scorecard standard)
+    // Qlik's Rolling13MonthFlag: AddMonths(MonthEnd(vMaxDate), -13, 1) 
+    // = First day of the month that is 13 months before the max date's month
+    const now = new Date();
+    const effectiveEndDate = endDate ? new Date(endDate) : now;
+    // Default start date is first day of the month, 13 months ago (Qlik eCCA_TVI_Score_13_Months)
+    // Example: If end date is Jan 24, 2026, start = Dec 1, 2024 (first day, 13 months back)
+    const effectiveStartDate = startDate 
+      ? new Date(startDate) 
+      : new Date(effectiveEndDate.getFullYear(), effectiveEndDate.getMonth() - 13, 1);
+
+    // TTS Weight Configuration - matches Qlik eCCA_TVI_Score_13_Months formula (6 components)
+    // From TTS_FORMULA_FINDINGS.md: Qlik uses ALL 6 components with NO compound scaling
+    // Weights from XML (divided by 10): Volume=2, Margin=2, TurnTime=0.5, PullThrough=1.5, Unit=2, Concession=2
+    // Compound scaling is COMMENTED OUT in Qlik - do NOT multiply by VolumeRating/100 or MarginRating/100
+    const weightConfig = {
+      volume: 2,        // 20% / 10 - Volume Rating weight
+      margin: 2,        // 20% / 10 - Margin Rating weight  
+      turnTime: 0.5,    // 5% / 10 - Turn Time Rating weight (NO compound scaling)
+      pullThrough: 1.5, // 15% / 10 - Pull Through Rating weight (NO compound scaling)
+      unit: 2,          // 20% / 10 - Unit Rating weight
+      concession: 2,    // 20% / 10 - Concession Rating weight (conditional)
+    };
+    // Concession is conditional via vCCA_ScorecardIncludeConcession - assume enabled for now
+    const includeConcession = true;
+    const totalWeight = includeConcession 
+      ? weightConfig.volume + weightConfig.margin + weightConfig.turnTime + weightConfig.pullThrough + weightConfig.unit + weightConfig.concession  // = 10
+      : weightConfig.volume + weightConfig.margin + weightConfig.turnTime + weightConfig.pullThrough + weightConfig.unit;  // = 8
+
+    logInfo('[SalesScorecard] Starting TTS calculation', {
+      actor,
+      dateRange: { start: effectiveStartDate.toISOString(), end: effectiveEndDate.toISOString() },
+      channelGroup,
+      weights: weightConfig
+    });
+
+    // PHASE 1: Fetch ALL loans from tenant database (no tenant_id filter needed - pool is tenant-specific)
+    // Note: DateType={'Funding'} in Qlik - we filter by funding_date
+    // Branch Concession from Qlik: "Branch Price Concession" (Fields.3375) - stored as percentage
+    // Qlik only uses Branch Concession for TTS (Corporate Concession is loaded but not used)
+    // Added occupancy_type and borr_self_employed for Loan Complexity Score calculation
+    // Added rate_lock_buy_side_base_price_rate for Revenue calculation per Qlik Transform.qvs line 549:
+    //   Revenue = [Base Buy ($)] + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
+    //   [Base Buy ($)] = ((Base Buy - 100) / 100) * Loan Amount
+    const allLoansResult = await retryQuery(
+      () => tenantPool.query(
+        `SELECT 
+          loan_id, loan_amount, loan_type, loan_purpose, current_loan_status, channel,
+          funding_date, closing_date, application_date, started_date,
+          branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
+          origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
+          branch_price_concession, occupancy_type, borr_self_employed,
+          rate_lock_buy_side_base_price_rate
+         FROM loans`
+      ),
+      2, 500
+    );
+
+    const allLoans = allLoansResult.rows;
+
+    // Debug logging for zero data investigation
+    logInfo('[SalesScorecard] Data check', {
+      totalLoans: allLoans.length,
+      loansWithFundingDate: allLoans.filter((l: any) => l.funding_date).length,
+      loansWithClosingDate: allLoans.filter((l: any) => l.closing_date).length,
+      loansWithLoanOfficer: allLoans.filter((l: any) => l.loan_officer && l.loan_officer.trim() !== '').length,
+      loansWithBranch: allLoans.filter((l: any) => l.branch && l.branch.trim() !== '').length,
+      sampleLoanOfficers: [...new Set(allLoans.slice(0, 20).map((l: any) => l.loan_officer).filter(Boolean))],
+      sampleBranches: [...new Set(allLoans.slice(0, 20).map((l: any) => l.branch).filter(Boolean))],
+    });
+
+    // PHASE 2: Apply channel filter
+    const channelFilteredLoans = allLoans.filter((l: any) => {
+      if (!channelGroup || channelGroup === 'All') return true;
+      
+      const channel = (l.channel || '').toLowerCase();
+      if (channelGroup === 'Retail') {
+        return channel.includes('retail') || channel.includes('brok');
+      } else if (channelGroup === 'TPO') {
+        return channel.includes('whole') || channel.includes('corresp');
+      } else if (channelGroup === '99-Missing') {
+        return !channel || channel.trim() === '';
+      } else if (channelGroup === 'Other') {
+        return channel && channel.trim() !== '' 
+          && !channel.includes('retail') && !channel.includes('brok')
+          && !channel.includes('whole') && !channel.includes('corresp');
+      }
+      return true;
+    });
+
+    // PHASE 3: Filter for FUNDED loans in date range
+    // Qlik: DateType*={'Funding'} - ONLY uses funding_date, no fallback to closing_date
+    const fundedLoans = channelFilteredLoans.filter((l: any) => {
+      if (!l.funding_date) return false; // Must have funding_date (no fallback)
+      const fd = new Date(l.funding_date);
+      return fd >= effectiveStartDate && fd <= effectiveEndDate;
+    });
+
+    // PHASE 4: Filter for STARTED loans in date range (for pull-through)
+    const startedLoans = channelFilteredLoans.filter((l: any) => {
+      const startedDate = l.started_date || l.application_date;
+      if (!startedDate) return false;
+      const sd = new Date(startedDate);
+      return sd >= effectiveStartDate && sd <= effectiveEndDate;
+    });
+
+    // PHASE 5: Filter for LOST OPPORTUNITY loans (withdrawn/denied) in date range
+    const lostOpportunityLoans = channelFilteredLoans.filter((l: any) => {
+      const status = (l.current_loan_status || '').toUpperCase();
+      const isLostOpportunity = status.includes('WITHDRAWN') || status.includes('DENIED') || 
+                                status.includes('CANCELLED') || status.includes('DECLINED');
+      if (!isLostOpportunity) return false;
+      
+      // Use application_date for lost opportunities
+      const appDate = l.application_date;
+      if (!appDate) return false;
+      const ad = new Date(appDate);
+      return ad >= effectiveStartDate && ad <= effectiveEndDate;
+    });
+
+    // Denied-only loans (subset of lost opportunity)
+    const deniedLoans = lostOpportunityLoans.filter((l: any) => {
+      const status = (l.current_loan_status || '').toUpperCase();
+      return status.includes('DENIED') || status.includes('DECLINED');
+    });
+
+    logInfo('[SalesScorecard] Filtered loans', {
+      total: allLoans.length,
+      channelFiltered: channelFilteredLoans.length,
+      funded: fundedLoans.length,
+      started: startedLoans.length,
+      lostOpportunity: lostOpportunityLoans.length,
+      denied: deniedLoans.length
+    });
+
+    // Helper functions
+    // Revenue calculation per Qlik Transform.qvs line 549:
+    //   When vDefaultRevFlag=0: Revenue = [Base Buy ($)] + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
+    //   Where [Base Buy ($)] = ((Base Buy - 100) / 100) * Loan Amount
+    //   "Base Buy" = rate_lock_buy_side_base_price_rate in our database
+    //   If Base Buy is 0/missing, fall back to Origination Points (per Qlik Origination Revenue formula)
+    const calcLoanRevenue = (l: any): number => {
+      const loanAmount = parseFloat(l.loan_amount) || 0;
+      const origPoints = parseFloat(l.origination_points) || 0;
+      const origFeeBorr = parseFloat(l.orig_fee_borr_pd) || 0;
+      const origFeeSeller = parseFloat(l.orig_fees_seller) || 0;
+      const cdCredits = parseFloat(l.cd_lender_credits) || 0;
+      
+      // rate_lock_buy_side_base_price_rate is stored as a rate (e.g., 102.5 = 2.5% gain over par)
+      const baseBuy = parseFloat(l.rate_lock_buy_side_base_price_rate) || 0;
+      
+      let revenue;
+      if (baseBuy > 0 && loanAmount > 0) {
+        // Use Base Buy formula when available
+        const baseBuyDollars = ((baseBuy - 100) / 100) * loanAmount;
+        revenue = baseBuyDollars + origFeeBorr + origFeeSeller - cdCredits;
+      } else {
+        // Fall back to Origination Points when Base Buy is not available
+        // Per Qlik: Origination Revenue = Origination Points + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
+        revenue = origPoints + origFeeBorr + origFeeSeller - cdCredits;
+      }
+      
+      // Only use fallback estimate if no revenue data at all
+      if (revenue !== 0 || origPoints > 0 || origFeeBorr > 0 || origFeeSeller > 0 || baseBuy > 0) {
+        return revenue;
+      }
+      
+      // Fallback: estimate revenue as 1% of loan amount (only if no real data)
+      return loanAmount * 0.01;
+    };
+
+    const calcTurnTime = (l: any): number | null => {
+      const appDate = l.application_date;
+      const fundDate = l.funding_date || l.closing_date;
+      if (!appDate || !fundDate) return null;
+      const diffMs = new Date(fundDate).getTime() - new Date(appDate).getTime();
+      return Math.round(diffMs / (1000 * 60 * 60 * 24));
+    };
+
+    /**
+     * Calculate Loan Complexity Score per Qlik Transform.qvs
+     * Sum of 8 components: Loan Purpose, Loan Type, Loan Amount, Occupancy, FICO, LTV, DTI, Employment
+     */
+    const calcLoanComplexity = (l: any): number => {
+      let complexity = 0;
+      
+      // 1. Loan Purpose Complexity
+      const loanPurpose = (l.loan_purpose || '').toUpperCase().trim();
+      if (loanPurpose.includes('C TO P') || loanPurpose.includes('CONSTRUCTION')) {
+        complexity += 0.3;
+      } else if (loanPurpose.includes('PURCHASE')) {
+        complexity += 0.1;
+      } else if (loanPurpose.includes('REFI') && loanPurpose.includes('CO')) {
+        complexity += 0.1; // Refi CO (cash out)
+      }
+      // Refi No CO = 0, default = 0
+      
+      // 2. Loan Type Complexity
+      const loanType = (l.loan_type || '').toUpperCase().trim();
+      if (loanType === 'FHA' || loanType.includes('FHA')) {
+        complexity += 0.1;
+      } else if (loanType === 'VA' || loanType.includes('VA')) {
+        complexity += 0.05;
+      }
+      // Conventional = 0, default = 0
+      
+      // 3. Loan Amount Complexity (Jumbo >= $1M)
+      const loanAmount = parseFloat(l.loan_amount) || 0;
+      if (loanAmount >= 1000000) {
+        complexity += 0.1;
+      }
+      
+      // 4. Occupancy Complexity
+      const occupancy = (l.occupancy_type || '').toUpperCase().trim();
+      if (occupancy.includes('SECOND') || occupancy === 'SECONDHOME') {
+        complexity += 0.1;
+      } else if (occupancy.includes('INVEST') || occupancy === 'INVESTOR') {
+        complexity += 0.1;
+      }
+      // Primary = 0, default = 0
+      
+      // 5. FICO Complexity (note: excellent FICO reduces complexity)
+      const fico = parseInt(l.fico_score) || 0;
+      if (fico > 0) {
+        if (fico > 760) {
+          complexity -= 0.1; // Excellent credit reduces complexity
+        } else if (fico > 681) {
+          complexity += 0; // Good credit = neutral
+        } else if (fico > 620) {
+          complexity += 0.05; // Fair credit
+        } else {
+          complexity += 0.15; // Poor credit
+        }
+      }
+      
+      // 6. LTV Complexity (high LTV >= 95%)
+      const ltv = parseFloat(l.ltv_ratio) || 0;
+      if (ltv >= 95) {
+        complexity += 0.05;
+      }
+      
+      // 7. DTI Complexity (high DTI >= 43%)
+      const dti = parseFloat(l.be_dti_ratio) || 0;
+      if (dti >= 43) {
+        complexity += 0.05;
+      }
+      
+      // 8. Employment Complexity (self-employed)
+      const selfEmployed = l.borr_self_employed;
+      if (selfEmployed === true || selfEmployed === 'Y' || selfEmployed === 'y' || selfEmployed === 'true' || selfEmployed === '1') {
+        complexity += 0.2;
+      }
+      
+      return complexity;
+    };
+
+    // PHASE 6: Group funded loans by actor and calculate raw metrics
+    interface ActorMetrics {
+      units: number;
+      volume: number;
+      revenue: number;
+      marginBpsValues: number[]; // Margin (BPS) values per loan for averaging
+      concessions: number[];   // Price concessions for concession rating
+      turnTimes: number[];
+      complexityScores: number[]; // Loan complexity scores per Qlik
+      fundedCount: number;
+      startedCount: number;
+      applicationCount: number;     // Total applications for this actor (for pull-through denominator)
+      pullThroughFundedCount: number; // Loans with funding date (for pull-through numerator)
+      lostOpportunityUnits: number;
+      lostOpportunityRevenue: number;
+      deniedUnits: number;
+      ficoWeighted: { sum: number; weight: number };
+      ltvWeighted: { sum: number; weight: number };
+      dtiWeighted: { sum: number; weight: number };
+    }
+
+    const actorMap = new Map<string, ActorMetrics>();
+
+    // Count started loans per actor (legacy - kept for compatibility)
+    const actorStartedCount = new Map<string, number>();
+    startedLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+      actorStartedCount.set(actorName, (actorStartedCount.get(actorName) || 0) + 1);
+    });
+
+    // Count applications per actor (for pull-through calculation)
+    // Qlik Pull Through formula from Expressions.csv line 1391-1450:
+    //   Numerator: Count({<DateType*={'Application'}, Rolling13MonthFlag*={Yes}, [Active Loan Flag]*={No}, 
+    //                     [Pull Through Originated Flag]*={Yes}, ...>}[Loan Number])
+    //   Denominator: Count({<DateType*={'Application'}, Rolling13MonthFlag*={Yes}, [Active Loan Flag]*={No}, ...>}[Loan Number])
+    // Key points:
+    //   - BOTH use DateType={'Application'} (application_date) in rolling 13-month window
+    //   - BOTH filter by [Active Loan Flag]={No} (inactive loans only)
+    //   - Numerator adds [Pull Through Originated Flag]={Yes} (has funding_date)
+    const actorApplicationCountForPullThrough = new Map<string, number>();  // Denominator: all inactive loans
+    const actorFundedCountForPullThrough = new Map<string, number>();      // Numerator: inactive loans with funding
+    
+    channelFilteredLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+      
+      // Check application date is in the rolling 13-month window
+      const appDate = l.application_date;
+      if (!appDate) return;
+      const ad = new Date(appDate);
+      if (ad < effectiveStartDate || ad > effectiveEndDate) return;
+      
+      // Check if loan is inactive ([Active Loan Flag]={No})
+      // Active loans are those still in process - inactive means funded, withdrawn, denied, etc.
+      const hasFundingDate = !!l.funding_date;
+      const status = (l.current_loan_status || '').toUpperCase();
+      const isInactive = hasFundingDate || 
+                         status.includes('WITHDRAWN') || status.includes('DENIED') || 
+                         status.includes('CANCELLED') || status.includes('DECLINED') ||
+                         status.includes('ORIGINATED') || status.includes('PURCHASED');
+      
+      if (!isInactive) return; // Skip active loans
+      
+      // Count as application (denominator) - all inactive loans with application_date in range
+      actorApplicationCountForPullThrough.set(actorName, (actorApplicationCountForPullThrough.get(actorName) || 0) + 1);
+      
+      // Count if funded (numerator) - [Pull Through Originated Flag]={Yes} = has funding_date
+      if (hasFundingDate) {
+        actorFundedCountForPullThrough.set(actorName, (actorFundedCountForPullThrough.get(actorName) || 0) + 1);
+      }
+    });
+
+    // Count lost opportunity loans per actor
+    const actorLostOpportunity = new Map<string, { units: number; revenue: number }>();
+    lostOpportunityLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+      
+      if (!actorLostOpportunity.has(actorName)) {
+        actorLostOpportunity.set(actorName, { units: 0, revenue: 0 });
+      }
+      const data = actorLostOpportunity.get(actorName)!;
+      data.units += 1;
+      data.revenue += calcLoanRevenue(l);
+    });
+
+    // Count denied loans per actor
+    const actorDenied = new Map<string, number>();
+    deniedLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+      actorDenied.set(actorName, (actorDenied.get(actorName) || 0) + 1);
+    });
+
+    // Process funded loans
+    fundedLoans.forEach((l: any) => {
+      const actorName = l[actorColumn];
+      if (!actorName || actorName.trim() === '') return;
+
+      if (!actorMap.has(actorName)) {
+        const lostOpp = actorLostOpportunity.get(actorName) || { units: 0, revenue: 0 };
+        actorMap.set(actorName, {
+          units: 0,
+          volume: 0,
+          revenue: 0,
+          marginBpsValues: [],
+          concessions: [],
+          turnTimes: [],
+          complexityScores: [],
+          fundedCount: 0,
+          startedCount: actorStartedCount.get(actorName) || 0,
+          applicationCount: actorApplicationCountForPullThrough.get(actorName) || 0,  // Application count for pull-through denominator (inactive loans with app_date in range)
+          pullThroughFundedCount: actorFundedCountForPullThrough.get(actorName) || 0,  // Funded count for pull-through numerator (inactive loans with funding_date)
+          lostOpportunityUnits: lostOpp.units,
+          lostOpportunityRevenue: lostOpp.revenue,
+          deniedUnits: actorDenied.get(actorName) || 0,
+          ficoWeighted: { sum: 0, weight: 0 },
+          ltvWeighted: { sum: 0, weight: 0 },
+          dtiWeighted: { sum: 0, weight: 0 },
+        });
+      }
+
+      const actorData = actorMap.get(actorName)!;
+      const loanAmount = parseFloat(l.loan_amount) || 0;
+      const revenue = calcLoanRevenue(l);
+      const turnTime = calcTurnTime(l);
+
+      actorData.units += 1;
+      actorData.volume += loanAmount;
+      actorData.revenue += revenue;
+      actorData.fundedCount += 1;
+      
+      // Track Margin (BPS) per loan for Qlik Margin Rating calculation
+      // Qlik uses Avg([Margin (BPS)]) per actor, NOT total revenue
+      // Margin BPS = (Revenue / Loan Amount) * 10000
+      if (loanAmount > 0) {
+        const marginBps = (revenue / loanAmount) * 10000;
+        actorData.marginBpsValues.push(marginBps);
+      }
+      
+      if (turnTime !== null && turnTime > 0) {
+        actorData.turnTimes.push(turnTime);
+      }
+      
+      // Track price concessions from Qlik: Branch Concession ($) = (Branch Concession / 100) * Loan Amount
+      // Qlik only uses Branch Concession for TTS calculations (Corporate Concession is loaded but not used)
+      // The database stores branch_price_concession as a percentage (e.g., 0.25 = 0.25%)
+      const branchConcessionPct = parseFloat(l.branch_price_concession) || 0;
+      
+      if (branchConcessionPct !== 0 && loanAmount > 0) {
+        // Calculate Branch Concession ($): (Branch Concession / 100) * Loan Amount
+        const concessionDollars = (branchConcessionPct / 100) * loanAmount;
+        actorData.concessions.push(concessionDollars);
+      }
+      
+      // Track loan complexity score per Qlik Transform.qvs
+      const complexityScore = calcLoanComplexity(l);
+      actorData.complexityScores.push(complexityScore);
+      
+      // Debug: Log first 3 loans' complexity breakdown
+      if (actorMap.size <= 1 && actorData.complexityScores.length <= 3) {
+        logInfo('[SalesScorecard] Complexity Debug', {
+          loan_id: l.loan_id,
+          loan_purpose: l.loan_purpose,
+          loan_type: l.loan_type,
+          loan_amount: loanAmount,
+          occupancy_type: l.occupancy_type,
+          fico_score: l.fico_score,
+          ltv_ratio: l.ltv_ratio,
+          be_dti_ratio: l.be_dti_ratio,
+          borr_self_employed: l.borr_self_employed,
+          calculated_complexity: complexityScore,
+        });
+      }
+
+      // Weighted averages
+      if (l.fico_score && loanAmount > 0) {
+        actorData.ficoWeighted.sum += parseFloat(l.fico_score) * loanAmount;
+        actorData.ficoWeighted.weight += loanAmount;
+      }
+      if (l.ltv_ratio && loanAmount > 0) {
+        actorData.ltvWeighted.sum += parseFloat(l.ltv_ratio) * loanAmount;
+        actorData.ltvWeighted.weight += loanAmount;
+      }
+      if (l.be_dti_ratio && loanAmount > 0) {
+        actorData.dtiWeighted.sum += parseFloat(l.be_dti_ratio) * loanAmount;
+        actorData.dtiWeighted.weight += loanAmount;
+      }
+    });
+
+    // PHASE 7: Calculate company-wide averages and totals
+    const actorCount = actorMap.size;
+    
+    // Calculate totals for lost opportunity and denied (company-wide)
+    const totalLostOpportunityUnits = lostOpportunityLoans.length;
+    const totalLostOpportunityRevenue = lostOpportunityLoans.reduce((sum: number, l: any) => sum + calcLoanRevenue(l), 0);
+    const totalDeniedUnits = deniedLoans.length;
+    
+    // Calculate company-wide weighted averages
+    let totalFicoWeightedSum = 0, totalFicoWeight = 0;
+    let totalLtvWeightedSum = 0, totalLtvWeight = 0;
+    let totalDtiWeightedSum = 0, totalDtiWeight = 0;
+    
+    fundedLoans.forEach((l: any) => {
+      const loanAmount = parseFloat(l.loan_amount) || 0;
+      if (l.fico_score && loanAmount > 0) {
+        totalFicoWeightedSum += parseFloat(l.fico_score) * loanAmount;
+        totalFicoWeight += loanAmount;
+      }
+      if (l.ltv_ratio && loanAmount > 0) {
+        totalLtvWeightedSum += parseFloat(l.ltv_ratio) * loanAmount;
+        totalLtvWeight += loanAmount;
+      }
+      if (l.be_dti_ratio && loanAmount > 0) {
+        totalDtiWeightedSum += parseFloat(l.be_dti_ratio) * loanAmount;
+        totalDtiWeight += loanAmount;
+      }
+    });
+
+    // Return empty response if no actors found
+    if (actorCount === 0) {
+      return res.json({
+        actors: [],
+        companyAverages: { avgLoanAmount: 0, avgRevenue: 0, avgPullThrough: 0, avgTurnTime: 0 },
+        weightConfig,
+        tierSummary: {
+          top: createEmptyTierSummary(),
+          second: createEmptyTierSummary(),
+          bottom: createEmptyTierSummary(),
+        },
+        totals: {
+          actorCount: 0,
+          units: 0,
+          volume: 0,
+          revenue: 0,
+          avgTurnTime: 0,
+          pullThrough: 0,
+          waFico: 0,
+          waLtv: 0,
+          waDti: 0,
+          lostOpportunityUnits: 0,
+          lostOpportunityRevenue: 0,
+          deniedUnits: 0,
+          avgTtsScore: 0,
+          loanComplexityScore: 100,
+        },
+        dateRange: { startDate: effectiveStartDate.toISOString(), endDate: effectiveEndDate.toISOString() },
+      });
+    }
+
+    // Aggregate metrics across all actors
+    // Qlik Rating Formulas require TOTALS per actor, then average of totals
+    let totalUnits = 0;
+    let totalVolume = 0;
+    let totalRevenue = 0;
+    let totalPullThroughSum = 0;
+    let pullThroughCount = 0;
+    let totalInverseTurnTimeSum = 0; // Sum of (1/turn_time) for Qlik formula
+    let turnTimeActorCount = 0;
+    let totalConcessionPerActor = 0; // Sum of total concessions per actor
+    let concessionActorCount = 0;
+    let totalAvgMarginBpsPerActor = 0; // Sum of Avg Margin BPS per actor
+    let marginBpsActorCount = 0;
+
+    actorMap.forEach((data) => {
+      totalUnits += data.units;
+      totalVolume += data.volume;
+      totalRevenue += data.revenue;
+      
+      // Margin BPS per actor - Qlik uses Avg([Margin (BPS)]) per actor
+      // vScorecardMarginAvg = Avg(Aggr(Avg([Margin (BPS)]), Actor))
+      if (data.marginBpsValues.length > 0) {
+        const avgMarginBps = data.marginBpsValues.reduce((a, b) => a + b, 0) / data.marginBpsValues.length;
+        totalAvgMarginBpsPerActor += avgMarginBps;
+        marginBpsActorCount++;
+      }
+      
+      // Pull-through per actor (percentage)
+      const actorPullThrough = data.startedCount > 0 
+        ? (data.fundedCount / data.startedCount) * 100 
+        : 0;
+      if (actorPullThrough > 0) {
+        totalPullThroughSum += actorPullThrough;
+        pullThroughCount++;
+      }
+      
+      // Turn time per actor - Qlik uses INVERSE: Pow(TurnTime, -1)
+      // vCCA_ScorecardTurnTimeAvg = Avg(Aggr(Pow([Scorecard TurnTime], -1), Actor))
+      if (data.turnTimes.length > 0) {
+        const avgTurnTime = data.turnTimes.reduce((a, b) => a + b, 0) / data.turnTimes.length;
+        if (avgTurnTime > 0) {
+          totalInverseTurnTimeSum += 1 / avgTurnTime; // Inverse for Qlik formula
+        }
+        turnTimeActorCount++;
+      }
+      
+      // Concession per actor - use TOTAL concession for this actor
+      if (data.concessions.length > 0) {
+        const totalActorConcession = data.concessions.reduce((a, b) => a + b, 0);
+        totalConcessionPerActor += totalActorConcession;
+        concessionActorCount++;
+      }
+    });
+
+    // Calculate company-wide averages PER ACTOR (not per loan) for ratings
+    // Qlik formulas: Rating = (Actor Value / Avg Actor Value) × 100
+    const avgUnitsPerActor = actorCount > 0 ? totalUnits / actorCount : 0;
+    const avgVolumePerActor = actorCount > 0 ? totalVolume / actorCount : 0;
+    const avgRevenuePerActor = actorCount > 0 ? totalRevenue / actorCount : 0;
+    const avgConcessionPerActor = concessionActorCount > 0 ? totalConcessionPerActor / concessionActorCount : 0;
+    const avgInverseTurnTime = turnTimeActorCount > 0 ? totalInverseTurnTimeSum / turnTimeActorCount : 1/30;
+    const avgPullThroughPerActor = pullThroughCount > 0 ? totalPullThroughSum / pullThroughCount : 70;
+    // Margin BPS average: Avg of (Avg Margin BPS per actor) across all actors
+    const avgMarginBpsPerActor = marginBpsActorCount > 0 ? totalAvgMarginBpsPerActor / marginBpsActorCount : 100;
+
+    const companyAverages = {
+      // For Rating calculations (per-actor totals)
+      avgUnitsPerActor,        // Avg units per actor
+      avgVolumePerActor,       // Avg total volume per actor
+      avgRevenuePerActor,      // Avg total revenue per actor (kept for display)
+      avgMarginBpsPerActor,    // Avg of Avg Margin BPS per actor (for Margin Rating)
+      avgConcessionPerActor,   // Avg total concession per actor
+      avgPullThrough: avgPullThroughPerActor, // Avg pull-through % per actor
+      avgInverseTurnTime,      // Avg of (1/turn_time) per actor - for Qlik inverse formula
+      // For display (per-loan averages)
+      avgLoanAmount: totalUnits > 0 ? totalVolume / totalUnits : 0,
+      avgRevenue: totalUnits > 0 ? totalRevenue / totalUnits : 0,
+    };
+
+    // Company-wide pull-through
+    const companyPullThrough = startedLoans.length > 0 
+      ? (fundedLoans.length / startedLoans.length) * 100 
+      : 0;
+
+    // Company-wide average turn time
+    const companyTurnTimes = fundedLoans
+      .map((l: any) => calcTurnTime(l))
+      .filter((t): t is number => t !== null && t > 0);
+    const companyAvgTurnTime = companyTurnTimes.length > 0 
+      ? companyTurnTimes.reduce((a, b) => a + b, 0) / companyTurnTimes.length 
+      : 30;
+
+    logInfo('[SalesScorecard] Company averages', companyAverages);
+
+    // PHASE 8: Calculate TTS score for each actor
+    interface ActorScore {
+      name: string;
+      units: number;
+      volume: number;
+      revenue: number;
+      revenueBps: number;
+      pullThrough: number;
+      avgTurnTime: number;
+      waFico: number;
+      waLtv: number;
+      waDti: number;
+      lostOpportunityUnits: number;
+      lostOpportunityRevenue: number;
+      deniedUnits: number;
+      ttsScore: number;
+      avgComplexity: number; // Loan complexity score per Qlik Transform.qvs
+      tier: 'top' | 'second' | 'bottom';
+    }
+
+    const actorScores: ActorScore[] = [];
+
+    actorMap.forEach((data, name) => {
+      // Calculate actor's values for ratings
+      // Pull Through per Qlik Expressions.csv line 1391-1450:
+      //   = Count({DateType={'Application'}, Rolling13MonthFlag={Yes}, [Active Loan Flag]={No}, [Pull Through Originated Flag]={Yes}})
+      //     / Count({DateType={'Application'}, Rolling13MonthFlag={Yes}, [Active Loan Flag]={No}})
+      // Both use application_date in rolling 13-month window, filter inactive loans only
+      // Numerator: inactive loans with funding_date ([Pull Through Originated Flag]={Yes})
+      // Denominator: all inactive loans with application_date in range
+      const actorPullThrough = data.applicationCount > 0 
+        ? (data.pullThroughFundedCount / data.applicationCount) * 100 
+        : companyAverages.avgPullThrough;
+      const actorAvgTurnTime = data.turnTimes.length > 0 
+        ? data.turnTimes.reduce((a, b) => a + b, 0) / data.turnTimes.length 
+        : 0;
+      const actorTotalConcession = data.concessions.length > 0
+        ? data.concessions.reduce((a, b) => a + b, 0)
+        : 0;
+
+      // Calculate all 6 ratings per Qlik TTS Formula Documentation
+      // Qlik ratings use TOTALS per actor compared to AVG TOTALS across actors
+      // Rating = (Actor Total Value / Avg Total Value Per Actor) × 100
+      // A rating of 100 = average performance
+      
+      // 1. Unit Rating: Actor's total units vs avg units per actor
+      // Qlik: [Scorecard Output Units] / vScorecardUnitsAverage * 100
+      const unitRating = companyAverages.avgUnitsPerActor > 0 
+        ? (data.units / companyAverages.avgUnitsPerActor) * 100 
+        : 100;
+      
+      // 2. Volume Rating: Actor's TOTAL volume vs avg TOTAL volume per actor
+      // Qlik: [CCA Scorecard Volume] / vCCA_ScorecardVolumeAvg * 100
+      // [CCA Scorecard Volume] = Sum of Loan Amount for the actor
+      const volumeRating = companyAverages.avgVolumePerActor > 0 
+        ? (data.volume / companyAverages.avgVolumePerActor) * 100 
+        : 100;
+      
+      // 3. Margin Rating: Actor's TOTAL revenue dollars vs avg TOTAL revenue per actor
+      // From TTS_FORMULA_FINDINGS.md: Uses Revenue in DOLLARS, not BPS
+      // Qlik: [CCA Scorecard Margin $] / vCCA_ScorecardMarginAvg * 100
+      // [CCA Scorecard Margin $] = Sum([Revenue]) per actor
+      const marginRating = companyAverages.avgRevenuePerActor > 0 
+        ? (data.revenue / companyAverages.avgRevenuePerActor) * 100 
+        : 100;
+      
+      // 4. Concession Rating: Actor's TOTAL concession vs avg TOTAL concession per actor
+      const concessionRating = companyAverages.avgConcessionPerActor > 0 
+        ? (actorTotalConcession / companyAverages.avgConcessionPerActor) * 100 
+        : 100;
+      
+      // 5. Pull-Through Rating: Actor's pull-through % vs avg pull-through %
+      // Qlik: [CCA Scorecard PullThrough] / vCCA_ScorecardPullThroughAvg * 100
+      const pullThroughRating = companyAverages.avgPullThrough > 0 
+        ? (actorPullThrough / companyAverages.avgPullThrough) * 100 
+        : 100;
+      
+      // 6. Turn Time Rating: Uses INVERSE formula (shorter time = better rating)
+      // Qlik: Pow([CCA Scorecard TurnTime], -1) / vCCA_ScorecardTurnTimeAvg * 100
+      // Where vCCA_ScorecardTurnTimeAvg = Avg(Aggr(Pow([Scorecard TurnTime], -1), Actor))
+      // Actor Rating = (1/ActorTurnTime) / Avg(1/AllActorTurnTimes) * 100
+      const actorInverseTurnTime = actorAvgTurnTime > 0 ? 1 / actorAvgTurnTime : 0;
+      const turnTimeRating = companyAverages.avgInverseTurnTime > 0 && actorInverseTurnTime > 0
+        ? (actorInverseTurnTime / companyAverages.avgInverseTurnTime) * 100 
+        : 100;
+
+      // Calculate TTS score using Qlik's eCCA_TVI_Score_13_Months formula (6 components, NO compound scaling)
+      // From TTS_FORMULA_FINDINGS.md: Compound scaling is COMMENTED OUT in Qlik
+      // TTS = (VolumeRating×VolumeWeight + MarginRating×MarginWeight + TurnTimeRating×TurnTimeWeight
+      //        + PullThroughRating×PullThroughWeight + UnitRating×UnitWeight + ConcessionRating×ConcessionWeight)
+      //      / totalWeight
+      // Concession is conditional via Pick(vCCA_ScorecardIncludeConcession, 0, value)
+      const concessionComponent = includeConcession 
+        ? concessionRating * weightConfig.concession 
+        : 0;
+      
+      const ttsScore = (
+        volumeRating * weightConfig.volume +
+        marginRating * weightConfig.margin +
+        turnTimeRating * weightConfig.turnTime +           // NO compound scaling (commented out in Qlik)
+        pullThroughRating * weightConfig.pullThrough +     // NO compound scaling (commented out in Qlik)
+        unitRating * weightConfig.unit +
+        concessionComponent
+      ) / totalWeight;
+
+      // Calculate weighted averages
+      const waFico = data.ficoWeighted.weight > 0 
+        ? data.ficoWeighted.sum / data.ficoWeighted.weight 
+        : 0;
+      const waLtv = data.ltvWeighted.weight > 0 
+        ? data.ltvWeighted.sum / data.ltvWeighted.weight 
+        : 0;
+      const waDti = data.dtiWeighted.weight > 0 
+        ? data.dtiWeighted.sum / data.dtiWeighted.weight 
+        : 0;
+
+      // Revenue in basis points
+      const revenueBps = data.volume > 0 
+        ? (data.revenue / data.volume) * 10000 
+        : 0;
+      
+      // Average loan complexity for this actor
+      // Raw complexity is 0.0 to ~0.6, but Qlik displays as: (1 + rawComplexity) * 100
+      // So 0.14 raw → 114.0 displayed
+      const rawAvgComplexity = data.complexityScores.length > 0
+        ? data.complexityScores.reduce((sum, c) => sum + c, 0) / data.complexityScores.length
+        : 0;
+      const avgComplexity = (1 + rawAvgComplexity) * 100;
+
+      actorScores.push({
+        name,
+        units: data.units,
+        volume: data.volume,
+        revenue: data.revenue,
+        revenueBps,
+        pullThrough: actorPullThrough,
+        avgTurnTime: actorAvgTurnTime,
+        waFico,
+        waLtv,
+        waDti,
+        lostOpportunityUnits: data.lostOpportunityUnits,
+        lostOpportunityRevenue: data.lostOpportunityRevenue,
+        deniedUnits: data.deniedUnits,
+        ttsScore,
+        avgComplexity,
+        tier: 'top', // Will be assigned below
+      });
+    });
+
+    // PHASE 9: Assign tiers based on TTS SCORE THRESHOLDS (from Qlik vCCA_TVI_13MonthTiersDim)
+    // - Top Tier: TTS >= 120
+    // - Second Tier: TTS >= 80 (and < 120)
+    // - Bottom Tier: TTS < 80
+    // Filter out LOs with 0 units (no production) - they shouldn't be in the scorecard
+    const actorsWithProduction = actorScores.filter(a => a.units > 0);
+    actorsWithProduction.sort((a, b) => b.ttsScore - a.ttsScore);
+
+    actorsWithProduction.forEach((actor) => {
+      if (actor.ttsScore >= 120) {
+        actor.tier = 'top';
+      } else if (actor.ttsScore >= 80) {
+        actor.tier = 'second';
+      } else {
+        actor.tier = 'bottom';
+      }
+    });
+
+    // PHASE 10: Calculate tier summaries
+    function createEmptyTierSummary() {
+      return {
+        count: 0,
+        units: 0,
+        unitsPercent: 0,
+        volume: 0,
+        volumePercent: 0,
+        revenue: 0,
+        revenueBps: 0,
+        avgTurnTime: 0,
+        pullThrough: 0,
+        waFico: 0,
+        waLtv: 0,
+        waDti: 0,
+        lostOpportunityUnits: 0,
+        lostOpportunityRevenue: 0,
+        deniedUnits: 0,
+        avgLoRevenue: 0,
+        avgLoUnits: 0,
+        avgTtsScore: 0,
+        loanComplexityScore: 0,
+      };
+    }
+
+    function calcTierSummary(tierActors: ActorScore[]) {
+      if (tierActors.length === 0) return createEmptyTierSummary();
+      
+      const tierUnits = tierActors.reduce((sum, a) => sum + a.units, 0);
+      const tierVolume = tierActors.reduce((sum, a) => sum + a.volume, 0);
+      const tierRevenue = tierActors.reduce((sum, a) => sum + a.revenue, 0);
+      const tierLostUnits = tierActors.reduce((sum, a) => sum + a.lostOpportunityUnits, 0);
+      const tierLostRevenue = tierActors.reduce((sum, a) => sum + a.lostOpportunityRevenue, 0);
+      const tierDenied = tierActors.reduce((sum, a) => sum + a.deniedUnits, 0);
+      
+      // Weighted averages for the tier
+      let tierFicoSum = 0, tierFicoWeight = 0;
+      let tierLtvSum = 0, tierLtvWeight = 0;
+      let tierDtiSum = 0, tierDtiWeight = 0;
+      
+      tierActors.forEach(a => {
+        if (a.waFico > 0 && a.volume > 0) {
+          tierFicoSum += a.waFico * a.volume;
+          tierFicoWeight += a.volume;
+        }
+        if (a.waLtv > 0 && a.volume > 0) {
+          tierLtvSum += a.waLtv * a.volume;
+          tierLtvWeight += a.volume;
+        }
+        if (a.waDti > 0 && a.volume > 0) {
+          tierDtiSum += a.waDti * a.volume;
+          tierDtiWeight += a.volume;
+        }
+      });
+
+      // Average turn time and pull-through for tier
+      const tierTurnTimes = tierActors.filter(a => a.avgTurnTime > 0);
+      const avgTurnTime = tierTurnTimes.length > 0 
+        ? tierTurnTimes.reduce((sum, a) => sum + a.avgTurnTime, 0) / tierTurnTimes.length 
+        : 0;
+      
+      const tierPullThroughs = tierActors.filter(a => a.pullThrough > 0);
+      const avgPullThrough = tierPullThroughs.length > 0 
+        ? tierPullThroughs.reduce((sum, a) => sum + a.pullThrough, 0) / tierPullThroughs.length 
+        : 0;
+      
+      // Average loan complexity for tier (weighted by units)
+      // Note: avgComplexity already has the (1 + raw) * 100 formula applied
+      const tierComplexityActors = tierActors.filter((a: any) => a.avgComplexity !== undefined && a.avgComplexity > 0);
+      const tierAvgComplexity = tierComplexityActors.length > 0
+        ? tierComplexityActors.reduce((sum: number, a: any) => sum + (a.avgComplexity * a.units), 0) / tierUnits
+        : 100; // Default to 100 (which is (1 + 0) * 100)
+
+      return {
+        count: tierActors.length,
+        units: tierUnits,
+        unitsPercent: totalUnits > 0 ? (tierUnits / totalUnits) * 100 : 0,
+        volume: tierVolume,
+        volumePercent: totalVolume > 0 ? (tierVolume / totalVolume) * 100 : 0,
+        revenue: tierRevenue,
+        revenueBps: tierVolume > 0 ? (tierRevenue / tierVolume) * 10000 : 0,
+        avgTurnTime,
+        pullThrough: avgPullThrough,
+        waFico: tierFicoWeight > 0 ? tierFicoSum / tierFicoWeight : 0,
+        waLtv: tierLtvWeight > 0 ? tierLtvSum / tierLtvWeight : 0,
+        waDti: tierDtiWeight > 0 ? tierDtiSum / tierDtiWeight : 0,
+        lostOpportunityUnits: tierLostUnits,
+        lostOpportunityRevenue: tierLostRevenue,
+        deniedUnits: tierDenied,
+        avgLoRevenue: tierActors.length > 0 ? tierRevenue / tierActors.length : 0,
+        avgLoUnits: tierActors.length > 0 ? tierUnits / tierActors.length : 0,
+        avgTtsScore: tierActors.length > 0 
+          ? tierActors.reduce((sum, a) => sum + a.ttsScore, 0) / tierActors.length 
+          : 0,
+        loanComplexityScore: tierAvgComplexity,
+      };
+    }
+
+    const tierSummary = {
+      top: calcTierSummary(actorsWithProduction.filter(a => a.tier === 'top')),
+      second: calcTierSummary(actorsWithProduction.filter(a => a.tier === 'second')),
+      bottom: calcTierSummary(actorsWithProduction.filter(a => a.tier === 'bottom')),
+    };
+
+    logInfo('[SalesScorecard] TTS Results', {
+      actorCount: actorsWithProduction.length,  // Only count LOs with production
+      tierCounts: {
+        top: tierSummary.top.count,
+        second: tierSummary.second.count,
+        bottom: tierSummary.bottom.count,
+      },
+      topActors: actorsWithProduction.slice(0, 3).map(a => ({ name: a.name, ttsScore: a.ttsScore.toFixed(1), tier: a.tier })),
+    });
+
+    // Calculate company-wide totals
+    // Average complexity weighted by units across all actors
+    // Note: avgComplexity already has the (1 + raw) * 100 formula applied
+    const complexityActors = actorsWithProduction.filter((a: any) => a.avgComplexity > 0);
+    const totalComplexityWeighted = complexityActors.reduce((sum: number, a: any) => 
+      sum + (a.avgComplexity * a.units), 0);
+    const avgComplexityTotal = totalUnits > 0 ? totalComplexityWeighted / totalUnits : 100;
+    
+    const totals = {
+      actorCount: actorsWithProduction.length,  // Use filtered count
+      units: totalUnits,
+      volume: totalVolume,
+      revenue: totalRevenue,
+      revenueBps: totalVolume > 0 ? (totalRevenue / totalVolume) * 10000 : 0,
+      avgTurnTime: companyAvgTurnTime,
+      pullThrough: companyPullThrough,
+      waFico: totalFicoWeight > 0 ? totalFicoWeightedSum / totalFicoWeight : 0,
+      waLtv: totalLtvWeight > 0 ? totalLtvWeightedSum / totalLtvWeight : 0,
+      waDti: totalDtiWeight > 0 ? totalDtiWeightedSum / totalDtiWeight : 0,
+      lostOpportunityUnits: totalLostOpportunityUnits,
+      lostOpportunityRevenue: totalLostOpportunityRevenue,
+      deniedUnits: totalDeniedUnits,
+      avgLoRevenue: actorsWithProduction.length > 0 ? totalRevenue / actorsWithProduction.length : 0,
+      avgLoUnits: actorsWithProduction.length > 0 ? totalUnits / actorsWithProduction.length : 0,
+      avgTtsScore: actorsWithProduction.length > 0 
+        ? actorsWithProduction.reduce((sum, a) => sum + a.ttsScore, 0) / actorsWithProduction.length 
+        : 0,
+      loanComplexityScore: avgComplexityTotal,
+    };
+
+    res.json({
+      actors: actorsWithProduction,  // Only include LOs with production (units > 0)
+      companyAverages,
+      weightConfig,
+      tierSummary,
+      totals,
+      dateRange: {
+        startDate: effectiveStartDate.toISOString(),
+        endDate: effectiveEndDate.toISOString(),
+      },
+    });
+  } catch (error: any) {
+    logError('Error fetching sales scorecard data', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to fetch sales scorecard data' });
   }
 });
 

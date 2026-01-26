@@ -6,32 +6,22 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from '@/components/theme-provider';
-import { Filter, BookmarkCheck, ChevronLeft, ChevronRight, Plus, Search, Download, Maximize2, Minimize2, TrendingUp, Info } from 'lucide-react';
+import { Search, Download, Maximize2, Minimize2, TrendingUp, Loader2 } from 'lucide-react';
+import { 
+  useSalesScorecardData, 
+  TTSActor, 
+  TTSTier,
+  TTSTierSummary,
+  getTierDisplayName,
+  formatCurrency,
+  formatNumber,
+  formatPercent
+} from '@/hooks/useSalesScorecardData';
+import { useAuth } from '@/contexts/AuthContext';
+import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
 
 type ScorecardActor = 'branch' | 'loan-officer';
-type DateRange = '3-months' | '6-months';
 type ActiveTab = 'summary' | 'detail';
-
-interface LoanOfficer {
-  id: string;
-  name: string;
-  branch: string;
-  units: number;
-  volume: number;
-  revenue: number;
-  pullThrough: number;
-  tier: 'top' | '2nd' | 'bottom';
-}
-
-interface Branch {
-  id: string;
-  name: string;
-  loCount: number;
-  units: number;
-  volume: number;
-  revenue: number;
-  pullThrough: number;
-}
 
 interface SummaryMetrics {
   metric: string;
@@ -42,202 +32,293 @@ interface SummaryMetrics {
   category?: 'general' | 'average-conditions';
 }
 
-// Mock data for 3 months
-const mockLoanOfficers3Months: LoanOfficer[] = [
-  { id: '1', name: 'John Smith', branch: 'Main Branch', units: 45, volume: 12500000, revenue: 312500, pullThrough: 78.0, tier: 'top' },
-  { id: '2', name: 'Sarah Johnson', branch: 'Main Branch', units: 38, volume: 10200000, revenue: 275400, pullThrough: 72.0, tier: 'top' },
-  { id: '3', name: 'Mike Davis', branch: 'West Branch', units: 32, volume: 8900000, revenue: 231400, pullThrough: 68.0, tier: '2nd' },
-  { id: '4', name: 'Emily Chen', branch: 'East Branch', units: 28, volume: 7500000, revenue: 187500, pullThrough: 65.0, tier: '2nd' },
-  { id: '5', name: 'Robert Wilson', branch: 'West Branch', units: 22, volume: 5800000, revenue: 139200, pullThrough: 58.0, tier: 'bottom' },
-];
-
-// Mock data for 6 months (same structure, could have different values)
-const mockLoanOfficers6Months: LoanOfficer[] = [
-  { id: '1', name: 'John Smith', branch: 'Main Branch', units: 45, volume: 12500000, revenue: 312500, pullThrough: 78.0, tier: 'top' },
-  { id: '2', name: 'Sarah Johnson', branch: 'Main Branch', units: 38, volume: 10200000, revenue: 275400, pullThrough: 72.0, tier: 'top' },
-  { id: '3', name: 'Mike Davis', branch: 'West Branch', units: 32, volume: 8900000, revenue: 231400, pullThrough: 68.0, tier: '2nd' },
-  { id: '4', name: 'Emily Chen', branch: 'East Branch', units: 28, volume: 7500000, revenue: 187500, pullThrough: 65.0, tier: '2nd' },
-  { id: '5', name: 'Robert Wilson', branch: 'West Branch', units: 22, volume: 5800000, revenue: 139200, pullThrough: 58.0, tier: 'bottom' },
-];
-
-// Mock data for branches (3 months)
-const mockBranches3Months: Branch[] = [
-  { id: '1', name: 'Main Branch', loCount: 12, units: 245, volume: 68500000, revenue: 1700000, pullThrough: 74.0 },
-  { id: '2', name: 'West Branch', loCount: 8, units: 165, volume: 45200000, revenue: 1100000, pullThrough: 68.0 },
-  { id: '3', name: 'East Branch', loCount: 6, units: 120, volume: 32000000, revenue: 800000, pullThrough: 62.0 },
-];
-
-// Mock data for branches (6 months)
-const mockBranches6Months: Branch[] = [
-  { id: '1', name: 'Main Branch', loCount: 12, units: 245, volume: 68500000, revenue: 1700000, pullThrough: 74.0 },
-  { id: '2', name: 'West Branch', loCount: 8, units: 165, volume: 45200000, revenue: 1100000, pullThrough: 68.0 },
-  { id: '3', name: 'East Branch', loCount: 6, units: 120, volume: 32000000, revenue: 800000, pullThrough: 62.0 },
-];
-
-// Summary metrics data for 3 months
-const summaryMetrics3Months: SummaryMetrics[] = [
-  { metric: 'Loan Officer Count', totals: 162, topTier: 27, secondTier: 54, bottomTier: 81, category: 'general' },
-  { metric: 'TTS Long Term Units', totals: 100.6, topTier: 65.4, secondTier: 25.2, bottomTier: 10.1, category: 'general' },
-  { metric: 'Loan Complexity Score', totals: 113.2, topTier: 113.6, secondTier: 113.4, bottomTier: 113.5, category: 'general' },
-  { metric: 'Units', totals: 2051, topTier: 1333, secondTier: 513, bottomTier: 205, category: 'general' },
-  { metric: 'Units %', totals: 100.0, topTier: 65.0, secondTier: 25.0, bottomTier: 10.0, category: 'general' },
-  { metric: 'Volume', totals: 468900000, topTier: 304800000, secondTier: 117200000, bottomTier: 46900000, category: 'general' },
-  { metric: 'Volume %', totals: 100.0, topTier: 65.0, secondTier: 25.0, bottomTier: 10.0, category: 'general' },
-  { metric: 'Revenue $', totals: 12500000, topTier: 8100000, secondTier: 3100000, bottomTier: 1300000, category: 'general' },
-  { metric: 'Revenue (BPS)', totals: 269.7, topTier: 276.5, secondTier: 268.7, bottomTier: 272.7, category: 'general' },
-  { metric: 'Lost Opportunity Revenue', totals: 3000000, topTier: 1900000, secondTier: 743117, bottomTier: 297247, category: 'general' },
-  { metric: 'Turn Time App to Close', totals: 38.55, topTier: 38.46, secondTier: 35.75, bottomTier: 38.22, category: 'average-conditions' },
-  { metric: 'Pull Through', totals: 70.0, topTier: 67.4, secondTier: 70.9, bottomTier: 64.7, category: 'average-conditions' },
-  { metric: 'WA W-H Days', totals: 8.97, topTier: 7.78, secondTier: 7.85, bottomTier: 7.34, category: 'average-conditions' },
-  { metric: 'WA FICO', totals: 711, topTier: 713, secondTier: 717, bottomTier: 713, category: 'average-conditions' },
-  { metric: 'WA LTV', totals: 80.3, topTier: 81.9, secondTier: 80.0, bottomTier: 79.2, category: 'average-conditions' },
-  { metric: 'WA DTI', totals: 38.6, topTier: 38.6, secondTier: 40.5, bottomTier: 39.6, category: 'average-conditions' },
-  { metric: 'Lost Opportunity Units', totals: 992, topTier: 645, secondTier: 248, bottomTier: 99, category: 'general' },
-  { metric: 'Denied Units', totals: 25, topTier: 16, secondTier: 6, bottomTier: 3, category: 'general' },
-  { metric: 'Avg LO Revenue', totals: 77386, topTier: 50301, secondTier: 19347, bottomTier: 7739, category: 'general' },
-  { metric: 'Avg LO Units', totals: 13, topTier: 8, secondTier: 3, bottomTier: 1, category: 'general' },
-];
-
-// Summary metrics data for 6 months
-const summaryMetrics6Months: SummaryMetrics[] = [
-  { metric: 'Loan Officer Count', totals: 162, topTier: 27, secondTier: 54, bottomTier: 81, category: 'general' },
-  { metric: 'TTS Long Term Units', totals: 100.6, topTier: 65.4, secondTier: 25.2, bottomTier: 10.1, category: 'general' },
-  { metric: 'Loan Complexity Score', totals: 114.6, topTier: 114.5, secondTier: 113.7, bottomTier: 113.3, category: 'general' },
-  { metric: 'Units', totals: 2051, topTier: 1333, secondTier: 513, bottomTier: 205, category: 'general' },
-  { metric: 'Units %', totals: 100.0, topTier: 65.0, secondTier: 25.0, bottomTier: 10.0, category: 'general' },
-  { metric: 'Volume', totals: 468900000, topTier: 304800000, secondTier: 117200000, bottomTier: 46900000, category: 'general' },
-  { metric: 'Volume %', totals: 100.0, topTier: 65.0, secondTier: 25.0, bottomTier: 10.0, category: 'general' },
-  { metric: 'Revenue $', totals: 12500000, topTier: 8100000, secondTier: 3100000, bottomTier: 1300000, category: 'general' },
-  { metric: 'Revenue (BPS)', totals: 271.2, topTier: 277.8, secondTier: 262.7, bottomTier: 262.6, category: 'general' },
-  { metric: 'Lost Opportunity Revenue', totals: 3000000, topTier: 1900000, secondTier: 743117, bottomTier: 297247, category: 'general' },
-  { metric: 'Turn Time App to Close', totals: 39.24, topTier: 39.18, secondTier: 36.27, bottomTier: 36.85, category: 'average-conditions' },
-  { metric: 'Pull Through', totals: 68.2, topTier: 69.9, secondTier: 69.8, bottomTier: 70.2, category: 'average-conditions' },
-  { metric: 'WA W-H Days', totals: 4.87, topTier: 10.21, secondTier: 7.56, bottomTier: 7.23, category: 'average-conditions' },
-  { metric: 'WA FICO', totals: 717, topTier: 713, secondTier: 715, bottomTier: 714, category: 'average-conditions' },
-  { metric: 'WA LTV', totals: 80.8, topTier: 81.2, secondTier: 80.5, bottomTier: 80.9, category: 'average-conditions' },
-  { metric: 'WA DTI', totals: 40.6, topTier: 38.5, secondTier: 39.9, bottomTier: 37.8, category: 'average-conditions' },
-  { metric: 'Lost Opportunity Units', totals: 992, topTier: 645, secondTier: 248, bottomTier: 99, category: 'general' },
-  { metric: 'Denied Units', totals: 25, topTier: 16, secondTier: 6, bottomTier: 3, category: 'general' },
-  { metric: 'Avg LO Revenue', totals: 77386, topTier: 50301, secondTier: 19347, bottomTier: 7739, category: 'general' },
-  { metric: 'Avg LO Units', totals: 13, topTier: 8, secondTier: 3, bottomTier: 1, category: 'general' },
-];
-
 const SalesScorecard = () => {
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
+  const { user } = useAuth();
 
   const [selectedActor, setSelectedActor] = useState<ScorecardActor>(() => {
     const saved = localStorage.getItem('sales-scorecard-actor');
     return (saved as ScorecardActor) || 'loan-officer';
   });
 
-  const [dateRange, setDateRange] = useState<DateRange>(() => {
-    const saved = localStorage.getItem('sales-scorecard-dateRange');
-    return (saved as DateRange) || '6-months';
-  });
+  // Use the reusable date period state hook (same as CompanyScorecard)
+  const { year: selectedYear, setYear: setSelectedYear, dateRange, setDateRange } = useDatePeriodState();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     const saved = localStorage.getItem('sales-scorecard-tab');
-    return (saved as ActiveTab) || 'detail';
+    return (saved as ActiveTab) || 'summary';
   });
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Get tenant_id from auth context
+  const tenantId = user?.tenant_id || null;
+
+  // Fetch TTS data from API using the hook
+  const actorType = selectedActor === 'branch' ? 'branch' : 'loan_officer';
+  const { data: scorecardData, loading, error } = useSalesScorecardData(actorType, dateRange, tenantId);
 
   useEffect(() => {
     localStorage.setItem('sales-scorecard-actor', selectedActor);
   }, [selectedActor]);
 
   useEffect(() => {
-    localStorage.setItem('sales-scorecard-dateRange', dateRange);
-  }, [dateRange]);
-
-  useEffect(() => {
     localStorage.setItem('sales-scorecard-tab', activeTab);
   }, [activeTab]);
 
-  // Get data based on actor and date range
-  const getCurrentData = useMemo(() => {
-    if (selectedActor === 'branch') {
-      return dateRange === '3-months' ? mockBranches3Months : mockBranches6Months;
-    } else {
-      return dateRange === '3-months' ? mockLoanOfficers3Months : mockLoanOfficers6Months;
-    }
-  }, [selectedActor, dateRange]);
-
-  // Get summary metrics based on date range
-  const summaryMetrics = useMemo(() => {
-    return dateRange === '3-months' ? summaryMetrics3Months : summaryMetrics6Months;
-  }, [dateRange]);
-
-  // Filter data based on search query
-  const filteredData = useMemo(() => {
-    if (!searchQuery) return getCurrentData;
-    const query = searchQuery.toLowerCase();
-    
-    if (selectedActor === 'branch') {
-      return (getCurrentData as Branch[]).filter(
-        (branch) => branch.name.toLowerCase().includes(query)
-      );
-    } else {
-      return (getCurrentData as LoanOfficer[]).filter(
-        (officer) =>
-          officer.name.toLowerCase().includes(query) ||
-          officer.branch.toLowerCase().includes(query)
-      );
-    }
-  }, [searchQuery, getCurrentData, selectedActor]);
-
-  const formatCurrency = (value: number) => {
-    if (value >= 1000000) {
-      return `$${(value / 1000000).toFixed(1)}M`;
-    }
-    return `$${(value / 1000).toFixed(0)}K`;
+  // Helper function to safely format numbers
+  const safeFixed = (value: number | undefined | null, decimals: number = 1): string => {
+    if (value === undefined || value === null || isNaN(value)) return '-';
+    return value.toFixed(decimals);
   };
 
-  const formatNumber = (num: number) => num.toLocaleString('en-US');
+  // Empty tier summary with all properties zeroed out
+  const emptyTierSummary: TTSTierSummary = {
+    count: 0, units: 0, unitsPercent: 0, volume: 0, volumePercent: 0,
+    revenue: 0, revenueBps: 0, avgTurnTime: 0, pullThrough: 0,
+    waFico: 0, waLtv: 0, waDti: 0, lostOpportunityUnits: 0,
+    lostOpportunityRevenue: 0, deniedUnits: 0, avgLoRevenue: 0,
+    avgLoUnits: 0, avgTtsScore: 0, loanComplexityScore: 0,
+  };
 
-  const getTierBadge = (tier: 'top' | '2nd' | 'bottom') => {
+  // Generate the 20 summary metrics matching the reference app
+  const summaryMetrics = useMemo((): SummaryMetrics[] => {
+    if (!scorecardData?.totals || !scorecardData?.tierSummary) return [];
+    
+    const { totals, tierSummary } = scorecardData;
+    const top = tierSummary.top || emptyTierSummary;
+    const second = tierSummary.second || emptyTierSummary;
+    const bottom = tierSummary.bottom || emptyTierSummary;
+    
+    return [
+      // General metrics (14)
+      { 
+        metric: selectedActor === 'branch' ? 'Branch Count' : 'Loan Officer Count', 
+        totals: totals.actorCount || 0, 
+        topTier: top.count || 0, 
+        secondTier: second.count || 0,
+        bottomTier: bottom.count || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'TTS Long Term Score', 
+        totals: safeFixed(totals.avgTtsScore), 
+        topTier: safeFixed(top.avgTtsScore), 
+        secondTier: safeFixed(second.avgTtsScore),
+        bottomTier: safeFixed(bottom.avgTtsScore), 
+        category: 'general' 
+      },
+      { 
+        metric: 'Loan Complexity Score', 
+        totals: safeFixed(totals.loanComplexityScore), 
+        topTier: safeFixed(top.loanComplexityScore), 
+        secondTier: safeFixed(second.loanComplexityScore),
+        bottomTier: safeFixed(bottom.loanComplexityScore), 
+        category: 'general' 
+      },
+      { 
+        metric: 'Units', 
+        totals: totals.units || 0, 
+        topTier: top.units || 0, 
+        secondTier: second.units || 0,
+        bottomTier: bottom.units || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'Units %', 
+        totals: '100.0', 
+        topTier: safeFixed(top.unitsPercent), 
+        secondTier: safeFixed(second.unitsPercent),
+        bottomTier: safeFixed(bottom.unitsPercent), 
+        category: 'general' 
+      },
+      { 
+        metric: 'Volume', 
+        totals: totals.volume || 0, 
+        topTier: top.volume || 0, 
+        secondTier: second.volume || 0,
+        bottomTier: bottom.volume || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'Volume %', 
+        totals: '100.0', 
+        topTier: safeFixed(top.volumePercent), 
+        secondTier: safeFixed(second.volumePercent),
+        bottomTier: safeFixed(bottom.volumePercent), 
+        category: 'general' 
+      },
+      { 
+        metric: 'Revenue $', 
+        totals: totals.revenue || 0, 
+        topTier: top.revenue || 0, 
+        secondTier: second.revenue || 0,
+        bottomTier: bottom.revenue || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'Revenue (BPS)', 
+        totals: safeFixed(totals.revenueBps), 
+        topTier: safeFixed(top.revenueBps), 
+        secondTier: safeFixed(second.revenueBps),
+        bottomTier: safeFixed(bottom.revenueBps), 
+        category: 'general' 
+      },
+      { 
+        metric: 'Lost Opportunity Revenue', 
+        totals: totals.lostOpportunityRevenue || 0, 
+        topTier: top.lostOpportunityRevenue || 0, 
+        secondTier: second.lostOpportunityRevenue || 0,
+        bottomTier: bottom.lostOpportunityRevenue || 0, 
+        category: 'general' 
+      },
+      // Average Conditions metrics (6)
+      { 
+        metric: 'Turn Time App to Close', 
+        totals: safeFixed(totals.avgTurnTime, 2), 
+        topTier: safeFixed(top.avgTurnTime, 2), 
+        secondTier: safeFixed(second.avgTurnTime, 2),
+        bottomTier: safeFixed(bottom.avgTurnTime, 2), 
+        category: 'average-conditions' 
+      },
+      { 
+        metric: 'Pull Through', 
+        totals: safeFixed(totals.pullThrough), 
+        topTier: safeFixed(top.pullThrough), 
+        secondTier: safeFixed(second.pullThrough),
+        bottomTier: safeFixed(bottom.pullThrough), 
+        category: 'average-conditions' 
+      },
+      { 
+        metric: 'WA W-H Days', 
+        totals: '-', 
+        topTier: '-', 
+        secondTier: '-',
+        bottomTier: '-', 
+        category: 'average-conditions' 
+      },
+      { 
+        metric: 'WA FICO', 
+        totals: (totals.waFico && totals.waFico > 0) ? Math.round(totals.waFico) : '-', 
+        topTier: (top.waFico && top.waFico > 0) ? Math.round(top.waFico) : '-', 
+        secondTier: (second.waFico && second.waFico > 0) ? Math.round(second.waFico) : '-',
+        bottomTier: (bottom.waFico && bottom.waFico > 0) ? Math.round(bottom.waFico) : '-', 
+        category: 'average-conditions' 
+      },
+      { 
+        metric: 'WA LTV', 
+        totals: (totals.waLtv && totals.waLtv > 0) ? totals.waLtv.toFixed(1) : '-', 
+        topTier: (top.waLtv && top.waLtv > 0) ? top.waLtv.toFixed(1) : '-', 
+        secondTier: (second.waLtv && second.waLtv > 0) ? second.waLtv.toFixed(1) : '-',
+        bottomTier: (bottom.waLtv && bottom.waLtv > 0) ? bottom.waLtv.toFixed(1) : '-', 
+        category: 'average-conditions' 
+      },
+      { 
+        metric: 'WA DTI', 
+        totals: (totals.waDti && totals.waDti > 0) ? totals.waDti.toFixed(1) : '-', 
+        topTier: (top.waDti && top.waDti > 0) ? top.waDti.toFixed(1) : '-', 
+        secondTier: (second.waDti && second.waDti > 0) ? second.waDti.toFixed(1) : '-',
+        bottomTier: (bottom.waDti && bottom.waDti > 0) ? bottom.waDti.toFixed(1) : '-', 
+        category: 'average-conditions' 
+      },
+      // Continued general metrics
+      { 
+        metric: 'Lost Opportunity Units', 
+        totals: totals.lostOpportunityUnits || 0, 
+        topTier: top.lostOpportunityUnits || 0, 
+        secondTier: second.lostOpportunityUnits || 0,
+        bottomTier: bottom.lostOpportunityUnits || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'Denied Units', 
+        totals: totals.deniedUnits || 0, 
+        topTier: top.deniedUnits || 0, 
+        secondTier: second.deniedUnits || 0,
+        bottomTier: bottom.deniedUnits || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'Avg LO Revenue', 
+        totals: totals.avgLoRevenue || 0, 
+        topTier: top.avgLoRevenue || 0, 
+        secondTier: second.avgLoRevenue || 0,
+        bottomTier: bottom.avgLoRevenue || 0, 
+        category: 'general' 
+      },
+      { 
+        metric: 'Avg LO Units', 
+        totals: safeFixed(totals.avgLoUnits, 0), 
+        topTier: safeFixed(top.avgLoUnits, 0), 
+        secondTier: safeFixed(second.avgLoUnits, 0),
+        bottomTier: safeFixed(bottom.avgLoUnits, 0), 
+        category: 'general' 
+      },
+    ];
+  }, [scorecardData, selectedActor]);
+
+  // Filter actors based on search query
+  const filteredActors = useMemo((): TTSActor[] => {
+    if (!scorecardData?.actors) return [];
+    if (!searchQuery) return scorecardData.actors;
+    const query = searchQuery.toLowerCase();
+    return scorecardData.actors.filter(actor => actor.name.toLowerCase().includes(query));
+  }, [searchQuery, scorecardData]);
+
+  const getTierBadge = (tier: TTSTier) => {
     const baseClasses = "inline-flex px-2 py-0.5 rounded-full text-xs font-medium";
     switch (tier) {
       case 'top':
-        return <span className={`${baseClasses} bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300`}>Top</span>;
-      case '2nd':
-        return <span className={`${baseClasses} bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300`}>2nd</span>;
+        return <span className={`${baseClasses} bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300`}>Top Tier</span>;
+      case 'second':
+        return <span className={`${baseClasses} bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300`}>2nd Tier</span>;
       case 'bottom':
         return <span className={`${baseClasses} bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300`}>Bottom</span>;
     }
   };
 
-  const getDateRangeLabel = () => {
-    switch (dateRange) {
-      case '3-months':
-        return '3 Months';
-      case '6-months':
-        return '6 Months';
-    }
-  };
-
   const getDateRangeText = () => {
-    const monthsAgo = dateRange === '3-months' ? 3 : 6;
-    // Using the date from the screenshot: 1/23/2026
-    return `Last ${monthsAgo} months: Data through Jan 23, 2026`;
-  };
-
-  const formatCurrencyFull = (value: number) => {
-    if (value >= 1000000) {
-      return `$${(value / 1000000).toFixed(1)}M`;
-    } else if (value >= 100000) {
-      // For values 100K-1M, show full number with commas
-      return `$${value.toLocaleString()}`;
-    } else if (value >= 1000) {
-      return `$${(value / 1000).toFixed(0)}K`;
+    if (dateRange?.start && dateRange?.end) {
+      const startDate = new Date(dateRange.start);
+      const endDate = new Date(dateRange.end);
+      const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const today = new Date();
+      const isCurrentYear = selectedYear === today.getFullYear();
+      const periodLabel = isCurrentYear ? `${selectedYear} YTD` : `${selectedYear}`;
+      return `${periodLabel}: ${formatDate(startDate)} - ${formatDate(endDate)}`;
     }
-    return `$${value.toLocaleString()}`;
+    return `${selectedYear}`;
   };
 
-  const convertToCSV = (data: any, tab: ActiveTab, actor: ScorecardActor): string => {
+  const formatMetricValue = (metricName: string, value: string | number): string => {
+    if (typeof value === 'string') return value;
+    
+    if (metricName.includes('Revenue') && !metricName.includes('%') && !metricName.includes('BPS')) {
+      return formatCurrency(value);
+    }
+    if (metricName.includes('Volume') && !metricName.includes('%')) {
+      return formatCurrency(value);
+    }
+    if (metricName.includes('%') || metricName.includes('Pull Through')) {
+      return typeof value === 'number' ? `${value}%` : value;
+    }
+    if (typeof value === 'number') {
+      return formatNumber(value);
+    }
+    return String(value);
+  };
+
+  // Get rating color class based on value (100 = average)
+  const getRatingColorClass = (rating: number): string => {
+    if (rating >= 120) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+    if (rating >= 100) return isDarkMode ? 'text-blue-400' : 'text-blue-600';
+    if (rating >= 80) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+  };
+
+  const convertToCSV = (data: any, tab: ActiveTab): string => {
     if (tab === 'summary') {
       const headers = ['Metric', 'Totals', 'Top Tier', 'Second Tier', 'Bottom Tier'];
       const rows = (data as SummaryMetrics[]).map(m => [
@@ -249,55 +330,23 @@ const SalesScorecard = () => {
       ]);
       return [headers, ...rows].map(row => row.join(',')).join('\n');
     } else {
-      if (actor === 'branch') {
-        const headers = ['Branch', 'LO Count', 'Units', 'Volume', 'Revenue', 'Pull Through'];
-        const rows = (data as Branch[]).map(b => [
-          b.name,
-          b.loCount.toString(),
-          b.units.toString(),
-          b.volume.toString(),
-          b.revenue.toString(),
-          b.pullThrough.toString(),
-        ]);
-        return [headers, ...rows].map(row => row.join(',')).join('\n');
-      } else {
-        const headers = ['Name', 'Branch', 'Units', 'Volume', 'Revenue', 'Pull Through', 'Tier'];
-        const rows = (data as LoanOfficer[]).map(lo => [
-          lo.name,
-          lo.branch,
-          lo.units.toString(),
-          lo.volume.toString(),
-          lo.revenue.toString(),
-          lo.pullThrough.toString(),
-          lo.tier,
-        ]);
-        return [headers, ...rows].map(row => row.join(',')).join('\n');
-      }
+      const headers = ['Name', 'TTS Score', 'Tier', 'Units', 'Volume', 'Revenue', 'Revenue BPS', 'Pull Through', 'Turn Time', 'WA FICO', 'WA LTV', 'WA DTI'];
+      const rows = (data as TTSActor[]).map(actor => [
+        actor.name,
+        actor.ttsScore.toFixed(1),
+        getTierDisplayName(actor.tier),
+        actor.units.toString(),
+        actor.volume.toString(),
+        actor.revenue.toString(),
+        actor.revenueBps.toFixed(1),
+        actor.pullThrough.toFixed(1),
+        actor.avgTurnTime.toFixed(1),
+        actor.waFico.toFixed(0),
+        actor.waLtv.toFixed(1),
+        actor.waDti.toFixed(1),
+      ]);
+      return [headers, ...rows].map(row => row.join(',')).join('\n');
     }
-  };
-
-  const formatMetricValue = (metricName: string, value: string | number): string => {
-    if (typeof value === 'string') return value;
-    
-    if (metricName.includes('Revenue') && !metricName.includes('BPS')) {
-      return formatCurrencyFull(value);
-    }
-    if (metricName.includes('Volume')) {
-      return formatCurrencyFull(value);
-    }
-    if (metricName.includes('%')) {
-      return `${value}%`;
-    }
-    if (metricName.includes('Score') || metricName.includes('FICO') || metricName.includes('LTV') || metricName.includes('DTI') || metricName.includes('Days')) {
-      return value.toFixed(1);
-    }
-    if (metricName.includes('Avg LO Revenue')) {
-      return formatCurrencyFull(value);
-    }
-    if (metricName.includes('Avg LO Units')) {
-      return value.toFixed(1);
-    }
-    return formatNumber(value);
   };
 
   return (
@@ -309,10 +358,10 @@ const SalesScorecard = () => {
 
       <main className={`relative mx-auto px-6 pt-24 pb-12 transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px]'}`}>
         <div className={`grid gap-4 sm:gap-5 md:gap-6 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
-          {/* Left Sidebar - Weights & Insights */}
+          {/* Left Sidebar - TTS Weights & Insights */}
           {!isFullscreen && (
             <div className="col-span-12 lg:col-span-3 space-y-4 sm:space-y-5 md:space-y-6">
-              {/* Weights & Story Card */}
+              {/* TTS Weights & Story Card */}
               <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
                 <Tabs defaultValue="weights" className="w-full">
                   <CardHeader className={`border-b pb-4 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
@@ -321,124 +370,151 @@ const SalesScorecard = () => {
                         value="weights"
                         className="text-xs data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
                       >
-                        Applied Weights
+                        TTS Weights
                       </TabsTrigger>
                       <TabsTrigger 
                         value="story"
                         className="text-xs data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
                       >
-                        Story
+                        Methodology
                       </TabsTrigger>
                     </TabsList>
                   </CardHeader>
 
-                  {/* Applied Weights Tab Content */}
+                  {/* TTS Weights Tab Content - 6 components from Qlik TTS Formula Documentation */}
                   <TabsContent value="weights" className="mt-0">
-                    <CardContent className="space-y-6">
-                      {/* Units */}
+                    <CardContent className="space-y-3 pt-4">
+                      {/* Unit Weight - 20% */}
                       <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-sm font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                            Units
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                            Unit Rating
                           </span>
-                          <Badge variant="secondary" className="font-mono">70%</Badge>
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">20%</Badge>
                         </div>
-                        <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
-                          <div 
-                            className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full shadow-lg shadow-emerald-500/30 transition-all duration-1000 ease-out animate-in slide-in-from-left" 
-                            style={{ width: '70%' }} 
-                          />
+                        <div className={`h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-200/80'}`}>
+                          <div className="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 rounded-full" style={{ width: '20%' }} />
                         </div>
-                        <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                          Unit Weight: 70%
-                        </p>
                       </div>
 
-                      {/* Revenue */}
+                      {/* Volume Weight - 20% */}
                       <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-sm font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                            Revenue
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                            Volume Rating
                           </span>
-                          <Badge variant="secondary" className="font-mono">20%</Badge>
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">20%</Badge>
                         </div>
-                        <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
-                          <div 
-                            className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-lg shadow-blue-500/30 transition-all duration-1000 ease-out animate-in slide-in-from-left delay-150" 
-                            style={{ width: '20%' }} 
-                          />
+                        <div className={`h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-200/80'}`}>
+                          <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full" style={{ width: '20%' }} />
                         </div>
-                        <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                          Revenue Weight: 20%
-                        </p>
                       </div>
 
-                      {/* Pull Through */}
+                      {/* Margin Weight - 20% */}
                       <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className={`text-sm font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
-                            Pull Through
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                            Margin Rating
                           </span>
-                          <Badge variant="secondary" className="font-mono">10%</Badge>
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">20%</Badge>
                         </div>
-                        <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
-                          <div 
-                            className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full shadow-lg shadow-amber-500/30 transition-all duration-1000 ease-out animate-in slide-in-from-left delay-300" 
-                            style={{ width: '10%' }} 
-                          />
+                        <div className={`h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-200/80'}`}>
+                          <div className="h-full bg-gradient-to-r from-purple-600 to-purple-400 rounded-full" style={{ width: '20%' }} />
                         </div>
-                        <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                          Pull Through Weight: 10%
+                      </div>
+
+                      {/* Concession Weight - 20% */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                            Concession Rating
+                          </span>
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">20%</Badge>
+                        </div>
+                        <div className={`h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-200/80'}`}>
+                          <div className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full" style={{ width: '20%' }} />
+                        </div>
+                      </div>
+
+                      {/* Pull-Through Weight - 15% */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                            Pull-Through Rating
+                          </span>
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">15%</Badge>
+                        </div>
+                        <div className={`h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-200/80'}`}>
+                          <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full" style={{ width: '15%' }} />
+                        </div>
+                      </div>
+
+                      {/* Turn Time Weight - 5% */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-rose-400' : 'text-rose-600'}`}>
+                            Turn Time Rating
+                          </span>
+                          <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">5%</Badge>
+                        </div>
+                        <div className={`h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-200/80'}`}>
+                          <div className="h-full bg-gradient-to-r from-rose-600 to-rose-400 rounded-full" style={{ width: '5%' }} />
+                        </div>
+                        <p className={`text-[9px] mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Inverse: faster = higher score</p>
+                      </div>
+
+                      <div className={`pt-2 mt-2 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                        <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          TTS = Sum of (Rating × Weight) / 100
                         </p>
                       </div>
                     </CardContent>
                   </TabsContent>
 
-                  {/* Story Tab Content */}
+                  {/* Methodology Tab Content */}
                   <TabsContent value="story" className="mt-0">
-                    <CardContent className="space-y-4">
+                    <CardContent className="space-y-3 pt-4">
                       <div>
-                        <h3 className={`text-sm font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                          Sales Scorecard Methodology
+                        <h3 className={`text-xs font-semibold mb-1.5 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                          TTS (Top Tier Score) Methodology
                         </h3>
-                        <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                          Our Sales Scorecard evaluates performance across key sales dimensions to create a comprehensive view of sales excellence.
-                        </p>
-                      </div>
-
-                      <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
-                        <h4 className={`text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                          Units (70%)
-                        </h4>
                         <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                          Volume-based output measuring productivity and loan origination capacity. This is the primary driver of tiering.
+                          TTS measures performance relative to the company average. A score of 100 = average performance.
                         </p>
                       </div>
 
-                      <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
-                        <h4 className={`text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                          Revenue (20%)
+                      <div className={`p-2.5 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
+                        <h4 className={`text-[11px] font-semibold mb-1.5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                          Tier Assignment (Score-Based)
                         </h4>
-                        <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                          Revenue generation metrics tracking commission and fee income per loan officer.
-                        </p>
+                        <ul className={`text-[10px] space-y-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          <li><span className="font-medium text-emerald-500">Top Tier:</span> TTS &gt; 120 (20%+ above avg)</li>
+                          <li><span className="font-medium text-blue-500">Second Tier:</span> TTS 100-120 (above avg)</li>
+                          <li><span className="font-medium text-rose-500">Bottom Tier:</span> TTS &lt; 100 (below avg)</li>
+                        </ul>
                       </div>
 
-                      <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
-                        <h4 className={`text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                          Pull Through (10%)
+                      <div className={`p-2.5 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
+                        <h4 className={`text-[11px] font-semibold mb-1.5 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                          Rating Calculation
                         </h4>
-                        <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                          Conversion rate from application to funding, measuring sales effectiveness and customer follow-through.
+                        <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Each rating = (Actor Value / Company Avg) × 100
+                        </p>
+                        <p className={`text-[10px] mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Turn Time: inverse (faster = higher score)
                         </p>
                       </div>
 
-                      <div className={`mt-4 pt-4 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                        <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                          Tiers are calculated by combining these weighted scores to identify top performers, consistent contributors, and areas for development.
+                      <div className={`p-2.5 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-purple-50/30'}`}>
+                        <h4 className={`text-[11px] font-semibold mb-1.5 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                          Time Period &amp; Date Type
+                        </h4>
+                        <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Default: Rolling 13 months (Qlik standard)
+                        </p>
+                        <p className={`text-[10px] mt-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Uses <strong>Funding Date</strong> for all metrics
                         </p>
                       </div>
                     </CardContent>
@@ -453,73 +529,65 @@ const SalesScorecard = () => {
                     <div className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500">
                       <TrendingUp className="w-3.5 h-3.5 text-white" />
                     </div>
-                    <CardTitle className="text-sm font-bold">Key Insights</CardTitle>
+                    <CardTitle className="text-sm font-bold">TTS Insights</CardTitle>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-5 space-y-4">
-                  {/* Top Tier Performance */}
-                  <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-teal-500/10 via-teal-500/5 to-transparent border-white/10 shadow-[0_3px_10px_rgba(20,184,166,0.2)]' : 'bg-gradient-to-br from-teal-50 via-teal-25 to-white border-white shadow-[0_3px_10px_rgba(20,184,166,0.3)]'}`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></div>
-                        <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-teal-400/90' : 'text-teal-600/90'}`}>
-                          Top Tier Output
+                  {loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Top Performers */}
+                      <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-white/10' : 'bg-gradient-to-br from-emerald-50 via-emerald-25 to-white border-white'}`}>
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                          <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-emerald-400/90' : 'text-emerald-600/90'}`}>
+                            Top Tier
+                          </p>
+                        </div>
+                        <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-emerald-300' : 'text-emerald-600'}`}>
+                          {scorecardData?.tierSummary.top.count || 0}
+                        </p>
+                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Avg TTS: {scorecardData?.tierSummary.top.avgTtsScore?.toFixed(1) || 0}
                         </p>
                       </div>
-                    </div>
-                    <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-teal-300' : 'text-teal-600'}`}>
-                      {selectedActor === 'branch' 
-                        ? `${filteredData.length > 0 ? Math.round((filteredData as Branch[]).reduce((sum, b) => sum + b.units, 0) / filteredData.length) : 0}`
-                        : `${filteredData.length > 0 ? Math.round((filteredData as LoanOfficer[]).filter(lo => lo.tier === 'top').length / filteredData.length * 100) : 0}`}
-                      <span className="text-xl">{selectedActor === 'loan-officer' ? '%' : ''}</span>
-                    </p>
-                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {selectedActor === 'branch' 
-                        ? `${filteredData.length} branches · ${(filteredData as Branch[]).reduce((sum, b) => sum + b.units, 0)} total units`
-                        : `${(filteredData as LoanOfficer[]).filter(lo => lo.tier === 'top').length} performers · ${(filteredData as LoanOfficer[]).filter(lo => lo.tier === 'top').reduce((sum, lo) => sum + lo.units, 0)} units`}
-                    </p>
-                  </div>
 
-                  {/* Revenue Insight */}
-                  <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent border-white/10 shadow-[0_3px_10px_rgba(59,130,246,0.2)]' : 'bg-gradient-to-br from-blue-50 via-blue-25 to-white border-white shadow-[0_3px_10px_rgba(59,130,246,0.3)]'}`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
-                        <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-blue-400/90' : 'text-blue-600/90'}`}>
-                          Avg Revenue
+                      {/* Total Revenue */}
+                      <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent border-white/10' : 'bg-gradient-to-br from-blue-50 via-blue-25 to-white border-white'}`}>
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                          <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-blue-400/90' : 'text-blue-600/90'}`}>
+                            Total Revenue
+                          </p>
+                        </div>
+                        <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-blue-300' : 'text-blue-600'}`}>
+                          {formatCurrency(scorecardData?.totals.revenue || 0)}
+                        </p>
+                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          {scorecardData?.totals.actorCount || 0} {selectedActor === 'branch' ? 'branches' : 'LOs'}
                         </p>
                       </div>
-                    </div>
-                    <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-blue-300' : 'text-blue-600'}`}>
-                      {selectedActor === 'branch'
-                        ? formatCurrency((filteredData as Branch[]).reduce((sum, b) => sum + b.revenue, 0) / Math.max(filteredData.length, 1))
-                        : formatCurrency((filteredData as LoanOfficer[]).reduce((sum, lo) => sum + lo.revenue, 0) / Math.max(filteredData.length, 1))}
-                    </p>
-                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {selectedActor === 'branch' ? 'Per branch average' : 'Per loan officer average'}
-                    </p>
-                  </div>
 
-                  {/* Pull Through Insight */}
-                  <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-white/10 shadow-[0_3px_10px_rgba(16,185,129,0.2)]' : 'bg-gradient-to-br from-emerald-50 via-emerald-25 to-white border-white shadow-[0_3px_10px_rgba(16,185,129,0.3)]'}`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                        <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-emerald-400/90' : 'text-emerald-600/90'}`}>
-                          Avg Pull Through
+                      {/* Total Units */}
+                      <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-purple-500/10 via-purple-500/5 to-transparent border-white/10' : 'bg-gradient-to-br from-purple-50 via-purple-25 to-white border-white'}`}>
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div>
+                          <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-purple-400/90' : 'text-purple-600/90'}`}>
+                            Total Units
+                          </p>
+                        </div>
+                        <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-purple-300' : 'text-purple-600'}`}>
+                          {formatNumber(scorecardData?.totals.units || 0)}
+                        </p>
+                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Avg: {scorecardData?.totals.avgLoUnits?.toFixed(1) || 0} per LO
                         </p>
                       </div>
-                    </div>
-                    <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-emerald-300' : 'text-emerald-600'}`}>
-                      {selectedActor === 'branch'
-                        ? `${((filteredData as Branch[]).reduce((sum, b) => sum + b.pullThrough, 0) / Math.max(filteredData.length, 1)).toFixed(1)}`
-                        : `${((filteredData as LoanOfficer[]).reduce((sum, lo) => sum + lo.pullThrough, 0) / Math.max(filteredData.length, 1)).toFixed(1)}`}
-                      <span className="text-xl">%</span>
-                    </p>
-                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Conversion rate performance
-                    </p>
-                  </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -532,51 +600,43 @@ const SalesScorecard = () => {
             <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
               <CardContent className="pt-6">
                 <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-              {/* Scorecard Actor Tabs */}
-              <div>
-                <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Scorecard Actor
-                </label>
-                <Tabs value={selectedActor} onValueChange={(v) => setSelectedActor(v as ScorecardActor)}>
-                  <TabsList className={`grid w-full grid-cols-2 h-10 sm:h-9 ${isDarkMode ? 'bg-slate-900/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                    <TabsTrigger 
-                      value="branch"
-                      className="text-xs sm:text-xs touch-manipulation data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                    >
-                      Branch
-                    </TabsTrigger>
-                    <TabsTrigger 
-                      value="loan-officer"
-                      className="text-xs sm:text-xs touch-manipulation data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                    >
-                      Loan Officer
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
+                  {/* Scorecard Actor Tabs */}
+                  <div>
+                    <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Scorecard Actor
+                    </label>
+                    <Tabs value={selectedActor} onValueChange={(v) => setSelectedActor(v as ScorecardActor)}>
+                      <TabsList className={`grid w-full grid-cols-2 h-10 sm:h-9 ${isDarkMode ? 'bg-slate-900/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
+                        <TabsTrigger 
+                          value="branch"
+                          className="text-xs sm:text-xs data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
+                        >
+                          Branch
+                        </TabsTrigger>
+                        <TabsTrigger 
+                          value="loan-officer"
+                          className="text-xs sm:text-xs data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
+                        >
+                          Loan Officer
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
 
-              {/* Date Range Tabs */}
-              <div>
-                <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Date Range
-                </label>
-                <Tabs value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
-                  <TabsList className={`grid w-full grid-cols-2 h-10 sm:h-9 ${isDarkMode ? 'bg-slate-900/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                    <TabsTrigger 
-                      value="3-months"
-                      className="text-xs sm:text-xs touch-manipulation data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-teal-500/25"
-                    >
-                      3 Months
-                    </TabsTrigger>
-                    <TabsTrigger 
-                      value="6-months"
-                      className="text-xs sm:text-xs touch-manipulation data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-teal-500/25"
-                    >
-                      6 Months
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
+                  {/* Date Range Tabs */}
+                  <div>
+                    <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Date Range
+                    </label>
+                    <DatePeriodPicker
+                      year={selectedYear}
+                      onYearChange={setSelectedYear}
+                      onDateRangeChange={setDateRange}
+                      yearsToShow={4}
+                      size="sm"
+                      showLabel={false}
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -585,61 +645,35 @@ const SalesScorecard = () => {
             {/* Scorecard Table */}
             <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
               <CardHeader className={`border-b pb-4 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
-                {/* Tabs and Fullscreen Toggle */}
                 <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ActiveTab)} className="w-full">
                   <div className="flex items-center justify-between mb-4">
                     <TabsList className={`grid w-fit grid-cols-2 h-9 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-blue-50/50 border border-blue-200/30'}`}>
-                      <TabsTrigger 
-                        value="summary"
-                        className="text-sm px-4 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                      >
-                        Summary
-                      </TabsTrigger>
-                      <TabsTrigger 
-                        value="detail"
-                        className="text-sm px-4 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                      >
-                        Detail
-                      </TabsTrigger>
+                      <TabsTrigger value="summary" className="text-sm px-4">Summary</TabsTrigger>
+                      <TabsTrigger value="detail" className="text-sm px-4">Detail</TabsTrigger>
                     </TabsList>
                     
-                    {/* Fullscreen Toggle Button */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setIsFullscreen(!isFullscreen)}
                       className={`gap-2 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-                      title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
                     >
-                      {isFullscreen ? (
-                        <>
-                          <Minimize2 className="h-4 w-4" />
-                          <span className="text-xs">Exit Fullscreen</span>
-                        </>
-                      ) : (
-                        <>
-                          <Maximize2 className="h-4 w-4" />
-                          <span className="text-xs">Fullscreen</span>
-                        </>
-                    )}
-                  </Button>
+                      {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                      <span className="text-xs">{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
+                    </Button>
                   </div>
                 </Tabs>
 
-                {/* Title and Description */}
                 <div>
                   <CardTitle className="text-base sm:text-lg font-semibold">
-                    RETAIL: Scorecard {activeTab === 'summary' ? 'Summary' : 'Detail'}
+                    TTS Sales Scorecard - {activeTab === 'summary' ? 'Summary' : 'Detail'}
                   </CardTitle>
-                  <CardDescription className="mt-1">
-                    {getDateRangeText()}
-                  </CardDescription>
+                  <CardDescription className="mt-1">{getDateRangeText()}</CardDescription>
                 </div>
               </CardHeader>
               <CardContent>
                 {/* Controls Row */}
                 <div className="flex items-center gap-4 mb-4 flex-wrap">
-                  {/* Search */}
                   <div className="relative flex-1 max-w-xs">
                     <Search className={`absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                     <Input
@@ -651,41 +685,23 @@ const SalesScorecard = () => {
                     />
                   </div>
                   
-                  {/* Action Buttons */}
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      className={`gap-2 ${isDarkMode ? 'border-slate-600 hover:bg-slate-800' : 'border-slate-300 hover:bg-slate-50'}`}
-                    >
-                      <Filter className="h-4 w-4" />
-                      Weights
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={`gap-2 ${isDarkMode ? 'border-slate-600 hover:bg-slate-800' : 'border-slate-300 hover:bg-slate-50'}`}
-                    >
-                      <BookmarkCheck className="h-4 w-4" />
-                      Bookmarks
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
                       onClick={() => {
-                        // Export functionality
-                        const data = activeTab === 'summary' ? summaryMetrics : filteredData;
-                        const csv = convertToCSV(data, activeTab, selectedActor);
+                        const data = activeTab === 'summary' ? summaryMetrics : filteredActors;
+                        const csv = convertToCSV(data, activeTab);
                         const blob = new Blob([csv], { type: 'text/csv' });
                         const url = window.URL.createObjectURL(blob);
                         const link = document.createElement('a');
                         link.href = url;
-                        link.download = `sales-scorecard-${activeTab}-${selectedActor}-${dateRange}.csv`;
+                        link.download = `tts-sales-scorecard-${activeTab}-${selectedYear}.csv`;
                         link.click();
                       }}
-                      className={`gap-2 ${isDarkMode ? 'border-slate-600 hover:bg-slate-800' : 'border-slate-300 hover:bg-slate-50'}`}
+                      disabled={loading}
                     >
-                      <Download className="h-4 w-4" />
+                      <Download className="h-4 w-4 mr-1" />
                       Export
                     </Button>
                   </div>
@@ -693,220 +709,183 @@ const SalesScorecard = () => {
 
                 {/* Table View */}
                 {activeTab === 'summary' ? (
-              // Summary Tab - Tier Comparison Table
-              <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className={`border-b-2 ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`}>
-                        <th className={`text-left py-3 px-4 text-sm font-medium sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-400 border-r border-slate-700' : 'bg-slate-50/90 text-slate-600 border-r border-slate-300'}`}>
-                          Metric
-                        </th>
-                        <th className={`text-right py-3 px-4 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                          Totals
-                        </th>
-                        <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-teal-500 via-teal-600 to-teal-700 text-white shadow-[0_2px_8px_rgba(20,184,166,0.3)]`}>
-                          Top Tier
-                        </th>
-                        <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 text-white shadow-[0_2px_8px_rgba(16,185,129,0.3)]`}>
-                          Second Tier
-                        </th>
-                        <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-red-400 via-red-500 to-red-600 text-white shadow-[0_2px_8px_rgba(239,68,68,0.3)]`}>
-                          Bottom Tier
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summaryMetrics.map((metric, index) => {
-                        const prevMetric = index > 0 ? summaryMetrics[index - 1] : null;
-                        const isCategoryHeader = prevMetric && prevMetric.category !== metric.category;
-                        
-                        return (
-                          <React.Fragment key={index}>
-                            {isCategoryHeader && (
-                              <tr>
-                                <td colSpan={5} className="py-2 px-4 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50">
-                                  Average Conditions
-                                </td>
-                              </tr>
-                            )}
-                            <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
-                              <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700 group-hover:bg-slate-800/95' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300 group-hover:bg-slate-50/95'}`}>
-                                {metric.metric}
-                              </td>
-                              <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                {formatMetricValue(metric.metric, metric.totals)}
-                              </td>
-                              <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 cursor-pointer hover:bg-teal-600/20 transition-colors ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                {formatMetricValue(metric.metric, metric.topTier)}
-                              </td>
-                              <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 cursor-pointer hover:bg-emerald-500/20 transition-colors ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                {formatMetricValue(metric.metric, metric.secondTier)}
-                              </td>
-                              <td className={`py-3 px-4 text-sm text-right font-mono bg-red-500/10 cursor-pointer hover:bg-red-500/20 transition-colors ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                {formatMetricValue(metric.metric, metric.bottomTier)}
-                              </td>
+                  // Summary Tab - 20 Metrics with 3 Tiers
+                  <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
+                    {loading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                        <span className="ml-3 text-sm text-slate-500">Loading TTS data...</span>
+                      </div>
+                    ) : error ? (
+                      <div className="flex items-center justify-center py-12 text-red-500">
+                        <span className="text-sm">{error}</span>
+                      </div>
+                    ) : summaryMetrics.length === 0 ? (
+                      <div className="flex items-center justify-center py-12 text-slate-500">
+                        <span className="text-sm">No data available for the selected period</span>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse">
+                          <thead>
+                            <tr className={`border-b-2 ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`}>
+                              <th className={`text-left py-3 px-4 text-sm font-medium sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-400' : 'bg-slate-50/90 text-slate-600'}`}>
+                                Metric
+                              </th>
+                              <th className={`text-right py-3 px-4 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                Totals
+                              </th>
+                              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+                                Top Tier
+                              </th>
+                              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+                                Second Tier
+                              </th>
+                              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-rose-500 to-rose-600 text-white">
+                                Bottom Tier
+                              </th>
                             </tr>
-                          </React.Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            ) : (
-              // Detail Tab - Branches or Loan Officers Table
-              <div className="overflow-x-auto">
-                <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
-                <CardHeader className="p-4 bg-slate-50 border-b border-slate-200 dark:bg-slate-800/50 dark:border-slate-700">
-                  <CardTitle className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    {selectedActor === 'branch' ? 'Branches' : 'Loan Officers'}
-                  </CardTitle>
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    Click on a row to zoom into Canvas view
-                  </p>
-                </CardHeader>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 dark:bg-slate-800/50 dark:border-slate-700">
-                        {selectedActor === 'branch' ? (
-                          <>
-                            <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Branch
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              LO Count
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Units
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Volume
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Revenue
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Pull Through
-                            </th>
-                            <th className="py-2.5 px-4 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Action
-                            </th>
-                          </>
-                        ) : (
-                          <>
-                            <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Name
-                            </th>
-                            <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Branch
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Units
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Volume
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Revenue
-                            </th>
-                            <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Pull Through
-                            </th>
-                            <th className="py-2.5 px-4 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Tier
-                            </th>
-                            <th className="py-2.5 px-4 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              Action
-                            </th>
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedActor === 'branch' ? (
-                        (filteredData as Branch[]).map((branch) => (
-                          <tr
-                            key={branch.id}
-                            className="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer dark:border-slate-700 dark:hover:bg-slate-800/50"
-                          >
-                            <td className="py-3 px-4 text-sm font-medium text-slate-800 dark:text-slate-200">
-                              {branch.name}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatNumber(branch.loCount)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatNumber(branch.units)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatCurrency(branch.volume)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatCurrency(branch.revenue)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {branch.pullThrough.toFixed(1)}%
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-3 text-xs text-teal-600 hover:text-teal-700 hover:bg-teal-50 dark:text-teal-400 dark:hover:text-teal-300 dark:hover:bg-teal-900/20"
-                              >
-                                <Plus className="w-3 h-3 mr-1" />
-                                Canvas
-                              </Button>
-                            </td>
-                          </tr>
-                        ))
+                          </thead>
+                          <tbody>
+                            {summaryMetrics.map((metric, index) => {
+                              const prevMetric = index > 0 ? summaryMetrics[index - 1] : null;
+                              const isCategoryHeader = prevMetric && prevMetric.category !== metric.category && metric.category === 'average-conditions';
+                              
+                              return (
+                                <React.Fragment key={index}>
+                                  {isCategoryHeader && (
+                                    <tr>
+                                      <td colSpan={5} className={`py-2 px-4 text-xs font-semibold ${isDarkMode ? 'text-slate-300 bg-slate-800/50' : 'text-slate-700 bg-slate-50'}`}>
+                                        Average Conditions
+                                      </td>
+                                    </tr>
+                                  )}
+                                  <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
+                                    <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300' : 'bg-slate-50/90 text-slate-700'}`}>
+                                      {metric.metric}
+                                    </td>
+                                    <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                      {formatMetricValue(metric.metric, metric.totals)}
+                                    </td>
+                                    <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                      {formatMetricValue(metric.metric, metric.topTier)}
+                                    </td>
+                                    <td className={`py-3 px-4 text-sm text-right font-mono bg-blue-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                      {formatMetricValue(metric.metric, metric.secondTier)}
+                                    </td>
+                                    <td className={`py-3 px-4 text-sm text-right font-mono bg-rose-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                      {formatMetricValue(metric.metric, metric.bottomTier)}
+                                    </td>
+                                  </tr>
+                                </React.Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Card>
+                ) : (
+                  // Detail Tab - TTS Actors
+                  <div className="overflow-x-auto">
+                    <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
+                      <CardHeader className="p-4 bg-slate-50 border-b border-slate-200 dark:bg-slate-800/50 dark:border-slate-700">
+                        <CardTitle className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {selectedActor === 'branch' ? 'Branches' : 'Loan Officers'} - TTS Score Ranking
+                        </CardTitle>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
+                          Sorted by TTS score (Top 33% / Middle 33% / Bottom 33%)
+                        </p>
+                      </CardHeader>
+                      {loading ? (
+                        <div className="flex items-center justify-center py-12">
+                          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                          <span className="ml-3 text-sm text-slate-500">Loading data...</span>
+                        </div>
+                      ) : error ? (
+                        <div className="flex items-center justify-center py-12 text-red-500">
+                          <span className="text-sm">{error}</span>
+                        </div>
+                      ) : filteredActors.length === 0 ? (
+                        <div className="flex items-center justify-center py-12 text-slate-500">
+                          <span className="text-sm">No data available for the selected period</span>
+                        </div>
                       ) : (
-                        (filteredData as LoanOfficer[]).map((officer) => (
-                          <tr
-                            key={officer.id}
-                            className="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer dark:border-slate-700 dark:hover:bg-slate-800/50"
-                          >
-                            <td className="py-3 px-4 text-sm font-medium text-slate-800 dark:text-slate-200">
-                              {officer.name}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-300">
-                              {officer.branch}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatNumber(officer.units)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatCurrency(officer.volume)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {formatCurrency(officer.revenue)}
-                            </td>
-                            <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                              {officer.pullThrough.toFixed(1)}%
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              {getTierBadge(officer.tier)}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-3 text-xs text-teal-600 hover:text-teal-700 hover:bg-teal-50 dark:text-teal-400 dark:hover:text-teal-300 dark:hover:bg-teal-900/20"
-                              >
-                                <Plus className="w-3 h-3 mr-1" />
-                                Canvas
-                              </Button>
-                            </td>
-                          </tr>
-                        ))
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead>
+                              <tr className="bg-slate-50 border-b border-slate-200 dark:bg-slate-800/50 dark:border-slate-700">
+                                <th className="py-2.5 px-4 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  {selectedActor === 'branch' ? 'Branch' : 'Loan Officer'}
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  TTS Score
+                                </th>
+                                <th className="py-2.5 px-4 text-center text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  Tier
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  Units
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  Volume
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  Revenue
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  BPS
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  P-T %
+                                </th>
+                                <th className="py-2.5 px-4 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  TT Days
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredActors.map((actor, index) => (
+                                <tr
+                                  key={index}
+                                  className={`border-b border-slate-100 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:hover:bg-slate-800/50`}
+                                >
+                                  <td className="py-3 px-4 text-sm font-medium text-slate-800 dark:text-slate-200">
+                                    {actor.name}
+                                  </td>
+                                  <td className={`py-3 px-4 text-sm text-right font-bold ${getRatingColorClass(actor.ttsScore)}`}>
+                                    {actor.ttsScore.toFixed(1)}
+                                  </td>
+                                  <td className="py-3 px-4 text-center">
+                                    {getTierBadge(actor.tier)}
+                                  </td>
+                                  <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
+                                    {formatNumber(actor.units)}
+                                  </td>
+                                  <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
+                                    {formatCurrency(actor.volume)}
+                                  </td>
+                                  <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
+                                    {formatCurrency(actor.revenue)}
+                                  </td>
+                                  <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
+                                    {actor.revenueBps.toFixed(1)}
+                                  </td>
+                                  <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
+                                    {actor.pullThrough.toFixed(1)}%
+                                  </td>
+                                  <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
+                                    {actor.avgTurnTime.toFixed(1)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-              </div>
-            )}
+                    </Card>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

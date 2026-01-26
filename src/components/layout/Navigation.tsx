@@ -596,8 +596,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                       <div className="p-4 bg-gradient-to-br from-slate-50/50 to-white dark:from-slate-800/50 dark:to-slate-900 border-b border-slate-100 dark:border-slate-800">
                         <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                           Dashboard Sections
-                        </div>
-                      </div>
+              </div>
+              </div>
                       <div className="p-4">
                         <div className="flex flex-col gap-2">
                           {dashboardSectionsConfig.map((section, index) => {
@@ -629,13 +629,13 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                               </button>
                             );
                           })}
-                        </div>
-                      </div>
+              </div>
+            </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
-
+                </div>
+                
               {/* Top Tiering Dropdown */}
               <div 
                 ref={topTieringRef}
@@ -891,8 +891,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
             {isAuthenticated && (
               <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
                 <SheetTrigger asChild>
-                  <Button
-                    variant="ghost"
+                  <Button 
+                    variant="ghost" 
                     size="icon"
                     className="lg:hidden h-9 w-9 rounded-lg"
                     aria-label="Open navigation menu"
@@ -929,8 +929,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 isAdmin={isAdmin()}
               />
             ) : (
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => navigate('/login')}
                 className="text-[13px] font-medium tracking-wide px-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg transition-colors"

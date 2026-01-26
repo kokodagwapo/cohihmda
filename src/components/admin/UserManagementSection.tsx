@@ -491,9 +491,9 @@ export function UserManagementSection() {
     >
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
+            <div>
           <h2 className="text-2xl font-light text-slate-900 dark:text-white">
-            User Management
+                User Management
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Manage platform users and tenant users
@@ -547,7 +547,7 @@ export function UserManagementSection() {
                   <p className="text-sm text-slate-500">Tenants</p>
                   <p className="text-2xl font-semibold">{tenants.length}</p>
                 </div>
-              </div>
+            </div>
             </CardContent>
           </Card>
         )}
@@ -675,11 +675,11 @@ export function UserManagementSection() {
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row gap-4">
                 <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input
-                    placeholder="Search users..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search users..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10"
                   />
                 </div>
@@ -706,8 +706,8 @@ export function UserManagementSection() {
           {/* Users Table */}
           <Card>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
+            <Table>
+              <TableHeader>
                   <TableRow>
                     <TableHead>User</TableHead>
                     <TableHead>Tenant</TableHead>
@@ -715,9 +715,9 @@ export function UserManagementSection() {
                     <TableHead>Status</TableHead>
                     <TableHead>Last Login</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                   {filteredTenantUsers.map(user => {
                     const roleConfig = ROLE_CONFIG[user.role] || ROLE_CONFIG.user;
                     return (
@@ -727,45 +727,45 @@ export function UserManagementSection() {
                             <p className="font-medium">{user.full_name || user.email}</p>
                             <p className="text-sm text-slate-500">{user.email}</p>
                           </div>
-                        </TableCell>
-                        <TableCell>
+                    </TableCell>
+                    <TableCell>
                           <Badge variant="outline">
                             <Building2 className="h-3 w-3 mr-1" />
                             {user.tenant_name}
-                          </Badge>
-                        </TableCell>
+                      </Badge>
+                    </TableCell>
                         <TableCell>
                           <Badge className={roleConfig.color}>
                             {roleConfig.label}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
+                    </TableCell>
+                    <TableCell>
                           {user.is_active ? (
                             <Badge variant="outline" className="text-emerald-600 border-emerald-200">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
                               Active
-                            </Badge>
-                          ) : (
+                        </Badge>
+                      ) : (
                             <Badge variant="outline" className="text-slate-500 border-slate-200">
                               <XCircle className="h-3 w-3 mr-1" />
                               Inactive
-                            </Badge>
-                          )}
-                        </TableCell>
+                        </Badge>
+                      )}
+                    </TableCell>
                         <TableCell className="text-sm text-slate-500">
                           {formatDate(user.last_login_at)}
-                        </TableCell>
+                    </TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(user)}
-                          >
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditDialog(user)}
+                        >
                             <Edit2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                             onClick={() => handleToggleActive(user)}
                           >
                             {user.is_active ? (
@@ -773,24 +773,24 @@ export function UserManagementSection() {
                             ) : (
                               <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                             )}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+                        </Button>
+                    </TableCell>
+                  </TableRow>
                     );
                   })}
                   {filteredTenantUsers.length === 0 && (
-                    <TableRow>
+                  <TableRow>
                       <TableCell colSpan={6} className="text-center py-8 text-slate-500">
                         {searchQuery || selectedTenant !== 'all'
                           ? 'No users match your filters'
                           : 'No tenant users found'}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+        </CardContent>
+      </Card>
         </TabsContent>
       </Tabs>
 
@@ -890,8 +890,8 @@ export function UserManagementSection() {
                   onValueChange={(v) => setFormData({ ...formData, role: v })}
                 >
                   <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                   <SelectContent>
                     {/* Tenant admins can create other tenant admins for their org */}
                     <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
@@ -899,9 +899,9 @@ export function UserManagementSection() {
                     <SelectItem value="processor">Processor</SelectItem>
                     <SelectItem value="user">User</SelectItem>
                     <SelectItem value="viewer">Viewer</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                </SelectContent>
+              </Select>
+            </div>
             )}
           </div>
 
@@ -910,7 +910,7 @@ export function UserManagementSection() {
               Cancel
             </Button>
             <Button onClick={handleCreateUser}>
-              Create User
+                  Create User
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -989,7 +989,7 @@ export function UserManagementSection() {
               Cancel
             </Button>
             <Button onClick={handleEditUser}>
-              Save Changes
+                  Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
