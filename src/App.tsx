@@ -31,6 +31,7 @@ import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
+import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 
 const queryClient = new QueryClient();
 
@@ -153,6 +154,11 @@ const App = () => (
               <Route path="/admin" element={
                 <ProtectedRoute adminOnly>
                   <Admin />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/knowledge-base" element={
+                <ProtectedRoute adminOnly>
+                  <KnowledgeBaseEditor />
                 </ProtectedRoute>
               } />
               

@@ -6,6 +6,18 @@ The Operations Scorecard evaluates performance of operations staff (Processors, 
 
 ---
 
+## Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **Unit Counts** | ✅ Matching Qlik | Processor: 2,087, Underwriter: 2,171, Closer: 1,305 |
+| **Date Field Mappings** | ✅ Verified | See Actor-Specific Date Fields section |
+| **Tiering Logic** | ✅ Implemented | TTS Score thresholds: >=120 Top, >=80 Second |
+| **TTS Calculation** | ✅ Implemented | 70% Unit, 15% TurnTime, 15% Complexity |
+| **Date Range Filter** | ✅ Verified | 12 months, exclusive end date (matches Qlik) |
+
+---
+
 ## TTS Formula (Operations)
 
 ```
@@ -60,24 +72,37 @@ ComplexityRating = (Actor AvgComplexity / Company AvgComplexity) × 100
 
 Each actor type uses different milestone dates for output and turn time calculations.
 
-**Database column names** (from `tenantDatabaseSchema.ts`):
+**IMPORTANT**: The Qlik field names (e.g., `[Sent To Underwriting]`, `[Sent To Closing]`) are **aliases** configured in client-specific `CoheusConfig.xml` via `TriggerDateField` mappings. The actual field IDs vary by client.
 
-| Actor | Output Date Field | Input Date Field | Turn Time Calculation |
-|-------|-------------------|------------------|----------------------|
-| **Processor** | `submitted_to_underwriting_date` | `submitted_to_processing_date` | submitted_to_underwriting_date - submitted_to_processing_date |
-| **Underwriter** | `ctc_date` | `submitted_to_underwriting_date` | ctc_date - submitted_to_underwriting_date |
-| **Closer** | `closing_date` | `ctc_date` | closing_date - ctc_date |
+### Verified Mappings for Homestead (from CoheusConfig.xml)
 
-### Qlik Field Mappings
-| Qlik Field | Database Column | Fallback Columns |
-|------------|-----------------|------------------|
-| `[Processor]` | `processor` | - |
-| `[Underwriter]` | `underwriter` | - |
-| `[Closer]` | `closer` | - |
-| `[Sent To Processing]` | `submitted_to_processing_date` | `processing_date`, `started_date` |
-| `[Sent To Underwriting]` | `submitted_to_underwriting_date` | `submittal_date` |
-| `[Sent To Closing]` | `ctc_date` | - (CTC = Clear To Close) |
-| `[End Date to indicate Loan Closed/Funded]` | `closing_date` | `funding_date` |
+| Actor | Qlik Alias | Encompass Field ID | Database Column | Verified Count |
+|-------|------------|-------------------|-----------------|----------------|
+| **Processor** | `[Sent To Underwriting]` | `Log.MS.Date.Approval` | `approval_date` | 2,087 units ✅ |
+| **Underwriter** | `[Sent To Closing]` | `Fields.748` | `closing_date` | 2,171 units ✅ |
+| **Closer** | `[End Date to indicate Loan Closed/Funded]` | `Fields.1997` | `disbursement_date` | 1,305 units ✅ |
+
+### Turn Time Calculations
+
+| Actor | Output Date | Input Date | Turn Time Formula |
+|-------|-------------|------------|-------------------|
+| **Processor** | `approval_date` | `submitted_to_processing_date` | approval_date - submitted_to_processing_date |
+| **Underwriter** | `closing_date` | `approval_date` | closing_date - approval_date |
+| **Closer** | `disbursement_date` | `closing_date` | disbursement_date - closing_date |
+
+### Qlik Field Aliases (Client-Configurable)
+
+| Qlik Alias | Purpose | Config Location |
+|------------|---------|-----------------|
+| `[Sent To Underwriting]` | Processor output milestone | `OperationalScorecards/TriggerDateField[@Name='Sent To Underwriting']` |
+| `[Sent To Closing]` | Underwriter output milestone | `OperationalScorecards/TriggerDateField[@Name='Sent To Closing']` |
+| `[End Date to indicate Loan Closed/Funded]` | Closer output milestone | `OperationalScorecards/TriggerDateField[@Name='End Date to indicate Loan Closed/Funded']` |
+
+**Note**: The `disbursement_date` column was added to `tenantDatabaseSchema.ts` to support Fields.1997 mapping for the Closer output date.
+
+### Future Consideration: Client-Configurable Date Fields
+
+The Qlik TriggerDateField mappings are **client-specific**. Different clients may map different Encompass fields to `[Sent To Closing]` or `[End Date to indicate Loan Closed/Funded]`. A future enhancement could add a configuration option allowing clients to select which database column maps to each Qlik alias. This would be stored in tenant configuration.
 
 ---
 
@@ -123,13 +148,35 @@ Where a score of 100 = baseline complexity, >100 = higher complexity.
 
 ## Tier Assignment
 
-Actors are assigned to tiers based on their TTS score:
+Actors are assigned to tiers based on their TTS score. This logic comes from Qlik's **"13 Month TVI Score Tiers"** dimension (Dimensions.csv):
+
+```qlik
+If(Avg(TVI_Score) >= 120, Dual('Top Tier', 1),
+   If(Avg(TVI_Score) >= 80, Dual('Second Tier', 2),
+      Dual('Bottom Tier', 3)))
+```
+
+### Thresholds
 
 | Tier | TTS Score Range | Description |
 |------|-----------------|-------------|
-| **Top Tier** | TTS > 120 | 20%+ above average |
-| **Second Tier** | 100 ≤ TTS ≤ 120 | At or above average |
-| **Bottom Tier** | TTS < 100 | Below average |
+| **Top Tier** | TTS >= 120 | 20%+ above average |
+| **Second Tier** | 80 <= TTS < 120 | Average to above average |
+| **Bottom Tier** | TTS < 80 | Below average |
+
+### Implementation
+
+```typescript
+// From server/src/routes/loans.ts
+if (ttsScore >= 120) tier = 'top';
+else if (ttsScore >= 80) tier = 'second';
+else tier = 'bottom';
+```
+
+**Note**: The Operations Scorecard uses the same TVI Score Tier dimension as the Sales Scorecard, selected dynamically via:
+```qlik
+=if(vOpsScorecardMonthRange=12, '13 Month TVI Score Tiers', '4 Month TVI Score Tiers')
+```
 
 ---
 
@@ -215,25 +262,54 @@ GET /api/loans/operations-scorecard
 
 The actual database columns are defined in `server/src/config/tenantDatabaseSchema.ts`. The query uses:
 
-1. **Primary columns**: `submitted_to_processing_date`, `submitted_to_underwriting_date`, `ctc_date`, `closing_date`
-2. **Fallback columns via COALESCE**: `processing_date`, `started_date`, `submittal_date`, `funding_date`
+1. **Primary columns for output**: `approval_date` (Processor), `closing_date` (Underwriter), `disbursement_date` (Closer)
+2. **Turn time input columns**: `submitted_to_processing_date`, `approval_date`, `closing_date`
 3. **Handle null values gracefully**: Exclude loans without required dates from turn time calculation
 
 ### SQL Column Selection
 ```sql
 SELECT 
-  loan_id, loan_amount, loan_type, loan_purpose, current_loan_status, channel,
+  loan_id,
+  COALESCE(loan_number, loan_id) as loan_number,
+  loan_amount, loan_type, loan_purpose, current_loan_status, channel,
   -- Actor columns
   processor, underwriter, closer,
-  -- Date columns (with fallbacks matching schema)
-  COALESCE(submitted_to_processing_date, processing_date, started_date) as submitted_to_processing_date,
-  COALESCE(submitted_to_underwriting_date, submittal_date) as submitted_to_underwriting_date,
-  ctc_date,
-  COALESCE(closing_date, funding_date) as closing_date,
+  -- Date columns per Homestead CoheusConfig.xml TriggerDateFields
+  submitted_to_processing_date,
+  processing_date,
+  approval_date,        -- Processor output (Qlik: [Sent To Underwriting] = Log.MS.Date.Approval)
+  closing_date,         -- Underwriter output (Qlik: [Sent To Closing] = Fields.748)
+  disbursement_date,    -- Closer output (Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997)
+  funding_date,
+  application_date,
   -- Metrics columns
   fico_score, ltv_ratio, be_dti_ratio,
-  occupancy_type
+  occupancy_type, borr_self_employed
 FROM loans
+```
+
+### Actor Configuration (from loans.ts)
+```typescript
+const actorConfigs: Record<string, ActorConfig> = {
+  processor: {
+    actorColumn: 'processor',
+    outputDateField: 'approval_date',  // Qlik: [Sent To Underwriting] = Log.MS.Date.Approval
+    turnTimeStartField: 'submitted_to_processing_date',
+    turnTimeEndField: 'approval_date'
+  },
+  underwriter: {
+    actorColumn: 'underwriter',
+    outputDateField: 'closing_date',   // Qlik: [Sent To Closing] = Fields.748 = Closing Date
+    turnTimeStartField: 'approval_date',
+    turnTimeEndField: 'closing_date'
+  },
+  closer: {
+    actorColumn: 'closer',
+    outputDateField: 'disbursement_date', // Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997
+    turnTimeStartField: 'closing_date',
+    turnTimeEndField: 'disbursement_date'
+  }
+};
 ```
 
 ---
@@ -241,22 +317,22 @@ FROM loans
 ## Testing Checklist
 
 ### Processor Scorecard
-- [ ] Units match Qlik (count loans with submitted_to_underwriting_date in range)
-- [ ] Turn time = submitted_to_underwriting_date - submitted_to_processing_date
+- [x] Units match Qlik (count loans with approval_date in range) - **2,087 units ✅**
+- [ ] Turn time = approval_date - submitted_to_processing_date
 - [ ] Actor count correct
-- [ ] Tier assignments match
+- [ ] Tier assignments match (TTS >= 120 = Top, >= 80 = Second)
 
 ### Underwriter Scorecard
-- [ ] Units match Qlik (count loans with ctc_date in range)
-- [ ] Turn time = ctc_date - submitted_to_underwriting_date
+- [x] Units match Qlik (count loans with closing_date in range) - **2,171 units ✅**
+- [ ] Turn time = closing_date - approval_date
 - [ ] Approved/Denied percentages correct
-- [ ] Tier assignments match
+- [ ] Tier assignments match (TTS >= 120 = Top, >= 80 = Second)
 
 ### Closer Scorecard
-- [ ] Units match Qlik (count loans with closing_date in range)
-- [ ] Turn time = closing_date - ctc_date
+- [x] Units match Qlik (count loans with disbursement_date in range) - **1,305 units ✅**
+- [ ] Turn time = disbursement_date - closing_date
 - [ ] Actor count correct
-- [ ] Tier assignments match
+- [ ] Tier assignments match (TTS >= 120 = Top, >= 80 = Second)
 
 ### All Actors
 - [ ] Volume output matches
@@ -264,7 +340,7 @@ FROM loans
 - [ ] Purchase % correct
 - [ ] WA FICO correct
 - [ ] WA LTV correct
-- [ ] Date range filtering works
+- [x] Date range filtering works (12-month range, exclusive end date)
 - [ ] Channel filtering works
 
 ---
@@ -287,3 +363,20 @@ FROM loans
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-01-26 | Initial specification | AI Assistant |
+| 2026-01-26 | Updated date field mappings after Qlik verification: Processor=approval_date, Underwriter=closing_date, Closer=disbursement_date | AI Assistant |
+| 2026-01-26 | Added disbursement_date column to tenantDatabaseSchema.ts for Fields.1997 mapping | AI Assistant |
+| 2026-01-26 | Fixed tier assignment thresholds: >=120 Top, >=80 Second, <80 Bottom (from Qlik Dimensions.csv) | AI Assistant |
+| 2026-01-27 | Verified unit counts match Qlik: Processor 2,087, Underwriter 2,171, Closer 1,305 | AI Assistant |
+
+## Qlik Reference Files
+
+The following Qlik files were analyzed to determine the correct logic:
+
+| File | Purpose |
+|------|---------|
+| `Variables.csv` | TTS weights, tier variable definitions, evaluated tier member lists |
+| `Dimensions.csv` | "13 Month TVI Score Tiers" dimension with threshold logic |
+| `Script.csv` | vMaxDate calculation, date range expressions, production flags |
+| `L1 Aliasing.qvs` | Field alias mappings for TriggerDateFields |
+| `CoheusConfig.xml` (Homestead) | Client-specific TriggerDateField mappings (Fields.1997, etc.) |
+| `CoheusDataDictionary.xml` | Encompass field ID to alias mappings |

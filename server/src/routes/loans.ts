@@ -5681,6 +5681,246 @@ router.get('/toptiering-comparison', authenticateToken, attachTenantContext, api
 });
 
 /**
+ * POST /api/loans/predict
+ * Predict outcomes for active loans using AI
+ */
+router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantContext = getTenantContext(req);
+    const tenantPool = tenantContext.tenantPool;
+    const tenantId = tenantContext.tenantId;
+
+    // Get request body
+    const { customPrompt, loanIds } = req.body;
+
+    // Build query for active loans (tenant database has no tenant_id column)
+    let query = `
+      SELECT 
+        loan_id, borrower_name, loan_amount, loan_type, status, 
+        application_date, closing_date, lock_date, interest_rate,
+        loan_purpose, branch, credit_pull_date, cycle_time_days,
+        raw_data
+      FROM public.loans 
+      WHERE status NOT IN ('Closed', 'Originated', 'Funded', 'Withdrawn', 'Denied', 'Declined')
+    `;
+    
+    const params: any[] = [];
+    let paramIndex = 1;
+    
+    // If specific loan IDs provided, filter to those
+    if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
+      query += ` AND loan_id = ANY($${paramIndex})`;
+      params.push(loanIds);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY application_date DESC LIMIT 10000`;
+
+    const loansResult = await tenantPool.query(query, params);
+
+    const activeLoans = loansResult.rows;
+
+    if (activeLoans.length === 0) {
+      return res.json({
+        predictions: [],
+        bucketedLoans: [],
+        summary: {
+          totalAnalyzed: 0,
+          predictedWithdraw: 0,
+          predictedDeny: 0,
+          predictedOriginate: 0
+        },
+        metadata: {
+          model: process.env.PREDICTION_MODEL || 'gpt-4o',
+          timestamp: new Date().toISOString(),
+          processingTimeMs: 0
+        }
+      });
+    }
+
+    // Fetch all loans for pullthrough calculation (needs historical data)
+    const allLoansResult = await tenantPool.query(
+      `SELECT 
+        loan_id, borrower_name, loan_amount, loan_type, status, 
+        application_date, closing_date, lock_date, interest_rate,
+        loan_purpose, branch, credit_pull_date, cycle_time_days,
+        raw_data
+      FROM public.loans 
+      ORDER BY application_date DESC`
+    );
+
+    const allLoans = allLoansResult.rows;
+
+    // Import and call prediction service
+    const { predictLoanOutcomes } = await import('../services/dashboard/predictionService.js');
+    
+    const result = await predictLoanOutcomes({
+      loans: activeLoans,
+      allLoans,
+      customPrompt,
+      tenantId
+    });
+
+    // Log response structure for debugging
+    const responseSize = JSON.stringify(result).length;
+    logInfo('Sending prediction response', {
+      predictionsCount: result.predictions?.length || 0,
+      bucketedLoansCount: result.bucketedLoans?.length || 0,
+      hasBucketedLoans: !!result.bucketedLoans,
+      summary: result.summary,
+      responseSizeBytes: responseSize,
+      responseSizeMB: (responseSize / 1024 / 1024).toFixed(2)
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Length', responseSize.toString());
+    
+    res.json(result);
+
+  } catch (error: any) {
+    logError('Error predicting loan outcomes', error, { userId: req.userId });
+    
+    if (handleDatabaseError(error, res, 'Failed to predict loan outcomes')) {
+      return;
+    }
+    
+    res.status(500).json({ error: error.message || 'Failed to predict loan outcomes' });
+  }
+});
+
+/**
+ * GET /api/loans/predict/status
+ * Returns whether the full prediction pipeline is still in progress for this tenant.
+ * Frontend polls this after POST /predict until inProgress is false.
+ */
+router.get('/predict/status', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantContext = getTenantContext(req);
+    const tenantId = tenantContext.tenantId;
+    
+    const { getPredictInProgress } = await import('../services/dashboard/predictionService.js');
+    const inProgress = getPredictInProgress(tenantId ?? null);
+    res.json({ inProgress });
+  } catch (error: any) {
+    logError('Error fetching predict status', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to fetch predict status' });
+  }
+});
+
+/**
+ * GET /api/loans/predictions
+ * Fetch stored AI predictions for loans
+ * Returns the most recent prediction for each loan
+ */
+router.get('/predictions', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantContext = getTenantContext(req);
+    const tenantPool = tenantContext.tenantPool;
+
+    // Optional filters
+    const loanIds = req.query.loanIds ? (Array.isArray(req.query.loanIds) ? req.query.loanIds : [req.query.loanIds]) : null;
+    const outcome = req.query.outcome as string | null;
+    const limit = parseInt(req.query.limit as string) || 10000;
+
+    // Build query to get most recent prediction for each loan (no tenant_id in tenant DB)
+    let query = `
+      SELECT DISTINCT ON (loan_id)
+        loan_id,
+        predicted_outcome,
+        confidence,
+        reasoning,
+        risk_factors,
+        model_version,
+        created_at,
+        updated_at
+      FROM public.loan_predictions
+      WHERE 1=1
+    `;
+    
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (loanIds && loanIds.length > 0) {
+      query += ` AND loan_id = ANY($${paramIndex})`;
+      params.push(loanIds);
+      paramIndex++;
+    }
+
+    if (outcome && ['withdraw', 'deny', 'originate'].includes(outcome)) {
+      query += ` AND predicted_outcome = $${paramIndex}`;
+      params.push(outcome);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY loan_id, created_at DESC LIMIT $${paramIndex}`;
+    params.push(limit);
+
+    const result = await tenantPool.query(query, params);
+
+    const predictions = result.rows.map(row => ({
+      loanId: row.loan_id,
+      predictedOutcome: row.predicted_outcome,
+      confidence: row.confidence,
+      reasoning: row.reasoning,
+      riskFactors: row.risk_factors || [],
+      modelVersion: row.model_version,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+
+    res.json({
+      predictions,
+      count: predictions.length,
+      summary: {
+        withdraw: predictions.filter(p => p.predictedOutcome === 'withdraw').length,
+        deny: predictions.filter(p => p.predictedOutcome === 'deny').length,
+        originate: predictions.filter(p => p.predictedOutcome === 'originate').length
+      }
+    });
+
+  } catch (error: any) {
+    logError('Error fetching loan predictions', error, { userId: req.userId });
+    
+    if (handleDatabaseError(error, res, 'Failed to fetch loan predictions')) {
+      return;
+    }
+    
+    res.status(500).json({ error: error.message || 'Failed to fetch loan predictions' });
+  }
+});
+
+/**
+ * POST /api/loans/sync-market-rates
+ * Sync market rates from FRED API and store in database
+ * Requires authentication
+ */
+router.post('/sync-market-rates', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { syncMarketRatesFromFRED } = await import('../services/dashboard/marketRateService.js');
+    const { startDate, endDate } = req.body;
+    
+    logInfo('Syncing market rates from FRED API', { 
+      userId: req.userId,
+      startDate,
+      endDate 
+    });
+    
+    const storedCount = await syncMarketRatesFromFRED(startDate, endDate);
+    
+    res.json({
+      success: true,
+      message: `Successfully synced ${storedCount} market rates from FRED API`,
+      storedCount
+    });
+  } catch (error: any) {
+    logError('Error syncing market rates from FRED', error, { userId: req.userId });
+    res.status(500).json({ 
+      error: error.message || 'Failed to sync market rates from FRED API' 
+    });
+  }
+});
+
+/**
  * DELETE /api/loans/:loanId
  * Delete a loan (admin/tenant owner only)
  */

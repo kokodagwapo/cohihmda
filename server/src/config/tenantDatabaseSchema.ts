@@ -1373,6 +1373,128 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       ON CONFLICT (name) DO NOTHING
     `).catch(() => {});
 
+    // =========================================================================
+    // Fallout Prediction Tables (for AI-powered loan outcome prediction)
+    // =========================================================================
+
+    // Loan predictions table - stores AI prediction results (NO tenant_id)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.loan_predictions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        loan_id TEXT NOT NULL,
+        predicted_outcome TEXT NOT NULL CHECK (predicted_outcome IN ('withdraw', 'deny', 'originate')),
+        confidence INTEGER NOT NULL CHECK (confidence >= 0 AND confidence <= 100),
+        reasoning TEXT,
+        risk_factors TEXT[],
+        model_version TEXT DEFAULT 'gpt-4o',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(loan_id, created_at)
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loan_predictions_loan ON public.loan_predictions(loan_id)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loan_predictions_outcome ON public.loan_predictions(predicted_outcome)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loan_predictions_created ON public.loan_predictions(created_at DESC)
+    `).catch(() => {});
+
+    // AI Pattern Learnings table - stores AI-extracted patterns (NO tenant_id)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.ai_pattern_learnings (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        learning_type TEXT NOT NULL DEFAULT 'historical_patterns',
+        pattern_summary TEXT NOT NULL,
+        historical_loan_count INTEGER NOT NULL,
+        date_range_start DATE,
+        date_range_end DATE,
+        model_version TEXT DEFAULT 'gpt-4o',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ,
+        metadata JSONB DEFAULT '{}'
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_pattern_learnings_type ON public.ai_pattern_learnings(learning_type)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ai_pattern_learnings_active ON public.ai_pattern_learnings(is_active)
+    `).catch(() => {});
+
+    // Historical Loan Bucket Cache - cached bucket snapshots (NO tenant_id)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.historical_loan_bucket_cache (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        loan_id TEXT NOT NULL UNIQUE,
+        bucket_snapshot JSONB NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_historical_loan_bucket_cache_loan ON public.historical_loan_bucket_cache(loan_id)
+    `).catch(() => {});
+
+    // RAG Knowledge Base table - admin-managed knowledge entries (NO tenant_id)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.rag_knowledge_base (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT,
+        tags TEXT[],
+        is_active BOOLEAN DEFAULT true,
+        priority INTEGER DEFAULT 0,
+        created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_rag_knowledge_base_active ON public.rag_knowledge_base(is_active)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_rag_knowledge_base_category ON public.rag_knowledge_base(category)
+    `).catch(() => {});
+
+    // Loan Outcome Embeddings - vector embeddings for RAG (requires pgvector)
+    // Note: pgvector extension must be installed separately
+    try {
+      await pool.query('CREATE EXTENSION IF NOT EXISTS vector').catch(() => {});
+      
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.loan_outcome_embeddings (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          loan_id TEXT NOT NULL UNIQUE,
+          outcome TEXT NOT NULL CHECK (outcome IN ('withdraw', 'deny', 'originate')),
+          canonical_text TEXT NOT NULL,
+          embedding vector(1536) NOT NULL,
+          metadata JSONB DEFAULT '{}',
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `).catch(() => {});
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_loan_outcome_embeddings_loan ON public.loan_outcome_embeddings(loan_id)
+      `).catch(() => {});
+
+      console.log('[TenantSchema] Fallout Prediction tables created (including pgvector)');
+    } catch (error: any) {
+      console.warn('[TenantSchema] pgvector extension not available - loan_outcome_embeddings table not created. RAG predictions will be disabled.');
+    }
+
     // Create derived field functions
     await createTenantDerivedFieldFunctions(pool);
 

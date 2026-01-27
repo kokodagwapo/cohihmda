@@ -17,18 +17,28 @@ interface LoanCard {
   dtiRatio: number | null;
 }
 
+interface LoanPrediction {
+  loanId: string;
+  predictedOutcome: 'withdraw' | 'deny' | 'originate';
+  confidence: number;
+  reasoning?: string;
+  riskFactors?: string[];
+}
+
 interface LoanCardsContainerProps {
   loans: LoanCard[];
+  predictions?: LoanPrediction[]; // Optional predictions map
   isDarkMode?: boolean;
 }
 
-type TabType = 'all' | 'critical' | 'at-risk' | 'low';
+type TabType = 'all' | 'likely-withdraw' | 'likely-decline';
 type SortType = 'risk' | 'amount' | 'loan' | 'officer';
 
 const ITEMS_PER_PAGE = 6;
 
 export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
   loans,
+  predictions = [],
   isDarkMode = false
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('all');
@@ -106,18 +116,29 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
     return filteredLoans.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredLoans, currentPage]);
 
-  const tabCounts = useMemo(() => ({
-    all: loans.length,
-    critical: loans.filter(l => l.riskLevel === 'Very High').length,
-    'at-risk': loans.filter(l => l.riskLevel === 'Medium').length,
-    low: loans.filter(l => l.riskLevel === 'Low').length
-  }), [loans]);
+  const tabCounts = useMemo(() => {
+    const predictionMapForCounts = new Map<string, LoanPrediction>();
+    predictions.forEach(pred => {
+      predictionMapForCounts.set(pred.loanId, pred);
+    });
+    
+    return {
+      all: loans.length,
+      'likely-withdraw': loans.filter(l => {
+        const pred = predictionMapForCounts.get(l.id);
+        return pred?.predictedOutcome === 'withdraw';
+      }).length,
+      'likely-decline': loans.filter(l => {
+        const pred = predictionMapForCounts.get(l.id);
+        return pred?.predictedOutcome === 'deny';
+      }).length
+    };
+  }, [loans, predictions]);
 
   const tabs: { id: TabType; label: string; shortLabel: string; color: string }[] = [
     { id: 'all', label: 'All Loans', shortLabel: 'All', color: 'darkred' },
-    { id: 'critical', label: 'Critical', shortLabel: 'Critical', color: 'red' },
-    { id: 'at-risk', label: 'At Risk', shortLabel: 'Risk', color: 'lightred' },
-    { id: 'low', label: 'Low Risk', shortLabel: 'Low', color: 'lightestred' }
+    { id: 'likely-withdraw', label: 'Likely Withdrawal', shortLabel: 'Withdraw', color: 'red' },
+    { id: 'likely-decline', label: 'Likely Decline', shortLabel: 'Decline', color: 'lightred' }
   ];
 
   const getTabStyle = (tab: typeof tabs[0]) => {

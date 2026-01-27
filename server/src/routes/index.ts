@@ -18,6 +18,7 @@ import encompassRoutes from './encompass.js';
 import tenantRoutes from './tenants.js';
 import tenantConfigRoutes from './tenantConfig.js';
 import dataChatRoutes from './dataChat.js';
+import ragKnowledgeBaseRouter from './ragKnowledgeBase.js';
 import { pool, resetPool } from '../config/database.js';
 import { setupMockLosApi } from '../services/mockLosApi.js';
 import { getVersionInfo } from '../services/versionService.js';
@@ -36,6 +37,7 @@ export function setupRoutes(app: Express) {
   // SaaS & Enterprise Features
   app.use('/api/subscriptions', subscriptionsRoutes);
   app.use('/api/rag', ragRoutes);
+  app.use('/api/rag/knowledge-base', ragKnowledgeBaseRouter);
   app.use('/api/metrics', metricsRoutes);
   app.use('/api/costs', costsRoutes);
   app.use('/api/deployments', deploymentsRoutes);
