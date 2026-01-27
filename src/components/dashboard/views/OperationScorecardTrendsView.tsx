@@ -6,140 +6,37 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTheme } from '@/components/theme-provider';
-import { Search, Download, Info, Target, Hash, DollarSign, Gauge, Clock, Maximize2, Minimize2, AlertTriangle, CheckCircle2, ArrowUpRight, ArrowDownRight, Calendar, TrendingUp } from 'lucide-react';
+import { Search, Download, Info, Target, Hash, DollarSign, Gauge, Clock, Maximize2, Minimize2, AlertTriangle, CheckCircle2, ArrowUpRight, ArrowDownRight, Calendar, TrendingUp, Loader2 } from 'lucide-react';
+import { useOperationsScorecardTrendsData, ScorecardActorType, ComparisonViewType, TierSummary } from '@/hooks/useOperationsScorecardTrendsData';
 
-type ScorecardActor = 'processor' | 'underwriter' | 'closer';
-type ComparisonView = 'monthly' | 'vs-target' | 'year-over-year';
-
-interface ProcessorMonthData {
-  unitsOutput: number;
-  outputVsTarget: number;
-  averageDays: number;
-  conversionPercent: number;
-  loanComplexityScore: number;
+// Props interface for the view component
+interface OperationScorecardTrendsViewProps {
+  selectedTenantId?: string | null;
+  selectedChannel?: string | null;
 }
 
-interface ProcessorData {
-  id: string;
-  name: string;
-  tier: 'top' | 'second' | 'bottom';
-  months: {
-    [key: string]: ProcessorMonthData;
-  };
-}
-
-interface TierSummary {
-  tier: 'top' | 'second' | 'bottom';
-  count: number;
-  totalUnits: number;
-  percentOfTotal: number;
-  avgUnitsPerMonth: number;
-  avgDaysPerUnit: number;
-}
-
-// Mock data for the trends view
-const mockMonths = ['Jan-2026', 'Dec-2025', 'Nov-2025', 'Oct-2025'];
-
-const mockProcessors: ProcessorData[] = [
-  {
-    id: '1',
-    name: 'Michelle Neuf',
-    tier: 'top',
-    months: {
-      'Jan-2026': { unitsOutput: 73, outputVsTarget: 48, averageDays: 0, conversionPercent: 56.2, loanComplexityScore: 111.5 },
-      'Dec-2025': { unitsOutput: 158, outputVsTarget: 133, averageDays: 0, conversionPercent: 53.2, loanComplexityScore: 111.1 },
-      'Nov-2025': { unitsOutput: 158, outputVsTarget: 133, averageDays: 0, conversionPercent: 51.3, loanComplexityScore: 111.6 },
-      'Oct-2025': { unitsOutput: 179, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-    }
-  },
-  {
-    id: '2',
-    name: 'Tianna Haynes',
-    tier: 'second',
-    months: {
-      'Jan-2026': { unitsOutput: 19, outputVsTarget: -6, averageDays: 0, conversionPercent: 57.9, loanComplexityScore: 108.7 },
-      'Dec-2025': { unitsOutput: 43, outputVsTarget: 18, averageDays: 0, conversionPercent: 51.2, loanComplexityScore: 107.9 },
-      'Nov-2025': { unitsOutput: 39, outputVsTarget: 14, averageDays: 0, conversionPercent: 70.7, loanComplexityScore: 107.9 },
-      'Oct-2025': { unitsOutput: 36, outputVsTarget: 11, averageDays: 0, conversionPercent: 52.8, loanComplexityScore: 110.4 },
-    }
-  },
-  {
-    id: '3',
-    name: 'Melanie Helen Ledford',
-    tier: 'second',
-    months: {
-      'Jan-2026': { unitsOutput: 16, outputVsTarget: -9, averageDays: 0, conversionPercent: 81.3, loanComplexityScore: 103.4 },
-      'Dec-2025': { unitsOutput: 26, outputVsTarget: 1, averageDays: 0, conversionPercent: 53.8, loanComplexityScore: 115.0 },
-      'Nov-2025': { unitsOutput: 31, outputVsTarget: 6, averageDays: 0, conversionPercent: 61.3, loanComplexityScore: 111.8 },
-      'Oct-2025': { unitsOutput: 30, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-    }
-  },
-  {
-    id: '4',
-    name: 'Katherine Goodey',
-    tier: 'second',
-    months: {
-      'Jan-2026': { unitsOutput: 8, outputVsTarget: -17, averageDays: 0, conversionPercent: 12.5, loanComplexityScore: 130.6 },
-      'Dec-2025': { unitsOutput: 20, outputVsTarget: -5, averageDays: 0, conversionPercent: 30.0, loanComplexityScore: 113.5 },
-      'Nov-2025': { unitsOutput: 15, outputVsTarget: -10, averageDays: 0, conversionPercent: 53.3, loanComplexityScore: 111.0 },
-      'Oct-2025': { unitsOutput: 25, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-    }
-  },
-  {
-    id: '5',
-    name: 'Tanya Cantrell',
-    tier: 'bottom',
-    months: {
-      'Jan-2026': { unitsOutput: 11, outputVsTarget: -14, averageDays: 0, conversionPercent: 45.5, loanComplexityScore: 115.9 },
-      'Dec-2025': { unitsOutput: 15, outputVsTarget: -10, averageDays: 0, conversionPercent: 53.3, loanComplexityScore: 108.3 },
-      'Nov-2025': { unitsOutput: 25, outputVsTarget: 0, averageDays: 0, conversionPercent: 36.0, loanComplexityScore: 113.0 },
-      'Oct-2025': { unitsOutput: 23, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-    }
-  },
-  {
-    id: '6',
-    name: 'Brett Smith',
-    tier: 'bottom',
-    months: {
-      'Jan-2026': { unitsOutput: 5, outputVsTarget: -20, averageDays: 0, conversionPercent: 60.0, loanComplexityScore: 116.0 },
-      'Dec-2025': { unitsOutput: 13, outputVsTarget: -12, averageDays: 0, conversionPercent: 38.5, loanComplexityScore: 123.1 },
-      'Nov-2025': { unitsOutput: 12, outputVsTarget: -13, averageDays: 0, conversionPercent: 58.3, loanComplexityScore: 117.5 },
-      'Oct-2025': { unitsOutput: 12, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-    }
-  },
-  {
-    id: '7',
-    name: 'Eric Paniucki',
-    tier: 'bottom',
-    months: {
-      'Jan-2026': { unitsOutput: 0, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-      'Dec-2025': { unitsOutput: 0, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-      'Nov-2025': { unitsOutput: 0, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-      'Oct-2025': { unitsOutput: 0, outputVsTarget: 0, averageDays: 0, conversionPercent: 0, loanComplexityScore: 0 },
-    }
-  },
-];
-
-const mockTierSummaries: TierSummary[] = [
-  { tier: 'top', count: 1, totalUnits: 516, percentOfTotal: 24.8, avgUnitsPerMonth: 40, avgDaysPerUnit: 0 },
-  { tier: 'second', count: 2, totalUnits: 824, percentOfTotal: 39.6, avgUnitsPerMonth: 32, avgDaysPerUnit: 0 },
-  { tier: 'bottom', count: 4, totalUnits: 739, percentOfTotal: 35.5, avgUnitsPerMonth: 14, avgDaysPerUnit: 0 },
-];
-
-export function OperationScorecardTrendsView() {
+export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel }: OperationScorecardTrendsViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   
-  const [selectedActor, setSelectedActor] = useState<ScorecardActor>(() => {
+  const [selectedActor, setSelectedActor] = useState<ScorecardActorType>(() => {
     const saved = localStorage.getItem('op-scorecard-trends-actor');
-    return (saved as ScorecardActor) || 'processor';
+    return (saved as ScorecardActorType) || 'underwriter';
   });
-  const [comparisonView, setComparisonView] = useState<ComparisonView>(() => {
+  const [comparisonView, setComparisonView] = useState<ComparisonViewType>(() => {
     const saved = localStorage.getItem('op-scorecard-trends-comparison');
-    return (saved as ComparisonView) || 'vs-target';
+    return (saved as ComparisonViewType) || 'vs-target';
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Fetch data using the hook
+  const { data, loading, error } = useOperationsScorecardTrendsData(
+    selectedActor,
+    comparisonView,
+    selectedTenantId,
+    selectedChannel
+  );
 
   useEffect(() => {
     localStorage.setItem('op-scorecard-trends-actor', selectedActor);
@@ -168,14 +65,27 @@ export function OperationScorecardTrendsView() {
     return { icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-900/20', label: 'Below Target' };
   };
 
-  // Calculate totals for top metrics
-  const totalUnits = mockProcessors.reduce((sum, p) => {
-    return sum + Object.values(p.months).reduce((s, m) => s + m.unitsOutput, 0);
+  // Get data from API or use defaults
+  const months = data?.months || [];
+  const actors = data?.actors || [];
+  const tierSummary = data?.tierSummary;
+  const kpis = data?.kpis;
+  
+  // Convert tier summary to array format for rendering
+  const tierSummaries: TierSummary[] = tierSummary ? [
+    tierSummary.top,
+    tierSummary.second,
+    tierSummary.bottom
+  ] : [];
+
+  // Calculate totals for top metrics from API data
+  const totalUnits = actors.reduce((sum, p) => {
+    return sum + Object.values(p.months).reduce((s: number, m: any) => s + (m.unitsOutput || 0), 0);
   }, 0);
 
-  const avgVolumeOutput = 68360393; // From screenshot
-  const avgLoanComplexityScore = 113.5; // From screenshot
-  const targetUnitsPerMonth = 25; // From screenshot
+  const avgVolumeOutput = kpis?.avgVolumeOutput || 0;
+  const avgLoanComplexityScore = kpis?.avgLoanComplexityScore || 100;
+  const targetUnitsPerMonth = kpis?.targetUnitsPerMonth || 25;
 
   // Get tier color - matching operation scorecard
   const getTierColor = (tier: 'top' | 'second' | 'bottom') => {
@@ -220,14 +130,14 @@ export function OperationScorecardTrendsView() {
     csv += `Generated: ${new Date().toLocaleString()}\n\n`;
     
     // Header row
-    csv += `Processor,Tier,${mockMonths.map(m => `${m} Units,${m} vs Target,${m} Conversion %,${m} Complexity`).join(',')}\n`;
+    csv += `${selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)},Tier,${months.map(m => `${m} Units,${m} vs Target,${m} Conversion %,${m} Complexity`).join(',')}\n`;
     
     // Data rows
-    mockProcessors.forEach(p => {
+    actors.forEach(p => {
       csv += `${p.name},${p.tier}`;
-      mockMonths.forEach(month => {
-        const data = p.months[month];
-        csv += `,${data.unitsOutput},${data.outputVsTarget},${data.conversionPercent},${data.loanComplexityScore}`;
+      months.forEach(month => {
+        const monthData = p.months[month];
+        csv += `,${monthData?.unitsOutput || 0},${monthData?.outputVsTarget || 0},${monthData?.conversionPercent || 0},${monthData?.loanComplexityScore || 0}`;
       });
       csv += '\n';
     });
@@ -238,6 +148,56 @@ export function OperationScorecardTrendsView() {
     link.download = filename;
     link.click();
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+          <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+            Loading trends data...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-red-900/20 border-red-700/50' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-6 w-6 text-red-500" />
+            <div>
+              <p className={`font-medium ${isDarkMode ? 'text-red-300' : 'text-red-900'}`}>Failed to load data</p>
+              <p className={`text-sm ${isDarkMode ? 'text-red-400' : 'text-red-700'}`}>{error}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state
+  if (!data || actors.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className={`p-6 rounded-lg border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="flex items-center gap-3">
+            <Info className="h-6 w-6 text-slate-400" />
+            <div>
+              <p className={`font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-900'}`}>No data available</p>
+              <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                No {selectedActor} performance data found for the selected period.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">
@@ -332,12 +292,12 @@ export function OperationScorecardTrendsView() {
                 {/* Total Summary */}
                 <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-slate-700/30' : 'bg-slate-50'}`}>
                   <p className={`text-sm font-semibold mb-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    {mockProcessors.length} {selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)}s output {formatNumber(totalUnits)} Total Units.
+                    {actors.length} {selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)}s output {formatNumber(totalUnits)} Total Units.
                   </p>
                 </div>
 
                 {/* Tier Summaries - Premium Redesign */}
-                {mockTierSummaries.map((tierData) => {
+                {tierSummaries.map((tierData) => {
                   const tierName = tierData.tier.charAt(0).toUpperCase() + tierData.tier.slice(1) + ' Tier';
                   
                   // Define tier-specific styles
@@ -607,9 +567,9 @@ export function OperationScorecardTrendsView() {
                           <span className="ml-1 text-red-600 dark:text-red-400">(Below target)</span>
                         </div>
                         <div>
-                          <span className="font-semibold">Avg Performance:</span> {Math.round((totalUnits / mockProcessors.length) / mockMonths.length)} units/month
-                          <span className={`ml-1 ${totalUnits / mockProcessors.length / mockMonths.length >= targetUnitsPerMonth ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                            ({totalUnits / mockProcessors.length / mockMonths.length >= targetUnitsPerMonth ? 'On track' : 'Below target'})
+                          <span className="font-semibold">Avg Performance:</span> {Math.round((totalUnits / actors.length) / months.length)} units/month
+                          <span className={`ml-1 ${totalUnits / actors.length / months.length >= targetUnitsPerMonth ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                            ({totalUnits / actors.length / months.length >= targetUnitsPerMonth ? 'On track' : 'Below target'})
                           </span>
                         </div>
                       </div>
@@ -672,7 +632,7 @@ export function OperationScorecardTrendsView() {
                         <th className={`text-left py-3 px-4 text-sm font-semibold sticky left-0 z-20 min-w-[200px] backdrop-blur-md ${isDarkMode ? 'bg-slate-800/70 text-slate-400 border-r-2 border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.3)]' : 'bg-white/70 text-slate-600 border-r-2 border-slate-300 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.1)]'}`}>
                           {selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)}
                         </th>
-                        {mockMonths.map((month) => (
+                        {months.map((month) => (
                           <th key={month} colSpan={5} className={`text-center py-3 px-2 text-sm font-semibold border-l ${isDarkMode ? 'border-slate-700 text-slate-300' : 'border-slate-300 text-slate-700'}`}>
                             {month}
                           </th>
@@ -682,7 +642,7 @@ export function OperationScorecardTrendsView() {
                         <th className={`text-left py-2 px-4 text-xs font-medium sticky left-0 z-20 min-w-[200px] backdrop-blur-md ${isDarkMode ? 'bg-slate-800/70 text-slate-500 border-r-2 border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.3)]' : 'bg-white/70 text-slate-500 border-r-2 border-slate-300 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.1)]'}`}>
                           {/* Empty */}
                         </th>
-                        {mockMonths.map((month) => (
+                        {months.map((month) => (
                           <React.Fragment key={month}>
                             <th className={`text-center py-2 px-2 text-xs font-medium border-l ${isDarkMode ? 'border-slate-700 text-slate-500' : 'border-slate-300 text-slate-500'}`}>
                               Units Output
@@ -709,8 +669,8 @@ export function OperationScorecardTrendsView() {
                         <td className={`py-3 px-4 text-sm sticky left-0 z-10 min-w-[200px] backdrop-blur-md ${isDarkMode ? 'bg-slate-700/65 text-white border-r-2 border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.3)]' : 'bg-slate-100/70 text-slate-900 border-r-2 border-slate-300 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.1)]'}`}>
                           Totals
                         </td>
-                        {mockMonths.map((month) => {
-                          const monthTotals = mockProcessors.reduce((acc, p) => {
+                        {months.map((month) => {
+                          const monthTotals = actors.reduce((acc, p) => {
                             const data = p.months[month];
                             return {
                               units: acc.units + data.unitsOutput,
@@ -750,7 +710,7 @@ export function OperationScorecardTrendsView() {
                       </tr>
 
                       {/* Individual Processor Rows */}
-                      {mockProcessors.map((processor) => {
+                      {actors.map((processor) => {
                         // Define backdrop styles for each tier
                         const tierBackdropStyles = {
                           top: isDarkMode 
@@ -765,7 +725,7 @@ export function OperationScorecardTrendsView() {
                         }[processor.tier];
 
                         // Check if processor is on target
-                        const latestMonth = mockMonths[0];
+                        const latestMonth = months[0];
                         const latestData = processor.months[latestMonth];
                         const isOnTarget = latestData.unitsOutput >= targetUnitsPerMonth;
                         
@@ -792,7 +752,7 @@ export function OperationScorecardTrendsView() {
                             <div className="flex items-center justify-between gap-2">
                               <span>{processor.name}</span>
                               {(() => {
-                                const latestMonth = mockMonths[0];
+                                const latestMonth = months[0];
                                 const latestData = processor.months[latestMonth];
                                 const indicator = getPerformanceIndicator(latestData.unitsOutput, targetUnitsPerMonth);
                                 const IndicatorIcon = indicator.icon;
@@ -814,7 +774,7 @@ export function OperationScorecardTrendsView() {
                               })()}
                             </div>
                           </td>
-                          {mockMonths.map((month) => {
+                          {months.map((month) => {
                             const data = processor.months[month];
                             const hasData = data.unitsOutput > 0 || data.outputVsTarget !== 0;
 

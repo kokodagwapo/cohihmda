@@ -5,11 +5,12 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from '@/components/theme-provider';
-import { Search, BarChart3, Filter, Target, DollarSign, Users, Clock, TrendingUp, TrendingDown, Bookmark, Mail, Phone, MapPin, LineChart } from 'lucide-react';
+import { Search, BarChart3, Filter, Target, DollarSign, Users, Clock, TrendingUp, TrendingDown, Bookmark, Mail, Phone, MapPin, LineChart, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Legend, AreaChart, Area, ComposedChart, Line } from 'recharts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Button } from '@/components/ui/button';
+import { useSalesTrendsData, type LoanOfficer as APILoanOfficer, type DrilldownData as APIDrilldownData, type DateRangeOption } from '@/hooks/useSalesTrendsData';
 
 type DateRange = '3-months' | '6-months';
 type ViewMode = 'cards' | 'tabular';
@@ -196,6 +197,11 @@ const SalesTrends = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOfficer, setSelectedOfficer] = useState<LoanOfficer | null>(null);
   const [isDrilldownOpen, setIsDrilldownOpen] = useState(false);
+  const [drilldownData, setDrilldownData] = useState<DrilldownData | null>(null);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+
+  // Fetch data from API
+  const { data: apiData, loading, error, refetch, fetchDrilldown } = useSalesTrendsData(dateRange as DateRangeOption, 'Retail');
 
   useEffect(() => {
     localStorage.setItem('sales-trends-dateRange', dateRange);
@@ -205,28 +211,35 @@ const SalesTrends = () => {
     localStorage.setItem('sales-trends-viewMode', viewMode);
   }, [viewMode]);
 
+  // Transform API loan officers to include trendData for charts
   const loanOfficers = useMemo(() => {
-    return dateRange === '3-months' ? mockLoanOfficers3Months : mockLoanOfficers6Months;
-  }, [dateRange]);
+    if (!apiData?.loanOfficers) return [];
+    return apiData.loanOfficers.map(lo => ({
+      ...lo,
+      trendData: generateTrendData(lo.trendPercent),
+    }));
+  }, [apiData?.loanOfficers]);
 
+  // Get fund type data from API
   const fundTypeData = useMemo(() => {
-    return dateRange === '3-months' ? fundTypeData3Months : fundTypeData6Months;
-  }, [dateRange]);
+    return apiData?.fundTypeBreakdown || [];
+  }, [apiData?.fundTypeBreakdown]);
 
+  // Get monthly performance from API
   const monthlyPerformance = useMemo(() => {
-    return dateRange === '3-months' ? monthlyPerformance3Months : monthlyPerformance6Months;
-  }, [dateRange]);
+    return apiData?.monthlyPerformance || [];
+  }, [apiData?.monthlyPerformance]);
 
+  // Get KPI metrics from API
   const kpiMetrics = useMemo(() => {
-    const totalUnits = loanOfficers.reduce((sum, lo) => sum + lo.closed, 0);
-    const totalVolume = loanOfficers.reduce((sum, lo) => sum + lo.volume, 0);
-    const activeLOs = loanOfficers.length;
+    if (!apiData?.kpiMetrics) {
+      return { totalUnits: 0, totalVolume: 0, activeLOs: 0, topTierCount: 0, avgTurnTime: 0 };
+    }
     const topTierCount = loanOfficers.filter(lo => lo.tier === 'top').length;
-    const avgTurnTime = Math.round(loanOfficers.reduce((sum, lo) => sum + lo.daysAvg, 0) / loanOfficers.length);
+    return { ...apiData.kpiMetrics, topTierCount };
+  }, [apiData?.kpiMetrics, loanOfficers]);
 
-    return { totalUnits, totalVolume, activeLOs, topTierCount, avgTurnTime };
-  }, [loanOfficers]);
-
+  // Filter data based on search query
   const filteredLoanOfficers = useMemo(() => {
     if (!searchQuery) return loanOfficers;
     const query = searchQuery.toLowerCase();
@@ -247,44 +260,57 @@ const SalesTrends = () => {
     return `$${value.toLocaleString()}`;
   };
 
-  const getDrilldownData = (officer: LoanOfficer): DrilldownData => {
-    const monthlyDetails: MonthlyDetail[] = [
-      { month: '2026-Jan', closed: 6, volume: 1200000, margin: 498, pullThrough: 37.1, turnTime: 42 },
-      { month: '2025-Dec', closed: 11, volume: 2500000, margin: 322, pullThrough: 57.9, turnTime: 55 },
-      { month: '2025-Nov', closed: 7, volume: 890000, margin: 415, pullThrough: 48.9, turnTime: 30 },
-      { month: '2025-Oct', closed: 6, volume: 3000000, margin: 372, pullThrough: 49.2, turnTime: 26 },
-      { month: '2025-Sep', closed: 11, volume: 2800000, margin: 520, pullThrough: 13.6, turnTime: 50 },
-      { month: '2025-Aug', closed: 8, volume: 1600000, margin: 380, pullThrough: 35.2, turnTime: 69 },
-    ];
-
-    const performanceTrend = monthlyDetails.map(d => ({
-      month: d.month.split('-')[1],
-      closedUnits: d.closed,
-      marginBPS: d.margin,
-    }));
-
-    const contact: ContactInfo = {
-      email: 'loan.officer@coheus.com',
-      phone: '(555) 123-4567',
-      location: 'West Coast',
-    };
-
-    return {
-      totalClosed: officer.closed,
-      totalVolume: officer.volume,
-      avgMargin: officer.marginBPS,
-      turnTime: officer.daysAvg,
-      branchRank: 3,
-      branchTotal: 10,
-      contact,
-      monthlyDetails,
-      performanceTrend,
-    };
-  };
-
-  const handleCardClick = (officer: LoanOfficer) => {
+  // Handle card click - fetch drilldown data from API
+  const handleCardClick = async (officer: LoanOfficer) => {
     setSelectedOfficer(officer);
     setIsDrilldownOpen(true);
+    setDrilldownLoading(true);
+    setDrilldownData(null);
+    
+    try {
+      const data = await fetchDrilldown(officer.name);
+      if (data) {
+        setDrilldownData({
+          totalClosed: data.totalClosed,
+          totalVolume: data.totalVolume,
+          avgMargin: data.avgMargin,
+          turnTime: data.turnTime,
+          branchRank: data.branchRank,
+          branchTotal: data.branchTotal,
+          contact: data.contact,
+          monthlyDetails: data.monthlyDetails,
+          performanceTrend: data.performanceTrend,
+        });
+      } else {
+        // Fallback to basic data from officer if API fails
+        setDrilldownData({
+          totalClosed: officer.closed,
+          totalVolume: officer.volume,
+          avgMargin: officer.marginBPS,
+          turnTime: officer.daysAvg,
+          branchRank: 1,
+          branchTotal: 1,
+          contact: { email: 'loan.officer@company.com', phone: '(555) 123-4567', location: officer.branch },
+          monthlyDetails: [],
+          performanceTrend: [],
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching drilldown:', err);
+      setDrilldownData({
+        totalClosed: officer.closed,
+        totalVolume: officer.volume,
+        avgMargin: officer.marginBPS,
+        turnTime: officer.daysAvg,
+        branchRank: 1,
+        branchTotal: 1,
+        contact: { email: 'loan.officer@company.com', phone: '(555) 123-4567', location: officer.branch },
+        monthlyDetails: [],
+        performanceTrend: [],
+      });
+    } finally {
+      setDrilldownLoading(false);
+    }
   };
 
   const getTierBadge = (tier: 'top' | '2nd' | 'bottom') => {
@@ -312,6 +338,31 @@ const SalesTrends = () => {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none" />
 
       <main className="relative mx-auto px-6 pt-24 pb-12 max-w-[1800px]">
+        {/* Loading State */}
+        {loading && (
+          <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <Loader2 className="h-8 w-8 animate-spin text-teal-500 mb-4" />
+            <p className="text-slate-600 dark:text-slate-400">Loading sales trends data...</p>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && !loading && (
+          <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <div className={`rounded-xl p-8 text-center ${isDarkMode ? 'bg-slate-800/70' : 'bg-white'} shadow-lg max-w-md`}>
+              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">Failed to Load Data</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">{error}</p>
+              <Button onClick={refetch} className="gap-2">
+                <RefreshCw className="h-4 w-4" />
+                Try Again
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Main Content */}
+        {!loading && !error && (
         <div className="grid gap-4 sm:gap-5 md:gap-6 grid-cols-12">
           <div className="col-span-12 lg:col-span-8 space-y-4 sm:space-y-5 md:space-y-6">
             {/* KPI Cards */}
@@ -586,6 +637,7 @@ const SalesTrends = () => {
             </Card>
           </div>
         </div>
+        )}
       </main>
 
       {/* Drilldown Modal */}
@@ -593,10 +645,19 @@ const SalesTrends = () => {
         <DialogPrimitive.Portal>
           <DialogPrimitive.Overlay className={`fixed inset-0 z-[80] backdrop-blur-sm sm:backdrop-blur-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 touch-none ${isDarkMode ? 'bg-black/70' : 'bg-black/50'}`} />
           <DialogContent className="max-w-[95vw] sm:max-w-6xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto p-0 w-full">
-            {selectedOfficer && (() => {
-              const drilldownData = getDrilldownData(selectedOfficer);
-              return (
+            {selectedOfficer && (
                 <div className="p-4 sm:p-6">
+                  {/* Drilldown Loading State */}
+                  {drilldownLoading && (
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <Loader2 className="h-8 w-8 animate-spin text-teal-500 mb-4" />
+                      <p className="text-slate-600 dark:text-slate-400">Loading details...</p>
+                    </div>
+                  )}
+
+                  {/* Drilldown Content */}
+                  {!drilldownLoading && drilldownData && (
+                  <>
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
                     <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                       <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white font-semibold text-sm sm:text-base bg-teal-500 flex-shrink-0">{selectedOfficer.initials}</div>
@@ -712,9 +773,10 @@ const SalesTrends = () => {
                       </div>
                     </CardContent>
                   </Card>
+                  </>
+                  )}
                 </div>
-              );
-            })()}
+            )}
           </DialogContent>
         </DialogPrimitive.Portal>
       </Dialog>

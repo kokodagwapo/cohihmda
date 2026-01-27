@@ -6,9 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { useTheme } from '@/components/theme-provider';
-import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2 } from 'lucide-react';
+import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2, AlertCircle } from 'lucide-react';
 import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ComposedChart, Tooltip, Cell, ReferenceLine } from 'recharts';
 import { formatCompactNumber } from '@/utils/formatting';
+import { 
+  useTopTieringComparisonData, 
+  TopTieringActorType, 
+  TimeFilterType,
+  TopTieringActor as APIActorData,
+  CustomDateRange
+} from '@/hooks/useTopTieringComparisonData';
 
 type TopTieringActor = 'branch' | 'loan-officer';
 type TimeFilter = 'last-year' | 'last-quarter' | 'last-month' | 'custom';
@@ -23,6 +30,11 @@ interface ActorData {
   volume: number;
   revenueBPS: number;
   revenuePerLoan: number;
+}
+
+interface TopTieringComparisonViewProps {
+  selectedTenantId?: string | null;
+  selectedChannel?: string | null;
 }
 
 // Mock data for Branches
@@ -127,7 +139,10 @@ const generateLoanOfficers = (): ActorData[] => {
 
 const mockLoanOfficers = generateLoanOfficers();
 
-export function TopTieringComparisonView() {
+export function TopTieringComparisonView({ 
+  selectedTenantId, 
+  selectedChannel 
+}: TopTieringComparisonViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   const isMobile = useIsMobile();
@@ -135,7 +150,7 @@ export function TopTieringComparisonView() {
   
   const [selectedActor, setSelectedActor] = useState<TopTieringActor>(() => {
     const saved = localStorage.getItem('toptiering-comparison-actor');
-    return (saved as TopTieringActor) || 'branch';
+    return (saved as TopTieringActor) || 'loan-officer';
   });
   const [timeFilter, setTimeFilter] = useState<TimeFilter>(() => {
     const saved = localStorage.getItem('toptiering-comparison-time');
@@ -150,6 +165,21 @@ export function TopTieringComparisonView() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  
+  // Custom date range state (for when timeFilter is 'custom')
+  const [customDateRange, setCustomDateRange] = useState<CustomDateRange | undefined>(undefined);
+
+  // Fetch real data from API
+  const { data: apiData, loading, error } = useTopTieringComparisonData(
+    selectedActor as TopTieringActorType,
+    timeFilter as TimeFilterType,
+    selectedTenantId,
+    selectedChannel,
+    customDateRange
+  );
+  
+  // Determine if using real data or mock data
+  const isUsingMockData = !apiData || apiData.actors.length === 0;
 
   useEffect(() => {
     localStorage.setItem('toptiering-comparison-actor', selectedActor);
@@ -169,8 +199,24 @@ export function TopTieringComparisonView() {
 
   const formatNumber = (num: number) => num.toLocaleString('en-US');
 
-  // Get current data based on selected actor
-  const currentData = selectedActor === 'branch' ? mockBranches : mockLoanOfficers;
+  // Get current data based on selected actor - use API data when available, else mock
+  const currentData: ActorData[] = useMemo(() => {
+    if (apiData && apiData.actors.length > 0) {
+      // Transform API data to match local interface
+      return apiData.actors.map(actor => ({
+        id: actor.id,
+        name: actor.name,
+        tier: actor.tier,
+        revenue: actor.revenue,
+        units: actor.units,
+        volume: actor.volume,
+        revenueBPS: actor.revenueBPS,
+        revenuePerLoan: actor.revenuePerLoan
+      }));
+    }
+    // Fall back to mock data
+    return selectedActor === 'branch' ? mockBranches : mockLoanOfficers;
+  }, [apiData, selectedActor]);
 
   // Calculate statistical insights
   const statisticalInsights = useMemo(() => {
@@ -234,13 +280,14 @@ export function TopTieringComparisonView() {
     );
   }, [currentData, searchQuery]);
 
-  // Calculate YoY growth (mock - would come from API)
-  const calculateYoYGrowth = () => {
+  // Calculate YoY growth - use API data when available
+  const yoyGrowth = useMemo(() => {
+    if (apiData && apiData.yoyGrowth !== undefined) {
+      return apiData.yoyGrowth;
+    }
     // Mock: assume 8% growth
     return 8.2;
-  };
-
-  const yoyGrowth = calculateYoYGrowth();
+  }, [apiData]);
 
   // Export functionality
   const handleExport = async () => {
@@ -351,8 +398,59 @@ export function TopTieringComparisonView() {
     }
   };
 
+  // Loading state
+  if (loading) {
+    return (
+      <div className={`relative transition-all duration-300 max-w-[1800px] p-3 sm:p-4 md:p-6`}>
+        <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white'}`}>
+          <CardContent className="pt-12 pb-12 text-center">
+            <Loader2 className={`w-12 h-12 mx-auto mb-4 animate-spin ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+            <p className={`text-lg font-semibold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+              Loading TopTiering Data...
+            </p>
+            <p className={`text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
+              Fetching {selectedActor === 'branch' ? 'branch' : 'loan officer'} performance metrics
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className={`relative transition-all duration-300 max-w-[1800px] p-3 sm:p-4 md:p-6`}>
+        <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-red-700/50 bg-slate-800/70' : 'border-red-200/40 bg-white'}`}>
+          <CardContent className="pt-12 pb-12 text-center">
+            <AlertCircle className={`w-12 h-12 mx-auto mb-4 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
+            <p className={`text-lg font-semibold mb-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+              Failed to Load Data
+            </p>
+            <p className={`text-sm mb-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
+              {error}
+            </p>
+            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+              Showing demo data instead
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className={`relative transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px]'} p-3 sm:p-4 md:p-6`}>
+        {/* Demo data indicator */}
+        {isUsingMockData && (
+          <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${isDarkMode ? 'bg-amber-900/20 border border-amber-700/30' : 'bg-amber-50 border border-amber-200'}`}>
+            <AlertCircle className={`w-4 h-4 flex-shrink-0 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`} />
+            <span className={`text-sm ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+              Using demo data. Connect to a tenant database or upload loan data to see real metrics.
+            </span>
+          </div>
+        )}
+        
         <div className={`grid gap-4 sm:gap-5 md:gap-6 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
           {/* Left Sidebar - Filters + TopTiering Story */}
           {!isFullscreen && (
@@ -361,7 +459,7 @@ export function TopTieringComparisonView() {
               <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
                 <CardHeader className={`border-b pb-2 sm:pb-3 ${isDarkMode ? 'border-slate-700/50' : 'border-blue-100/50'}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="text-xs sm:text-sm font-bold leading-tight">TopTiering by {actorLabel} | Production Data Last Year</CardTitle>
+                    <CardTitle className="text-xs sm:text-sm font-bold leading-tight">TopTiering by {actorLabel} | Production Data {apiData?.dateRange?.label || 'Last Year'}</CardTitle>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <Button 
                         variant="ghost" 
@@ -472,14 +570,14 @@ export function TopTieringComparisonView() {
                 <CardHeader className={`border-b pb-2 sm:pb-3 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-blue-600/10 to-purple-600/10' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/80 to-purple-50/60'}`}>
                   <CardTitle className="text-xs sm:text-sm font-bold">TopTiering Story</CardTitle>
                   <CardDescription className="text-[10px] sm:text-xs">
-                    {actorLabel} Revenue Analysis | Production Data Last Year
+                    {actorLabel} Revenue Analysis | Production Data {apiData?.dateRange?.label || 'Last Year'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-4 sm:pt-5 space-y-3 sm:space-y-4">
                   {/* Total Summary */}
                   <div className={`p-3 sm:p-4 rounded-lg ${isDarkMode ? 'bg-slate-700/30' : 'bg-slate-50'}`}>
                     <p className={`text-xs sm:text-sm font-semibold mb-1 leading-relaxed ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                      Total Revenue contributed by {currentData.length} {actorLabelPlural} Last Year. <strong className="font-bold">{formatCurrency(totalRevenue)}</strong>
+                      Total Revenue contributed by {currentData.length} {actorLabelPlural} {apiData?.dateRange?.label || 'Last Year'}. <strong className="font-bold">{formatCurrency(totalRevenue)}</strong>
                     </p>
                   </div>
 

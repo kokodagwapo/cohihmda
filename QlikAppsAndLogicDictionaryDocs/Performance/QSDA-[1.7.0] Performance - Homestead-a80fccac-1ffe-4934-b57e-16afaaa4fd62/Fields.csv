@@ -1,0 +1,1177 @@
+Name,Cardinal,TotalBytes,ByteSize,SymbolWidth,IndexBytes,PointerBits,UseCount,KeyCount,IsUsed,IsHidden,IsSystem,IsIslandTable,AlwaysOneSelected,IsDefinitionOnly,IsNumeric,Tags,Comment,NumFormatFmt,NumFormatType,QsdaVersion,MetaId
+%Dateuid,3574,294484,28592,8,265892,12,3,3,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date, $key",,###0,INTEGER,3.4.5,1138
+%EDTCFuid,1038,38092,8304,8,29788,11,3,3,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date, $key",,###0,INTEGER,3.4.5,91
+%STCuid,1141,39356,9128,8,30228,11,3,3,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date, $key",,###0,INTEGER,3.4.5,89
+%STUuid,1108,38838,8864,8,29974,11,3,3,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date, $key",,###0,INTEGER,3.4.5,90
+%VariableName,195,7448,7058,36.19,390,8,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,28
+1st Change Months,3,4273,67,22.33,4206,2,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,219
+2MonthsAgoFlag,2,464,17,8.5,447,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,80
+2QuartersAgoFlag,2,464,17,8.5,447,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,84
+2WeeksAgoFlag,2,464,17,8.5,447,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,76
+2YearsAgoFlag,2,464,17,8.5,447,1,49,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,88
+Account Executive,1,2135,32,32,2103,1,14,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1061
+Account Executive Status,1,2123,20,20,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,482
+Account Manager,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,358
+Active Aging Days,399,22118,3192,8,18926,9,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1069
+Active Aging Days > 90,7,6397,88,12.57,6309,3,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1070
+Active Aging Days > 90 Sort,7,6386,77,11,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1100
+Active Aging Range,6,6373,64,10.67,6309,3,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1068
+Active Aging Range Sort,6,6375,66,11,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1099
+Active Loan Flag,2,2120,17,8.5,2103,1,91,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,374
+Adjusted Buy Price,2599,46027,20792,8,25235,12,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.000",REAL,3.4.5,446
+Adjustment Period Months,3,4273,67,22.33,4206,2,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,221
+App Name,1,11,10,10,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,42
+App-ApprOrdered Days,931,28477,7448,8,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1046
+App-Close,150,18023,1200,8,16823,8,16,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1033
+App-EstClose,221,18591,1768,8,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1032
+App-Fund,144,17975,1152,8,16823,8,2,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1034
+App-InvPurch,156,18071,1248,8,16823,8,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1035
+App-LE Sent Days,235,18951,2128,9.06,16823,8,1,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1045
+App-LE Sent Days Grouping,4,4258,52,13,4206,2,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1056
+Application All Time,1,2112,9,9,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,456
+Application Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,543
+Application Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,545
+Application Date,1016,29157,8128,8,21029,10,40,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,414
+Application Date Rolling 12 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,547
+Application Date Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,548
+Application Last Quarter Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,552
+Application Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,551
+Application LYMTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,553
+Application LYQTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,554
+Application Month,12,8568,156,13,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,555
+Application MonthPrevious,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,538
+Application MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,532
+Application MTD Previous,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,535
+Application Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,544
+Application Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,546
+Application QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,531
+Application Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,541
+Application Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,539
+Application Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,542
+Application Rolling 4Qtr Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,556
+Application Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,540
+Application Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,549
+Application Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,525
+Application Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,537
+Application Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1077
+Application YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,526
+Application YearMonth Group,6,6416,107,17.83,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,406
+Application YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,527
+Application YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,536
+Application YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,528
+Application YearWeek,160,19674,2851,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,529
+Application Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,550
+Application YTD,22,10924,409,18.59,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,533
+Application YTD Flag,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,530
+Application YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,534
+Appraisal Completed Date,931,49860,28831,30.97,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,123
+Appraisal Ordered Date,846,47204,26175,30.94,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,122
+Appraisal Ordered Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1044
+Appraisal Received Date,890,48577,27548,30.95,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,165
+Appraisal Received Flag,2,2120,17,8.5,2103,1,6,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1128
+Appraised Value,1280,33372,10240,8,23132,11,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,396
+Approval,781,45204,24175,30.95,21029,10,5,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,340
+Approved Flag,2,2120,17,8.5,2103,1,11,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,492
+Appt Reset,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,350
+Appt Set,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,351
+ARM Program,1,2114,11,11,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,215
+Assets Subtotal Liquid Assets,5469,186569,159231,29.12,27338,13,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,103
+Assets Subtotal Liquid Assets Grouping,3,4252,46,15.33,4206,2,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,366
+Assets Subtotal Liquid Assets Grouping Sort Order,3,4239,33,11,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,452
+ATR Loan Type,3,4259,53,17.67,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,252
+AU Decision Date,677,41999,20970,30.97,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,120
+Balloon Payments,2,2117,14,7,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,225
+Base Buy,3401,52443,27208,8,25235,12,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.000",REAL,3.4.5,445
+Base Buy ($),5939,74850,47512,8,27338,13,1,0,True,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,463
+Base Loan Amount,3879,129418,104183,26.86,25235,12,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,294
+BE DTI Range,262,25198,6272,23.94,18926,9,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,498
+BE DTI Ratio,1206,32780,9648,8,23132,11,124,0,True,False,False,False,False,False,True,$numeric,,###0.0,FIX,3.4.5,393
+BORR EMPLOYER,8401,225749,196308,23.37,29441,14,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,167
+Borr Info Points Paid,1560,66447,43315,27.77,23132,11,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,304
+Borr Position,4733,121633,94295,19.92,27338,13,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,168
+Borr Position - 2nd,138,19373,2550,18.48,16823,8,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,169
+Borr Self Employed,2,4220,14,7,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,170
+Borr Self Employed - 2nd,2,4220,14,7,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,171
+Borr Yrs on Job,51,13026,408,8,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,388
+Borr Yrs on Job - 2nd,32,10771,256,8,10515,5,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,390
+Borr Yrs on Job Grouping,4,4241,35,8.75,4206,2,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,364
+Borr Yrs on Job Grouping Sort Order,4,4250,44,11,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,450
+Borrower Mailing Address is same as the Property Address,1,2110,7,7,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,194
+Borrower Type,1,2119,16,16,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,190
+Branch,14,8552,140,10,8412,4,194,0,True,False,False,False,False,False,False,"$numeric, $integer, $ascii, $text",,,UNKNOWN,3.4.5,375
+Branch Concession,2,2119,16,8,2103,1,9,0,True,False,False,False,False,False,True,$numeric,,"#,##0.000",REAL,3.4.5,436
+Branch Concession ($),2,2119,16,8,2103,1,23,0,True,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,1127
+Branch Missing,1,2114,11,11,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1104
+Branch Price Concession,2,2151,48,24,2103,1,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,141
+Branch_Production,2,2120,17,8.5,2103,1,60,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1136
+Broker Lender Name,2,2156,53,26.5,2103,1,14,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1062
+Business or Commercial Purpose,1,2159,56,56,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,177
+Buy Price Contribution,7092,84074,56736,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,495
+Buy Side Lock # Days,38,13494,876,23.05,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,202
+Buy Side Lock Date,765,44703,23674,30.95,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,201
+Buy Side Lock Expiration,1020,52596,31567,30.95,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,203
+CD Applied Cure,797,42080,21051,26.41,21029,10,12,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,164
+CD Lender Credits,1340,58953,35821,26.73,23132,11,2,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,401
+Channel,1,2124,21,21,2103,1,59,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,137
+Channel Group,1,2115,12,12,2103,1,2,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,371
+Channel_ExcludeCorrespondent,1,2124,21,21,2103,1,8,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,407
+Client,1,35,34,34,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,40
+ClientID,1,17,16,16,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,41
+Closer,4,4280,74,18.5,4206,2,204,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,411
+Closer Assignment,757,44464,23435,30.96,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,342
+Closer Calendar,1038,1428,0,0,1428,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,1183
+Closer Day,31,897,248,8,649,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1179
+Closer DaysAgo,1038,9732,8304,8,1428,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1174
+Closer ID,3,4248,42,14,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,250
+Closer Interval,18,2707,330,18.33,2377,5,6,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1184
+Closer Missing,2,2125,22,11,2103,1,26,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1073
+Closer Month,12,675,156,13,519,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1177
+Closer MonthsAgo,35,1059,280,8,779,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1171
+Closer Quarter,4,308,48,12,260,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1176
+Closer QuartersAgo,13,623,104,8,519,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1172
+Closer Status,1,2123,20,20,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,481
+Closer Week,53,1468,689,13,779,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1178
+Closer WeeksAgo,149,2230,1192,8,1038,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1173
+Closer Year,4,316,56,14,260,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1175
+Closer YearMonth,35,1409,630,18,779,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1181
+Closer YearQuarter,13,740,221,17,519,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1180
+Closer YearsAgo,4,292,32,8,260,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1170
+Closer YearWeek,149,4614,3576,24,1038,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1182
+Closer_Production,1,2112,9,9,2103,1,26,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1097
+Closing Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,578
+Closing Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,580
+Closing Date,909,28301,7272,8,21029,10,24,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,415
+Closing Day Group,5,6376,67,13.4,6309,3,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,584
+Closing Disclosure Received Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,935
+Closing Disclosure Received Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,937
+Closing Disclosure Received Date,915,28349,7320,8,21029,10,12,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,430
+Closing Disclosure Received MonthPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,930
+Closing Disclosure Received MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,926
+Closing Disclosure Received MTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,928
+Closing Disclosure Received Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,936
+Closing Disclosure Received Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,938
+Closing Disclosure Received QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,925
+Closing Disclosure Received Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,933
+Closing Disclosure Received Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,931
+Closing Disclosure Received Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,934
+Closing Disclosure Received Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,932
+Closing Disclosure Received Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,919
+Closing Disclosure Received Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1083
+Closing Disclosure Received YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,920
+Closing Disclosure Received YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,921
+Closing Disclosure Received YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,929
+Closing Disclosure Received YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,922
+Closing Disclosure Received YearWeek,160,19673,2850,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,923
+Closing Disclosure Received YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,924
+Closing Disclosure Received YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,927
+Closing Disclosure Sent Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,955
+Closing Disclosure Sent Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,957
+Closing Disclosure Sent Date,820,27589,6560,8,21029,10,10,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,431
+Closing Disclosure Sent MonthPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,950
+Closing Disclosure Sent MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,946
+Closing Disclosure Sent MTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,948
+Closing Disclosure Sent Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,956
+Closing Disclosure Sent Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,958
+Closing Disclosure Sent QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,945
+Closing Disclosure Sent Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,953
+Closing Disclosure Sent Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,951
+Closing Disclosure Sent Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,954
+Closing Disclosure Sent Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,952
+Closing Disclosure Sent Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,939
+Closing Disclosure Sent Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1082
+Closing Disclosure Sent YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,940
+Closing Disclosure Sent YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,941
+Closing Disclosure Sent YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,949
+Closing Disclosure Sent YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,942
+Closing Disclosure Sent YearWeek,159,19656,2833,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,943
+Closing Disclosure Sent YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,944
+Closing Disclosure Sent YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,947
+Closing Docs 1003 Signature Date,1026,54877,31745,30.94,23132,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,323
+Closing LYMTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,572
+Closing LYQTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,573
+Closing LYSameMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,563
+Closing Month,12,8568,156,13,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,558
+Closing Month Previous,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,571
+Closing MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,567
+Closing MTD Previous,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,569
+Closing Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,579
+Closing Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,581
+Closing Projection Date,90,15441,720,8,14721,7,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,1055
+Closing Projection Group,6,6409,100,16.67,6309,3,47,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1102
+Closing Projection Group Sort,6,6375,66,11,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1130
+Closing Projection Status,3,4276,70,23.33,4206,2,16,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1052
+Closing Projection Week,24,10816,301,12.54,10515,5,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1093
+Closing Projection YearMonth,9,8574,162,18,8412,4,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1057
+Closing Projection YearMonthNum,9,8484,72,8,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1058
+Closing QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,566
+Closing Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,576
+Closing Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,574
+Closing Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,582
+Closing Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,577
+Closing Rolling 4Qtr Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,583
+Closing Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,575
+Closing Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,557
+Closing Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,570
+Closing YearMonth,38,13302,684,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,559
+Closing YearMonthNum,38,12922,304,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,560
+Closing YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,561
+Closing YearWeek,161,19691,2868,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,562
+Closing YTD,17,10831,316,18.59,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,565
+Closing YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,564
+Closing YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,568
+ClosingProjDims,9,172,167,18.56,5,4,3,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,36
+CLTV,5312,171128,143790,27.07,27338,13,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,104
+Co-Borr Employer,3656,111119,85884,23.49,25235,12,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,172
+Co-Borr Position,2171,67982,42747,19.69,25235,12,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,173
+Co-Borr Self Employed,2,4220,14,7,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,174
+Co-Borr Yrs on Job,45,12978,360,8,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,389
+CoBorrower Mailing Address is same as the Property Address,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,192
+CoBorrower Type,1,2119,16,16,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,191
+Coheus Setup Flag,1,2114,11,11,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,493
+Combined Assets All Borrowers,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,236
+Company NMLS ID,1,2119,16,16,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,138
+Completion,0,2103,0,0,2103,1,3,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,349
+Cond Appr Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1043
+Cond. Approval,878,48198,27169,30.94,21029,10,4,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,338
+CondAppr-CTC Days,757,27085,6056,8,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1047
+Conditional Approval Date,874,48072,27043,30.94,21029,10,22,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,313
+Conditional Approved Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1091
+Consolidated Channels,1,2115,12,12,2103,1,513,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,505
+Corporate Concession,291,21254,2328,8,18926,9,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.000",REAL,3.4.5,435
+Corporate Price Concession,291,26493,7567,26.00,18926,9,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,140
+Correspondent Channel Flag,1,2111,8,8,2103,1,32,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,408
+County FIPS Code,155,18225,1402,9.05,16823,8,1,0,True,False,False,False,False,False,False,"$numeric, $integer, $ascii, $text",,,ASCII,3.4.5,376
+Credit Pull Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,860
+Credit Pull Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,862
+Credit Pull Date,1082,31788,8656,8,23132,11,10,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,427
+Credit Pull Date Rolling 12 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,864
+Credit Pull Date Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,865
+Credit Pull Flag,2,2120,17,8.5,2103,1,8,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1126
+Credit Pull Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,868
+Credit Pull MonthPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,855
+Credit Pull MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,851
+Credit Pull MTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,853
+Credit Pull Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,861
+Credit Pull Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,863
+Credit Pull QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,850
+Credit Pull Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,858
+Credit Pull Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,856
+Credit Pull Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,859
+Credit Pull Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,857
+Credit Pull Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,866
+Credit Pull Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,844
+Credit Pull Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1076
+Credit Pull YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,845
+Credit Pull YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,846
+Credit Pull YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,854
+Credit Pull YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,847
+Credit Pull YearWeek,160,19674,2851,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,848
+Credit Pull Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,867
+Credit Pull YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,849
+Credit Pull YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,852
+CTC Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,687
+CTC Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,689
+CTC Date,769,35606,14577,18.96,21029,10,37,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,413
+CTC Flag,2,2120,17,8.5,2103,1,14,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1041
+CTC Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,693
+CTC Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,682
+CTC MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,678
+CTC MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,680
+CTC Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,688
+CTC Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,690
+CTC QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,677
+CTC Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,685
+CTC Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,683
+CTC Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,694
+CTC Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,686
+CTC Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,684
+CTC Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,691
+CTC Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,671
+CTC Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,681
+CTC Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1084
+CTC YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,672
+CTC YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,673
+CTC YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,674
+CTC YearWeek,159,19657,2834,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,675
+CTC Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,692
+CTC YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,676
+CTC YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,679
+CTC-Fund,40,12938,320,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1040
+CU Risk Score,33,13145,527,15.97,12618,6,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,180
+Current Loan Status,6,6477,168,28,6309,3,335,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,107
+Current Loan Status Group,4,4295,89,22.25,4206,2,123,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1103
+Current Milestone,17,10859,344,20.24,10515,5,36,0,True,False,False,False,False,False,True,"$numeric, $integer, $ascii, $text",,,UNKNOWN,3.4.5,477
+Current Status Date,865,37426,16397,18.96,21029,10,10,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,412
+Current Status Date Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1029
+Current Status Date Current Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,999
+Current Status Date Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1030
+Current Status Date Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1000
+Current Status Date LYCurWeek Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1005
+Current Status Date LYLastMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1003
+Current Status Date LYMTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1017
+Current Status Date LYQTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1018
+Current Status Date LYSameMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1004
+Current Status Date LYYesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1006
+Current Status Date Month,12,8568,156,13,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1010
+Current Status Date Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1022
+Current Status Date MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1016
+Current Status Date MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1020
+Current Status Date Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1023
+Current Status Date Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1024
+Current Status Date QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1015
+Current Status Date Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1025
+Current Status Date Rolling 12 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1007
+Current Status Date Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1008
+Current Status Date Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1028
+Current Status Date Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1026
+Current Status Date Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1001
+Current Status Date Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1009
+Current Status Date Year Month,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1012
+Current Status Date Year Month Num,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1013
+Current Status Date Year Previous,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1021
+Current Status Date Year Quarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1011
+Current Status Date Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1002
+Current Status Date YTD Flag,2,2120,17,8.5,2103,1,4,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1014
+Current Status Date YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1019
+Current Status Dateing Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1027
+CurrentProductionFlag,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,73
+Date,3574,286298,28592,8,257706,12,54,2,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date, $key",,M/D/YYYY,DATE,3.4.5,63
+Date Calendar,3574,5361,0,0,5361,12,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,1198
+Date Day,31,2482,248,8,2234,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1194
+Date DaysAgo,3574,33953,28592,8,5361,12,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1189
+Date Interval,18,3741,330,18.33,3411,5,34,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1199
+Date Month,12,1943,156,13,1787,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1192
+Date MonthsAgo,118,4072,944,8,3128,7,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1186
+Date Quarter,4,942,48,12,894,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1191
+Date QuartersAgo,40,3001,320,8,2681,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1187
+Date Sold to Third Party,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,325
+Date Warehoused,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,326
+Date Week,53,3370,689,13,2681,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1193
+Date WeeksAgo,512,8117,4096,8,4021,9,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1188
+Date Year,10,1927,140,14,1787,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1190
+Date YearMonth,118,5252,2124,18,3128,7,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1196
+Date YearQuarter,40,3361,680,17,2681,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1195
+Date YearsAgo,10,1867,80,8,1787,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1185
+Date YearWeek,512,16309,12288,24,4021,9,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1197
+DateType,10,84276,161,16.1,84115,4,1075,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1139
+Day,31,2482,248,8,2234,5,2,0,True,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,66
+Denied Date,196,20545,3722,18.99,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1132
+Denied Flag,2,2125,22,11,2103,1,31,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1075
+Description of the ARM index type,2,4236,30,15,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,222
+Disclosure Prep,1019,52563,31534,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,333
+Discount / Yield Spread Premium,2816,98578,73343,26.05,25235,12,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,118
+Doc Preparation,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,352
+Docs Out,761,44588,23559,30.96,21029,10,3,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,343
+Docs Signing,749,44212,23183,30.95,21029,10,4,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,344
+Document Type,10,8662,250,25,8412,4,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,179
+DTI Complexity,2,4235,29,14.5,4206,2,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,472
+DTI Out of Range Flag,2,2120,17,8.5,2103,1,48,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1051
+DTI Range Sort,6,6357,48,8,6309,3,6,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,515
+DTI Range_Std,6,6403,94,15.67,6309,3,7,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,499
+DTI Ranges,2,2135,32,16,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1064
+DU/LP Case ID,5895,135209,107871,18.30,27338,13,1,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,166
+Employment Complexity,2,2131,28,14,2103,1,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,473
+Enabled,1,10,9,9,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,39
+Encompass Instance,1,2119,16,16,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,447
+End Date,301,28261,9335,31.01,18926,9,15,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1105
+End Date MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1112
+End Date Previous MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1121
+End Date Previous QTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1123
+End Date Previous YTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1122
+End Date QTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1114
+End Date to indicate Loan Closed/Funded,301,28261,9335,31.01,18926,9,137,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,96
+End Date Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,491
+End Date YearMonth,19,10857,342,18,10515,5,7,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,487
+End Date YTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1113
+Estimated Closing Current Month Flag,2,2120,17,8.5,2103,1,2,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,647
+Estimated Closing Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,649
+Estimated Closing Date,1095,31892,8760,8,23132,11,38,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,418
+Estimated Closing Days Range,8,6410,101,12.62,6309,3,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,524
+Estimated Closing Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,642
+Estimated Closing MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,638
+Estimated Closing MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,640
+Estimated Closing Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,648
+Estimated Closing Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,650
+Estimated Closing QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,637
+Estimated Closing Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,645
+Estimated Closing Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,643
+Estimated Closing Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,646
+Estimated Closing Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,644
+Estimated Closing Year,6,6357,48,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,630
+Estimated Closing Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,641
+Estimated Closing Year_Strat,7,6381,72,10.29,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1079
+Estimated Closing YearMonth,50,13518,900,18,12618,6,5,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,631
+Estimated Closing YearMonthNum,50,13018,400,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,632
+Estimated Closing YearQuarter,19,10838,323,17,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,633
+Estimated Closing YearWeek,182,20065,3242,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,634
+Estimated Closing YTD,19,10868,353,18.58,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,636
+Estimated Closing YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,635
+Estimated Closing YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,639
+Exempt from Reg. Z,2,4220,14,7,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,251
+Fannie AU Decision,3,4272,66,22,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,183
+Fannie Property Valuation Form Type,9,9018,606,67.33,8412,4,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,184
+Fee Details - Line 804 - Borrower Amount - Appraisal Fee,112,17467,2746,24.52,14721,7,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,256
+Fee Details - Line 804 - Borrower POC Amount - Appraisal,12,8704,292,24.33,8412,4,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,262
+Fee Details - Line 804 - Broker POC Amount - Appraisal,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,264
+Fee Details - Line 804 - Lender POC Amount - Appraisal,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,265
+Fee Details - Line 804 - Other POC Amount - Appraisal,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,266
+Fee Details - Line 804 - Seller Amount - Appraisal Fee,3,4280,74,24.67,4206,2,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,257
+Fee Details - Line 804 - Seller POC Amount - Appraisal,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,263
+Fee Details - Line 804 Appraisal Fee PAC,167,21014,4191,25.10,16823,8,7,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,278
+Fee Details - Line 805 - Borrower Amount - Credit Report,239,23219,6396,26.76,16823,8,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,258
+Fee Details - Line 805 - Borrower POC Amount - Cred Report,2,2149,46,23,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,267
+Fee Details - Line 805 - Broker POC Amount - Cred Report,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,269
+Fee Details - Line 805 - Lender POC Amount - Cred Report,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,270
+Fee Details - Line 805 - Other POC Amount - Cred Report,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,271
+Fee Details - Line 805 - Seller Amount - Credit Report,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,259
+Fee Details - Line 805 - Seller POC Amount - Cred Report,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,268
+Fee Details - Line 805 Credit Report Fee PAC,263,25978,7052,26.81,18926,9,7,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,279
+Fee Details - Line 807 - Borrower Amount - Flood Cert,4,4296,90,22.5,4206,2,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,260
+Fee Details - Line 807 - Borrower POC Amount - Flood Cert,2,2148,45,22.5,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,272
+Fee Details - Line 807 - Broker POC Amount - Flood Cert,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,274
+Fee Details - Line 807 - Lender POC Amount - Flood Cert,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,275
+Fee Details - Line 807 - Other POC Amount - Flood Cert,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,276
+Fee Details - Line 807 - Seller Amount - Flood Cert,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,261
+Fee Details - Line 807 - Seller POC Amount - Flood Cert,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,273
+Fee Details - Line 807 Flood Certification Fee PAC,17,10949,434,25.53,10515,5,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,280
+Fees Loan Discount Fee %,397,29248,10322,26,18926,9,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,299
+Fees Loan Discount Fee Borr,3996,137484,112249,28.09,25235,12,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,300
+Fees VA Fund Fee Borr,365,28731,9805,26.86,18926,9,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,296
+FHA Lender ID,2,4246,40,20,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,298
+FICO Complexity,4,6369,60,15,6309,3,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,470
+FICO Out of Range Flag,1,2111,8,8,2103,1,57,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1049
+FICO Range Sort,9,8484,72,8,8412,4,7,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,513
+FICO Range_25,18,10857,342,19,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,502
+FICO Range_50,9,8583,171,19,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,503
+FICO Range_Std,9,8532,120,13.33,8412,4,18,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,504
+FICO Ranges,1,2117,14,14,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1063
+FICO Score,368,21870,2944,8,18926,9,129,0,True,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,385
+Final Appr-CTC,78,15345,624,8,14721,7,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1039
+First Rate Adjustment Cap,2,2147,44,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,210
+First Rate Adjustment Date,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,211
+Flood Certification Date,773,44955,23926,30.95,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,281
+Floor Rate,3,4280,74,24.67,4206,2,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,212
+FNMA Flag,2,2139,36,18,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,523
+Freddie AU Decision,3,4255,49,16.33,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,185
+Freddie AVM Model Name Type Other Description,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,186
+Freddie Loan Level Credit Score Method,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,189
+Freddie Loan Level Credit Score Value,1,2103,0,0,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,397
+Freddie Property Valuation Form Type,9,8858,446,49.56,8412,4,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,187
+Freddie Underwriting Type Other,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,##############,REAL,3.4.5,392
+Frefinance Cash Out Type,3,4254,48,16,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,193
+full_xml,1,76104,76103,76103,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,49
+Fund-InvPurch,82,15377,656,8,14721,7,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1037
+Fund-Ship,30,10755,240,8,10515,5,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1036
+Funded Flag,2,2120,17,8.5,2103,1,6,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,459
+Funded Not Purchased Aging,3,4230,24,8,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1131
+Funded Not Purchased Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,368
+Funding,750,44245,23216,30.95,21029,10,120,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,345
+Funding All Time,1,2112,9,9,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,457
+Funding Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,825
+Funding Current Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,829
+Funding Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,827
+Funding Date,749,27021,5992,8,21029,10,43,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,426
+Funding Day Group,5,6376,67,13.4,6309,3,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,843
+Funding Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,830
+Funding LYCurWeek Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,835
+Funding LYLastMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,833
+Funding LYMTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,840
+Funding LYQTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,841
+Funding LYSameMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,834
+Funding LYYesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,836
+Funding Month,12,8568,156,13,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,839
+Funding Month Previous,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,820
+Funding MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,816
+Funding MTD Previous,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,818
+Funding Previous Month Flag,2,2120,17,8.5,2103,1,5,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,826
+Funding Previous Year Flag,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,828
+Funding QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,815
+Funding Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,823
+Funding Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,821
+Funding Rolling 12 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,837
+Funding Rolling 13 Month Flag,2,2120,17,8.5,2103,1,14,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,838
+Funding Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,824
+Funding Rolling 4Qtr Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,842
+Funding Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,822
+Funding Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,831
+Funding Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,808
+Funding Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,819
+Funding Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1087
+Funding YearMonth,37,13284,666,18,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,809
+Funding YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,810
+Funding YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,811
+Funding YearWeek,159,19657,2834,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,812
+Funding Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,832
+Funding YTD,15,8691,279,18.6,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,814
+Funding YTD Flag,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,813
+Funding YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,817
+Funds Sent Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,975
+Funds Sent Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,977
+Funds Sent Date,31,10763,248,8,10515,5,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,432
+Funds Sent MonthPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,970
+Funds Sent MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,966
+Funds Sent MTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,968
+Funds Sent Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,976
+Funds Sent Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,978
+Funds Sent QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,965
+Funds Sent Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,973
+Funds Sent Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,971
+Funds Sent Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,974
+Funds Sent Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,972
+Funds Sent Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,959
+Funds Sent YearMonth,19,10857,342,18,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,960
+Funds Sent YearMonthNum,19,10667,152,8,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,961
+Funds Sent YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,969
+Funds Sent YearQuarter,11,8599,187,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,962
+Funds Sent YearWeek,28,11017,502,17.93,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,963
+Funds Sent YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,964
+Funds Sent YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,967
+Funnel Stage,9,199,194,21.56,5,4,18,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,53
+Funnel Stage Short,5,107,105,21,2,3,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,55
+FunnelStageShortSortOrder,5,2,0,0,2,3,0,0,False,False,False,True,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,56
+FunnelStageSortOrder,10,5,0,0,5,4,2,0,True,False,False,True,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,54
+GFE Application Date,1016,52471,31442,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,317
+GFE Initial GFE Disclosure Affiliated Business Disclosure Provided Date,751,44234,23205,30.90,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,327
+GFE Initial GFE Disclosure CHARM Booklet Provided Date,1,2134,31,31,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,328
+GFE Initial GFE Disclosure HELOC Brochure Provided Date,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,330
+GFE Initial GFE Disclosure HUD Special Booklet Provided Date,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,329
+GFE Initial GFE Disclosure Provided Date,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,319
+Global Ranges,2,2149,46,23,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1098
+Guaranty Fee,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,162
+GUID,16823,771756,740212,44,31544,15,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,175
+HCLTV,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,240
+Hedged Loan,2,4220,14,7,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,136
+HELOC Draw Period,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,242
+HELOC Intial Draw,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,241
+HELOC Repayment Period,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,243
+Income Total Mo Income,10901,336783,307342,28.19,29441,14,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,102
+Income Total Mo Income (Borr/Co-Borr),11006,339914,310473,28.21,29441,14,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,305
+Income Total Mo Income Grouping,3,4250,44,14.67,4206,2,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,365
+Income Total Mo Income Grouping Sort Order,3,4239,33,11,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,451
+Initial Disclosure Due Date,768,44797,23768,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,318
+Interest Only Indicator,2,2117,14,7,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,176
+Interest Only Mos,3,4276,70,23.33,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,303
+Interest Only Payments,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,223
+Interest Ranges,2,2135,32,16,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1066
+Interest Rate,137,17919,1096,8,16823,8,120,0,True,False,False,False,False,False,True,$numeric,,###0.000,FIX,3.4.5,386
+Interest Rate Out of Range Flag,2,2120,17,8.5,2103,1,36,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1048
+Interest Rate Range,10,8600,188,18.8,8412,4,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,362
+Interest Rate Range Sort,10,8530,118,11.8,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,449
+Interest Rate Range_125,59,14059,1441,24.42,12618,6,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,519
+Interest Rate Range_25,38,13463,845,22.24,12618,6,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,517
+Interest Rate Range_50,23,10961,446,19.39,10515,5,9,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,518
+Investor,47,13547,929,19.77,12618,6,24,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,198
+Investor Lock Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,995
+Investor Lock Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,997
+Investor Lock Date,765,27149,6120,8,21029,10,8,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,433
+Investor Lock MonthPrevious,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,990
+Investor Lock MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,986
+Investor Lock MTDPrevious,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,988
+Investor Lock Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,996
+Investor Lock Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,998
+Investor Lock QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,985
+Investor Lock Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,993
+Investor Lock Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,991
+Investor Lock Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,994
+Investor Lock Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,992
+Investor Lock Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,979
+Investor Lock YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,980
+Investor Lock YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,981
+Investor Lock YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,989
+Investor Lock YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,982
+Investor Lock YearWeek,160,19673,2850,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,983
+Investor Lock YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,984
+Investor Lock YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,987
+Investor Purchase Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,711
+Investor Purchase Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,713
+Investor Purchase Date,729,26861,5832,8,21029,10,12,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,420
+Investor Purchase Date Rolling 12 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,715
+Investor Purchase Date Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,716
+Investor Purchase Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,719
+Investor Purchase Month Previous,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,706
+Investor Purchase MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,702
+Investor Purchase MTD Previous,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,704
+Investor Purchase Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,712
+Investor Purchase Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,714
+Investor Purchase QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,701
+Investor Purchase Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,709
+Investor Purchase Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,707
+Investor Purchase Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,710
+Investor Purchase Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,708
+Investor Purchase Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,717
+Investor Purchase Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,695
+Investor Purchase Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,705
+Investor Purchase Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1085
+Investor Purchase YearMonth,36,13266,648,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,696
+Investor Purchase YearMonthNum,36,12906,288,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,697
+Investor Purchase YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,698
+Investor Purchase YearWeek,156,19605,2782,17.83,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,699
+Investor Purchase Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,718
+Investor Purchase YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,700
+Investor Purchase YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,703
+Investor Status,5,6395,86,17.2,6309,3,27,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,367
+KPI_ClosingProjections,6,182,179,29.83,3,3,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,32
+KPI_TimeRange,3,59,58,19.33,1,2,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,38
+Last Completed Milestone,17,10790,275,16.18,10515,5,4,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,359
+Last Completed Milestone Date,0,2103,0,0,2103,1,2,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,360
+Last Completed Milestone Due Date,1124,57920,34788,30.95,23132,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,361
+Last Modified Date,16741,165472,133928,8,31544,15,1,0,True,False,False,False,False,False,True,"$numeric, $timestamp",,M/D/YYYY,DATE,3.4.5,425
+Last Rate Set Date,766,44734,23705,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,321
+LastWeekFlag,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,75
+LE Sent Flag,2,2120,17,8.5,2103,1,2,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1042
+Legacy Loan Officer ID,60,13489,871,14.52,12618,6,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,245
+Lien Position,3,4254,48,16,4206,2,10,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,100
+Life Cap,2,2147,44,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,213
+Loan Amount,5044,162911,135573,26.88,27338,13,827,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,97
+Loan Amount Complexity,2,2131,28,14,2103,1,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,468
+Loan Amt,3879,129418,104183,26.86,25235,12,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,302
+Loan Complexity Score,26,10723,208,8,10515,5,27,0,True,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,474
+Loan Estimate Received Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,915
+Loan Estimate Received Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,917
+Loan Estimate Received Date,1074,31724,8592,8,23132,11,9,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,429
+Loan Estimate Received MonthPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,910
+Loan Estimate Received MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,906
+Loan Estimate Received MTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,908
+Loan Estimate Received Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,916
+Loan Estimate Received Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,918
+Loan Estimate Received QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,905
+Loan Estimate Received Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,913
+Loan Estimate Received Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,911
+Loan Estimate Received Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,914
+Loan Estimate Received Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,912
+Loan Estimate Received Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,899
+Loan Estimate Received Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1081
+Loan Estimate Received YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,900
+Loan Estimate Received YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,901
+Loan Estimate Received YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,909
+Loan Estimate Received YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,902
+Loan Estimate Received YearWeek,161,19690,2867,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,903
+Loan Estimate Received YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,904
+Loan Estimate Received YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,907
+Loan Estimate Sent Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,885
+Loan Estimate Sent Current Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,889
+Loan Estimate Sent Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,887
+Loan Estimate Sent Date,1019,29181,8152,8,21029,10,12,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,428
+Loan Estimate Sent Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,890
+Loan Estimate Sent LYCurWeek Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,895
+Loan Estimate Sent LYLastMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,893
+Loan Estimate Sent LYSameMonth Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,894
+Loan Estimate Sent LYYesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,896
+Loan Estimate Sent MonthPrevious,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,880
+Loan Estimate Sent MTD,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,876
+Loan Estimate Sent MTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,878
+Loan Estimate Sent Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,886
+Loan Estimate Sent Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,888
+Loan Estimate Sent QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,875
+Loan Estimate Sent Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,883
+Loan Estimate Sent Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,881
+Loan Estimate Sent Rolling 12 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,897
+Loan Estimate Sent Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,898
+Loan Estimate Sent Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,884
+Loan Estimate Sent Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,882
+Loan Estimate Sent Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,891
+Loan Estimate Sent Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,869
+Loan Estimate Sent Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1080
+Loan Estimate Sent YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,870
+Loan Estimate Sent YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,871
+Loan Estimate Sent YearPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,879
+Loan Estimate Sent YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,872
+Loan Estimate Sent YearWeek,160,19674,2851,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,873
+Loan Estimate Sent Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,892
+Loan Estimate Sent YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,874
+Loan Estimate Sent YTDPrevious,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,877
+Loan First Payment Date,50,14130,1512,30.24,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,277
+Loan Folder,7,6451,142,20.29,6309,3,10,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,178
+Loan Interviewer,61,13939,1321,21.66,12618,6,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,246
+Loan Number,16823,300712,269168,16,31544,15,725,0,True,False,False,False,False,False,False,"$numeric, $integer, $ascii, $text",,,ASCII,3.4.5,377
+Loan Officer,61,14152,1534,25.15,12618,6,504,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1060
+Loan Officer ID,60,13489,871,14.52,12618,6,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,244
+Loan Officer Status,2,2130,27,13.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,478
+Loan Officer Team Member,60,14133,1515,25.25,12618,6,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,357
+Loan Officer_Production,2,2120,17,8.5,2103,1,140,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1135
+Loan Processor ID,10,8548,136,13.6,8412,4,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,248
+Loan Program,482,43451,24525,50.88,18926,9,13,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,108
+Loan Program_Production,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1137
+Loan Purpose,7,6411,102,14.57,6309,3,36,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,381
+Loan Purpose Complexity,2,4234,28,14,4206,2,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,466
+Loan Purpose Group,6,6397,88,14.67,6309,3,31,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,384
+Loan Source,7,6494,185,26.43,6309,3,2,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,199
+Loan Term,21,10683,168,8,10515,5,7,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,387
+Loan Type,7,6390,81,11.57,6309,3,37,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,382
+Loan Type Complexity,3,4252,46,15.33,4206,2,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,467
+Loan Type Group,5,6378,69,13.8,6309,3,53,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,383
+Lock Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,602
+Lock Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,604
+Lock Date,765,27149,6120,8,21029,10,27,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,416
+Lock Days,45,12978,360,8,12618,6,10,0,True,False,False,False,False,False,True,"$numeric, $integer",,"#,##0",REAL,3.4.5,403
+Lock Expiration Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,626
+Lock Expiration Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,628
+Lock Expiration Date,1015,29149,8120,8,21029,10,17,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,417
+Lock Expiration Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,621
+Lock Expiration MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,617
+Lock Expiration MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,619
+Lock Expiration Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,627
+Lock Expiration Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,629
+Lock Expiration QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,616
+Lock Expiration Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,624
+Lock Expiration Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,622
+Lock Expiration Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,625
+Lock Expiration Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,623
+Lock Expiration Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,609
+Lock Expiration Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,620
+Lock Expiration YearMonth,38,13302,684,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,610
+Lock Expiration YearMonthNum,38,12922,304,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,611
+Lock Expiration YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,612
+Lock Expiration YearWeek,164,19743,2920,17.80,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,613
+Lock Expiration YTD,22,10924,409,18.59,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,615
+Lock Expiration YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,614
+Lock Expiration YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,618
+Lock Expire Days Range,8,6420,111,13.88,6309,3,8,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,402
+Lock Expired Flag,2,2120,17,8.5,2103,1,14,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,373
+Lock Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,607
+Lock Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,597
+Lock MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,593
+Lock MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,595
+Lock Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,603
+Lock Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,605
+Lock QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,592
+Lock Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,600
+Lock Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,598
+Lock Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,601
+Lock Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,599
+Lock Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,606
+Lock Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,585
+Lock Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,596
+Lock YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,586
+Lock YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,587
+Lock YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,588
+Lock YearWeek,160,19673,2850,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,589
+Lock Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,608
+Lock YTD,14,8673,261,18.64,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,591
+Lock YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,590
+Lock YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,594
+Locked Flag,2,2120,17,8.5,2103,1,19,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,372
+LockFlag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,455
+LockNum,1015,29149,8120,8,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,##############,REAL,3.4.5,454
+Lookback,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,218
+LTV Complexity,2,2132,29,14.5,2103,1,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,471
+LTV Out of Range Flag,2,2120,17,8.5,2103,1,48,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1050
+LTV Range,29,11060,545,18.79,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,500
+LTV Range Sort,10,8492,80,8,8412,4,6,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,514
+LTV Range_Std,10,8573,161,16.1,8412,4,15,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,501
+LTV Ranges,2,2135,32,16,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1065
+LTV Ratio,894,28181,7152,8,21029,10,124,0,True,False,False,False,False,False,True,$numeric,,###0.0,FIX,3.4.5,391
+Margin,2,2151,48,24,2103,1,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,214
+Margin (BPS),5362,70234,42896,8,27338,13,10,0,True,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,507
+Margin (BPS)_Contribution,5362,70234,42896,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,510
+Margin (BPS)_Exec,5362,70234,42896,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,508
+Margin (BPS)_Ops,5362,70234,42896,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,509
+Margin Index,2,2151,48,24,2103,1,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,216
+Maturity Date,218,23427,6604,30.29,16823,8,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,227
+Mavent - ATR-QM Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,285
+Mavent - Enterprise Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,284
+Mavent - GSE Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,282
+Mavent - High-Cost result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,283
+Mavent - HMDA Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,289
+Mavent - HPML Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,290
+Mavent - License Reviewer Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,291
+Mavent - NMLS Licensing Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,287
+Mavent - Other Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,292
+Mavent - Overall Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,293
+Mavent - State Rules Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,288
+Mavent - TILA Tolerance Result,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,286
+Max,1,7,6,6,1,1,4,0,True,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,51
+Maximum Rate Adjustment Cap,2,2147,44,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,220
+Meets Agency/GSE QM,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,255
+Mers Min,16823,435296,403752,24,31544,15,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,105
+Mers Min #,16823,435296,403752,24,31544,15,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,297
+MI % Coverage 1,145,20593,3770,26,16823,8,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,232
+Mi % Coverage 2,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,234
+MI Cancel %,3,4274,68,22.67,4206,2,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,239
+MI Coverage 1 Months,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,233
+MI Coverage 2 Months,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,235
+Milestone Sort Order,17,10710,195,11.47,10515,5,2,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,458
+Min,1,7,6,6,1,1,16,0,True,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,52
+Month,12,1943,156,13,1787,4,36,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,65
+Mortgage Insurance Company Name,46,13592,974,21.17,12618,6,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,230
+Mortgage Loan Officer (MLO),61,14152,1534,25.15,12618,6,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1094
+Mortgage Loan Officer (MLO) Missing,1,2114,11,11,2103,1,4,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1129
+Mortgage Loan Officer (MLO)_Production,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1134
+MSR Value,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,163
+MTD,2,464,17,8.5,447,1,39,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,77
+Multi-Channel App/Start Date,1016,52471,31442,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,370
+Name,3,29,28,9.33,1,2,11,0,True,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,50
+Net Buy,381,29238,10312,27.07,18926,9,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,398
+Net Buy ($),4417,62674,35336,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,464
+Net Sell,2812,103848,78613,27.96,25235,12,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,116
+Net Sell ($),6056,75786,48448,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,465
+NMLS ID,58,13573,955,16.47,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,139
+Note Date,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,228
+Number Of Conditions,0,2103,0,0,2103,1,12,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,247
+Number of Months Interest Only Payments,3,4276,70,23.33,4206,2,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,224
+Number of Months Reserves,62,14041,1423,22.95,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,237
+Number of Units,9,8484,72,8,8412,4,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,394
+Occupancy Complexity,2,4234,28,14,4206,2,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,469
+Occupancy Type,4,4274,68,17,4206,2,15,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,113
+OpportunityBuckets,12,230,224,18.67,6,4,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,37
+ORGID,14,8608,196,14,8412,4,2,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,182
+Orig Fee Borr Pd,566,36030,15001,26.50,21029,10,2,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,399
+Orig Fees Seller,1,2125,22,22,2103,1,2,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,400
+Original Balance Outlier Range,24,11052,537,22.38,10515,5,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1067
+Original Balance Range,16,8772,360,22.5,8412,4,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,497
+Original Balance Range Sort,16,8560,148,9.25,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,512
+Original Term to Maturity,6,6382,73,12.17,6309,3,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,520
+Origination Points,3908,134876,109641,28.06,25235,12,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,181
+Origination Revenue,5383,70402,43064,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,475
+P&I Payment,11137,348964,319523,28.69,29441,14,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,226
+PA Payout 1,269,26567,7641,28.41,18926,9,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,124
+PA Payout 10,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,133
+PA Payout 11,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,134
+PA Payout 12,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,135
+PA Payout 2,26,11225,710,27.31,10515,5,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,125
+PA Payout 3,2,2149,46,23,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,126
+PA Payout 4,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,127
+PA Payout 5,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,128
+PA Payout 6,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,129
+PA Payout 7,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,130
+PA Payout 8,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,131
+PA Payout 9,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,132
+PA Payouts,282,21182,2256,8,18926,9,0,0,False,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,462
+PA Sell Amt,5250,180394,153056,29.15,27338,13,14,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,159
+PA SRP Amt,3,4283,77,25.67,4206,2,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,160
+PITI Payment,15013,463202,433761,28.89,29441,14,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,238
+PMI Flag,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,229
+Post Closing,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,353
+PreApproval,1047,55528,32396,30.94,23132,11,3,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,332
+PreApproval - old,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,354
+Preapproval Flag,2,4272,66,33,4206,2,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,356
+PreApproval Req. Dt,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,355
+PreviousMonthFlag,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,79
+PreviousMTD,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,78
+PreviousQTD,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,82
+PreviousQuarterFlag,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,83
+PreviousYearFlag,2,464,17,8.5,447,1,632,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,87
+PreviousYTDFlag,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,86
+Private Mortgage Insurance Indicator,2,2117,14,7,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,231
+Processing,803,45877,24848,30.94,21029,10,19,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,336
+Processor,13,8665,253,19.46,8412,4,228,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,409
+Processor Calendar,1108,1524,0,0,1524,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,1153
+Processor Day,31,941,248,8,693,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1149
+Processor DaysAgo,1108,10388,8864,8,1524,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1144
+Processor Interval,17,2730,312,18.35,2418,5,7,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1154
+Processor Missing,2,2125,22,11,2103,1,26,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1071
+Processor Month,12,710,156,13,554,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1147
+Processor MonthsAgo,37,1127,296,8,831,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1141
+Processor Quarter,4,325,48,12,277,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1146
+Processor QuartersAgo,13,658,104,8,554,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1142
+Processor Status,1,2123,20,20,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,479
+Processor Week,53,1520,689,13,831,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1148
+Processor WeeksAgo,159,2380,1272,8,1108,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1143
+Processor Year,4,333,56,14,277,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1145
+Processor YearMonth,37,1497,666,18,831,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1151
+Processor YearQuarter,13,775,221,17,554,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1150
+Processor YearsAgo,4,309,32,8,277,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1140
+Processor YearWeek,159,4924,3816,24,1108,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1152
+Processor_Production,2,2120,17,8.5,2103,1,26,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1095
+Product Type,4,4257,51,12.75,4206,2,2,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,101
+Projected Closing Date,1106,31980,8848,8,23132,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,511
+Projected Closing YearMonth,50,13518,900,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1053
+Projected Closing YearMonthNum,50,13018,400,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1054
+Property City,2395,60720,35485,14.82,25235,12,12,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,378
+Property County,654,29593,8564,13.09,21029,10,12,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,379
+Property Rights,2,4236,30,15,4206,2,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,106
+Property State,17,10659,144,8.47,10515,5,12,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,99
+Property State Name,17,10740,225,13.24,10515,5,15,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1124
+Property Street,11447,287170,257729,22.51,29441,14,6,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,98
+Property Type,9,8598,186,20.67,8412,4,8,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,111
+Property Valuation Effective Date,928,49763,28734,30.96,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,196
+Property Valuation Method Type,4,6389,80,20,6309,3,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,195
+Property Zip,3582,64640,39405,11.00,25235,12,6,0,True,False,False,False,False,False,False,"$ascii, $text",,,ASCII,3.4.5,380
+Pull Through Originated Flag,2,2120,17,8.5,2103,1,182,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1101
+Purchased,729,43599,22570,30.96,21029,10,5,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,347
+QM Loan Type,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,253
+QTD,2,464,17,8.5,447,1,18,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,81
+Rate Lock Buy Side Adjusted Buy Price,2599,95683,70448,27.11,25235,12,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,158
+Rate Lock Buy Side Base Price Rate,3401,120166,94931,27.91,25235,12,232,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,115
+Rate Lock Buy Side Net Buy Rate,63,14257,1639,26.02,12618,6,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,114
+Rate Lock Buy Side Profit Margin Adjustment 1,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,437
+Rate Lock Buy Side Profit Margin Adjustment 1 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,142
+Rate Lock Buy Side Profit Margin Adjustment 1 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,143
+Rate Lock Buy Side Profit Margin Adjustment 2,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,438
+Rate Lock Buy Side Profit Margin Adjustment 2 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,144
+Rate Lock Buy Side Profit Margin Adjustment 2 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,145
+Rate Lock Buy Side Profit Margin Adjustment 3,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,439
+Rate Lock Buy Side Profit Margin Adjustment 3 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,146
+Rate Lock Buy Side Profit Margin Adjustment 3 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,147
+Rate Lock Buy Side Profit Margin Adjustment 4,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,440
+Rate Lock Buy Side Profit Margin Adjustment 4 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,148
+Rate Lock Buy Side Profit Margin Adjustment 4 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,149
+Rate Lock Buy Side Profit Margin Adjustment 5,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,441
+Rate Lock Buy Side Profit Margin Adjustment 5 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,150
+Rate Lock Buy Side Profit Margin Adjustment 5 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,151
+Rate Lock Buy Side Profit Margin Adjustment 6,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,442
+Rate Lock Buy Side Profit Margin Adjustment 6 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,152
+Rate Lock Buy Side Profit Margin Adjustment 6 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,153
+Rate Lock Buy Side Profit Margin Adjustment 7,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,443
+Rate Lock Buy Side Profit Margin Adjustment 7 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,154
+Rate Lock Buy Side Profit Margin Adjustment 7 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,155
+Rate Lock Buy Side Profit Margin Adjustment 8,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,"#,##0.000",REAL,3.4.5,444
+Rate Lock Buy Side Profit Margin Adjustment 8 Desc,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,156
+Rate Lock Buy Side Profit Margin Adjustment 8 Rate,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,157
+Rate Lock Sell Side Last Rate Set Date,361,30121,11195,31.01,18926,9,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,322
+Read Library Folder,1,32,31,31,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,46
+Read Table Name,1,19,18,18,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,44
+Ready for Docs,775,45018,23989,30.95,21029,10,3,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,341
+Reconciled,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,348
+Referral Name,1437,63389,40257,28.01,23132,11,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,315
+Repurchase Date,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,324
+RESPA App Status,2,2120,17,8.5,2103,1,57,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1125
+Resubmittal,795,45629,24600,30.94,21029,10,3,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,339
+Retail Branch ID,14,8552,140,10,8412,4,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,404
+Retail Flag,1,2112,9,9,2103,1,7,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,461
+Retail LO,61,14142,1524,24.98,12618,6,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,405
+Revenue,6440,78858,51520,8,27338,13,247,0,True,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,506
+Revenue_CCA_TVI,6440,78858,51520,8,27338,13,4,0,True,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,1059
+RevenueConfiguredFlag,1,2114,11,11,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,483
+RevenueFields,4,86,85,21.25,1,2,0,0,False,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,48
+Revised CD Received Date,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,209
+Revised CD Sent Date,797,45707,24678,30.96,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,208
+Revised LE Received Date,904,49014,27985,30.96,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,207
+Revised LE Sent Date,796,45666,24637,30.95,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,206
+Rolling13MonthFlag,2,464,17,8.5,447,1,171,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,70
+Rolling2MonthFlag,2,464,17,8.5,447,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,72
+Rolling4MonthFlag,2,464,17,8.5,447,1,42,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,71
+Rolling4QtrFlag,2,464,17,8.5,447,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,74
+Rounding,2,4254,48,24,4206,2,1,0,True,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,217
+RowNo,16823,481559,134584,8,346975,15,103,2,True,False,False,False,False,False,True,"$numeric, $integer, $key",,###0,INTEGER,3.4.5,92
+Rush Closing on File.,1,2110,7,7,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,307
+Safe Harbor,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,254
+Sales Price,1232,32988,9856,8,23132,11,1,0,True,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,395
+ScorecardActors,21,487,473,22.52,14,5,4,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,34
+ScorecardCalcs,3,48,47,15.67,1,2,11,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,35
+Scrub Rating of File,3,4227,21,7,4206,2,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,308
+Scrubbed,774,44983,23954,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,335
+Secondary Revenue,5257,69394,42056,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,476
+Sell Price Contribution,7102,84154,56816,8,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,"#,##0.00;(#,##0.00)",REAL,3.4.5,496
+Sell Side Lock # Days,64,14095,1477,23.08,12618,6,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,204
+Sell Side Lock Expiration,1023,52686,31657,30.95,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,205
+Sent To Closing,910,49174,28145,30.93,21029,10,173,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,95
+Sent To Closing MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1109
+Sent To Closing Previous MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1118
+Sent To Closing Previous QTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1120
+Sent To Closing Previous YTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1119
+Sent To Closing QTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1111
+Sent To Closing Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,490
+Sent To Closing Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1090
+Sent To Closing YearMonth,38,13302,684,18,12618,6,7,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,486
+Sent To Closing YTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1110
+Sent To Processing,0,2103,0,0,2103,1,55,0,True,False,False,False,False,False,False,,,M/D/YYYY,DATE,3.4.5,1092
+Sent To Processing Year,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,488
+Sent To Processing Year_Strat,1,2121,18,18,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1088
+Sent To Processing YearMonth,0,2103,0,0,2103,1,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,484
+Sent To Underwriting,782,45210,24181,30.92,21029,10,161,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,94
+Sent To Underwriting MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1106
+Sent To Underwriting Previous MTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1115
+Sent To Underwriting Previous QTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1117
+Sent To Underwriting Previous YTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1116
+Sent To Underwriting QTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1108
+Sent To Underwriting Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,489
+Sent To Underwriting Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1089
+Sent To Underwriting YearMonth,37,13284,666,18,12618,6,13,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,485
+Sent To Underwriting YTD,2,2120,17,8.5,2103,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1107
+Service Fee,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,161
+SET or LET,1,58,9,9,49,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,25
+Ship-InvPurch,87,15417,696,8,14721,7,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1038
+Shipped Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,781
+Shipped Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,783
+Shipped Date,692,26565,5536,8,21029,10,7,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,423
+Shipped Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,776
+Shipped MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,772
+Shipped MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,774
+Shipped Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,782
+Shipped Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,784
+Shipped QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,771
+Shipped Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,779
+Shipped Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,777
+Shipped Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,780
+Shipped Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,778
+Shipped Year,5,6349,40,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,765
+Shipped Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,775
+Shipped Year_Strat,6,6372,63,10.5,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1086
+Shipped YearMonth,38,13302,684,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,766
+Shipped YearMonthNum,38,12922,304,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,767
+Shipped YearQuarter,14,8650,238,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,768
+Shipped YearWeek,159,19657,2834,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,769
+Shipped YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,770
+Shipped YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,773
+Shipping,720,43319,22290,30.96,21029,10,3,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,346
+Signed,974,51170,30141,30.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,334
+Sold Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,460
+Sort,6,3,0,0,3,3,4,0,True,False,False,True,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,33
+Source,1,10,9,9,1,1,3,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,43
+SRP from investor,1,2125,22,22,2103,1,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,117
+Start-App,276,21134,2208,8,18926,9,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1031
+Started,1106,57360,34228,30.95,23132,11,18,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,331
+Started Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,802
+Started Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,804
+Started Date,1106,31980,8848,8,23132,11,9,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,424
+Started Month Previous,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,797
+Started MTD,2,2120,17,8.5,2103,1,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,793
+Started MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,795
+Started Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,803
+Started Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,805
+Started QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,792
+Started Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,800
+Started Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,798
+Started Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,801
+Started Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,799
+Started Year,4,4238,32,8,4206,2,90,0,True,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,785
+Started Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,796
+Started YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,786
+Started YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,787
+Started YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,788
+Started YearWeek,160,19674,2851,17.82,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,789
+Started YTD,22,10924,409,18.59,10515,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,791
+Started YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,790
+Started YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,794
+State County,1113,41045,17913,16.09,23132,11,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,521
+State FIPS Code,16,10707,192,12,10515,5,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,200
+State Zip,3639,76567,51332,14.11,25235,12,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,522
+State-County FIPS Code,1038,35765,12633,12.17,23132,11,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,516
+Subject Property County Code,154,18825,2002,13,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,306
+Subject Property Street,11446,287154,257713,22.52,29441,14,0,0,False,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,301
+Subject Property Type Fannie Mae,8,8552,140,17.5,8412,4,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,295
+Submittal,810,46092,25063,30.94,21029,10,13,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,337
+Submitted To Processing Date,0,2103,0,0,2103,1,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,314
+Submitted To Underwriting Date,810,27509,6480,8,21029,10,1,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,434
+Submitted to Underwriting Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,806
+Submitted to Underwriting YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,807
+SwapExpirationPlaceHolder,1,2114,11,11,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,93
+TIL Intl Disclosure Provided Date,1019,52560,31531,30.94,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,320
+Time in File - TC,4338,140221,112883,26.02,27338,13,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,311
+Time in File - UW,3638,119843,94608,26.01,25235,12,0,0,False,False,False,False,False,False,True,$numeric,,,UNKNOWN,3.4.5,312
+Total Count of All Defects,12,8546,134,11.17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,310
+Total Mortgaged Properties Count,10,8634,222,22.2,8412,4,1,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,188
+Total Revenue,6852,82154,54816,8,27338,13,45,0,True,False,False,False,False,False,True,$numeric,,##############,REAL,3.4.5,494
+TPO Check,1,2114,11,11,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,448
+TPO Flag,1,2111,8,8,2103,1,8,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,363
+TurnTime,5,87,85,17,2,3,0,0,False,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,31
+Underwriter,13,8692,280,21.54,8412,4,298,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,410
+Underwriter Calendar,1141,1569,0,0,1569,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,1168
+Underwriter Day,31,962,248,8,714,5,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,1164
+Underwriter DaysAgo,1141,10697,9128,8,1569,11,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1159
+Underwriter ID,13,8598,186,14.31,8412,4,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,249
+Underwriter Interval,18,2843,330,18.33,2513,5,20,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1169
+Underwriter Missing,2,2125,22,11,2103,1,165,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1072
+Underwriter Month,12,727,156,13,571,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1162
+Underwriter MonthsAgo,38,1160,304,8,856,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1156
+Underwriter Quarter,4,334,48,12,286,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1161
+Underwriter QuartersAgo,13,675,104,8,571,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1157
+Underwriter Risk Assess AUS Recomm,171,20133,3310,19.36,16823,8,1,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,110
+Underwriter Risk Assess Type,5,6370,61,12.2,6309,3,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,109
+Underwriter Status,1,2123,20,20,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,480
+Underwriter Week,53,1545,689,13,856,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1163
+Underwriter WeeksAgo,164,2453,1312,8,1141,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1158
+Underwriter Year,4,342,56,14,286,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1160
+Underwriter YearMonth,38,1540,684,18,856,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1166
+Underwriter YearQuarter,13,792,221,17,571,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1165
+Underwriter YearsAgo,4,318,32,8,286,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,1155
+Underwriter YearWeek,164,5077,3936,24,1141,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1167
+Underwriter_Production,2,2120,17,8.5,2103,1,179,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,1096
+Underwriting AUS Number,1153,43848,20716,17.97,23132,11,1,0,True,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,121
+Underwriting AUS Source,21,10784,269,12.81,10515,5,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,119
+Underwriting Description,4,6365,56,14,6309,3,1,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,112
+User Touches - All User-Hours - One User Per Line,16630,1974287,1942743,116.82,31544,15,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,309
+UW Denied Current Month Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,736
+UW Denied Current Year Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,738
+UW Denied Date,2,4222,16,8,4206,2,7,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,421
+UW Denied Month Previous,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,731
+UW Denied MTD,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,727
+UW Denied MTD Previous,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,729
+UW Denied Previous Month Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,737
+UW Denied Previous Year Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,739
+UW Denied QTD,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,726
+UW Denied Rolling 0-360 Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,734
+UW Denied Rolling 0-60 Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,732
+UW Denied Rolling 13 Month Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,740
+UW Denied Rolling 361-720 Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,735
+UW Denied Rolling 61-120 Flag,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,733
+UW Denied Year,1,2103,0,0,2103,1,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,720
+UW Denied Year Previous,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,730
+UW Denied YearMonth,2,4242,36,18,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,721
+UW Denied YearMonthNum,2,4222,16,8,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,722
+UW Denied YearQuarter,2,4240,34,17,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,723
+UW Denied YearWeek,2,4242,36,18,4206,2,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,724
+UW Denied YTD,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,725
+UW Denied YTD Previous,1,2111,8,8,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,728
+UW Final Approval Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,757
+UW Final Approval Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,759
+UW Final Approval Date,796,27397,6368,8,21029,10,40,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,422
+UW Final Approval Last Week Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,763
+UW Final Approval Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,752
+UW Final Approval MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,748
+UW Final Approval MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,750
+UW Final Approval Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,758
+UW Final Approval Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,760
+UW Final Approval QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,747
+UW Final Approval Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,755
+UW Final Approval Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,753
+UW Final Approval Rolling 13 Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,764
+UW Final Approval Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,756
+UW Final Approval Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,754
+UW Final Approval Today Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,761
+UW Final Approval Year,5,6349,40,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,741
+UW Final Approval Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,751
+UW Final Approval YearMonth,38,13302,684,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,742
+UW Final Approval YearMonthNum,38,12922,304,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,743
+UW Final Approval YearQuarter,14,8650,238,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,744
+UW Final Approval YearWeek,161,19691,2868,17.81,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,745
+UW Final Approval Yesterday Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,762
+UW Final Approval YTD Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,746
+UW Final Approval YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,749
+UW Suspended Current Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,667
+UW Suspended Current Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,669
+UW Suspended Date,495,22886,3960,8,18926,9,7,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,M/D/YYYY,DATE,3.4.5,419
+UW Suspended Month Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,662
+UW Suspended MTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,658
+UW Suspended MTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,660
+UW Suspended Previous Month Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,668
+UW Suspended Previous Year Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,670
+UW Suspended QTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,657
+UW Suspended Rolling 0-360 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,665
+UW Suspended Rolling 0-60 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,663
+UW Suspended Rolling 361-720 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,666
+UW Suspended Rolling 61-120 Flag,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,664
+UW Suspended Year,4,6341,32,8,6309,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,651
+UW Suspended Year Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,661
+UW Suspended Year_Strat,5,6363,54,10.8,6309,3,0,0,False,False,False,False,False,False,True,,,,UNKNOWN,3.4.5,1078
+UW Suspended YearMonth,37,13284,666,18,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,652
+UW Suspended YearMonthNum,37,12914,296,8,12618,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,653
+UW Suspended YearQuarter,13,8633,221,17,8412,4,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,654
+UW Suspended YearWeek,151,19517,2694,17.84,16823,8,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,655
+UW Suspended YTD,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,656
+UW Suspended YTD Previous,2,2120,17,8.5,2103,1,0,0,False,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,659
+UW Touches,0,2103,0,0,2103,1,3,0,True,False,False,False,False,False,False,,,,UNKNOWN,3.4.5,316
+Variable Comment,1,91,42,42,49,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,30
+Variable Definition,159,67483,67093,421.97,390,8,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,24
+Variable Type,3,138,40,13.33,98,2,0,0,False,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,29
+VariableSourceFile,3,191,93,31,98,2,0,0,False,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,26
+VariableSourceFilePath,3,374,276,92,98,2,0,0,False,False,False,True,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,27
+VP Prefix,1,10,9,9,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,47
+W-H Days,86,15497,776,9.02,14721,7,8,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,369
+W-H Days Range,7,6378,69,9.86,6309,3,2,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,453
+Warehouse Co Name,6,6441,132,22,6309,3,9,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,197
+Waterfall Stage,9,276,271,30.11,5,4,73,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,57
+Waterfall Stage Fee Leakage,8,231,226,28.25,5,4,18,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,59
+Waterfall Stage Short,7,188,185,26.43,3,3,45,0,True,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,61
+WaterfallStageFeeLeakageSortOrder,9,5,0,0,5,4,2,0,True,False,False,True,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,60
+WaterfallStageShortSortOrder,7,3,0,0,3,3,12,0,True,False,False,True,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,62
+WaterfallStageSortOrder,10,5,0,0,5,4,6,0,True,False,False,True,False,False,True,"$numeric, $integer",,##############,REAL,3.4.5,58
+Weekday,7,1432,91,13,1341,3,0,0,False,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,67
+Withdrawn Date,817,36510,15481,18.95,21029,10,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,1133
+Withdrawn Flag,2,2125,22,11,2103,1,67,0,True,False,False,False,False,False,True,"$numeric, $integer",,,UNKNOWN,3.4.5,1074
+Write Table Name,1,19,18,18,1,1,0,0,False,False,False,True,False,False,False,"$ascii, $text",,##############,REAL,3.4.5,45
+Year,10,1787,0,0,1787,4,14,0,True,False,False,False,False,False,True,"$numeric, $integer",,###0,INTEGER,3.4.5,64
+YearMonth,118,5252,2124,18,3128,7,17,0,True,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,68
+YearQuarter,40,3361,680,17,2681,6,0,0,False,False,False,False,False,False,True,"$numeric, $integer, $timestamp, $date",,,UNKNOWN,3.4.5,69
+YTDFlag,2,464,17,8.5,447,1,3,0,True,False,False,False,False,False,False,"$ascii, $text",,,UNKNOWN,3.4.5,85

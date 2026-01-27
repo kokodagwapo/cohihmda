@@ -54,7 +54,10 @@ const OperationScorecardTrends = () => {
       {/* Main content */}
       <main className="pt-28 sm:pt-32 pb-8 px-3 sm:px-6 md:px-8 lg:px-12">
         <div className="container mx-auto">
-          <OperationScorecardTrendsView />
+          <OperationScorecardTrendsView 
+            selectedTenantId={selectedTenantId}
+            selectedChannel={selectedChannel}
+          />
         </div>
       </main>
       

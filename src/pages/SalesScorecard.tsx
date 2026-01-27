@@ -19,6 +19,7 @@ import {
 } from '@/hooks/useSalesScorecardData';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
+import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
 
 type ScorecardActor = 'branch' | 'loan-officer';
 type ActiveTab = 'summary' | 'detail';
@@ -52,13 +53,19 @@ const SalesScorecard = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Channel filter state - Qlik TTS scorecard uses Retail by default
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(() => {
+    const saved = localStorage.getItem('sales-scorecard-channel');
+    return saved || 'Retail'; // Default to Retail to match Qlik
+  });
 
   // Get tenant_id from auth context
   const tenantId = user?.tenant_id || null;
 
   // Fetch TTS data from API using the hook
   const actorType = selectedActor === 'branch' ? 'branch' : 'loan_officer';
-  const { data: scorecardData, loading, error } = useSalesScorecardData(actorType, dateRange, tenantId);
+  const { data: scorecardData, loading, error } = useSalesScorecardData(actorType, dateRange, tenantId, selectedChannel);
 
   useEffect(() => {
     localStorage.setItem('sales-scorecard-actor', selectedActor);
@@ -68,22 +75,34 @@ const SalesScorecard = () => {
     localStorage.setItem('sales-scorecard-tab', activeTab);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (selectedChannel) {
+      localStorage.setItem('sales-scorecard-channel', selectedChannel);
+    } else {
+      localStorage.removeItem('sales-scorecard-channel');
+    }
+  }, [selectedChannel]);
+
   // Helper function to safely format numbers
   const safeFixed = (value: number | undefined | null, decimals: number = 1): string => {
     if (value === undefined || value === null || isNaN(value)) return '-';
     return value.toFixed(decimals);
   };
 
-  // Empty tier summary with all properties zeroed out
+  // Empty tier summary with all properties zeroed out (matching Qlik's 28 metrics)
   const emptyTierSummary: TTSTierSummary = {
     count: 0, units: 0, unitsPercent: 0, volume: 0, volumePercent: 0,
     revenue: 0, revenueBps: 0, avgTurnTime: 0, pullThrough: 0,
-    waFico: 0, waLtv: 0, waDti: 0, lostOpportunityUnits: 0,
-    lostOpportunityRevenue: 0, deniedUnits: 0, avgLoRevenue: 0,
-    avgLoUnits: 0, avgTtsScore: 0, loanComplexityScore: 0,
+    waFico: 0, waLtv: 0, waDti: 0, waWhDays: 0, avgConditions: 0,
+    lostOpportunityUnits: 0, lostOpportunityUnitsPercent: 0,
+    lostOpportunityRevenue: 0, deniedUnits: 0, deniedUnitsPercent: 0,
+    deniedRevenue: 0, lostOpportunityAndDeniedRevenue: 0,
+    lostOpportunityAndDeniedRevenueBps: 0, avgLoRevenue: 0,
+    avgLoUnits: 0, avgLoUnitsPerMonth: 0, avgLoVolume: 0,
+    avgLoVolumePerMonth: 0, avgTtsScore: 0, loanComplexityScore: 0,
   };
 
-  // Generate the 20 summary metrics matching the reference app
+  // Generate 28 summary metrics matching Qlik's Sales Scorecard Summary table
   const summaryMetrics = useMemo((): SummaryMetrics[] => {
     if (!scorecardData?.totals || !scorecardData?.tierSummary) return [];
     
@@ -93,7 +112,7 @@ const SalesScorecard = () => {
     const bottom = tierSummary.bottom || emptyTierSummary;
     
     return [
-      // General metrics (14)
+      // Row 1: Loan Officer Count
       { 
         metric: selectedActor === 'branch' ? 'Branch Count' : 'Loan Officer Count', 
         totals: totals.actorCount || 0, 
@@ -102,6 +121,7 @@ const SalesScorecard = () => {
         bottomTier: bottom.count || 0, 
         category: 'general' 
       },
+      // Row 2: TTS Long Term Score
       { 
         metric: 'TTS Long Term Score', 
         totals: safeFixed(totals.avgTtsScore), 
@@ -110,6 +130,7 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.avgTtsScore), 
         category: 'general' 
       },
+      // Row 3: Loan Complexity Score
       { 
         metric: 'Loan Complexity Score', 
         totals: safeFixed(totals.loanComplexityScore), 
@@ -118,6 +139,7 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.loanComplexityScore), 
         category: 'general' 
       },
+      // Row 4: Units
       { 
         metric: 'Units', 
         totals: totals.units || 0, 
@@ -126,6 +148,7 @@ const SalesScorecard = () => {
         bottomTier: bottom.units || 0, 
         category: 'general' 
       },
+      // Row 5: Units %
       { 
         metric: 'Units %', 
         totals: '100.0', 
@@ -134,6 +157,7 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.unitsPercent), 
         category: 'general' 
       },
+      // Row 6: Volume
       { 
         metric: 'Volume', 
         totals: totals.volume || 0, 
@@ -142,6 +166,7 @@ const SalesScorecard = () => {
         bottomTier: bottom.volume || 0, 
         category: 'general' 
       },
+      // Row 7: Volume %
       { 
         metric: 'Volume %', 
         totals: '100.0', 
@@ -150,6 +175,7 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.volumePercent), 
         category: 'general' 
       },
+      // Row 8: Revenue $
       { 
         metric: 'Revenue $', 
         totals: totals.revenue || 0, 
@@ -158,6 +184,7 @@ const SalesScorecard = () => {
         bottomTier: bottom.revenue || 0, 
         category: 'general' 
       },
+      // Row 9: Revenue (BPS)
       { 
         metric: 'Revenue (BPS)', 
         totals: safeFixed(totals.revenueBps), 
@@ -166,6 +193,7 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.revenueBps), 
         category: 'general' 
       },
+      // Row 10: Lost Opportunity Revenue
       { 
         metric: 'Lost Opportunity Revenue', 
         totals: totals.lostOpportunityRevenue || 0, 
@@ -174,7 +202,16 @@ const SalesScorecard = () => {
         bottomTier: bottom.lostOpportunityRevenue || 0, 
         category: 'general' 
       },
-      // Average Conditions metrics (6)
+      // Row 11: Average Conditions (NEW)
+      { 
+        metric: 'Average Conditions', 
+        totals: (totals.avgConditions && totals.avgConditions > 0) ? safeFixed(totals.avgConditions, 1) : '-', 
+        topTier: (top.avgConditions && top.avgConditions > 0) ? safeFixed(top.avgConditions, 1) : '-', 
+        secondTier: (second.avgConditions && second.avgConditions > 0) ? safeFixed(second.avgConditions, 1) : '-',
+        bottomTier: (bottom.avgConditions && bottom.avgConditions > 0) ? safeFixed(bottom.avgConditions, 1) : '-', 
+        category: 'average-conditions' 
+      },
+      // Row 12: Turn Time App to Consumer Close
       { 
         metric: 'Turn Time App to Close', 
         totals: safeFixed(totals.avgTurnTime, 2), 
@@ -183,6 +220,7 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.avgTurnTime, 2), 
         category: 'average-conditions' 
       },
+      // Row 13: Pull Through
       { 
         metric: 'Pull Through', 
         totals: safeFixed(totals.pullThrough), 
@@ -191,14 +229,18 @@ const SalesScorecard = () => {
         bottomTier: safeFixed(bottom.pullThrough), 
         category: 'average-conditions' 
       },
+      // Row 14: WA W-H Days (Weighted Average Warehouse Holding Days)
+      // Qlik Transform.qvs: If investor_purchase_date exists, use (purchase_date - funding_date)
+      // else use (vMaxDate - funding_date) for funded but not yet purchased loans
       { 
         metric: 'WA W-H Days', 
-        totals: '-', 
-        topTier: '-', 
-        secondTier: '-',
-        bottomTier: '-', 
+        totals: (totals.waWhDays && totals.waWhDays > 0) ? safeFixed(totals.waWhDays, 1) : '-', 
+        topTier: (top.waWhDays && top.waWhDays > 0) ? safeFixed(top.waWhDays, 1) : '-', 
+        secondTier: (second.waWhDays && second.waWhDays > 0) ? safeFixed(second.waWhDays, 1) : '-',
+        bottomTier: (bottom.waWhDays && bottom.waWhDays > 0) ? safeFixed(bottom.waWhDays, 1) : '-', 
         category: 'average-conditions' 
       },
+      // Row 15: WA FICO
       { 
         metric: 'WA FICO', 
         totals: (totals.waFico && totals.waFico > 0) ? Math.round(totals.waFico) : '-', 
@@ -207,6 +249,7 @@ const SalesScorecard = () => {
         bottomTier: (bottom.waFico && bottom.waFico > 0) ? Math.round(bottom.waFico) : '-', 
         category: 'average-conditions' 
       },
+      // Row 16: WA LTV
       { 
         metric: 'WA LTV', 
         totals: (totals.waLtv && totals.waLtv > 0) ? totals.waLtv.toFixed(1) : '-', 
@@ -215,6 +258,7 @@ const SalesScorecard = () => {
         bottomTier: (bottom.waLtv && bottom.waLtv > 0) ? bottom.waLtv.toFixed(1) : '-', 
         category: 'average-conditions' 
       },
+      // Row 17: WA DTI
       { 
         metric: 'WA DTI', 
         totals: (totals.waDti && totals.waDti > 0) ? totals.waDti.toFixed(1) : '-', 
@@ -223,7 +267,7 @@ const SalesScorecard = () => {
         bottomTier: (bottom.waDti && bottom.waDti > 0) ? bottom.waDti.toFixed(1) : '-', 
         category: 'average-conditions' 
       },
-      // Continued general metrics
+      // Row 18: Lost Opportunity Units
       { 
         metric: 'Lost Opportunity Units', 
         totals: totals.lostOpportunityUnits || 0, 
@@ -232,6 +276,16 @@ const SalesScorecard = () => {
         bottomTier: bottom.lostOpportunityUnits || 0, 
         category: 'general' 
       },
+      // Row 19: Lost Opportunity Units % (NEW)
+      { 
+        metric: 'Lost Opportunity Units %', 
+        totals: safeFixed(totals.lostOpportunityUnitsPercent), 
+        topTier: safeFixed(top.lostOpportunityUnitsPercent), 
+        secondTier: safeFixed(second.lostOpportunityUnitsPercent),
+        bottomTier: safeFixed(bottom.lostOpportunityUnitsPercent), 
+        category: 'general' 
+      },
+      // Row 20: Denied Units
       { 
         metric: 'Denied Units', 
         totals: totals.deniedUnits || 0, 
@@ -240,20 +294,76 @@ const SalesScorecard = () => {
         bottomTier: bottom.deniedUnits || 0, 
         category: 'general' 
       },
+      // Row 21: Denied Units % (NEW)
       { 
-        metric: 'Avg LO Revenue', 
+        metric: 'Denied Units %', 
+        totals: safeFixed(totals.deniedUnitsPercent), 
+        topTier: safeFixed(top.deniedUnitsPercent), 
+        secondTier: safeFixed(second.deniedUnitsPercent),
+        bottomTier: safeFixed(bottom.deniedUnitsPercent), 
+        category: 'general' 
+      },
+      // Row 22: Lost Opportunity & Denied Revenue (NEW)
+      { 
+        metric: 'Lost Opportunity & Denied Revenue', 
+        totals: totals.lostOpportunityAndDeniedRevenue || 0, 
+        topTier: top.lostOpportunityAndDeniedRevenue || 0, 
+        secondTier: second.lostOpportunityAndDeniedRevenue || 0,
+        bottomTier: bottom.lostOpportunityAndDeniedRevenue || 0, 
+        category: 'general' 
+      },
+      // Row 23: Lost Opportunity & Denied Revenue BPS (NEW)
+      { 
+        metric: 'Lost Opp & Denied Rev BPS', 
+        totals: safeFixed(totals.lostOpportunityAndDeniedRevenueBps), 
+        topTier: safeFixed(top.lostOpportunityAndDeniedRevenueBps), 
+        secondTier: safeFixed(second.lostOpportunityAndDeniedRevenueBps),
+        bottomTier: safeFixed(bottom.lostOpportunityAndDeniedRevenueBps), 
+        category: 'general' 
+      },
+      // Row 24: Average Loan Officer Revenue
+      { 
+        metric: 'Average LO Revenue', 
         totals: totals.avgLoRevenue || 0, 
         topTier: top.avgLoRevenue || 0, 
         secondTier: second.avgLoRevenue || 0,
         bottomTier: bottom.avgLoRevenue || 0, 
         category: 'general' 
       },
+      // Row 25: Average Loan Officer Units
       { 
-        metric: 'Avg LO Units', 
-        totals: safeFixed(totals.avgLoUnits, 0), 
-        topTier: safeFixed(top.avgLoUnits, 0), 
-        secondTier: safeFixed(second.avgLoUnits, 0),
-        bottomTier: safeFixed(bottom.avgLoUnits, 0), 
+        metric: 'Average LO Units', 
+        totals: safeFixed(totals.avgLoUnits, 1), 
+        topTier: safeFixed(top.avgLoUnits, 1), 
+        secondTier: safeFixed(second.avgLoUnits, 1),
+        bottomTier: safeFixed(bottom.avgLoUnits, 1), 
+        category: 'general' 
+      },
+      // Row 26: Average Loan Officer Units per Month (NEW)
+      { 
+        metric: 'Average LO Units/Month', 
+        totals: safeFixed(totals.avgLoUnitsPerMonth, 2), 
+        topTier: safeFixed(top.avgLoUnitsPerMonth, 2), 
+        secondTier: safeFixed(second.avgLoUnitsPerMonth, 2),
+        bottomTier: safeFixed(bottom.avgLoUnitsPerMonth, 2), 
+        category: 'general' 
+      },
+      // Row 27: Average Loan Officer Volume (NEW)
+      { 
+        metric: 'Average LO Volume', 
+        totals: totals.avgLoVolume || 0, 
+        topTier: top.avgLoVolume || 0, 
+        secondTier: second.avgLoVolume || 0,
+        bottomTier: bottom.avgLoVolume || 0, 
+        category: 'general' 
+      },
+      // Row 28: Average Loan Officer Volume per Month (NEW)
+      { 
+        metric: 'Average LO Volume/Month', 
+        totals: totals.avgLoVolumePerMonth || 0, 
+        topTier: top.avgLoVolumePerMonth || 0, 
+        secondTier: second.avgLoVolumePerMonth || 0,
+        bottomTier: bottom.avgLoVolumePerMonth || 0, 
         category: 'general' 
       },
     ];
@@ -637,6 +747,20 @@ const SalesScorecard = () => {
                       showLabel={false}
                     />
                   </div>
+
+                  {/* Channel Filter */}
+                  <div>
+                    <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Channel
+                    </label>
+                    <ChannelSelector
+                      selectedChannel={selectedChannel}
+                      onChannelChange={setSelectedChannel}
+                      selectedTenantId={tenantId}
+                      compact={true}
+                      useChannelGroups={true}
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -854,7 +978,7 @@ const SalesScorecard = () => {
                                     {actor.name}
                                   </td>
                                   <td className={`py-3 px-4 text-sm text-right font-bold ${getRatingColorClass(actor.ttsScore)}`}>
-                                    {actor.ttsScore.toFixed(1)}
+                                    {actor.ttsScore.toFixed(2)}
                                   </td>
                                   <td className="py-3 px-4 text-center">
                                     {getTierBadge(actor.tier)}
@@ -866,16 +990,16 @@ const SalesScorecard = () => {
                                     {formatCurrency(actor.volume)}
                                   </td>
                                   <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                                    {formatCurrency(actor.revenue)}
+                                    ${actor.revenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                                   </td>
                                   <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                                    {actor.revenueBps.toFixed(1)}
+                                    {actor.revenueBps.toFixed(2)}
                                   </td>
                                   <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                                    {actor.pullThrough.toFixed(1)}%
+                                    {actor.pullThrough.toFixed(2)}%
                                   </td>
                                   <td className="py-3 px-4 text-sm text-right text-slate-700 dark:text-slate-300">
-                                    {actor.avgTurnTime.toFixed(1)}
+                                    {actor.avgTurnTime.toFixed(2)}
                                   </td>
                                 </tr>
                               ))}

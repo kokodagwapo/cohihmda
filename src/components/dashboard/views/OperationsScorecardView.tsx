@@ -15,10 +15,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
-import { Search, Download, TrendingUp, TrendingDown, Minus, Info, BarChart3, Filter, Maximize2, Minimize2 } from 'lucide-react';
+import { Search, Download, TrendingUp, TrendingDown, Minus, Info, BarChart3, Filter, Maximize2, Minimize2, Loader2 } from 'lucide-react';
+import { 
+  useOperationsScorecardData, 
+  OperationsActorType, 
+  DateRangeType,
+  convertToViewFormat,
+  getActorTypeDisplayName
+} from '@/hooks/useOperationsScorecardData';
 
-type ScorecardActor = 'processor' | 'underwriter' | 'closer';
-type DateRange = '3-months' | '6-months' | '12-months';
+type ScorecardActor = OperationsActorType;
+type DateRange = DateRangeType;
+
+interface OperationsScorecardViewProps {
+  selectedTenantId?: string | null;
+  selectedChannel?: string | null;
+}
 
 interface ScorecardData {
   underwriterCount: number;
@@ -218,7 +230,7 @@ const mockPreviousData: TierData = {
   },
 };
 
-// Mock data - replace with API call
+// Mock data - used as fallback when API data is not available
 const mockData: TierData = {
   totals: {
     underwriterCount: 8,
@@ -290,7 +302,7 @@ const mockData: TierData = {
   },
 };
 
-export function OperationsScorecardView() {
+export function OperationsScorecardView({ selectedTenantId, selectedChannel }: OperationsScorecardViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   // Initialize from localStorage or defaults
@@ -319,6 +331,30 @@ export function OperationsScorecardView() {
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Fetch real data from API
+  const { data: apiData, loading, error } = useOperationsScorecardData(
+    selectedActor,
+    dateRange,
+    selectedTenantId,
+    selectedChannel
+  );
+
+  // Convert API data to view format, with fallback to empty structure
+  const currentData = apiData ? {
+    totals: convertToViewFormat(apiData.totals),
+    topTier: convertToViewFormat(apiData.tierSummary.top),
+    secondTier: convertToViewFormat(apiData.tierSummary.second),
+    bottomTier: convertToViewFormat(apiData.tierSummary.bottom),
+  } : null;
+
+  // Use API data if available, otherwise fall back to mock data for display
+  const displayData = currentData || mockData;
+  
+  // Get date range string for display
+  const dateRangeDisplay = apiData?.dateRange 
+    ? `${new Date(apiData.dateRange.start).toLocaleDateString()} to ${new Date(apiData.dateRange.end).toLocaleDateString()}`
+    : `Last ${dateRange.replace('-', ' ')}`;
 
   // Persist preferences to localStorage
   useEffect(() => {
@@ -389,11 +425,11 @@ export function OperationsScorecardView() {
   const getTierData = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return { name: 'Top Tier', data: mockData.topTier, color: 'teal' };
+        return { name: 'Top Tier', data: displayData.topTier, color: 'teal' };
       case 'second':
-        return { name: 'Second Tier', data: mockData.secondTier, color: 'emerald' };
+        return { name: 'Second Tier', data: displayData.secondTier, color: 'emerald' };
       case 'bottom':
-        return { name: 'Bottom Tier', data: mockData.bottomTier, color: 'lime' };
+        return { name: 'Bottom Tier', data: displayData.bottomTier, color: 'lime' };
     }
   };
 
@@ -408,19 +444,19 @@ export function OperationsScorecardView() {
     csv += `Generated: ${new Date().toLocaleString()}\n\n`;
     
     csv += `Metric,Totals,Top Tier,Second Tier,Bottom Tier\n`;
-    csv += `${selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)} Count,${mockData.totals.underwriterCount},${mockData.topTier.underwriterCount},${mockData.secondTier.underwriterCount},${mockData.bottomTier.underwriterCount}\n`;
-    csv += `Units Output,${mockData.totals.unitsOutput},${mockData.topTier.unitsOutput},${mockData.secondTier.unitsOutput},${mockData.bottomTier.unitsOutput}\n`;
-    csv += `Units % Output,${mockData.totals.unitsPercent}%,${mockData.topTier.unitsPercent}%,${mockData.secondTier.unitsPercent}%,${mockData.bottomTier.unitsPercent}%\n`;
-    csv += `Volume Output,$${mockData.totals.volumeOutput},$${mockData.topTier.volumeOutput},$${mockData.secondTier.volumeOutput},$${mockData.bottomTier.volumeOutput}\n`;
-    csv += `Loan Complexity Score,${mockData.totals.loanComplexityScore},${mockData.topTier.loanComplexityScore},${mockData.secondTier.loanComplexityScore},${mockData.bottomTier.loanComplexityScore}\n`;
-    csv += `Avg Units Per Month,${mockData.totals.avgUnitsPerMonth},${mockData.topTier.avgUnitsPerMonth},${mockData.secondTier.avgUnitsPerMonth},${mockData.bottomTier.avgUnitsPerMonth}\n`;
-    csv += `Average Days,${mockData.totals.avgDays},${mockData.topTier.avgDays},${mockData.secondTier.avgDays},${mockData.bottomTier.avgDays}\n`;
-    csv += `% Approved,${mockData.totals.approvedPercent}%,${mockData.topTier.approvedPercent}%,${mockData.secondTier.approvedPercent}%,${mockData.bottomTier.approvedPercent}%\n`;
-    csv += `% Denied,${mockData.totals.deniedPercent}%,${mockData.topTier.deniedPercent}%,${mockData.secondTier.deniedPercent}%,${mockData.bottomTier.deniedPercent}%\n`;
-    csv += `Government %,${mockData.totals.governmentPercent}%,${mockData.topTier.governmentPercent}%,${mockData.secondTier.governmentPercent}%,${mockData.bottomTier.governmentPercent}%\n`;
-    csv += `Purchase %,${mockData.totals.purchasePercent}%,${mockData.topTier.purchasePercent}%,${mockData.secondTier.purchasePercent}%,${mockData.bottomTier.purchasePercent}%\n`;
-    csv += `WA FICO,${mockData.totals.waFico},${mockData.topTier.waFico},${mockData.secondTier.waFico},${mockData.bottomTier.waFico}\n`;
-    csv += `WA LTV,${mockData.totals.waLtv}%,${mockData.topTier.waLtv}%,${mockData.secondTier.waLtv}%,${mockData.bottomTier.waLtv}%\n`;
+    csv += `${selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)} Count,${displayData.totals.underwriterCount},${displayData.topTier.underwriterCount},${displayData.secondTier.underwriterCount},${displayData.bottomTier.underwriterCount}\n`;
+    csv += `Units Output,${displayData.totals.unitsOutput},${displayData.topTier.unitsOutput},${displayData.secondTier.unitsOutput},${displayData.bottomTier.unitsOutput}\n`;
+    csv += `Units % Output,${displayData.totals.unitsPercent}%,${displayData.topTier.unitsPercent}%,${displayData.secondTier.unitsPercent}%,${displayData.bottomTier.unitsPercent}%\n`;
+    csv += `Volume Output,$${displayData.totals.volumeOutput},$${displayData.topTier.volumeOutput},$${displayData.secondTier.volumeOutput},$${displayData.bottomTier.volumeOutput}\n`;
+    csv += `Loan Complexity Score,${displayData.totals.loanComplexityScore},${displayData.topTier.loanComplexityScore},${displayData.secondTier.loanComplexityScore},${displayData.bottomTier.loanComplexityScore}\n`;
+    csv += `Avg Units Per Month,${displayData.totals.avgUnitsPerMonth},${displayData.topTier.avgUnitsPerMonth},${displayData.secondTier.avgUnitsPerMonth},${displayData.bottomTier.avgUnitsPerMonth}\n`;
+    csv += `Average Days,${displayData.totals.avgDays},${displayData.topTier.avgDays},${displayData.secondTier.avgDays},${displayData.bottomTier.avgDays}\n`;
+    csv += `% Approved,${displayData.totals.approvedPercent}%,${displayData.topTier.approvedPercent}%,${displayData.secondTier.approvedPercent}%,${displayData.bottomTier.approvedPercent}%\n`;
+    csv += `% Denied,${displayData.totals.deniedPercent}%,${displayData.topTier.deniedPercent}%,${displayData.secondTier.deniedPercent}%,${displayData.bottomTier.deniedPercent}%\n`;
+    csv += `Government %,${displayData.totals.governmentPercent}%,${displayData.topTier.governmentPercent}%,${displayData.secondTier.governmentPercent}%,${displayData.bottomTier.governmentPercent}%\n`;
+    csv += `Purchase %,${displayData.totals.purchasePercent}%,${displayData.topTier.purchasePercent}%,${displayData.secondTier.purchasePercent}%,${displayData.bottomTier.purchasePercent}%\n`;
+    csv += `WA FICO,${displayData.totals.waFico},${displayData.topTier.waFico},${displayData.secondTier.waFico},${displayData.bottomTier.waFico}\n`;
+    csv += `WA LTV,${displayData.totals.waLtv}%,${displayData.topTier.waLtv}%,${displayData.secondTier.waLtv}%,${displayData.bottomTier.waLtv}%\n`;
     
     // Create download
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -429,6 +465,36 @@ export function OperationsScorecardView() {
     link.download = filename;
     link.click();
   };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+            Loading {getActorTypeDisplayName(selectedActor)} scorecard...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className={`text-center p-6 rounded-lg ${isDarkMode ? 'bg-red-900/20 border border-red-800' : 'bg-red-50 border border-red-200'}`}>
+          <p className={`text-sm font-medium ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+            Error loading scorecard data
+          </p>
+          <p className={`text-xs mt-2 ${isDarkMode ? 'text-red-500' : 'text-red-500'}`}>
+            {error}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -593,15 +659,15 @@ export function OperationsScorecardView() {
                      </div>
                      {showComparison && (
                        <TrendIndicator 
-                         change={calculateChange(mockData.topTier.unitsOutput, mockPreviousData.topTier.unitsOutput)} 
+                         change={calculateChange(displayData.topTier.unitsOutput, mockPreviousData.topTier.unitsOutput)} 
                        />
                      )}
                    </div>
                    <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-teal-300' : 'text-teal-600'}`}>
-                     {mockData.topTier.unitsPercent.toFixed(1)}<span className="text-xl">%</span>
+                     {displayData.topTier.unitsPercent.toFixed(1)}<span className="text-xl">%</span>
                    </p>
                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                     {mockData.topTier.underwriterCount} performers · {formatNumber(mockData.topTier.unitsOutput)} units
+                     {displayData.topTier.underwriterCount} performers · {formatNumber(displayData.topTier.unitsOutput)} units
                    </p>
                  </div>
 
@@ -616,15 +682,15 @@ export function OperationsScorecardView() {
                      </div>
                      {showComparison && (
                        <TrendIndicator 
-                         change={calculateChange(mockData.totals.avgDays, mockPreviousData.totals.avgDays, false)} 
+                         change={calculateChange(displayData.totals.avgDays, mockPreviousData.totals.avgDays, false)} 
                        />
                      )}
                    </div>
                    <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-blue-300' : 'text-blue-600'}`}>
-                     {mockData.totals.avgDays.toFixed(1)} <span className="text-base font-normal opacity-70">days</span>
+                     {displayData.totals.avgDays.toFixed(1)} <span className="text-base font-normal opacity-70">days</span>
                    </p>
                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                     {mockData.totals.avgDays < 6 ? '🎉 Excellent performance' : mockData.totals.avgDays < 8 ? '✓ On target' : '⚠️ Needs attention'}
+                     {displayData.totals.avgDays < 6 ? '🎉 Excellent performance' : displayData.totals.avgDays < 8 ? '✓ On target' : '⚠️ Needs attention'}
                    </p>
                  </div>
 
@@ -639,20 +705,20 @@ export function OperationsScorecardView() {
                      </div>
                      {showComparison && (
                        <TrendIndicator 
-                         change={calculateChange(mockData.totals.approvedPercent, mockPreviousData.totals.approvedPercent)} 
+                         change={calculateChange(displayData.totals.approvedPercent, mockPreviousData.totals.approvedPercent)} 
                        />
                      )}
                    </div>
                    <p className={`text-3xl font-bold leading-none mb-2 ${isDarkMode ? 'text-emerald-300' : 'text-emerald-600'}`}>
-                     {mockData.totals.approvedPercent.toFixed(1)}<span className="text-xl">%</span>
+                     {displayData.totals.approvedPercent.toFixed(1)}<span className="text-xl">%</span>
                    </p>
                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                     {mockData.totals.deniedPercent.toFixed(1)}% denied · High quality
+                     {displayData.totals.deniedPercent.toFixed(1)}% denied · High quality
                    </p>
                  </div>
 
                  {/* Action Required Alert */}
-                 {mockData.bottomTier.underwriterCount > 0 && (
+                 {displayData.bottomTier.underwriterCount > 0 && (
                    <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border-white/10 shadow-[0_3px_10px_rgba(245,158,11,0.2)]' : 'bg-gradient-to-br from-amber-50 via-amber-25 to-white border-white shadow-[0_3px_10px_rgba(245,158,11,0.3)]'}`}>
                      <div className="flex items-start gap-3">
                        <Info className={`w-4 h-4 mt-0.5 flex-shrink-0 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`} />
@@ -661,7 +727,7 @@ export function OperationsScorecardView() {
                            Action Required
                          </p>
                          <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                           {mockData.bottomTier.underwriterCount} team member{mockData.bottomTier.underwriterCount > 1 ? 's' : ''} in bottom tier ({mockData.bottomTier.unitsPercent.toFixed(1)}%). Consider coaching.
+                           {displayData.bottomTier.underwriterCount} team member{displayData.bottomTier.underwriterCount > 1 ? 's' : ''} in bottom tier ({displayData.bottomTier.unitsPercent.toFixed(1)}%). Consider coaching.
                          </p>
                        </div>
                      </div>
@@ -796,7 +862,8 @@ export function OperationsScorecardView() {
                 <div>
                   <CardTitle>{selectedActor.charAt(0).toUpperCase() + selectedActor.slice(1)} Output Scorecard {scorecardView === 'summary' ? 'Summary' : ''}</CardTitle>
                   <CardDescription className="mt-1">
-                    Displays data for last {dateRange === '3-months' ? '3 months' : dateRange === '6-months' ? '6 months' : '12 months'}: 1/1/2025 to 12/31/2025
+                    Displays data for last {dateRange === '3-months' ? '3 months' : dateRange === '6-months' ? '6 months' : '12 months'}: {dateRangeDisplay}
+                    {!currentData && <span className="ml-2 text-amber-500">(Using demo data)</span>}
                   </CardDescription>
                 </div>
               </CardHeader>
@@ -953,9 +1020,9 @@ export function OperationsScorecardView() {
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
                           <div className="flex items-center justify-end gap-2">
-                            <span>{mockData.totals.underwriterCount}</span>
+                            <span>{displayData.totals.underwriterCount}</span>
                             {showComparison && (
-                              <TrendIndicator change={calculateChange(mockData.totals.underwriterCount, mockPreviousData.totals.underwriterCount)} compact />
+                              <TrendIndicator change={calculateChange(displayData.totals.underwriterCount, mockPreviousData.totals.underwriterCount)} compact />
                             )}
                           </div>
                         </td>
@@ -964,21 +1031,21 @@ export function OperationsScorecardView() {
                           onClick={() => handleTierClick('top', 'count')}
                           title="Click for details"
                         >
-                          <span className="underline decoration-dotted underline-offset-2">{mockData.topTier.underwriterCount}</span>
+                          <span className="underline decoration-dotted underline-offset-2">{displayData.topTier.underwriterCount}</span>
                         </td>
                         <td 
                           className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 cursor-pointer hover:bg-emerald-500/20 transition-colors ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}
                           onClick={() => handleTierClick('second', 'count')}
                           title="Click for details"
                         >
-                          <span className="underline decoration-dotted underline-offset-2">{mockData.secondTier.underwriterCount}</span>
+                          <span className="underline decoration-dotted underline-offset-2">{displayData.secondTier.underwriterCount}</span>
                         </td>
                         <td 
                           className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 cursor-pointer hover:bg-lime-500/20 transition-colors ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}
                           onClick={() => handleTierClick('bottom', 'count')}
                           title="Click for details"
                         >
-                          <span className="underline decoration-dotted underline-offset-2">{mockData.bottomTier.underwriterCount}</span>
+                          <span className="underline decoration-dotted underline-offset-2">{displayData.bottomTier.underwriterCount}</span>
                         </td>
                       </tr>
 
@@ -1004,20 +1071,20 @@ export function OperationsScorecardView() {
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
                           <div className="flex items-center justify-end gap-2">
-                            <span>{formatNumber(mockData.totals.unitsOutput)}</span>
+                            <span>{formatNumber(displayData.totals.unitsOutput)}</span>
                             {showComparison && (
-                              <TrendIndicator change={calculateChange(mockData.totals.unitsOutput, mockPreviousData.totals.unitsOutput)} compact />
+                              <TrendIndicator change={calculateChange(displayData.totals.unitsOutput, mockPreviousData.totals.unitsOutput)} compact />
                             )}
                           </div>
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatNumber(mockData.topTier.unitsOutput)}
+                          {formatNumber(displayData.topTier.unitsOutput)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatNumber(mockData.secondTier.unitsOutput)}
+                          {formatNumber(displayData.secondTier.unitsOutput)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatNumber(mockData.bottomTier.unitsOutput)}
+                          {formatNumber(displayData.bottomTier.unitsOutput)}
                         </td>
                       </tr>
 
@@ -1027,16 +1094,16 @@ export function OperationsScorecardView() {
                           Units % Output
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.totals.unitsPercent)}
+                          {formatPercent(displayData.totals.unitsPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.topTier.unitsPercent)}
+                          {formatPercent(displayData.topTier.unitsPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.secondTier.unitsPercent)}
+                          {formatPercent(displayData.secondTier.unitsPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.bottomTier.unitsPercent)}
+                          {formatPercent(displayData.bottomTier.unitsPercent)}
                         </td>
                       </tr>
 
@@ -1046,16 +1113,16 @@ export function OperationsScorecardView() {
                           Volume Output
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatCurrency(mockData.totals.volumeOutput)}
+                          {formatCurrency(displayData.totals.volumeOutput)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatCurrency(mockData.topTier.volumeOutput)}
+                          {formatCurrency(displayData.topTier.volumeOutput)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatCurrency(mockData.secondTier.volumeOutput)}
+                          {formatCurrency(displayData.secondTier.volumeOutput)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatCurrency(mockData.bottomTier.volumeOutput)}
+                          {formatCurrency(displayData.bottomTier.volumeOutput)}
                         </td>
                       </tr>
 
@@ -1065,16 +1132,16 @@ export function OperationsScorecardView() {
                           Loan Complexity Score
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.totals.loanComplexityScore.toFixed(1)}
+                          {displayData.totals.loanComplexityScore.toFixed(1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.topTier.loanComplexityScore.toFixed(1)}
+                          {displayData.topTier.loanComplexityScore.toFixed(1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.secondTier.loanComplexityScore.toFixed(1)}
+                          {displayData.secondTier.loanComplexityScore.toFixed(1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.bottomTier.loanComplexityScore.toFixed(1)}
+                          {displayData.bottomTier.loanComplexityScore.toFixed(1)}
                         </td>
                       </tr>
 
@@ -1084,16 +1151,16 @@ export function OperationsScorecardView() {
                           Average Units Output Per Month
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.totals.avgUnitsPerMonth}
+                          {displayData.totals.avgUnitsPerMonth}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.topTier.avgUnitsPerMonth}
+                          {displayData.topTier.avgUnitsPerMonth}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.secondTier.avgUnitsPerMonth}
+                          {displayData.secondTier.avgUnitsPerMonth}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.bottomTier.avgUnitsPerMonth}
+                          {displayData.bottomTier.avgUnitsPerMonth}
                         </td>
                       </tr>
 
@@ -1119,20 +1186,20 @@ export function OperationsScorecardView() {
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
                           <div className="flex items-center justify-end gap-2">
-                            <span>{mockData.totals.avgDays.toFixed(2)}</span>
+                            <span>{displayData.totals.avgDays.toFixed(2)}</span>
                             {showComparison && (
-                              <TrendIndicator change={calculateChange(mockData.totals.avgDays, mockPreviousData.totals.avgDays, false)} compact />
+                              <TrendIndicator change={calculateChange(displayData.totals.avgDays, mockPreviousData.totals.avgDays, false)} compact />
                             )}
                           </div>
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.topTier.avgDays.toFixed(2)}
+                          {displayData.topTier.avgDays.toFixed(2)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.secondTier.avgDays.toFixed(2)}
+                          {displayData.secondTier.avgDays.toFixed(2)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.bottomTier.avgDays.toFixed(2)}
+                          {displayData.bottomTier.avgDays.toFixed(2)}
                         </td>
                       </tr>
 
@@ -1142,16 +1209,16 @@ export function OperationsScorecardView() {
                           Compensation $
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.totals.compensation}
+                          {displayData.totals.compensation}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.topTier.compensation}
+                          {displayData.topTier.compensation}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.secondTier.compensation}
+                          {displayData.secondTier.compensation}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.bottomTier.compensation}
+                          {displayData.bottomTier.compensation}
                         </td>
                       </tr>
 
@@ -1161,16 +1228,16 @@ export function OperationsScorecardView() {
                           Cost per File
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.totals.costPerFile}
+                          {displayData.totals.costPerFile}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.topTier.costPerFile}
+                          {displayData.topTier.costPerFile}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.secondTier.costPerFile}
+                          {displayData.secondTier.costPerFile}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {mockData.bottomTier.costPerFile}
+                          {displayData.bottomTier.costPerFile}
                         </td>
                       </tr>
 
@@ -1180,16 +1247,16 @@ export function OperationsScorecardView() {
                           % Approved
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.totals.approvedPercent)}
+                          {formatPercent(displayData.totals.approvedPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.topTier.approvedPercent)}
+                          {formatPercent(displayData.topTier.approvedPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.secondTier.approvedPercent)}
+                          {formatPercent(displayData.secondTier.approvedPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.bottomTier.approvedPercent)}
+                          {formatPercent(displayData.bottomTier.approvedPercent)}
                         </td>
                       </tr>
 
@@ -1199,16 +1266,16 @@ export function OperationsScorecardView() {
                           % Denied
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.totals.deniedPercent)}
+                          {formatPercent(displayData.totals.deniedPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.topTier.deniedPercent)}
+                          {formatPercent(displayData.topTier.deniedPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.secondTier.deniedPercent)}
+                          {formatPercent(displayData.secondTier.deniedPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.bottomTier.deniedPercent)}
+                          {formatPercent(displayData.bottomTier.deniedPercent)}
                         </td>
                       </tr>
 
@@ -1218,16 +1285,16 @@ export function OperationsScorecardView() {
                           Government %
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.totals.governmentPercent)}
+                          {formatPercent(displayData.totals.governmentPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.topTier.governmentPercent)}
+                          {formatPercent(displayData.topTier.governmentPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.secondTier.governmentPercent)}
+                          {formatPercent(displayData.secondTier.governmentPercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.bottomTier.governmentPercent)}
+                          {formatPercent(displayData.bottomTier.governmentPercent)}
                         </td>
                       </tr>
 
@@ -1237,16 +1304,16 @@ export function OperationsScorecardView() {
                           Purchase %
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.totals.purchasePercent)}
+                          {formatPercent(displayData.totals.purchasePercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.topTier.purchasePercent)}
+                          {formatPercent(displayData.topTier.purchasePercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.secondTier.purchasePercent)}
+                          {formatPercent(displayData.secondTier.purchasePercent)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {formatPercent(mockData.bottomTier.purchasePercent)}
+                          {formatPercent(displayData.bottomTier.purchasePercent)}
                         </td>
                       </tr>
 
@@ -1256,16 +1323,16 @@ export function OperationsScorecardView() {
                           WA FICO
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.totals.waFico}
+                          {displayData.totals.waFico}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.topTier.waFico}
+                          {displayData.topTier.waFico}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.secondTier.waFico}
+                          {displayData.secondTier.waFico}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.bottomTier.waFico}
+                          {displayData.bottomTier.waFico}
                         </td>
                       </tr>
 
@@ -1275,16 +1342,16 @@ export function OperationsScorecardView() {
                           WA LTV
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.totals.waLtv.toFixed(1)}
+                          {displayData.totals.waLtv.toFixed(1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.topTier.waLtv.toFixed(1)}
+                          {displayData.topTier.waLtv.toFixed(1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.secondTier.waLtv.toFixed(1)}
+                          {displayData.secondTier.waLtv.toFixed(1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {mockData.bottomTier.waLtv.toFixed(1)}
+                          {displayData.bottomTier.waLtv.toFixed(1)}
                         </td>
                       </tr>
                     </tbody>
@@ -1302,9 +1369,9 @@ export function OperationsScorecardView() {
                       </h3>
                       <div className="space-y-3">
                         {[
-                          { name: 'Top Tier', value: mockData.topTier.unitsOutput, percent: mockData.topTier.unitsPercent, color: 'teal', delay: '' },
-                          { name: 'Second Tier', value: mockData.secondTier.unitsOutput, percent: mockData.secondTier.unitsPercent, color: 'emerald', delay: 'delay-150' },
-                          { name: 'Bottom Tier', value: mockData.bottomTier.unitsOutput, percent: mockData.bottomTier.unitsPercent, color: 'lime', delay: 'delay-300' },
+                          { name: 'Top Tier', value: displayData.topTier.unitsOutput, percent: displayData.topTier.unitsPercent, color: 'teal', delay: '' },
+                          { name: 'Second Tier', value: displayData.secondTier.unitsOutput, percent: displayData.secondTier.unitsPercent, color: 'emerald', delay: 'delay-150' },
+                          { name: 'Bottom Tier', value: displayData.bottomTier.unitsOutput, percent: displayData.bottomTier.unitsPercent, color: 'lime', delay: 'delay-300' },
                         ].map((tier) => (
                           <div key={tier.name}>
                             <div className="flex items-center justify-between mb-1.5">
@@ -1346,9 +1413,9 @@ export function OperationsScorecardView() {
                         </h4>
                         <div className="space-y-3">
                           {[
-                            { name: 'Top', value: mockData.topTier.avgDays, color: 'teal', delay: '' },
-                            { name: 'Second', value: mockData.secondTier.avgDays, color: 'emerald', delay: 'delay-150' },
-                            { name: 'Bottom', value: mockData.bottomTier.avgDays, color: 'lime', delay: 'delay-300' },
+                            { name: 'Top', value: displayData.topTier.avgDays, color: 'teal', delay: '' },
+                            { name: 'Second', value: displayData.secondTier.avgDays, color: 'emerald', delay: 'delay-150' },
+                            { name: 'Bottom', value: displayData.bottomTier.avgDays, color: 'lime', delay: 'delay-300' },
                           ].map((tier) => (
                             <div key={tier.name} className="flex items-center gap-3">
                               <div className={`w-20 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -1380,9 +1447,9 @@ export function OperationsScorecardView() {
                         </h4>
                         <div className="space-y-3">
                           {[
-                            { name: 'Top', value: mockData.topTier.approvedPercent, color: 'teal', delay: '' },
-                            { name: 'Second', value: mockData.secondTier.approvedPercent, color: 'emerald', delay: 'delay-150' },
-                            { name: 'Bottom', value: mockData.bottomTier.approvedPercent, color: 'lime', delay: 'delay-300' },
+                            { name: 'Top', value: displayData.topTier.approvedPercent, color: 'teal', delay: '' },
+                            { name: 'Second', value: displayData.secondTier.approvedPercent, color: 'emerald', delay: 'delay-150' },
+                            { name: 'Bottom', value: displayData.bottomTier.approvedPercent, color: 'lime', delay: 'delay-300' },
                           ].map((tier) => (
                             <div key={tier.name} className="flex items-center gap-3">
                               <div className={`w-20 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -1415,10 +1482,10 @@ export function OperationsScorecardView() {
                       </h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         {[
-                          { label: 'Government', value: mockData.totals.governmentPercent, gradient: 'from-blue-400/80 via-blue-500/70 to-blue-600/80', shadow: 'shadow-blue-500/20' },
-                          { label: 'Purchase', value: mockData.totals.purchasePercent, gradient: 'from-purple-400/80 via-purple-500/70 to-purple-600/80', shadow: 'shadow-purple-500/20' },
-                          { label: 'Approved', value: mockData.totals.approvedPercent, gradient: 'from-emerald-400/80 via-emerald-500/70 to-emerald-600/80', shadow: 'shadow-emerald-500/20' },
-                          { label: 'Denied', value: mockData.totals.deniedPercent, gradient: 'from-red-400/80 via-red-500/70 to-red-600/80', shadow: 'shadow-red-500/20' },
+                          { label: 'Government', value: displayData.totals.governmentPercent, gradient: 'from-blue-400/80 via-blue-500/70 to-blue-600/80', shadow: 'shadow-blue-500/20' },
+                          { label: 'Purchase', value: displayData.totals.purchasePercent, gradient: 'from-purple-400/80 via-purple-500/70 to-purple-600/80', shadow: 'shadow-purple-500/20' },
+                          { label: 'Approved', value: displayData.totals.approvedPercent, gradient: 'from-emerald-400/80 via-emerald-500/70 to-emerald-600/80', shadow: 'shadow-emerald-500/20' },
+                          { label: 'Denied', value: displayData.totals.deniedPercent, gradient: 'from-red-400/80 via-red-500/70 to-red-600/80', shadow: 'shadow-red-500/20' },
                         ].map((metric) => (
                           <div key={metric.label} className="text-center">
                             <div className={`w-full h-32 rounded-xl bg-gradient-to-br ${metric.gradient} backdrop-blur-sm border ${isDarkMode ? 'border-white/10' : 'border-white/40'} flex items-center justify-center text-white shadow-lg ${metric.shadow} transition-all duration-500 hover:scale-105 hover:shadow-xl`}>

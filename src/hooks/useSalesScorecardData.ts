@@ -61,7 +61,7 @@ export interface WeightConfig {
 }
 
 /**
- * Summary statistics for each tier (matches the 20 metrics)
+ * Summary statistics for each tier (matches Qlik's 28 metrics)
  */
 export interface TTSTierSummary {
   count: number;
@@ -76,17 +76,27 @@ export interface TTSTierSummary {
   waFico: number;
   waLtv: number;
   waDti: number;
+  waWhDays: number;
+  avgConditions: number;
   lostOpportunityUnits: number;
+  lostOpportunityUnitsPercent: number;
   lostOpportunityRevenue: number;
   deniedUnits: number;
+  deniedUnitsPercent: number;
+  deniedRevenue: number;
+  lostOpportunityAndDeniedRevenue: number;
+  lostOpportunityAndDeniedRevenueBps: number;
   avgLoRevenue: number;
   avgLoUnits: number;
+  avgLoUnitsPerMonth: number;
+  avgLoVolume: number;
+  avgLoVolumePerMonth: number;
   avgTtsScore: number;
   loanComplexityScore: number;
 }
 
 /**
- * Company totals (matching the 20 metrics)
+ * Company totals (matching Qlik's 28 metrics)
  */
 export interface TotalsData {
   actorCount: number;
@@ -99,11 +109,21 @@ export interface TotalsData {
   waFico: number;
   waLtv: number;
   waDti: number;
+  waWhDays: number;
+  avgConditions: number;
   lostOpportunityUnits: number;
+  lostOpportunityUnitsPercent: number;
   lostOpportunityRevenue: number;
   deniedUnits: number;
+  deniedUnitsPercent: number;
+  deniedRevenue: number;
+  lostOpportunityAndDeniedRevenue: number;
+  lostOpportunityAndDeniedRevenueBps: number;
   avgLoRevenue: number;
   avgLoUnits: number;
+  avgLoUnitsPerMonth: number;
+  avgLoVolume: number;
+  avgLoVolumePerMonth: number;
   avgTtsScore: number;
   loanComplexityScore: number;
 }

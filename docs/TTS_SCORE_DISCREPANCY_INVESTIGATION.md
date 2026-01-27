@@ -8,20 +8,74 @@
 - Stanley Edward Obrecht Jr.: Our score vs Qlik score (difference of ~30 points)
 - Other LOs: Similar ±30 point differences across the board
 
-**What's Working:**
+**CRITICAL DISCOVERY - Major Discrepancy Found:**
+
+After reviewing the actual Qlik source files (`Variables.csv` line 1861-1881), there is a **fundamental mismatch** between:
+1. What the `TTS_FORMULA_FINDINGS.md` document claims Qlik uses
+2. What the current backend implementation has
+3. What the **actual Qlik source code** shows
+
+**Actual Qlik Formula (from Variables.csv):**
+- **4 components only** (Volume, Margin, TurnTime, PullThrough)
+- **Compound scaling IS ACTIVE** (not commented out)
+- **Weights:** Volume=3, Margin=2, TurnTime=1, PullThrough=2 (total = 8)
+- **NO Unit or Concession ratings** in the formula
+
+**Current Backend Implementation:**
 - ✅ 6-component formula implemented (Volume, Margin, TurnTime, PullThrough, Unit, Concession)
-- ✅ Correct weights (2, 2, 0.5, 1.5, 2, 2 = total 10)
-- ✅ No compound scaling (removed per Qlik findings)
+- ✅ Weights: 2, 2, 0.5, 1.5, 2, 2 = total 10
+- ✅ No compound scaling (removed per TTS_FORMULA_FINDINGS.md)
 - ✅ Revenue calculation using Base Buy with Origination Points fallback
 - ✅ Pull-through calculation using application_date for inactive loans
 - ✅ Filtering out LOs with 0 units
 
-**What Needs Investigation:**
-- Individual rating calculations may have subtle differences
-- Date range filtering might be slightly off
-- Company average calculations might differ
-- Rounding/precision differences
-- Missing edge cases or filters
+**What's Working:**
+- ✅ Revenue calculation using Base Buy with Origination Points fallback
+- ✅ Pull-through calculation using application_date for inactive loans
+- ✅ Filtering out LOs with 0 units
+
+**✅ CONFIRMED - Performance App Formula Review Complete:**
+
+**Performance App Formula (Variables.csv line 6484-6512):**
+```qvs
+eCCA_TVI_Score_13_Months = (
+    $(eCCA_TVI_VolumeRating) * $(vScorecardVolumeWeight)      // Weight = 2
+    +
+    $(eCCA_TVI_MarginRating) * $(vScorecardMarginWeight)       // Weight = 2
+    +
+    $(eCCA_TVI_TurnTimesRating)  /**( $(eCCA_TVI_VolumeRating) /100)*/*$(vScorecardTurnTimeWeight)  // Compound scaling COMMENTED OUT, Weight = 0.5
+    +
+    $(eCCA_TVI_PullThroughRating) /** ( $(eCCA_TVI_MarginRating)  /100)*/*$(vScorecardPullThroughWeight)  // Compound scaling COMMENTED OUT, Weight = 1.5
+    +
+    $(eCCA_TVI_UnitRating) * $(vScorecardUnitWeight)          // Weight = 2
+    +
+    Pick(vCCA_ScorecardIncludeConcession, 0, $(eCCA_TVI_ConcessionRating)) * $(vScorecardConcessionWeight)  // Weight = 2 (conditional)
+)
+/
+($(vScorecardVolumeWeight)+$(vScorecardMarginWeight)+$(vScorecardTurnTimeWeight)+$(vScorecardPullThroughWeight)+$(vScorecardUnitWeight)+Pick(vCCA_ScorecardIncludeConcession, 0,$(vScorecardConcessionWeight)))
+```
+
+**Key Findings:**
+- ✅ **6 Components**: Volume, Margin, TurnTime, PullThrough, Unit, Concession
+- ✅ **Compound Scaling**: COMMENTED OUT (using `/** ... */` syntax)
+- ✅ **Weights**: Volume=2, Margin=2, TurnTime=0.5, PullThrough=1.5, Unit=2, Concession=2 (total = 10 with concession, 8 without)
+- ✅ **Backend Implementation MATCHES** the Performance app formula exactly!
+
+**Source:** `QlikAppsAndLogicDictionaryDocs/Performance/QSDA-[1.7.0] Performance - Homestead-a80fccac-1ffe-4934-b57e-16afaaa4fd62/Variables.csv` line 6484-6512
+
+**✅ FORMULA VERIFIED:** The Performance app formula matches the backend implementation exactly.
+
+**✅ ACTUAL DISCREPANCIES FOUND:** See `TTS_ACTUAL_DISCREPANCIES_FOUND.md` for complete analysis.
+
+**Critical Discrepancies Identified:**
+1. **Date Range: 12 vs 13 months** - Qlik uses "Last 12 Months", backend uses 13 months
+2. **Pull-through company average** - Backend uses wrong data source (`startedCount`/`fundedCount` instead of `applicationCount`/`pullThroughFundedCount`)
+3. **End date: Today vs MonthEnd** - Backend uses today, Qlik uses last day of month
+4. **Company averages** - Backend includes all actors, Qlik excludes actors with 0 value or no current production
+5. **Concession inclusion** - Backend always includes, Qlik only includes when average = 0
+6. **Turn time fallback** - Backend uses closing_date fallback, Qlik may not
+
+**All discrepancies documented with exact line numbers and Qlik formulas in:** `docs/TTS_ACTUAL_DISCREPANCIES_FOUND.md`
 
 ---
 
@@ -62,9 +116,10 @@ const volumeRating = companyAverages.avgVolumePerActor > 0
    - Get company average volume from Qlik
    - Compare to our calculated values
 
-**Files to Check:**
+**Files to Check (Performance App):**
 - `QlikAppsAndLogicDictionaryDocs/Performance/tvd-coheus-performance-qlik/QSDA-[1.6.0] Performance-82c16f07-1efc-4482-ae53-99d8abba3ee4/Expressions.csv` - Search for "Volume Rating" or "eCCA_TVI_VolumeRating"
-- `QlikAppsAndLogicDictionaryDocs/tvd-coheus-datapilot-qlik/QSDA-Data Pilot-dbaa5b90-3f7f-467e-98e7-0053c46b913a/Variables.csv` - Line 2285 (eCCA_TVI_VolumeRating)
+- `QlikAppsAndLogicDictionaryDocs/Performance/tvd-coheus-performance-qlik/QSDA-[1.6.0] Performance-82c16f07-1efc-4482-ae53-99d8abba3ee4/Variables.csv` - Search for eCCA_TVI_VolumeRating and eCCA_TVI_Score_13_Months
+- `QlikAppsAndLogicDictionaryDocs/Performance/tvd-coheus-performance-qlik/Scripts/QSS Files.qvs` - Weight definitions (shows all 6 weights)
 
 #### 1.2 Margin Rating
 **Qlik Formula:**
@@ -528,11 +583,110 @@ Based on ±30 point discrepancies, likely causes:
 
 ---
 
+## Detailed Component-by-Component Comparison
+
+### Volume Rating
+| Aspect | Qlik Source | Backend Implementation | Match? |
+|--------|-------------|------------------------|--------|
+| Formula | `([CCA Scorecard Volume] / vCCA_ScorecardVolumeAvg) * 100` | `(data.volume / companyAverages.avgVolumePerActor) * 100` | ✅ Yes |
+| Weight in TTS | 3 | 2 | ❌ **NO** |
+| Volume Definition | `Sum([Loan Amount])` per actor | `Sum(loan_amount)` per actor | ✅ Yes |
+| Date Filter | `Rolling13MonthFlag={Yes}, DateType={'Funding'}` | `funding_date` in 13-month range | ✅ Yes |
+
+### Margin Rating
+| Aspect | Qlik Source | Backend Implementation | Match? |
+|--------|-------------|------------------------|--------|
+| Formula | `([CCA Scorecard Margin $] / vCCA_ScorecardMarginAvg) * 100` | `(data.revenue / companyAverages.avgRevenuePerActor) * 100` | ✅ Yes |
+| Weight in TTS | 2 | 2 | ✅ Yes |
+| Revenue Definition | `Sum([Revenue])` per actor (dollars) | `Sum(revenue)` per actor (dollars) | ✅ Yes |
+| Revenue Calculation | Base Buy formula (Transform.qvs line 549) | Base Buy with Origination Points fallback | ✅ Yes |
+
+### Turn Time Rating
+| Aspect | Qlik Source | Backend Implementation | Match? |
+|--------|-------------|------------------------|--------|
+| Formula | `(Pow([TurnTime], -1) / vCCA_ScorecardTurnTimeAvg) * 100` | `(1/actorAvgTurnTime / avgInverseTurnTime) * 100` | ✅ Yes |
+| Weight in TTS | 1 | 0.5 | ❌ **NO** |
+| Compound Scaling | `* (VolumeRating / 100)` | None | ❌ **NO** |
+| Average Calculation | `Avg(Aggr(Pow(TurnTime, -1), Actor))` | `Avg(1/turnTime per actor)` | ✅ Yes |
+
+### Pull Through Rating
+| Aspect | Qlik Source | Backend Implementation | Match? |
+|--------|-------------|------------------------|--------|
+| Formula | `([CCA Scorecard PullThrough] / vCCA_ScorecardPullThroughAvg) * 100` | `(actorPullThrough / avgPullThrough) * 100` | ✅ Yes |
+| Weight in TTS | 2 | 1.5 | ❌ **NO** |
+| Compound Scaling | `* (MarginRating / 100)` | None | ❌ **NO** |
+| Pull Through Definition | Funded / Applications (inactive loans) | Funded / Applications (inactive loans) | ✅ Yes |
+| Date Filter | `DateType={'Application'}, Rolling13MonthFlag={Yes}` | `application_date` in 13-month range | ✅ Yes |
+
+### Unit Rating
+| Aspect | Qlik Source | Backend Implementation | Match? |
+|--------|-------------|------------------------|--------|
+| In Formula? | ❌ **NO** (not in eCCA_TVI_Score_13_Months) | ✅ Yes | ❌ **NO** |
+| Formula (if used) | N/A | `(data.units / companyAverages.avgUnitsPerActor) * 100` | N/A |
+| Weight in TTS | N/A | 2 | N/A |
+
+### Concession Rating
+| Aspect | Qlik Source | Backend Implementation | Match? |
+|--------|-------------|------------------------|--------|
+| In Formula? | ❌ **NO** (not in eCCA_TVI_Score_13_Months) | ✅ Yes | ❌ **NO** |
+| Formula (if used) | N/A | `(actorTotalConcession / avgConcessionPerActor) * 100` | N/A |
+| Weight in TTS | N/A | 2 | N/A |
+
+## Summary of Critical Findings
+
+### Root Cause of ±30 Point Discrepancy
+
+The discrepancy is caused by the backend using a **completely different formula** than what Qlik actually uses:
+
+**Qlik Actual Formula (DataPilot Variables.csv line 1861-1881):**
+- 4 components: Volume, Margin, TurnTime, PullThrough
+- Compound scaling: **ACTIVE** (TurnTime × VolumeRating/100, PullThrough × MarginRating/100)
+- Weights: Volume=3, Margin=2, TurnTime=1, PullThrough=2 (total = 8)
+- Formula: `(V×3 + M×2 + TT×(V/100)×1 + PT×(M/100)×2) / 8`
+
+**Backend Current Implementation:**
+- 6 components: Volume, Margin, TurnTime, PullThrough, Unit, Concession
+- Compound scaling: **DISABLED**
+- Weights: Volume=2, Margin=2, TurnTime=0.5, PullThrough=1.5, Unit=2, Concession=2 (total = 10)
+- Formula: `(V×2 + M×2 + TT×0.5 + PT×1.5 + U×2 + C×2) / 10`
+
+**This fundamental difference explains the ±30 point discrepancy.**
+
+### Next Steps - Decision Required
+
+**URGENT:** A business decision is needed on which formula to use:
+
+1. **Option A: Match Qlik exactly (4 components with compound scaling)**
+   - Remove Unit and Concession ratings
+   - Re-enable compound scaling
+   - Change weights to: Volume=3, Margin=2, TurnTime=1, PullThrough=2
+   - This will match Qlik's current production formula
+
+2. **Option B: Use the 6-component formula (if it's a newer/planned version)**
+   - Verify if the 6-component formula is intended to replace the 4-component one
+   - Check if Qlik is planning to update to 6 components
+   - If so, update Qlik first, then match backend
+
+3. **Option C: Keep both formulas (if different scorecards)**
+   - Verify if Sales uses 4-component and Operations uses different formula
+   - Operations app uses Unit + TurnTime only (2 components)
+   - May need different formulas for different roles
+
+### Verification Needed
+
+Before making changes, verify:
+1. Which Qlik app/view is being compared? (DataPilot, Performance, Operations?)
+2. Is the 6-component formula documented anywhere in Qlik source?
+3. Are there multiple versions of the TTS formula for different contexts?
+4. What does the actual production Qlik app show for Stanley's score?
+
 ## Questions to Answer
 
-1. What is the exact value of `vDefaultRevFlag` in Qlik? (0 = Base Buy, 1 = custom)
-2. What is the exact value of `vCCA_ScorecardIncludeConcession`? (0 = exclude, 1 = include)
-3. How does Qlik calculate `Rolling13MonthFlag` exactly?
-4. Does Qlik round intermediate rating values or only the final TTS score?
-5. Are there any additional filters we're missing?
-6. How does Qlik handle actors with 0 units in company averages?
+1. **CRITICAL:** Which formula is correct - 4-component with compound scaling, or 6-component without?
+2. What is the exact value of `vDefaultRevFlag` in Qlik? (0 = Base Buy, 1 = custom)
+3. What is the exact value of `vCCA_ScorecardIncludeConcession`? (0 = exclude, 1 = include)
+4. How does Qlik calculate `Rolling13MonthFlag` exactly?
+5. Does Qlik round intermediate rating values or only the final TTS score?
+6. Are there any additional filters we're missing?
+7. How does Qlik handle actors with 0 units in company averages?
+8. Are Unit and Concession ratings used in a different Qlik app or view?
