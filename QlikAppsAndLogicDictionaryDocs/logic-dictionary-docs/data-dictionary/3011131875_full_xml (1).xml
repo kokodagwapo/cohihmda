@@ -1,0 +1,1473 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Setup>
+  <ClientInfo Id="3011131875" Name="" SavedBy="bob@hfmloans.com" SavedTimeStamp="2024-09-13T15:11:52.8049388+00:00" />
+  <CoheusConfig>
+    <AdHoc>
+      <Field Id="1041" Alias="Subject Property Type Fannie Mae" />
+      <Field Id="1050" Alias="Fees VA Fund Fee Borr" />
+      <Field Id="1051" Alias="Mers Min #" />
+      <Field Id="1059" Alias="FHA Lender ID" />
+      <Field Id="1061" Alias="Fees Loan Discount Fee %" />
+      <Field Id="1093" Alias="Fees Loan Discount Fee Borr" />
+      <Field Id="11" Alias="Subject Property Street" />
+      <Field Id="1109" Alias="Loan Amt" />
+      <Field Id="1172" Alias="Loan Type" />
+      <Field Id="1177" Alias="Interest Only Mos" />
+      <Field Id="1191" Alias="Borr Info Points Paid" />
+      <Field Id="1389" Alias="Income Total Mo Income (Borr/Co-Borr)" />
+      <Field Id="1396" Alias="Subject Property County Code" />
+      <Field Id="CUST19FV" Alias="Rush Closing on File." />
+      <Field Id="CUST24FV" Alias="Scrub Rating of File" />
+      <Field Id="CX.TOUCHES.ALL.USERHOURS" Alias="User Touches - All User-Hours - One User Per Line" />
+      <Field Id="CX.CX.QUAL.DEFECT.COUNT" Alias="Total Count of All Defects" />
+      <Field Id="CX.HOURS.TC" Alias="Time in File - TC" />
+      <Field Id="CX.HOURS.UW" Alias="Time in File - UW" />
+    </AdHoc>
+    <TurnTimes>
+      <Field Id="3142" Alias="GFE Application Date" />
+      <Field Id="3143" Alias="Initial Disclosure Due Date" />
+      <Field Id="3148" Alias="GFE Initial GFE Disclosure Provided Date" />
+      <Field Id="3152" Alias="TIL Intl Disclosure Provided Date" />
+      <Field Id="3253" Alias="Last Rate Set Date" />
+      <Field Id="3257" Alias="Rate Lock Sell Side Last Rate Set Date" />
+      <Field Id="3261" Alias="Closing Docs 1003 Signature Date" />
+      <Field Id="3312" Alias="Repurchase Date" />
+      <Field Id="3337" Alias="Date Sold to Third Party" />
+      <Field Id="3341" Alias="Date Warehoused" />
+      <Field Id="3544" Alias="GFE Initial GFE Disclosure Affiliated Business Disclosure Provided Date" />
+      <Field Id="3545" Alias="GFE Initial GFE Disclosure CHARM Booklet Provided Date" />
+      <Field Id="3546" Alias="GFE Initial GFE Disclosure HUD Special Booklet Provided Date" />
+      <Field Id="3547" Alias="GFE Initial GFE Disclosure HELOC Brochure Provided Date" />
+    </TurnTimes>
+    <FieldSwap>
+      <Field Alias="Loan Officer" DefaultFieldId="317" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Closing Date" DefaultFieldId="748" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Estimated Closing Date" DefaultFieldId="763" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Funding Date" DefaultFieldId="1997" NewFieldId="MS.FUN" ExpirationDate="" IsDate="false" />
+      <Field Alias="Shipped Date" DefaultFieldId="2014" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Conditional Approval Date" DefaultFieldId="2300" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="UW Final Approval Date" DefaultFieldId="2301" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="CTC Date" DefaultFieldId="2305" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Investor Purchase Date" DefaultFieldId="2370" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Credit Pull Date" DefaultFieldId="Document.DateReceived.CREDIT REPORT" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Account Executive" DefaultFieldId="LoanTeamMember.Name.Account Executive" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Closer" DefaultFieldId="LoanTeamMember.Name.Closer" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Processor" DefaultFieldId="LoanTeamMember.Name.Loan Processor" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Underwriter" DefaultFieldId="LoanTeamMember.Name.Underwriter" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Submitted To Processing Date" DefaultFieldId="Log.MS.Date.Send To Processing" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Started Date" DefaultFieldId="Log.MS.Date.Started" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Submitted To Underwriting Date" DefaultFieldId="Log.MS.Date.Submittal" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Branch" DefaultFieldId="ORGID" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Referral Name" DefaultFieldId="1822" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="UW Touches" DefaultFieldId="CX.Count.UWSub" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Application Date" DefaultFieldId="3142" NewFieldId="" ExpirationDate="" IsDate="true" />
+      <Field Alias="Preapproval Flag" DefaultFieldId="HMDA.X12" NewFieldId="" ExpirationDate="" IsDate="false" isArchived="false"/>
+      <Field Alias="Preapproval Req. Dt" DefaultFieldId="CX.PREAPP.REQ.DT" NewFieldId="" ExpirationDate="" IsDate="false" isArchived="false"/>
+    </FieldSwap>
+    <Milestones>
+      <Milestone Name="Started" SortOrder="1" FieldId="Log.MS.Date.Started" IsCustom="false" />
+      <Milestone Name="PreApproval" SortOrder="2" FieldId="Log.MS.Date.PreApproval" IsCustom="false" />
+      <Milestone Name="Disclosure Prep" SortOrder="3" FieldId="Log.MS.Date.Disclosure Prep" IsCustom="false" />
+      <Milestone Name="Signed" SortOrder="4" FieldId="Log.MS.Date.Signed" IsCustom="false" />
+      <Milestone Name="Scrubbed" SortOrder="5" FieldId="Log.MS.Date.Scrubbed" IsCustom="false" />
+      <Milestone Name="Processing" SortOrder="6" FieldId="Log.MS.Date.Processing" IsCustom="false" />
+      <Milestone Name="Submittal" SortOrder="7" FieldId="Log.MS.Date.Submittal" IsCustom="false" />
+      <Milestone Name="Cond. Approval" SortOrder="8" FieldId="Log.MS.Date.Cond. Approval" IsCustom="false" />
+      <Milestone Name="Resubmittal" SortOrder="9" FieldId="Log.MS.Date.Resubmittal" IsCustom="false" />
+      <Milestone Name="Approval" SortOrder="10" FieldId="Log.MS.Date.Approval" IsCustom="false" />
+      <Milestone Name="Ready for Docs" SortOrder="11" FieldId="Log.MS.Date.Ready for Docs" IsCustom="false" />
+      <Milestone Name="Closer Assignment" SortOrder="12" FieldId="Log.MS.Date.Closer Assignment" IsCustom="false" />
+      <Milestone Name="Docs Out" SortOrder="13" FieldId="Log.MS.Date.Docs Out" IsCustom="false" />
+      <Milestone Name="Docs Signing" SortOrder="14" FieldId="Log.MS.Date.Docs Signing" IsCustom="false" />
+      <Milestone Name="Funding" SortOrder="15" FieldId="Log.MS.Date.Funding" IsCustom="false" />
+      <Milestone Name="Shipping" SortOrder="16" FieldId="Log.MS.Date.Shipping" IsCustom="false" />
+      <Milestone Name="Purchased" SortOrder="17" FieldId="Log.MS.Date.Purchased" IsCustom="false" />
+      <Milestone Name="Reconciled" SortOrder="18" FieldId="Log.MS.Date.Reconciled" IsCustom="false" />
+      <Milestone Name="Completion" SortOrder="19" FieldId="Log.MS.Date.Completion" IsCustom="false" />
+      <Milestone Name="Appt Reset" SortOrder="20" FieldId="Log.MS.Date.Appt Reset" IsCustom="false" />
+      <Milestone Name="Appt Set" SortOrder="21" FieldId="Log.MS.Date.Appt Set" IsCustom="false" />
+      <Milestone Name="Doc Preparation" SortOrder="22" FieldId="Log.MS.Date.Doc Preparation" IsCustom="false" />
+      <Milestone Name="Post Closing" SortOrder="23" FieldId="Log.MS.Date.Post Closing" IsCustom="false" />
+      <Milestone Name="PreApproval - old" SortOrder="24" FieldId="Log.MS.Date.PreApproval - old" IsCustom="false" />
+    </Milestones>
+    <LoanFolders>
+      <LoanFolders Name="My Pipeline" DisplayName="My Pipeline" />
+      <LoanFolders Name="Now in Underwriting" DisplayName="Now in Underwriting" />
+      <LoanFolders Name="Prospects" DisplayName="Prospects" />
+      <LoanFolders Name="Closed" DisplayName="&lt;Closed&gt;" />
+      <LoanFolders Name="Adverse 2021" DisplayName="&lt;Adverse 2021&gt;" />
+      <LoanFolders Name="Adverse 2020" DisplayName="&lt;Adverse 2020&gt;" />
+      <LoanFolders Name="Employee" DisplayName="&lt;Employee&gt;" />
+      <LoanFolders Name="Adverse" DisplayName="&lt;Adverse&gt;" />
+      <LoanFolders Name="Adverse Archive" DisplayName="&lt;Adverse Archive&gt;" />
+      <LoanFolders Name="TD Leads (not enough information)" DisplayName="&lt;TD Leads (not enough information)&gt;" />
+      <LoanFolders Name="Repurchased Files" DisplayName="&lt;Repurchased Files&gt;" />
+    </LoanFolders>
+    <SectionAccess>
+      <LevelOne AccessField="ORGID">
+        <Entry UserId="admin" AccessValue="" />
+        <Entry UserId="cas" AccessValue="" />
+        <Entry UserId="clearaudit" AccessValue="" />
+        <Entry UserId="emshomestead" AccessValue="" />
+        <Entry UserId="endeavorcapital" AccessValue="" />
+        <Entry UserId="j.stgemme" AccessValue="*" />
+        <Entry UserId="j_hardie" AccessValue="*" />
+        <Entry UserId="jungo-api" AccessValue="" />
+        <Entry UserId="l_nolfo" AccessValue="" />
+        <Entry UserId="loanvision" AccessValue="" />
+        <Entry UserId="r.wemlinger" AccessValue="" />
+        <Entry UserId="r.may" AccessValue="" />
+        <Entry UserId="svr_account" AccessValue="" />
+        <Entry UserId="svr_teraverde" AccessValue="" />
+        <Entry UserId="test" AccessValue="" />
+        <Entry UserId="webmaster" AccessValue="" />
+        <Entry UserId="z.dooley" AccessValue="" />
+        <Entry UserId="v.nettles" AccessValue="" />
+        <Entry UserId="s_ringsdorf" AccessValue="" />
+        <Entry UserId="s_schnyder" AccessValue="*" />
+        <Entry UserId="s.detz" AccessValue="" />
+        <Entry UserId="s.eckert" AccessValue="" />
+        <Entry UserId="r_detz" AccessValue="*" />
+        <Entry UserId="r_perotti" AccessValue="*" />
+        <Entry UserId="r.sendejas" AccessValue="" />
+        <Entry UserId="r.sheth" AccessValue="" />
+        <Entry UserId="r.stephens" AccessValue="" />
+        <Entry UserId="m.barnes" AccessValue="" />
+        <Entry UserId="k.knopf" AccessValue="" />
+        <Entry UserId="k.richardson" AccessValue="" />
+        <Entry UserId="k.wilson" AccessValue="" />
+        <Entry UserId="k_allen" AccessValue="" />
+        <Entry UserId="l.barker" AccessValue="" />
+        <Entry UserId="m.loseke" AccessValue="" />
+        <Entry UserId="m_neuf" AccessValue="" />
+        <Entry UserId="p.butler" AccessValue="" />
+        <Entry UserId="p.green" AccessValue="" />
+        <Entry UserId="j_maurer" AccessValue="" />
+        <Entry UserId="j_zakibe" AccessValue="" />
+        <Entry UserId="k.campbell" AccessValue="" />
+        <Entry UserId="j.rivera" AccessValue="" />
+        <Entry UserId="j.miller" AccessValue="" />
+        <Entry UserId="j.perea" AccessValue="" />
+        <Entry UserId="j.weissbeck" AccessValue="" />
+        <Entry UserId="j.yocom" AccessValue="" />
+        <Entry UserId="j_bender" AccessValue="" />
+        <Entry UserId="j_budde" AccessValue="*" />
+        <Entry UserId="g.budde" AccessValue="" />
+        <Entry UserId="e_paniucki" AccessValue="" />
+        <Entry UserId="g.mooney" AccessValue="" />
+        <Entry UserId="gacinta" AccessValue="" />
+        <Entry UserId="h.medhane" AccessValue="" />
+        <Entry UserId="j.bundy" AccessValue="" />
+        <Entry UserId="j.delorenzo" AccessValue="" />
+        <Entry UserId="j.dimartino" AccessValue="" />
+        <Entry UserId="j.garneau" AccessValue="" />
+        <Entry UserId="j.lemley" AccessValue="" />
+        <Entry UserId="d.wyciskalla" AccessValue="" />
+        <Entry UserId="c.thomas" AccessValue="" />
+        <Entry UserId="c.vombey" AccessValue="" />
+        <Entry UserId="c.givens" AccessValue="" />
+        <Entry UserId="andros" AccessValue="" />
+        <Entry UserId="a_bergfeld" AccessValue="" />
+        <Entry UserId="a.harting" AccessValue="" />
+        <Entry UserId="a.hoffman" AccessValue="" />
+        <Entry UserId="a.walther" AccessValue="" />
+        <Entry UserId="b.hodge" AccessValue="" />
+        <Entry UserId="b_vanmeter" AccessValue="" />
+        <Entry UserId="c.bickell" AccessValue="*" />
+        <Entry UserId="c.mueller" AccessValue="" />
+        <Entry UserId="g_aftayev" AccessValue="" />
+        <Entry UserId="jaysonhardie" AccessValue="*" />
+        <Entry UserId="k.braun" AccessValue="" />
+        <Entry UserId="k.pieri" AccessValue="" />
+        <Entry UserId="l.chickey" AccessValue="" />
+        <Entry UserId="l.vachon" AccessValue="" />
+        <Entry UserId="m.heffron" AccessValue="" />
+        <Entry UserId="l_oneill" AccessValue="" />
+        <Entry UserId="l.goedeker" AccessValue="" />
+        <Entry UserId="p_hughes" AccessValue="" />
+        <Entry UserId="n.boyd" AccessValue="" />
+        <Entry UserId="n.dix" AccessValue="" />
+        <Entry UserId="officer" AccessValue="" />
+        <Entry UserId="r.horvath" AccessValue="" />
+        <Entry UserId="m.feldman" AccessValue="" />
+        <Entry UserId="m.rutledge" AccessValue="" />
+        <Entry UserId="r.schopper" AccessValue="" />
+        <Entry UserId="s.ingold" AccessValue="" />
+        <Entry UserId="s.lee" AccessValue="" />
+        <Entry UserId="s.mccauley" AccessValue="" />
+        <Entry UserId="s.tiemeyer" AccessValue="" />
+        <Entry UserId="t.welsch" AccessValue="" />
+        <Entry UserId="t.marquis" AccessValue="" />
+        <Entry UserId="i.sanghvi" AccessValue="" />
+        <Entry UserId="j.ham" AccessValue="" />
+        <Entry UserId="j.knight" AccessValue="" />
+        <Entry UserId="j.erb" AccessValue="" />
+        <Entry UserId="j.connors" AccessValue="" />
+        <Entry UserId="j.worobec" AccessValue="" />
+        <Entry UserId="k.cummins" AccessValue="" />
+        <Entry UserId="b_griffin" AccessValue="" />
+        <Entry UserId="a.rist" AccessValue="" />
+        <Entry UserId="b.agee" AccessValue="" />
+        <Entry UserId="c_nielsen" AccessValue="" />
+        <Entry UserId="d.barban" AccessValue="" />
+        <Entry UserId="e.stephens" AccessValue="" />
+        <Entry UserId="e.gillick" AccessValue="" />
+        <Entry UserId="f_spell" AccessValue="" />
+        <Entry UserId="g.bachkora" AccessValue="" />
+        <Entry UserId="d.suggs" AccessValue="" />
+        <Entry UserId="c_deckert" AccessValue="" />
+        <Entry UserId="b.smith" AccessValue="" />
+        <Entry UserId="j.newton" AccessValue="" />
+        <Entry UserId="j.switzer" AccessValue="" />
+        <Entry UserId="j.ayalapacheco" AccessValue="" />
+        <Entry UserId="j.caldwell" AccessValue="2101" />
+        <Entry UserId="s.lafontant" AccessValue="" />
+        <Entry UserId="t.luttrell" AccessValue="" />
+        <Entry UserId="t.barnes" AccessValue="" />
+        <Entry UserId="l_anderson" AccessValue="" />
+        <Entry UserId="m.barton" AccessValue="" />
+        <Entry UserId="m.lafferty" AccessValue="" />
+        <Entry UserId="m.lage" AccessValue="" />
+        <Entry UserId="l.harris" AccessValue="" />
+        <Entry UserId="l.hill" AccessValue="" />
+        <Entry UserId="l.salgado" AccessValue="" />
+        <Entry UserId="l_rios" AccessValue="" />
+        <Entry UserId="l_whalen" AccessValue="" />
+        <Entry UserId="l.denton" AccessValue="" />
+        <Entry UserId="l.brenton" AccessValue="" />
+        <Entry UserId="k.runge" AccessValue="" />
+        <Entry UserId="k.will" AccessValue="" />
+        <Entry UserId="k.reap" AccessValue="" />
+        <Entry UserId="k.lynn" AccessValue="" />
+        <Entry UserId="k.meyer" AccessValue="" />
+        <Entry UserId="k.hoofman" AccessValue="" />
+        <Entry UserId="m.sweet" AccessValue="" />
+        <Entry UserId="m.vergere" AccessValue="" />
+        <Entry UserId="m_blodgett" AccessValue="" />
+        <Entry UserId="m_boyd" AccessValue="" />
+        <Entry UserId="m_burns" AccessValue="" />
+        <Entry UserId="m_coffer" AccessValue="" />
+        <Entry UserId="m_horton" AccessValue="" />
+        <Entry UserId="m.guillen" AccessValue="" />
+        <Entry UserId="m.morales" AccessValue="" />
+        <Entry UserId="m.moriarty" AccessValue="" />
+        <Entry UserId="m.nicholson" AccessValue="" />
+        <Entry UserId="m.pierce" AccessValue="" />
+        <Entry UserId="n.perkins" AccessValue="" />
+        <Entry UserId="p_oglesby" AccessValue="" />
+        <Entry UserId="r.cronin" AccessValue="" />
+        <Entry UserId="r.cusack" AccessValue="" />
+        <Entry UserId="r.fannin" AccessValue="" />
+        <Entry UserId="r.henry" AccessValue="" />
+        <Entry UserId="p.mchenry" AccessValue="" />
+        <Entry UserId="p.tedford" AccessValue="" />
+        <Entry UserId="p.veunnasack" AccessValue="" />
+        <Entry UserId="p_flynn" AccessValue="" />
+        <Entry UserId="m_rimkus" AccessValue="" />
+        <Entry UserId="m_snyder" AccessValue="" />
+        <Entry UserId="m_thele" AccessValue="" />
+        <Entry UserId="t.domenic" AccessValue="" />
+        <Entry UserId="t.ashby" AccessValue="" />
+        <Entry UserId="s_watson" AccessValue="" />
+        <Entry UserId="s_wright" AccessValue="" />
+        <Entry UserId="s.walton" AccessValue="" />
+        <Entry UserId="s_mclaughlin" AccessValue="" />
+        <Entry UserId="s.simmons" AccessValue="" />
+        <Entry UserId="s.kennedy" AccessValue="" />
+        <Entry UserId="s.gorczyca" AccessValue="" />
+        <Entry UserId="s.burton" AccessValue="" />
+        <Entry UserId="r_franklin" AccessValue="" />
+        <Entry UserId="r.mcgrail" AccessValue="" />
+        <Entry UserId="r.tedford" AccessValue="" />
+        <Entry UserId="r.treat" AccessValue="" />
+        <Entry UserId="r.white" AccessValue="" />
+        <Entry UserId="r.wollenberg" AccessValue="" />
+        <Entry UserId="wstewart" AccessValue="" />
+        <Entry UserId="v.robles" AccessValue="" />
+        <Entry UserId="velocify" AccessValue="" />
+        <Entry UserId="w.hurt" AccessValue="" />
+        <Entry UserId="w.lowery" AccessValue="" />
+        <Entry UserId="t.hussey" AccessValue="" />
+        <Entry UserId="t.mennemeyer" AccessValue="" />
+        <Entry UserId="t.roth" AccessValue="" />
+        <Entry UserId="t_stapleton" AccessValue="" />
+        <Entry UserId="v.kuntorovskiy" AccessValue="" />
+        <Entry UserId="j.cavellero" AccessValue="" />
+        <Entry UserId="j.challans" AccessValue="" />
+        <Entry UserId="irendaci" AccessValue="" />
+        <Entry UserId="j.adams" AccessValue="" />
+        <Entry UserId="j.amini" AccessValue="" />
+        <Entry UserId="g_weaver" AccessValue="" />
+        <Entry UserId="g.green" AccessValue="" />
+        <Entry UserId="j.barrett" AccessValue="" />
+        <Entry UserId="j.brown" AccessValue="" />
+        <Entry UserId="j.davis" AccessValue="" />
+        <Entry UserId="h.nguyen" AccessValue="" />
+        <Entry UserId="j.hussey" AccessValue="" />
+        <Entry UserId="j.long" AccessValue="" />
+        <Entry UserId="j.mair" AccessValue="" />
+        <Entry UserId="j.martin" AccessValue="" />
+        <Entry UserId="j.vukich" AccessValue="" />
+        <Entry UserId="j.stephans" AccessValue="" />
+        <Entry UserId="j.pattillo" AccessValue="" />
+        <Entry UserId="j.reeder" AccessValue="" />
+        <Entry UserId="j.richey" AccessValue="" />
+        <Entry UserId="j.zeller" AccessValue="" />
+        <Entry UserId="j_farmer" AccessValue="" />
+        <Entry UserId="j.wells" AccessValue="" />
+        <Entry UserId="k.fisk" AccessValue="" />
+        <Entry UserId="janetsciuto" AccessValue="" />
+        <Entry UserId="j_hoisington" AccessValue="" />
+        <Entry UserId="j_juenger" AccessValue="" />
+        <Entry UserId="j_kellerman" AccessValue="" />
+        <Entry UserId="j_lesinski" AccessValue="" />
+        <Entry UserId="j_robertson" AccessValue="" />
+        <Entry UserId="j_rogers" AccessValue="" />
+        <Entry UserId="j_vatterott" AccessValue="" />
+        <Entry UserId="j_weston" AccessValue="" />
+        <Entry UserId="b.zabala" AccessValue="" />
+        <Entry UserId="b.kable" AccessValue="" />
+        <Entry UserId="b.leonard" AccessValue="" />
+        <Entry UserId="b_jones" AccessValue="" />
+        <Entry UserId="b_jordan" AccessValue="" />
+        <Entry UserId="b_mathis" AccessValue="" />
+        <Entry UserId="b_oswald" AccessValue="" />
+        <Entry UserId="b_sneed" AccessValue="" />
+        <Entry UserId="c.myers" AccessValue="" />
+        <Entry UserId="c.nichols" AccessValue="" />
+        <Entry UserId="c.powers" AccessValue="" />
+        <Entry UserId="c.proffer" AccessValue="" />
+        <Entry UserId="c.clayton" AccessValue="" />
+        <Entry UserId="b_willis" AccessValue="" />
+        <Entry UserId="b.arnall" AccessValue="" />
+        <Entry UserId="a_johnson" AccessValue="" />
+        <Entry UserId="b.compton" AccessValue="" />
+        <Entry UserId="b.hernley" AccessValue="" />
+        <Entry UserId="a.tayloe" AccessValue="" />
+        <Entry UserId="a.trimble" AccessValue="" />
+        <Entry UserId="a_amin" AccessValue="" />
+        <Entry UserId="a.lusk" AccessValue="" />
+        <Entry UserId="a.alderman" AccessValue="" />
+        <Entry UserId="a.carpino" AccessValue="" />
+        <Entry UserId="c_fitzpatrick" AccessValue="" />
+        <Entry UserId="c_fumagalli" AccessValue="" />
+        <Entry UserId="c.mccown" AccessValue="" />
+        <Entry UserId="d.bewen" AccessValue="" />
+        <Entry UserId="d.bray" AccessValue="" />
+        <Entry UserId="d.flassig" AccessValue="" />
+        <Entry UserId="d.keating" AccessValue="" />
+        <Entry UserId="d.maher" AccessValue="" />
+        <Entry UserId="d.nappier" AccessValue="" />
+        <Entry UserId="e.montano" AccessValue="" />
+        <Entry UserId="e.shumaker" AccessValue="" />
+        <Entry UserId="f.andriole" AccessValue="" />
+        <Entry UserId="f.ely" AccessValue="" />
+        <Entry UserId="e.tatum" AccessValue="" />
+        <Entry UserId="e.theno" AccessValue="" />
+        <Entry UserId="e.vanmatre" AccessValue="" />
+        <Entry UserId="d_dobinsky" AccessValue="" />
+        <Entry UserId="d_mayday" AccessValue="" />
+        <Entry UserId="d_patterson" AccessValue="" />
+        <Entry UserId="e.garcia" AccessValue="" />
+        <Entry UserId="j.harris" AccessValue="" />
+        <Entry UserId="g.demare" AccessValue="" />
+        <Entry UserId="j.doore" AccessValue="" />
+        <Entry UserId="j_obrecht" AccessValue="" />
+        <Entry UserId="j.yonaka" AccessValue="" />
+        <Entry UserId="m.mccoy" AccessValue="" />
+        <Entry UserId="kkoetzle" AccessValue="" />
+        <Entry UserId="m.ledford" AccessValue="" />
+        <Entry UserId="r_wohlert" AccessValue="" />
+        <Entry UserId="t.haynes" AccessValue="" />
+        <Entry UserId="k.goodey" AccessValue="" />
+        <Entry UserId="h.moore" AccessValue="" />
+        <Entry UserId="b.beebe" AccessValue="" />
+        <Entry UserId="r_beile" AccessValue="" />
+        <Entry UserId="m.vivian" AccessValue="" />
+        <Entry UserId="bob" AccessValue="*" />
+        <Entry UserId="budde" AccessValue="*" />
+        <Entry UserId="j.stgemme" AccessValue="" />
+        <Entry UserId="steve" AccessValue="*" />
+        <Entry UserId="r.detz" AccessValue="" />
+        <Entry UserId="m.smith" AccessValue="" />
+        <Entry UserId="r.lumpkins" AccessValue="" />
+        <Entry UserId="j.loudon" AccessValue="" />
+        <Entry UserId="g.wiesner" AccessValue="" />
+        <Entry UserId="ddarr" AccessValue="" />
+        <Entry UserId="m.mayfield" AccessValue="" />
+        <Entry UserId="k.shoemaker" AccessValue="" />
+        <Entry UserId="d.shoemaker" AccessValue="*" />
+        <Entry UserId="jayson" AccessValue="*" />
+        <Entry UserId="temp value" AccessValue="" />
+        <Entry UserId="s.shaughnessy" AccessValue="" />
+        <Entry UserId="m.west" AccessValue="" />
+        <Entry UserId="j.gunderson" AccessValue="" />
+        <Entry UserId="salesforceint" AccessValue="" />
+        <Entry UserId="socialsurvey" AccessValue="" />
+        <Entry UserId="l.hocking" AccessValue="" />
+        <Entry UserId="l.smith" AccessValue="" />
+        <Entry UserId="j.napieracz" AccessValue="" />
+        <Entry UserId="a.blagajcevic" AccessValue="*" />
+        <Entry UserId="t.treiber" AccessValue="" />
+        <Entry UserId="s.rosen" AccessValue="" />
+        <Entry UserId="j.howald" AccessValue="" />
+        <Entry UserId="a.flynn" AccessValue="" />
+        <Entry UserId="a.graf" AccessValue="" />
+        <Entry UserId="d.scerpella" AccessValue="" />
+        <Entry UserId="n.kost" AccessValue="" />
+        <Entry UserId="d.forman" AccessValue="" />
+        <Entry UserId="test-svr" AccessValue="" />
+        <Entry UserId="c.ash" AccessValue="" />
+        <Entry UserId="candor" AccessValue="" />
+        <Entry UserId="candoradmin" AccessValue="" />
+        <Entry UserId="d.collins" AccessValue="" />
+        <Entry UserId="m.dickens" AccessValue="" />
+        <Entry UserId="p.barackman" AccessValue="" />
+        <Entry UserId="temp value" AccessValue="" />
+        <Entry UserId="admin" AccessValue="" />
+        <Entry UserId="cas" AccessValue="" />
+        <Entry UserId="clearaudit" AccessValue="" />
+        <Entry UserId="emshomestead" AccessValue="" />
+        <Entry UserId="endeavorcapital" AccessValue="" />
+        <Entry UserId="j.stgemme" AccessValue="" />
+        <Entry UserId="j_hardie" AccessValue="" />
+        <Entry UserId="jungo-api" AccessValue="" />
+        <Entry UserId="l_nolfo" AccessValue="" />
+        <Entry UserId="loanvision" AccessValue="" />
+        <Entry UserId="r.wemlinger" AccessValue="" />
+        <Entry UserId="r.may" AccessValue="" />
+        <Entry UserId="svr_account" AccessValue="" />
+        <Entry UserId="svr_teraverde" AccessValue="" />
+        <Entry UserId="test" AccessValue="" />
+        <Entry UserId="webmaster" AccessValue="" />
+        <Entry UserId="z.dooley" AccessValue="" />
+        <Entry UserId="v.nettles" AccessValue="" />
+        <Entry UserId="s_ringsdorf" AccessValue="" />
+        <Entry UserId="s_schnyder" AccessValue="" />
+        <Entry UserId="s.detz" AccessValue="" />
+        <Entry UserId="s.eckert" AccessValue="" />
+        <Entry UserId="r_detz" AccessValue="" />
+        <Entry UserId="r_perotti" AccessValue="" />
+        <Entry UserId="r.sendejas" AccessValue="" />
+        <Entry UserId="r.sheth" AccessValue="" />
+        <Entry UserId="r.stephens" AccessValue="" />
+        <Entry UserId="m.barnes" AccessValue="" />
+        <Entry UserId="k.knopf" AccessValue="" />
+        <Entry UserId="k.richardson" AccessValue="" />
+        <Entry UserId="k.wilson" AccessValue="" />
+        <Entry UserId="k_allen" AccessValue="" />
+        <Entry UserId="l.barker" AccessValue="" />
+        <Entry UserId="m.loseke" AccessValue="" />
+        <Entry UserId="m_neuf" AccessValue="" />
+        <Entry UserId="p.butler" AccessValue="" />
+        <Entry UserId="p.green" AccessValue="" />
+        <Entry UserId="j_maurer" AccessValue="" />
+        <Entry UserId="j_zakibe" AccessValue="" />
+        <Entry UserId="k.campbell" AccessValue="" />
+        <Entry UserId="j.rivera" AccessValue="" />
+        <Entry UserId="j.miller" AccessValue="" />
+        <Entry UserId="j.perea" AccessValue="" />
+        <Entry UserId="j.weissbeck" AccessValue="" />
+        <Entry UserId="j.yocom" AccessValue="" />
+        <Entry UserId="j_bender" AccessValue="" />
+        <Entry UserId="j_budde" AccessValue="" />
+        <Entry UserId="g.budde" AccessValue="" />
+        <Entry UserId="e_paniucki" AccessValue="" />
+        <Entry UserId="g.mooney" AccessValue="" />
+        <Entry UserId="gacinta" AccessValue="" />
+        <Entry UserId="h.medhane" AccessValue="" />
+        <Entry UserId="j.bundy" AccessValue="" />
+        <Entry UserId="j.delorenzo" AccessValue="" />
+        <Entry UserId="j.dimartino" AccessValue="" />
+        <Entry UserId="j.garneau" AccessValue="" />
+        <Entry UserId="j.lemley" AccessValue="" />
+        <Entry UserId="d.wyciskalla" AccessValue="" />
+        <Entry UserId="c.thomas" AccessValue="" />
+        <Entry UserId="c.vombey" AccessValue="" />
+        <Entry UserId="c.givens" AccessValue="" />
+        <Entry UserId="andros" AccessValue="" />
+        <Entry UserId="a_bergfeld" AccessValue="" />
+        <Entry UserId="a.harting" AccessValue="" />
+        <Entry UserId="a.hoffman" AccessValue="" />
+        <Entry UserId="a.walther" AccessValue="" />
+        <Entry UserId="b.hodge" AccessValue="" />
+        <Entry UserId="b_vanmeter" AccessValue="" />
+        <Entry UserId="c.bickell" AccessValue="" />
+        <Entry UserId="c.mueller" AccessValue="" />
+        <Entry UserId="g_aftayev" AccessValue="" />
+        <Entry UserId="jaysonhardie" AccessValue="" />
+        <Entry UserId="k.braun" AccessValue="" />
+        <Entry UserId="k.pieri" AccessValue="" />
+        <Entry UserId="l.chickey" AccessValue="" />
+        <Entry UserId="l.vachon" AccessValue="" />
+        <Entry UserId="m.heffron" AccessValue="" />
+        <Entry UserId="l_oneill" AccessValue="" />
+        <Entry UserId="l.goedeker" AccessValue="" />
+        <Entry UserId="p_hughes" AccessValue="" />
+        <Entry UserId="n.boyd" AccessValue="" />
+        <Entry UserId="n.dix" AccessValue="" />
+        <Entry UserId="officer" AccessValue="" />
+        <Entry UserId="r.horvath" AccessValue="" />
+        <Entry UserId="m.feldman" AccessValue="" />
+        <Entry UserId="m.rutledge" AccessValue="" />
+        <Entry UserId="r.schopper" AccessValue="" />
+        <Entry UserId="s.ingold" AccessValue="" />
+        <Entry UserId="s.lee" AccessValue="" />
+        <Entry UserId="s.mccauley" AccessValue="" />
+        <Entry UserId="s.tiemeyer" AccessValue="" />
+        <Entry UserId="t.welsch" AccessValue="" />
+        <Entry UserId="t.marquis" AccessValue="" />
+        <Entry UserId="i.sanghvi" AccessValue="" />
+        <Entry UserId="j.ham" AccessValue="" />
+        <Entry UserId="j.knight" AccessValue="" />
+        <Entry UserId="j.erb" AccessValue="" />
+        <Entry UserId="j.connors" AccessValue="" />
+        <Entry UserId="j.worobec" AccessValue="" />
+        <Entry UserId="k.cummins" AccessValue="" />
+        <Entry UserId="b_griffin" AccessValue="" />
+        <Entry UserId="a.rist" AccessValue="" />
+        <Entry UserId="b.agee" AccessValue="" />
+        <Entry UserId="c_nielsen" AccessValue="" />
+        <Entry UserId="d.barban" AccessValue="" />
+        <Entry UserId="e.stephens" AccessValue="" />
+        <Entry UserId="e.gillick" AccessValue="" />
+        <Entry UserId="f_spell" AccessValue="" />
+        <Entry UserId="g.bachkora" AccessValue="" />
+        <Entry UserId="d.suggs" AccessValue="" />
+        <Entry UserId="c_deckert" AccessValue="" />
+        <Entry UserId="b.smith" AccessValue="" />
+        <Entry UserId="j.newton" AccessValue="" />
+        <Entry UserId="j.switzer" AccessValue="" />
+        <Entry UserId="j.ayalapacheco" AccessValue="" />
+        <Entry UserId="j.caldwell" AccessValue="" />
+        <Entry UserId="s.lafontant" AccessValue="" />
+        <Entry UserId="t.luttrell" AccessValue="" />
+        <Entry UserId="t.barnes" AccessValue="" />
+        <Entry UserId="l_anderson" AccessValue="" />
+        <Entry UserId="m.barton" AccessValue="" />
+        <Entry UserId="m.lafferty" AccessValue="" />
+        <Entry UserId="m.lage" AccessValue="" />
+        <Entry UserId="l.harris" AccessValue="" />
+        <Entry UserId="l.hill" AccessValue="" />
+        <Entry UserId="l.salgado" AccessValue="" />
+        <Entry UserId="l_rios" AccessValue="" />
+        <Entry UserId="l_whalen" AccessValue="" />
+        <Entry UserId="l.denton" AccessValue="" />
+        <Entry UserId="l.brenton" AccessValue="" />
+        <Entry UserId="k.runge" AccessValue="" />
+        <Entry UserId="k.will" AccessValue="" />
+        <Entry UserId="k.reap" AccessValue="" />
+        <Entry UserId="k.lynn" AccessValue="" />
+        <Entry UserId="k.meyer" AccessValue="" />
+        <Entry UserId="k.hoofman" AccessValue="" />
+        <Entry UserId="m.sweet" AccessValue="" />
+        <Entry UserId="m.vergere" AccessValue="" />
+        <Entry UserId="m_blodgett" AccessValue="" />
+        <Entry UserId="m_boyd" AccessValue="" />
+        <Entry UserId="m_burns" AccessValue="" />
+        <Entry UserId="m_coffer" AccessValue="" />
+        <Entry UserId="m_horton" AccessValue="" />
+        <Entry UserId="m.guillen" AccessValue="" />
+        <Entry UserId="m.morales" AccessValue="" />
+        <Entry UserId="m.moriarty" AccessValue="" />
+        <Entry UserId="m.nicholson" AccessValue="" />
+        <Entry UserId="m.pierce" AccessValue="" />
+        <Entry UserId="n.perkins" AccessValue="" />
+        <Entry UserId="p_oglesby" AccessValue="" />
+        <Entry UserId="r.cronin" AccessValue="" />
+        <Entry UserId="r.cusack" AccessValue="" />
+        <Entry UserId="r.fannin" AccessValue="" />
+        <Entry UserId="r.henry" AccessValue="" />
+        <Entry UserId="p.mchenry" AccessValue="" />
+        <Entry UserId="p.tedford" AccessValue="" />
+        <Entry UserId="p.veunnasack" AccessValue="" />
+        <Entry UserId="p_flynn" AccessValue="" />
+        <Entry UserId="m_rimkus" AccessValue="" />
+        <Entry UserId="m_snyder" AccessValue="" />
+        <Entry UserId="m_thele" AccessValue="" />
+        <Entry UserId="t.domenic" AccessValue="" />
+        <Entry UserId="t.ashby" AccessValue="" />
+        <Entry UserId="s_watson" AccessValue="" />
+        <Entry UserId="s_wright" AccessValue="" />
+        <Entry UserId="s.walton" AccessValue="" />
+        <Entry UserId="s_mclaughlin" AccessValue="" />
+        <Entry UserId="s.simmons" AccessValue="" />
+        <Entry UserId="s.kennedy" AccessValue="" />
+        <Entry UserId="s.gorczyca" AccessValue="" />
+        <Entry UserId="s.burton" AccessValue="" />
+        <Entry UserId="r_franklin" AccessValue="" />
+        <Entry UserId="r.mcgrail" AccessValue="" />
+        <Entry UserId="r.tedford" AccessValue="" />
+        <Entry UserId="r.treat" AccessValue="" />
+        <Entry UserId="r.white" AccessValue="" />
+        <Entry UserId="r.wollenberg" AccessValue="" />
+        <Entry UserId="wstewart" AccessValue="" />
+        <Entry UserId="v.robles" AccessValue="" />
+        <Entry UserId="velocify" AccessValue="" />
+        <Entry UserId="w.hurt" AccessValue="" />
+        <Entry UserId="w.lowery" AccessValue="" />
+        <Entry UserId="t.hussey" AccessValue="" />
+        <Entry UserId="t.mennemeyer" AccessValue="" />
+        <Entry UserId="t.roth" AccessValue="" />
+        <Entry UserId="t_stapleton" AccessValue="" />
+        <Entry UserId="v.kuntorovskiy" AccessValue="" />
+        <Entry UserId="j.cavellero" AccessValue="" />
+        <Entry UserId="j.challans" AccessValue="" />
+        <Entry UserId="irendaci" AccessValue="" />
+        <Entry UserId="j.adams" AccessValue="" />
+        <Entry UserId="j.amini" AccessValue="" />
+        <Entry UserId="g_weaver" AccessValue="" />
+        <Entry UserId="g.green" AccessValue="" />
+        <Entry UserId="j.barrett" AccessValue="" />
+        <Entry UserId="j.brown" AccessValue="" />
+        <Entry UserId="j.davis" AccessValue="" />
+        <Entry UserId="h.nguyen" AccessValue="" />
+        <Entry UserId="j.hussey" AccessValue="" />
+        <Entry UserId="j.long" AccessValue="" />
+        <Entry UserId="j.mair" AccessValue="" />
+        <Entry UserId="j.martin" AccessValue="" />
+        <Entry UserId="j.vukich" AccessValue="" />
+        <Entry UserId="j.stephans" AccessValue="" />
+        <Entry UserId="j.pattillo" AccessValue="" />
+        <Entry UserId="j.reeder" AccessValue="" />
+        <Entry UserId="j.richey" AccessValue="" />
+        <Entry UserId="j.zeller" AccessValue="" />
+        <Entry UserId="j_farmer" AccessValue="" />
+        <Entry UserId="j.wells" AccessValue="" />
+        <Entry UserId="k.fisk" AccessValue="" />
+        <Entry UserId="janetsciuto" AccessValue="" />
+        <Entry UserId="j_hoisington" AccessValue="" />
+        <Entry UserId="j_juenger" AccessValue="" />
+        <Entry UserId="j_kellerman" AccessValue="" />
+        <Entry UserId="j_lesinski" AccessValue="" />
+        <Entry UserId="j_robertson" AccessValue="" />
+        <Entry UserId="j_rogers" AccessValue="" />
+        <Entry UserId="j_vatterott" AccessValue="" />
+        <Entry UserId="j_weston" AccessValue="" />
+        <Entry UserId="b.zabala" AccessValue="" />
+        <Entry UserId="b.kable" AccessValue="" />
+        <Entry UserId="b.leonard" AccessValue="" />
+        <Entry UserId="b_jones" AccessValue="" />
+        <Entry UserId="b_jordan" AccessValue="" />
+        <Entry UserId="b_mathis" AccessValue="" />
+        <Entry UserId="b_oswald" AccessValue="" />
+        <Entry UserId="b_sneed" AccessValue="" />
+        <Entry UserId="c.myers" AccessValue="" />
+        <Entry UserId="c.nichols" AccessValue="" />
+        <Entry UserId="c.powers" AccessValue="" />
+        <Entry UserId="c.proffer" AccessValue="" />
+        <Entry UserId="c.clayton" AccessValue="" />
+        <Entry UserId="b_willis" AccessValue="" />
+        <Entry UserId="b.arnall" AccessValue="" />
+        <Entry UserId="a_johnson" AccessValue="" />
+        <Entry UserId="b.compton" AccessValue="" />
+        <Entry UserId="b.hernley" AccessValue="" />
+        <Entry UserId="a.tayloe" AccessValue="" />
+        <Entry UserId="a.trimble" AccessValue="" />
+        <Entry UserId="a_amin" AccessValue="" />
+        <Entry UserId="a.lusk" AccessValue="" />
+        <Entry UserId="a.alderman" AccessValue="" />
+        <Entry UserId="a.carpino" AccessValue="" />
+        <Entry UserId="c_fitzpatrick" AccessValue="" />
+        <Entry UserId="c_fumagalli" AccessValue="" />
+        <Entry UserId="c.mccown" AccessValue="" />
+        <Entry UserId="d.bewen" AccessValue="" />
+        <Entry UserId="d.bray" AccessValue="" />
+        <Entry UserId="d.flassig" AccessValue="" />
+        <Entry UserId="d.keating" AccessValue="" />
+        <Entry UserId="d.maher" AccessValue="" />
+        <Entry UserId="d.nappier" AccessValue="" />
+        <Entry UserId="e.montano" AccessValue="" />
+        <Entry UserId="e.shumaker" AccessValue="" />
+        <Entry UserId="f.andriole" AccessValue="" />
+        <Entry UserId="f.ely" AccessValue="" />
+        <Entry UserId="e.tatum" AccessValue="" />
+        <Entry UserId="e.theno" AccessValue="" />
+        <Entry UserId="e.vanmatre" AccessValue="" />
+        <Entry UserId="d_dobinsky" AccessValue="" />
+        <Entry UserId="d_mayday" AccessValue="" />
+        <Entry UserId="d_patterson" AccessValue="" />
+        <Entry UserId="e.garcia" AccessValue="" />
+        <Entry UserId="j.harris" AccessValue="" />
+        <Entry UserId="g.demare" AccessValue="" />
+        <Entry UserId="j.doore" AccessValue="" />
+        <Entry UserId="j_obrecht" AccessValue="" />
+        <Entry UserId="j.yonaka" AccessValue="" />
+        <Entry UserId="m.mccoy" AccessValue="" />
+        <Entry UserId="kkoetzle" AccessValue="" />
+        <Entry UserId="m.ledford" AccessValue="" />
+        <Entry UserId="r_wohlert" AccessValue="" />
+        <Entry UserId="t.haynes" AccessValue="" />
+        <Entry UserId="k.goodey" AccessValue="" />
+        <Entry UserId="h.moore" AccessValue="" />
+        <Entry UserId="b.beebe" AccessValue="" />
+        <Entry UserId="r_beile" AccessValue="" />
+        <Entry UserId="m.vivian" AccessValue="" />
+        <Entry UserId="m.smith" AccessValue="" />
+        <Entry UserId="r.lumpkins" AccessValue="" />
+        <Entry UserId="j.loudon" AccessValue="" />
+        <Entry UserId="g.wiesner" AccessValue="" />
+        <Entry UserId="ddarr" AccessValue="" />
+        <Entry UserId="m.mayfield" AccessValue="" />
+        <Entry UserId="k.shoemaker" AccessValue="" />
+        <Entry UserId="d.shoemaker" AccessValue="" />
+        <Entry UserId="s.shaughnessy" AccessValue="" />
+        <Entry UserId="m.west" AccessValue="" />
+        <Entry UserId="j.gunderson" AccessValue="" />
+        <Entry UserId="salesforceint" AccessValue="" />
+        <Entry UserId="socialsurvey" AccessValue="" />
+        <Entry UserId="l.hocking" AccessValue="" />
+        <Entry UserId="l.smith" AccessValue="" />
+        <Entry UserId="j.napieracz" AccessValue="" />
+        <Entry UserId="a.blagajcevic" AccessValue="" />
+        <Entry UserId="t.treiber" AccessValue="" />
+        <Entry UserId="s.rosen" AccessValue="" />
+        <Entry UserId="j.howald" AccessValue="" />
+        <Entry UserId="a.flynn" AccessValue="" />
+        <Entry UserId="a.graf" AccessValue="" />
+        <Entry UserId="d.scerpella" AccessValue="" />
+        <Entry UserId="n.kost" AccessValue="" />
+        <Entry UserId="d.forman" AccessValue="" />
+        <Entry UserId="test-svr" AccessValue="" />
+        <Entry UserId="c.ash" AccessValue="" />
+        <Entry UserId="candor" AccessValue="" />
+        <Entry UserId="candoradmin" AccessValue="" />
+        <Entry UserId="d.collins" AccessValue="" />
+        <Entry UserId="m.dickens" AccessValue="" />
+        <Entry UserId="p.barackman" AccessValue="" />
+        <Entry UserId="admin" AccessValue="" />
+        <Entry UserId="cas" AccessValue="" />
+        <Entry UserId="clearaudit" AccessValue="" />
+        <Entry UserId="emshomestead" AccessValue="" />
+        <Entry UserId="endeavorcapital" AccessValue="" />
+        <Entry UserId="j.stgemme" AccessValue="" />
+        <Entry UserId="j_hardie" AccessValue="" />
+        <Entry UserId="jungo-api" AccessValue="" />
+        <Entry UserId="l_nolfo" AccessValue="" />
+        <Entry UserId="loanvision" AccessValue="" />
+        <Entry UserId="r.wemlinger" AccessValue="" />
+        <Entry UserId="r.may" AccessValue="" />
+        <Entry UserId="svr_account" AccessValue="" />
+        <Entry UserId="svr_teraverde" AccessValue="" />
+        <Entry UserId="test" AccessValue="" />
+        <Entry UserId="webmaster" AccessValue="" />
+        <Entry UserId="z.dooley" AccessValue="" />
+        <Entry UserId="v.nettles" AccessValue="" />
+        <Entry UserId="s_ringsdorf" AccessValue="" />
+        <Entry UserId="s_schnyder" AccessValue="" />
+        <Entry UserId="s.detz" AccessValue="" />
+        <Entry UserId="s.eckert" AccessValue="" />
+        <Entry UserId="r_detz" AccessValue="" />
+        <Entry UserId="r_perotti" AccessValue="" />
+        <Entry UserId="r.sendejas" AccessValue="" />
+        <Entry UserId="r.sheth" AccessValue="" />
+        <Entry UserId="r.stephens" AccessValue="" />
+        <Entry UserId="m.barnes" AccessValue="" />
+        <Entry UserId="k.knopf" AccessValue="" />
+        <Entry UserId="k.richardson" AccessValue="" />
+        <Entry UserId="k.wilson" AccessValue="" />
+        <Entry UserId="k_allen" AccessValue="" />
+        <Entry UserId="l.barker" AccessValue="" />
+        <Entry UserId="m.loseke" AccessValue="" />
+        <Entry UserId="m_neuf" AccessValue="" />
+        <Entry UserId="p.butler" AccessValue="" />
+        <Entry UserId="p.green" AccessValue="" />
+        <Entry UserId="j_maurer" AccessValue="" />
+        <Entry UserId="j_zakibe" AccessValue="" />
+        <Entry UserId="k.campbell" AccessValue="" />
+        <Entry UserId="j.rivera" AccessValue="" />
+        <Entry UserId="j.miller" AccessValue="" />
+        <Entry UserId="j.perea" AccessValue="" />
+        <Entry UserId="j.weissbeck" AccessValue="" />
+        <Entry UserId="j.yocom" AccessValue="" />
+        <Entry UserId="j_bender" AccessValue="" />
+        <Entry UserId="j_budde" AccessValue="" />
+        <Entry UserId="g.budde" AccessValue="" />
+        <Entry UserId="e_paniucki" AccessValue="" />
+        <Entry UserId="g.mooney" AccessValue="" />
+        <Entry UserId="gacinta" AccessValue="" />
+        <Entry UserId="h.medhane" AccessValue="" />
+        <Entry UserId="j.bundy" AccessValue="" />
+        <Entry UserId="j.delorenzo" AccessValue="" />
+        <Entry UserId="j.dimartino" AccessValue="" />
+        <Entry UserId="j.garneau" AccessValue="" />
+        <Entry UserId="j.lemley" AccessValue="" />
+        <Entry UserId="d.wyciskalla" AccessValue="" />
+        <Entry UserId="c.thomas" AccessValue="" />
+        <Entry UserId="c.vombey" AccessValue="" />
+        <Entry UserId="c.givens" AccessValue="" />
+        <Entry UserId="andros" AccessValue="" />
+        <Entry UserId="a_bergfeld" AccessValue="" />
+        <Entry UserId="a.harting" AccessValue="" />
+        <Entry UserId="a.hoffman" AccessValue="" />
+        <Entry UserId="a.walther" AccessValue="" />
+        <Entry UserId="b.hodge" AccessValue="" />
+        <Entry UserId="b_vanmeter" AccessValue="" />
+        <Entry UserId="c.bickell" AccessValue="" />
+        <Entry UserId="c.mueller" AccessValue="" />
+        <Entry UserId="g_aftayev" AccessValue="" />
+        <Entry UserId="jaysonhardie" AccessValue="" />
+        <Entry UserId="k.braun" AccessValue="" />
+        <Entry UserId="k.pieri" AccessValue="" />
+        <Entry UserId="l.chickey" AccessValue="" />
+        <Entry UserId="l.vachon" AccessValue="" />
+        <Entry UserId="m.heffron" AccessValue="" />
+        <Entry UserId="l_oneill" AccessValue="" />
+        <Entry UserId="l.goedeker" AccessValue="" />
+        <Entry UserId="p_hughes" AccessValue="" />
+        <Entry UserId="n.boyd" AccessValue="" />
+        <Entry UserId="n.dix" AccessValue="" />
+        <Entry UserId="officer" AccessValue="" />
+        <Entry UserId="r.horvath" AccessValue="" />
+        <Entry UserId="m.feldman" AccessValue="" />
+        <Entry UserId="m.rutledge" AccessValue="" />
+        <Entry UserId="r.schopper" AccessValue="" />
+        <Entry UserId="s.ingold" AccessValue="" />
+        <Entry UserId="s.lee" AccessValue="" />
+        <Entry UserId="s.mccauley" AccessValue="" />
+        <Entry UserId="s.tiemeyer" AccessValue="" />
+        <Entry UserId="t.welsch" AccessValue="" />
+        <Entry UserId="t.marquis" AccessValue="" />
+        <Entry UserId="i.sanghvi" AccessValue="" />
+        <Entry UserId="j.ham" AccessValue="" />
+        <Entry UserId="j.knight" AccessValue="" />
+        <Entry UserId="j.erb" AccessValue="" />
+        <Entry UserId="j.connors" AccessValue="" />
+        <Entry UserId="j.worobec" AccessValue="" />
+        <Entry UserId="k.cummins" AccessValue="" />
+        <Entry UserId="b_griffin" AccessValue="" />
+        <Entry UserId="a.rist" AccessValue="" />
+        <Entry UserId="b.agee" AccessValue="" />
+        <Entry UserId="c_nielsen" AccessValue="" />
+        <Entry UserId="d.barban" AccessValue="" />
+        <Entry UserId="e.stephens" AccessValue="" />
+        <Entry UserId="e.gillick" AccessValue="" />
+        <Entry UserId="f_spell" AccessValue="" />
+        <Entry UserId="g.bachkora" AccessValue="" />
+        <Entry UserId="d.suggs" AccessValue="" />
+        <Entry UserId="c_deckert" AccessValue="" />
+        <Entry UserId="b.smith" AccessValue="" />
+        <Entry UserId="j.newton" AccessValue="" />
+        <Entry UserId="j.switzer" AccessValue="" />
+        <Entry UserId="j.ayalapacheco" AccessValue="" />
+        <Entry UserId="j.caldwell" AccessValue="" />
+        <Entry UserId="s.lafontant" AccessValue="" />
+        <Entry UserId="t.luttrell" AccessValue="" />
+        <Entry UserId="t.barnes" AccessValue="" />
+        <Entry UserId="l_anderson" AccessValue="" />
+        <Entry UserId="m.barton" AccessValue="" />
+        <Entry UserId="m.lafferty" AccessValue="" />
+        <Entry UserId="m.lage" AccessValue="" />
+        <Entry UserId="l.harris" AccessValue="" />
+        <Entry UserId="l.hill" AccessValue="" />
+        <Entry UserId="l.salgado" AccessValue="" />
+        <Entry UserId="l_rios" AccessValue="" />
+        <Entry UserId="l_whalen" AccessValue="" />
+        <Entry UserId="l.denton" AccessValue="" />
+        <Entry UserId="l.brenton" AccessValue="" />
+        <Entry UserId="k.runge" AccessValue="" />
+        <Entry UserId="k.will" AccessValue="" />
+        <Entry UserId="k.reap" AccessValue="" />
+        <Entry UserId="k.lynn" AccessValue="" />
+        <Entry UserId="k.meyer" AccessValue="" />
+        <Entry UserId="k.hoofman" AccessValue="" />
+        <Entry UserId="m.sweet" AccessValue="" />
+        <Entry UserId="m.vergere" AccessValue="" />
+        <Entry UserId="m_blodgett" AccessValue="" />
+        <Entry UserId="m_boyd" AccessValue="" />
+        <Entry UserId="m_burns" AccessValue="" />
+        <Entry UserId="m_coffer" AccessValue="" />
+        <Entry UserId="m_horton" AccessValue="" />
+        <Entry UserId="m.guillen" AccessValue="" />
+        <Entry UserId="m.morales" AccessValue="" />
+        <Entry UserId="m.moriarty" AccessValue="" />
+        <Entry UserId="m.nicholson" AccessValue="" />
+        <Entry UserId="m.pierce" AccessValue="" />
+        <Entry UserId="n.perkins" AccessValue="" />
+        <Entry UserId="p_oglesby" AccessValue="" />
+        <Entry UserId="r.cronin" AccessValue="" />
+        <Entry UserId="r.cusack" AccessValue="" />
+        <Entry UserId="r.fannin" AccessValue="" />
+        <Entry UserId="r.henry" AccessValue="" />
+        <Entry UserId="p.mchenry" AccessValue="" />
+        <Entry UserId="p.tedford" AccessValue="" />
+        <Entry UserId="p.veunnasack" AccessValue="" />
+        <Entry UserId="p_flynn" AccessValue="" />
+        <Entry UserId="m_rimkus" AccessValue="" />
+        <Entry UserId="m_snyder" AccessValue="" />
+        <Entry UserId="m_thele" AccessValue="" />
+        <Entry UserId="t.domenic" AccessValue="" />
+        <Entry UserId="t.ashby" AccessValue="" />
+        <Entry UserId="s_watson" AccessValue="" />
+        <Entry UserId="s_wright" AccessValue="" />
+        <Entry UserId="s.walton" AccessValue="" />
+        <Entry UserId="s_mclaughlin" AccessValue="" />
+        <Entry UserId="s.simmons" AccessValue="" />
+        <Entry UserId="s.kennedy" AccessValue="" />
+        <Entry UserId="s.gorczyca" AccessValue="" />
+        <Entry UserId="s.burton" AccessValue="" />
+        <Entry UserId="r_franklin" AccessValue="" />
+        <Entry UserId="r.mcgrail" AccessValue="" />
+        <Entry UserId="r.tedford" AccessValue="" />
+        <Entry UserId="r.treat" AccessValue="" />
+        <Entry UserId="r.white" AccessValue="" />
+        <Entry UserId="r.wollenberg" AccessValue="" />
+        <Entry UserId="wstewart" AccessValue="" />
+        <Entry UserId="v.robles" AccessValue="" />
+        <Entry UserId="velocify" AccessValue="" />
+        <Entry UserId="w.hurt" AccessValue="" />
+        <Entry UserId="w.lowery" AccessValue="" />
+        <Entry UserId="t.hussey" AccessValue="" />
+        <Entry UserId="t.mennemeyer" AccessValue="" />
+        <Entry UserId="t.roth" AccessValue="" />
+        <Entry UserId="t_stapleton" AccessValue="" />
+        <Entry UserId="v.kuntorovskiy" AccessValue="" />
+        <Entry UserId="j.cavellero" AccessValue="" />
+        <Entry UserId="j.challans" AccessValue="" />
+        <Entry UserId="irendaci" AccessValue="" />
+        <Entry UserId="j.adams" AccessValue="" />
+        <Entry UserId="j.amini" AccessValue="" />
+        <Entry UserId="g_weaver" AccessValue="" />
+        <Entry UserId="g.green" AccessValue="" />
+        <Entry UserId="j.barrett" AccessValue="" />
+        <Entry UserId="j.brown" AccessValue="" />
+        <Entry UserId="j.davis" AccessValue="" />
+        <Entry UserId="h.nguyen" AccessValue="" />
+        <Entry UserId="j.hussey" AccessValue="" />
+        <Entry UserId="j.long" AccessValue="" />
+        <Entry UserId="j.mair" AccessValue="" />
+        <Entry UserId="j.martin" AccessValue="" />
+        <Entry UserId="j.vukich" AccessValue="" />
+        <Entry UserId="j.stephans" AccessValue="" />
+        <Entry UserId="j.pattillo" AccessValue="" />
+        <Entry UserId="j.reeder" AccessValue="" />
+        <Entry UserId="j.richey" AccessValue="" />
+        <Entry UserId="j.zeller" AccessValue="" />
+        <Entry UserId="j_farmer" AccessValue="" />
+        <Entry UserId="j.wells" AccessValue="" />
+        <Entry UserId="k.fisk" AccessValue="" />
+        <Entry UserId="janetsciuto" AccessValue="" />
+        <Entry UserId="j_hoisington" AccessValue="" />
+        <Entry UserId="j_juenger" AccessValue="" />
+        <Entry UserId="j_kellerman" AccessValue="" />
+        <Entry UserId="j_lesinski" AccessValue="" />
+        <Entry UserId="j_robertson" AccessValue="" />
+        <Entry UserId="j_rogers" AccessValue="" />
+        <Entry UserId="j_vatterott" AccessValue="" />
+        <Entry UserId="j_weston" AccessValue="" />
+        <Entry UserId="b.zabala" AccessValue="" />
+        <Entry UserId="b.kable" AccessValue="" />
+        <Entry UserId="b.leonard" AccessValue="" />
+        <Entry UserId="b_jones" AccessValue="" />
+        <Entry UserId="b_jordan" AccessValue="" />
+        <Entry UserId="b_mathis" AccessValue="" />
+        <Entry UserId="b_oswald" AccessValue="" />
+        <Entry UserId="b_sneed" AccessValue="" />
+        <Entry UserId="c.myers" AccessValue="" />
+        <Entry UserId="c.nichols" AccessValue="" />
+        <Entry UserId="c.powers" AccessValue="" />
+        <Entry UserId="c.proffer" AccessValue="" />
+        <Entry UserId="c.clayton" AccessValue="" />
+        <Entry UserId="b_willis" AccessValue="" />
+        <Entry UserId="b.arnall" AccessValue="" />
+        <Entry UserId="a_johnson" AccessValue="" />
+        <Entry UserId="b.compton" AccessValue="" />
+        <Entry UserId="b.hernley" AccessValue="" />
+        <Entry UserId="a.tayloe" AccessValue="" />
+        <Entry UserId="a.trimble" AccessValue="" />
+        <Entry UserId="a_amin" AccessValue="" />
+        <Entry UserId="a.lusk" AccessValue="" />
+        <Entry UserId="a.alderman" AccessValue="" />
+        <Entry UserId="a.carpino" AccessValue="" />
+        <Entry UserId="c_fitzpatrick" AccessValue="" />
+        <Entry UserId="c_fumagalli" AccessValue="" />
+        <Entry UserId="c.mccown" AccessValue="" />
+        <Entry UserId="d.bewen" AccessValue="" />
+        <Entry UserId="d.bray" AccessValue="" />
+        <Entry UserId="d.flassig" AccessValue="" />
+        <Entry UserId="d.keating" AccessValue="" />
+        <Entry UserId="d.maher" AccessValue="" />
+        <Entry UserId="d.nappier" AccessValue="" />
+        <Entry UserId="e.montano" AccessValue="" />
+        <Entry UserId="e.shumaker" AccessValue="" />
+        <Entry UserId="f.andriole" AccessValue="" />
+        <Entry UserId="f.ely" AccessValue="" />
+        <Entry UserId="e.tatum" AccessValue="" />
+        <Entry UserId="e.theno" AccessValue="" />
+        <Entry UserId="e.vanmatre" AccessValue="" />
+        <Entry UserId="d_dobinsky" AccessValue="" />
+        <Entry UserId="d_mayday" AccessValue="" />
+        <Entry UserId="d_patterson" AccessValue="" />
+        <Entry UserId="e.garcia" AccessValue="" />
+        <Entry UserId="j.harris" AccessValue="" />
+        <Entry UserId="g.demare" AccessValue="" />
+        <Entry UserId="j.doore" AccessValue="" />
+        <Entry UserId="j_obrecht" AccessValue="" />
+        <Entry UserId="j.yonaka" AccessValue="" />
+        <Entry UserId="m.mccoy" AccessValue="" />
+        <Entry UserId="kkoetzle" AccessValue="" />
+        <Entry UserId="m.ledford" AccessValue="" />
+        <Entry UserId="r_wohlert" AccessValue="" />
+        <Entry UserId="t.haynes" AccessValue="" />
+        <Entry UserId="k.goodey" AccessValue="" />
+        <Entry UserId="h.moore" AccessValue="" />
+        <Entry UserId="b.beebe" AccessValue="" />
+        <Entry UserId="r_beile" AccessValue="" />
+        <Entry UserId="m.vivian" AccessValue="" />
+        <Entry UserId="m.smith" AccessValue="" />
+        <Entry UserId="r.lumpkins" AccessValue="" />
+        <Entry UserId="j.loudon" AccessValue="" />
+        <Entry UserId="g.wiesner" AccessValue="" />
+        <Entry UserId="ddarr" AccessValue="" />
+        <Entry UserId="m.mayfield" AccessValue="" />
+        <Entry UserId="k.shoemaker" AccessValue="" />
+        <Entry UserId="d.shoemaker" AccessValue="" />
+        <Entry UserId="s.shaughnessy" AccessValue="" />
+        <Entry UserId="m.west" AccessValue="" />
+        <Entry UserId="j.gunderson" AccessValue="" />
+        <Entry UserId="salesforceint" AccessValue="" />
+        <Entry UserId="socialsurvey" AccessValue="" />
+        <Entry UserId="l.hocking" AccessValue="" />
+        <Entry UserId="l.smith" AccessValue="" />
+        <Entry UserId="j.napieracz" AccessValue="" />
+        <Entry UserId="a.blagajcevic" AccessValue="" />
+        <Entry UserId="t.treiber" AccessValue="" />
+        <Entry UserId="s.rosen" AccessValue="" />
+        <Entry UserId="j.howald" AccessValue="" />
+        <Entry UserId="a.flynn" AccessValue="" />
+        <Entry UserId="a.graf" AccessValue="" />
+        <Entry UserId="d.scerpella" AccessValue="" />
+        <Entry UserId="n.kost" AccessValue="" />
+        <Entry UserId="d.forman" AccessValue="" />
+        <Entry UserId="test-svr" AccessValue="" />
+        <Entry UserId="c.ash" AccessValue="" />
+        <Entry UserId="candor" AccessValue="" />
+        <Entry UserId="candoradmin" AccessValue="" />
+        <Entry UserId="d.collins" AccessValue="" />
+        <Entry UserId="m.dickens" AccessValue="" />
+        <Entry UserId="p.barackman" AccessValue="" />
+      </LevelOne>
+      <LevelTwo AccessField="" />
+      <LevelThree AccessField="" />
+    </SectionAccess>
+    <FieldRanges>
+      <Range Name="DTI" Max="" Min="" />
+      <Range Name="LTV" Max="" Min="" />
+      <Range Name="FICO" Max="" Min="" />
+    </FieldRanges>
+    <Revenue>
+      <CoheusConfigRevenue Name="Default" Formula="" />
+      <CoheusConfigRevenue Name="Revenue_Executive" Formula="" />
+      <CoheusConfigRevenue Name="Revenue_Contribution" Formula="" />
+      <CoheusConfigRevenue Name="Revenue_Sales" Formula="" />
+      <CoheusConfigRevenue Name="Revenue_Operations" Formula="" />
+    </Revenue>
+    <OtherCalcs>
+      <Calculation Name="" Formula="" />
+      <Calculation Name="" Formula="" />
+      <Calculation Name="" Formula="" />
+    </OtherCalcs>
+    <CdssVivaNotifications>
+      <Email Name="Bob Perotti" EmailAddress="bob@hfmloans.com" Role="Executive, Accounting/Profit" />
+      <Email Name="" EmailAddress="" Role="" />
+      <Email Name="" EmailAddress="" Role="" />
+      <Email Name="" EmailAddress="" Role="" />
+      <Email Name="" EmailAddress="" Role="" />
+      <Email Name="" EmailAddress="" Role="LV_Admin" />
+    </CdssVivaNotifications>
+    <OperationalScorecards>
+      <TriggerDateField Name="Sent to Processing" DefaultFieldId="Log.MS.Date.Sent to Processing" SelectedFieldId="" ExpirationDate="" IsDate="false" />
+      <TriggerDateField Name="Sent to Underwriting" DefaultFieldId="Log.MS.Date.Approval" SelectedFieldId="" ExpirationDate="" IsDate="false" />
+      <TriggerDateField Name="Sent to Closing" DefaultFieldId="748" SelectedFieldId="" ExpirationDate="" IsDate="false" />
+      <TriggerDateField Name="End Date to indicate Loan Closed/Funded" DefaultFieldId="1997" SelectedFieldId="" ExpirationDate="" IsDate="false" />
+    </OperationalScorecards>
+    <SourceSelections />
+    <LoanQueryFilter IncludeArchivedloans="true" Filter="{&quot;operator&quot;:&quot;and&quot;,&quot;terms&quot;:[{&quot;canonicalName&quot;:&quot;Fields.14&quot;,&quot;value&quot;:&quot;MO&quot;,&quot;matchType&quot;:&quot;contains&quot;}]}" />
+    <PricingDashboard>
+    </PricingDashboard>
+  </CoheusConfig>
+  <ProfitabilityConfig>
+    <AdHoc />
+    <FieldSwap>
+      <Field Alias="Orig Fees Seller" DefaultFieldId="559" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Net Buy Rate" DefaultFieldId="2160" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Base Price Rate" DefaultFieldId="2161" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Net Buy" DefaultFieldId="2203" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Net Sell" DefaultFieldId="2274" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="SRP from investor" DefaultFieldId="2276" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Discount / Yield Spread Premium" DefaultFieldId="2277" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 1" DefaultFieldId="2373" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 2" DefaultFieldId="2375" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 3" DefaultFieldId="2377" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 4" DefaultFieldId="2379" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 5" DefaultFieldId="2381" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 6" DefaultFieldId="2383" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 7" DefaultFieldId="2385" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 8" DefaultFieldId="2387" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 9" DefaultFieldId="2389" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 10" DefaultFieldId="2391" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 11" DefaultFieldId="2393" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Payout 12" DefaultFieldId="2395" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Hedged Loan" DefaultFieldId="2401" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Corporate Price Concession" DefaultFieldId="3371" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Branch Price Concession" DefaultFieldId="3375" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 1 Desc" DefaultFieldId="3380" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 1 Rate" DefaultFieldId="3381" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 2 Desc" DefaultFieldId="3382" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 2 Rate" DefaultFieldId="3383" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 3 Desc" DefaultFieldId="3384" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 3 Rate" DefaultFieldId="3385" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 4 Desc" DefaultFieldId="3386" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 4 Rate" DefaultFieldId="3387" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 5 Desc" DefaultFieldId="3388" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 5 Rate" DefaultFieldId="3389" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 6 Desc" DefaultFieldId="3390" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 6 Rate" DefaultFieldId="3391" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 7 Desc" DefaultFieldId="3392" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 7 Rate" DefaultFieldId="3393" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 8 Desc" DefaultFieldId="3394" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Profit Margin Adjustment 8 Rate" DefaultFieldId="3395" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Rate Lock Buy Side Adjusted Buy Price" DefaultFieldId="3420" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA Sell Amt" DefaultFieldId="3424" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="PA SRP Amt" DefaultFieldId="3428" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Service Fee" DefaultFieldId="3888" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Guaranty Fee" DefaultFieldId="3889" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="MSR Value" DefaultFieldId="4118" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="CD Applied Cure" DefaultFieldId="CD2.X2" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="CD Lender Credits" DefaultFieldId="CD2.XSTLC" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Origination Points" DefaultFieldId="NEWHUD.X1151" NewFieldId="" ExpirationDate="" IsDate="false" />
+      <Field Alias="Orig Fee Borr Pd" DefaultFieldId="NEWHUD.X686" NewFieldId="" ExpirationDate="" IsDate="false" />
+    </FieldSwap>
+    <Revenue>
+      <ProfitabilityConfigRevenue Name="Default" Formula="" />
+      <ProfitabilityConfigRevenue Name="Revenue_Executive" Formula="" />
+      <ProfitabilityConfigRevenue Name="Revenue_Contribution" Formula="" />
+      <ProfitabilityConfigRevenue Name="Revenue_Sales" Formula="" />
+      <ProfitabilityConfigRevenue Name="Revenue_Operations" Formula="" />
+    </Revenue>
+    <OtherCalcs>
+      <Calculation Name="" Formula="" />
+      <Calculation Name="" Formula="" />
+      <Calculation Name="" Formula="" />
+    </OtherCalcs>
+  </ProfitabilityConfig>
+  <DataDictionary>
+    <Field Id="Fields.2" Alias="Loan Amount" />
+    <Field Id="Fields.3" Alias="Interest Rate" />
+    <Field Id="Fields.4" Alias="Loan Term" />
+    <Field Id="Fields.11" Alias="Property Street" />
+    <Field Id="Fields.12" Alias="Property City" />
+    <Field Id="Fields.13" Alias="Property County" />
+    <Field Id="Fields.14" Alias="Property State" />
+    <Field Id="Fields.15" Alias="Property Zip" />
+    <Field Id="Fields.16" Alias="Number of Units" />
+    <Field Id="Fields.19" Alias="Loan Purpose" />
+    <Field Id="Fields.136" Alias="Sales Price" />
+    <Field Id="Fields.315" Alias="Broker Lender Name" />
+    <Field Id="Fields.353" Alias="LTV Ratio" />
+    <Field Id="Fields.356" Alias="Appraised Value" />
+    <Field Id="Fields.364" Alias="Loan Number" />
+    <Field Id="Fields.420" Alias="Lien Position" />
+    <Field Id="Fields.432" Alias="Lock Days" />
+    <Field Id="Fields.559" Alias="Orig Fees Seller" />
+    <Field Id="Fields.608" Alias="Product Type" />
+    <Field Id="Fields.736" Alias="Income Total Mo Income" />
+    <Field Id="Fields.742" Alias="BE DTI Ratio" />
+    <Field Id="Fields.749" Alias="Current Status Date" />
+    <Field Id="Fields.761" Alias="Lock Date" />
+    <Field Id="Fields.762" Alias="Lock Expiration Date" />
+    <Field Id="Fields.915" Alias="Assets Subtotal Liquid Assets" />
+    <Field Id="Fields.976" Alias="CLTV" />
+    <Field Id="Fields.1051" Alias="Mers Min" />
+    <Field Id="Fields.1066" Alias="Property Rights" />
+    <Field Id="Fields.1172" Alias="Loan Type" />
+    <Field Id="Fields.1393" Alias="Current Loan Status" />
+    <Field Id="Fields.1396" Alias="County FIPS Code" />
+    <Field Id="Fields.1401" Alias="Loan Program" />
+    <Field Id="Fields.1543" Alias="Underwriter Risk Assess Type" />
+    <Field Id="Fields.1544" Alias="Underwriter Risk Assess AUS Recomm" />
+    <Field Id="Fields.1553" Alias="Property Type" />
+    <Field Id="Fields.1556" Alias="Underwriting Description" />
+    <Field Id="Fields.1811" Alias="Occupancy Type" />
+    <Field Id="Fields.1992" Alias="Funds Sent Date" />
+    <Field Id="Fields.2031" Alias="Investor Status" />
+    <Field Id="Fields.2160" Alias="Rate Lock Buy Side Net Buy Rate" />
+    <Field Id="Fields.2161" Alias="Rate Lock Buy Side Base Price Rate" />
+    <Field Id="Fields.2203" Alias="Net Buy" />
+    <Field Id="Fields.2220" Alias="Investor Lock Date" />
+    <Field Id="Fields.2274" Alias="Net Sell" />
+    <Field Id="Fields.2276" Alias="SRP from investor" />
+    <Field Id="Fields.2277" Alias="Discount / Yield Spread Premium" />
+    <Field Id="Fields.2303" Alias="UW Suspended Date" />
+    <Field Id="Fields.2312" Alias="Underwriting AUS Source" />
+    <Field Id="Fields.2313" Alias="AU Decision Date" />
+    <Field Id="Fields.2316" Alias="Underwriting AUS Number" />
+    <Field Id="Fields.2352" Alias="Appraisal Ordered Date" />
+    <Field Id="Fields.2353" Alias="Appraisal Completed Date" />
+    <Field Id="Fields.2373" Alias="PA Payout 1" />
+    <Field Id="Fields.2375" Alias="PA Payout 2" />
+    <Field Id="Fields.2377" Alias="PA Payout 3" />
+    <Field Id="Fields.2379" Alias="PA Payout 4" />
+    <Field Id="Fields.2381" Alias="PA Payout 5" />
+    <Field Id="Fields.2383" Alias="PA Payout 6" />
+    <Field Id="Fields.2385" Alias="PA Payout 7" />
+    <Field Id="Fields.2387" Alias="PA Payout 8" />
+    <Field Id="Fields.2389" Alias="PA Payout 9" />
+    <Field Id="Fields.2391" Alias="PA Payout 10" />
+    <Field Id="Fields.2393" Alias="PA Payout 11" />
+    <Field Id="Fields.2395" Alias="PA Payout 12" />
+    <Field Id="Fields.2401" Alias="Hedged Loan" />
+    <Field Id="Fields.2626" Alias="Channel" />
+    <Field Id="Fields.2987" Alias="UW Denied Date" />
+    <Field Id="Fields.3142" Alias="Application Date" />
+    <Field Id="Fields.3152" Alias="Loan Estimate Sent Date" />
+    <Field Id="Fields.3153" Alias="Loan Estimate Received Date" />
+    <Field Id="Fields.3237" Alias="Company NMLS ID" />
+    <Field Id="Fields.3238" Alias="NMLS ID" />
+    <Field Id="Fields.3371" Alias="Corporate Price Concession" />
+    <Field Id="Fields.3375" Alias="Branch Price Concession" />
+    <Field Id="Fields.3380" Alias="Rate Lock Buy Side Profit Margin Adjustment 1 Desc" />
+    <Field Id="Fields.3381" Alias="Rate Lock Buy Side Profit Margin Adjustment 1 Rate" />
+    <Field Id="Fields.3382" Alias="Rate Lock Buy Side Profit Margin Adjustment 2 Desc" />
+    <Field Id="Fields.3383" Alias="Rate Lock Buy Side Profit Margin Adjustment 2 Rate" />
+    <Field Id="Fields.3384" Alias="Rate Lock Buy Side Profit Margin Adjustment 3 Desc" />
+    <Field Id="Fields.3385" Alias="Rate Lock Buy Side Profit Margin Adjustment 3 Rate" />
+    <Field Id="Fields.3386" Alias="Rate Lock Buy Side Profit Margin Adjustment 4 Desc" />
+    <Field Id="Fields.3387" Alias="Rate Lock Buy Side Profit Margin Adjustment 4 Rate" />
+    <Field Id="Fields.3388" Alias="Rate Lock Buy Side Profit Margin Adjustment 5 Desc" />
+    <Field Id="Fields.3389" Alias="Rate Lock Buy Side Profit Margin Adjustment 5 Rate" />
+    <Field Id="Fields.3390" Alias="Rate Lock Buy Side Profit Margin Adjustment 6 Desc" />
+    <Field Id="Fields.3391" Alias="Rate Lock Buy Side Profit Margin Adjustment 6 Rate" />
+    <Field Id="Fields.3392" Alias="Rate Lock Buy Side Profit Margin Adjustment 7 Desc" />
+    <Field Id="Fields.3393" Alias="Rate Lock Buy Side Profit Margin Adjustment 7 Rate" />
+    <Field Id="Fields.3394" Alias="Rate Lock Buy Side Profit Margin Adjustment 8 Desc" />
+    <Field Id="Fields.3395" Alias="Rate Lock Buy Side Profit Margin Adjustment 8 Rate" />
+    <Field Id="Fields.3420" Alias="Rate Lock Buy Side Adjusted Buy Price" />
+    <Field Id="Fields.3424" Alias="PA Sell Amt" />
+    <Field Id="Fields.3428" Alias="PA SRP Amt" />
+    <Field Id="Fields.3888" Alias="Service Fee" />
+    <Field Id="Fields.3889" Alias="Guaranty Fee" />
+    <Field Id="Fields.3977" Alias="Closing Disclosure Sent Date" />
+    <Field Id="Fields.3978" Alias="Closing Disclosure Received Date" />
+    <Field Id="Fields.4118" Alias="MSR Value" />
+    <Field Id="Fields.CD2.X2" Alias="CD Applied Cure" />
+    <Field Id="Fields.CD2.XSTLC" Alias="CD Lender Credits" />
+    <Field Id="Fields.Document.DateReceived.Appraisal" Alias="Appraisal Received Date" />
+    <Field Id="Fields.DU.LP.ID" Alias="DU/LP Case ID" />
+    <Field Id="Fields.FE0102" Alias="BORR EMPLOYER" />
+    <Field Id="Fields.FE0110" Alias="Borr Position" />
+    <Field Id="Fields.FE0110#2" Alias="Borr Position - 2nd" />
+    <Field Id="Fields.FE0113" Alias="Borr Yrs on Job" />
+    <Field Id="Fields.FE0113#2" Alias="Borr Yrs on Job - 2nd" />
+    <Field Id="Fields.FE0115" Alias="Borr Self Employed" />
+    <Field Id="Fields.FE0115#2" Alias="Borr Self Employed - 2nd" />
+    <Field Id="Fields.FE0202" Alias="Co-Borr Employer" />
+    <Field Id="Fields.FE0210" Alias="Co-Borr Position" />
+    <Field Id="Fields.FE0213" Alias="Co-Borr Yrs on Job" />
+    <Field Id="Fields.FE0215" Alias="Co-Borr Self Employed" />
+    <Field Id="Fields.GUID" Alias="GUID" />
+    <Field Id="Fields.HMDA.X109" Alias="Interest Only Indicator" />
+    <Field Id="Fields.HMDA.X58" Alias="Business or Commercial Purpose" />
+    <Field Id="Loan.LoanFolder" Alias="Loan Folder" />
+    <Field Id="Loan.LoanLastModified" Alias="Last Modified Date" />
+    <Field Id="Fields.Log.MS.CurrentMilestone" Alias="Current Milestone" />
+    <Field Id="Fields.MORNET.X67" Alias="Document Type" />
+    <Field Id="Fields.MORNET.X92" Alias="CU Risk Score" />
+    <Field Id="Fields.NEWHUD.X1151" Alias="Origination Points" />
+    <Field Id="Fields.NEWHUD.X686" Alias="Orig Fee Borr Pd" />
+    <Field Id="Fields.ORGID" Alias="ORGID" />
+    <Field Id="Fields.ULDD.FNM.AutoUWDec" Alias="Fannie AU Decision" />
+    <Field Id="Fields.ULDD.FNM.PropertyFormType" Alias="Fannie Property Valuation Form Type" />
+    <Field Id="Fields.ULDD.FRE.AutoUWDec" Alias="Freddie AU Decision" />
+    <Field Id="Fields.ULDD.FRE.AVMModelNameExpl" Alias="Freddie AVM Model Name Type Other Description" />
+    <Field Id="Fields.ULDD.FRE.PropertyFormType" Alias="Freddie Property Valuation Form Type" />
+    <Field Id="Fields.ULDD.TotalMortgagedPropertiesCount" Alias="Total Mortgaged Properties Count" />
+    <Field Id="Fields.ULDD.X101" Alias="Freddie Loan Level Credit Score Value" />
+    <Field Id="Fields.ULDD.X102" Alias="Freddie Loan Level Credit Score Method" />
+    <Field Id="Fields.ULDD.X149" Alias="Freddie Underwriting Type Other" />
+    <Field Id="Fields.ULDD.X150" Alias="Borrower Type" />
+    <Field Id="Fields.ULDD.X151" Alias="CoBorrower Type" />
+    <Field Id="Fields.ULDD.X154" Alias="CoBorrower Mailing Address is same as the Property Address" />
+    <Field Id="Fields.ULDD.X18" Alias="Frefinance Cash Out Type" />
+    <Field Id="Fields.ULDD.X26" Alias="Borrower Mailing Address is same as the Property Address" />
+    <Field Id="Fields.ULDD.X29" Alias="Property Valuation Method Type" />
+    <Field Id="Fields.ULDD.X30" Alias="Property Valuation Effective Date" />
+    <Field Id="Fields.VASUMM.X23" Alias="FICO Score" />
+    <Field Id="Fields.VEND.X200" Alias="Warehouse Co Name" />
+    <Field Id="Fields.VEND.X263" Alias="Investor" />
+    <Field Id="Fields.2024" Alias="Loan Source" />
+    <Field Id="Fields.1395" Alias="State FIPS Code" />
+    <Field Id="Fields.2149" Alias="Buy Side Lock Date" />
+    <Field Id="Fields.2150" Alias="Buy Side Lock # Days" />
+    <Field Id="Fields.2151" Alias="Buy Side Lock Expiration" />
+    <Field Id="Fields.2221" Alias="Sell Side Lock # Days" />
+    <Field Id="Fields.2222" Alias="Sell Side Lock Expiration" />
+    <Field Id="Fields.3154" Alias="Revised LE Sent Date" />
+    <Field Id="Fields.3155" Alias="Revised LE Received Date" />
+    <Field Id="Fields.3979" Alias="Revised CD Sent Date" />
+    <Field Id="Fields.3980" Alias="Revised CD Received Date" />
+    <Field Id="Fields.697" Alias="First Rate Adjustment Cap" />
+    <Field Id="Fields.3054" Alias="First Rate Adjustment Date" />
+    <Field Id="Fields.1699" Alias="Floor Rate" />
+    <Field Id="Fields.247" Alias="Life Cap" />
+    <Field Id="Fields.689" Alias="Margin" />
+    <Field Id="Fields.995" Alias="ARM Program" />
+    <Field Id="Fields.688" Alias="Margin Index" />
+    <Field Id="Fields.1700" Alias="Rounding" />
+    <Field Id="Fields.ARM.IdxLkbckPrd" Alias="Lookback" />
+    <Field Id="Fields.696" Alias="1st Change Months" />
+    <Field Id="Fields.695" Alias="Maximum Rate Adjustment Cap" />
+    <Field Id="Fields.694" Alias="Adjustment Period Months" />
+    <Field Id="Fields.1959" Alias="Description of the ARM index type" />
+    <Field Id="Fields.CD4.X23" Alias="Interest Only Payments" />
+    <Field Id="Fields.1177" Alias="Number of Months Interest Only Payments" />
+    <Field Id="Fields.1659" Alias="Balloon Payments" />
+    <Field Id="Fields.5" Alias="P&amp;I Payment" />
+    <Field Id="Fields.78" Alias="Maturity Date" />
+    <Field Id="Fields.992" Alias="Note Date" />
+    <Field Id="Fields.8" Alias="PMI Flag" />
+    <Field Id="Fields.L248" Alias="Mortgage Insurance Company Name" />
+    <Field Id="Fields.3336" Alias="Private Mortgage Insurance Indicator" />
+    <Field Id="Fields.1199" Alias="MI % Coverage 1" />
+    <Field Id="Fields.1198" Alias="MI Coverage 1 Months" />
+    <Field Id="Fields.1201" Alias="Mi % Coverage 2" />
+    <Field Id="Fields.1200" Alias="MI Coverage 2 Months" />
+    <Field Id="Fields.1547" Alias="Combined Assets All Borrowers" />
+    <Field Id="Fields.1548" Alias="Number of Months Reserves" />
+    <Field Id="Fields.912" Alias="PITI Payment" />
+    <Field Id="Fields.1205" Alias="MI Cancel %" />
+    <Field Id="Fields.1540" Alias="HCLTV" />
+    <Field Id="Fields.1888" Alias="HELOC Intial Draw" />
+    <Field Id="Fields.1889" Alias="HELOC Draw Period" />
+    <Field Id="Fields.1890" Alias="HELOC Repayment Period" />
+    <Field Id="Fields.LoanTeamMember.UserID.Loan Officer" Alias="Loan Officer ID" />
+    <Field Id="Fields.LOID" Alias="Legacy Loan Officer ID" />
+    <Field Id="Fields.1612" Alias="Loan Interviewer" />
+    <Field Id="Fields.UWC.ALLCOUNT" Alias="Number Of Conditions" />
+    <Field Id="Fields.LoanTeamMember.UserID.Loan Processor" Alias="Loan Processor ID" />
+    <Field Id="Fields.LoanTeamMember.UserID.Underwriter" Alias="Underwriter ID" />
+    <Field Id="Fields.LoanTeamMember.UserID.Closer" Alias="Closer ID" />
+    <Field Id="Fields.QM.X103" Alias="Exempt from Reg. Z" />
+    <Field Id="Fields.QM.X23" Alias="ATR Loan Type" />
+    <Field Id="Fields.QM.X24" Alias="QM Loan Type" />
+    <Field Id="Fields.QM.X25" Alias="Safe Harbor" />
+    <Field Id="Fields.QM.X62" Alias="Meets Agency/GSE QM" />
+    <Field Id="Fields.641" Alias="Fee Details - Line 804 - Borrower Amount - Appraisal Fee" />
+    <Field Id="Fields.581" Alias="Fee Details - Line 804 - Seller Amount - Appraisal Fee" />
+    <Field Id="Fields.640" Alias="Fee Details - Line 805 - Borrower Amount - Credit Report" />
+    <Field Id="Fields.580" Alias="Fee Details - Line 805 - Seller Amount - Credit Report" />
+    <Field Id="Fields.NEWHUD.X400" Alias="Fee Details - Line 807 - Borrower Amount - Flood Cert" />
+    <Field Id="Fields.NEWHUD.X781" Alias="Fee Details - Line 807 - Seller Amount - Flood Cert" />
+    <Field Id="Fields.NEWHUD2.X1101" Alias="Fee Details - Line 804 - Borrower POC Amount - Appraisal" />
+    <Field Id="Fields.NEWHUD2.X1104" Alias="Fee Details - Line 804 - Seller POC Amount - Appraisal" />
+    <Field Id="Fields.NEWHUD2.X1107" Alias="Fee Details - Line 804 - Broker POC Amount - Appraisal" />
+    <Field Id="Fields.NEWHUD2.X1110" Alias="Fee Details - Line 804 - Lender POC Amount - Appraisal" />
+    <Field Id="Fields.NEWHUD2.X1113" Alias="Fee Details - Line 804 - Other POC Amount - Appraisal" />
+    <Field Id="Fields.NEWHUD2.X1134" Alias="Fee Details - Line 805 - Borrower POC Amount - Cred Report" />
+    <Field Id="Fields.NEWHUD2.X1137" Alias="Fee Details - Line 805 - Seller POC Amount - Cred Report" />
+    <Field Id="Fields.NEWHUD2.X1140" Alias="Fee Details - Line 805 - Broker POC Amount - Cred Report" />
+    <Field Id="Fields.NEWHUD2.X1143" Alias="Fee Details - Line 805 - Lender POC Amount - Cred Report" />
+    <Field Id="Fields.NEWHUD2.X1146" Alias="Fee Details - Line 805 - Other POC Amount - Cred Report" />
+    <Field Id="Fields.NEWHUD2.X1200" Alias="Fee Details - Line 807 - Borrower POC Amount - Flood Cert" />
+    <Field Id="Fields.NEWHUD2.X1203" Alias="Fee Details - Line 807 - Seller POC Amount - Flood Cert" />
+    <Field Id="Fields.NEWHUD2.X1206" Alias="Fee Details - Line 807 - Broker POC Amount - Flood Cert" />
+    <Field Id="Fields.NEWHUD2.X1209" Alias="Fee Details - Line 807 - Lender POC Amount - Flood Cert" />
+    <Field Id="Fields.NEWHUD2.X1212" Alias="Fee Details - Line 807 - Other POC Amount - Flood Cert" />
+    <Field Id="Fields.682" Alias="Loan First Payment Date" />
+    <Field Id="Fields.NEWHUD2.X1100" Alias="Fee Details - Line 804 Appraisal Fee PAC" />
+    <Field Id="Fields.NEWHUD2.X1133" Alias="Fee Details - Line 805 Credit Report Fee PAC" />
+    <Field Id="Fields.NEWHUD2.X1199" Alias="Fee Details - Line 807 Flood Certification Fee PAC" />
+    <Field Id="Fields.2365" Alias="Flood Certification Date" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X6" Alias="Mavent - GSE Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X7" Alias="Mavent - High-Cost result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X5" Alias="Mavent - Enterprise Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X18" Alias="Mavent - ATR-QM Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X14" Alias="Mavent - TILA Tolerance Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X17" Alias="Mavent - NMLS Licensing Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X12" Alias="Mavent - State Rules Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X8" Alias="Mavent - HMDA Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X16" Alias="Mavent - HPML Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X9" Alias="Mavent - License Reviewer Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X11" Alias="Mavent - Other Result" />
+    <Field Id="Fields.COMPLIANCEREVIEW.X1" Alias="Mavent - Overall Result" />
+    <Field Id="Fields.1109" Alias="Base Loan Amount" />
+    <Field Id="Fields.1041" Alias="Subject Property Type Fannie Mae" />
+    <Field Id="Fields.1050" Alias="Fees VA Fund Fee Borr" />
+    <Field Id="Fields.1051" Alias="Mers Min #" />
+    <Field Id="Fields.1059" Alias="FHA Lender ID" />
+    <Field Id="Fields.1061" Alias="Fees Loan Discount Fee %" />
+    <Field Id="Fields.1093" Alias="Fees Loan Discount Fee Borr" />
+    <Field Id="Fields.11" Alias="Subject Property Street" />
+    <Field Id="Fields.1109" Alias="Loan Amt" />
+    <Field Id="Fields.1177" Alias="Interest Only Mos" />
+    <Field Id="Fields.1191" Alias="Borr Info Points Paid" />
+    <Field Id="Fields.1389" Alias="Income Total Mo Income (Borr/Co-Borr)" />
+    <Field Id="Fields.1396" Alias="Subject Property County Code" />
+    <Field Id="Fields.CUST19FV" Alias="Rush Closing on File." />
+    <Field Id="Fields.CUST24FV" Alias="Scrub Rating of File" />
+    <Field Id="Fields.CX.TOUCHES.ALL.USERHOURS" Alias="User Touches - All User-Hours - One User Per Line" />
+    <Field Id="Fields.CX.CX.QUAL.DEFECT.COUNT" Alias="Total Count of All Defects" />
+    <Field Id="Fields.CX.HOURS.TC" Alias="Time in File - TC" />
+    <Field Id="Fields.CX.HOURS.UW" Alias="Time in File - UW" />
+    <Field Id="Fields.317" Alias="Loan Officer" />
+    <Field Id="Fields.748" Alias="Closing Date" />
+    <Field Id="Fields.763" Alias="Estimated Closing Date" />
+    <Field Id="Fields.MS.FUN" Alias="Funding Date" />
+    <Field Id="Fields.2014" Alias="Shipped Date" />
+    <Field Id="Fields.2300" Alias="Conditional Approval Date" />
+    <Field Id="Fields.2301" Alias="UW Final Approval Date" />
+    <Field Id="Fields.2305" Alias="CTC Date" />
+    <Field Id="Fields.2370" Alias="Investor Purchase Date" />
+    <Field Id="Fields.Document.DateReceived.CREDIT REPORT" Alias="Credit Pull Date" />
+    <Field Id="Fields.LoanTeamMember.Name.Account Executive" Alias="Account Executive" />
+    <Field Id="Fields.LoanTeamMember.Name.Closer" Alias="Closer" />
+    <Field Id="Fields.LoanTeamMember.Name.Loan Processor" Alias="Processor" />
+    <Field Id="Fields.LoanTeamMember.Name.Underwriter" Alias="Underwriter" />
+    <Field Id="Fields.Log.MS.Date.Send To Processing" Alias="Submitted To Processing Date" />
+    <Field Id="Fields.Log.MS.Date.Started" Alias="Started Date" />
+    <Field Id="Fields.Log.MS.Date.Submittal" Alias="Submitted To Underwriting Date" />
+    <Field Id="Fields.ORGID" Alias="Branch" />
+    <Field Id="Fields.1822" Alias="Referral Name" />
+    <Field Id="Fields.CX.Count.UWSub" Alias="UW Touches" />
+    <Field Id="Fields.3142" Alias="GFE Application Date" />
+    <Field Id="Fields.3143" Alias="Initial Disclosure Due Date" />
+    <Field Id="Fields.3148" Alias="GFE Initial GFE Disclosure Provided Date" />
+    <Field Id="Fields.3152" Alias="TIL Intl Disclosure Provided Date" />
+    <Field Id="Fields.3253" Alias="Last Rate Set Date" />
+    <Field Id="Fields.3257" Alias="Rate Lock Sell Side Last Rate Set Date" />
+    <Field Id="Fields.3261" Alias="Closing Docs 1003 Signature Date" />
+    <Field Id="Fields.3312" Alias="Repurchase Date" />
+    <Field Id="Fields.3337" Alias="Date Sold to Third Party" />
+    <Field Id="Fields.3341" Alias="Date Warehoused" />
+    <Field Id="Fields.3544" Alias="GFE Initial GFE Disclosure Affiliated Business Disclosure Provided Date" />
+    <Field Id="Fields.3545" Alias="GFE Initial GFE Disclosure CHARM Booklet Provided Date" />
+    <Field Id="Fields.3546" Alias="GFE Initial GFE Disclosure HUD Special Booklet Provided Date" />
+    <Field Id="Fields.3547" Alias="GFE Initial GFE Disclosure HELOC Brochure Provided Date" />
+    <Field Id="Fields.Log.MS.Date.Started" Alias="Started" />
+    <Field Id="Fields.Log.MS.Date.PreApproval" Alias="PreApproval" />
+    <Field Id="Fields.Log.MS.Date.Disclosure Prep" Alias="Disclosure Prep" />
+    <Field Id="Fields.Log.MS.Date.Signed" Alias="Signed" />
+    <Field Id="Fields.Log.MS.Date.Scrubbed" Alias="Scrubbed" />
+    <Field Id="Fields.Log.MS.Date.Processing" Alias="Processing" />
+    <Field Id="Fields.Log.MS.Date.Submittal" Alias="Submittal" />
+    <Field Id="Fields.Log.MS.Date.Cond. Approval" Alias="Cond. Approval" />
+    <Field Id="Fields.Log.MS.Date.Resubmittal" Alias="Resubmittal" />
+    <Field Id="Fields.Log.MS.Date.Approval" Alias="Approval" />
+    <Field Id="Fields.Log.MS.Date.Ready for Docs" Alias="Ready for Docs" />
+    <Field Id="Fields.Log.MS.Date.Closer Assignment" Alias="Closer Assignment" />
+    <Field Id="Fields.Log.MS.Date.Docs Out" Alias="Docs Out" />
+    <Field Id="Fields.Log.MS.Date.Docs Signing" Alias="Docs Signing" />
+    <Field Id="Fields.Log.MS.Date.Funding" Alias="Funding" />
+    <Field Id="Fields.Log.MS.Date.Shipping" Alias="Shipping" />
+    <Field Id="Fields.Log.MS.Date.Purchased" Alias="Purchased" />
+    <Field Id="Fields.Log.MS.Date.Reconciled" Alias="Reconciled" />
+    <Field Id="Fields.Log.MS.Date.Completion" Alias="Completion" />
+    <Field Id="Fields.Log.MS.Date.Appt Reset" Alias="Appt Reset" />
+    <Field Id="Fields.Log.MS.Date.Appt Set" Alias="Appt Set" />
+    <Field Id="Fields.Log.MS.Date.Doc Preparation" Alias="Doc Preparation" />
+    <Field Id="Fields.Log.MS.Date.Post Closing" Alias="Post Closing" />
+    <Field Id="Fields.Log.MS.Date.PreApproval - old" Alias="PreApproval - old" />
+    <Field Id="Fields.CX.PREAPP.REQ.DT" Alias="PreApproval Req. Dt"/>
+    <Field Id="Fields.HMDA.X12" Alias="Preapproval Flag"/>
+  </DataDictionary>
+</Setup>

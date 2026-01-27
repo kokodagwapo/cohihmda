@@ -38,6 +38,7 @@
     <Field Id="Fields.1556" Alias="Underwriting Description" />
     <Field Id="Fields.1811" Alias="Occupancy Type" />
     <Field Id="Fields.1992" Alias="Funds Sent Date" />
+    <Field Id="Fields.1997" Alias="Disbursement Date" />
     <Field Id="Fields.2031" Alias="Investor Status" />
     <Field Id="Fields.2160" Alias="Rate Lock Buy Side Net Buy Rate" />
     <Field Id="Fields.2161" Alias="Rate Lock Buy Side Base Price Rate" />

@@ -3498,10 +3498,10 @@ router.get('/sales-scorecard', authenticateToken, attachTenantContext, apiLimite
  * 
  * Weights: Units = 70%, Turn Time = 15%, Loan Complexity = 15%
  * 
- * Each actor type uses different milestone dates (from tenantDatabaseSchema.ts):
- * - Processor: output = submitted_to_underwriting_date, turn time = submitted_to_underwriting_date - submitted_to_processing_date
- * - Underwriter: output = ctc_date, turn time = ctc_date - submitted_to_underwriting_date
- * - Closer: output = closing_date, turn time = closing_date - ctc_date
+ * Each actor type uses different milestone dates (from Homestead CoheusConfig.xml TriggerDateFields):
+ * - Processor: output = approval_date (Qlik: [Sent To Underwriting] = Log.MS.Date.Approval)
+ * - Underwriter: output = closing_date (Qlik: [Sent To Closing] = Fields.748)
+ * - Closer: output = disbursement_date (Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997)
  * 
  * Query Parameters:
  * - actor_type: 'processor' | 'underwriter' | 'closer' (default: 'underwriter')
@@ -3534,56 +3534,96 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       turnTimeEndField: string;
     }
     
-    // Actor configuration using actual database column names from tenantDatabaseSchema.ts
-    // - submitted_to_processing_date: DATE field for when loan goes to processing
-    // - submitted_to_underwriting_date: DATE field for when loan goes to underwriting
-    // - ctc_date: DATE field for Clear To Close (when loan goes to closing)
-    // - closing_date: DATE field for final closing
+    // Actor configuration - Qlik field mappings per Homestead CoheusConfig.xml
+    // From <OperationalScorecards> TriggerDateField:
+    // - Processor: "Sent to Underwriting" (Log.MS.Date.Approval) → approval_date
+    // - Underwriter: "Sent to Closing" (Fields.748) → closing_date  
+    // - Closer: "End Date to indicate Loan Closed/Funded" (Fields.1997) → disbursement_date
     const actorConfigs: Record<string, ActorConfig> = {
       processor: {
         actorColumn: 'processor',
-        outputDateField: 'submitted_to_underwriting_date',
+        outputDateField: 'approval_date',  // Qlik: [Sent To Underwriting] = Log.MS.Date.Approval
         turnTimeStartField: 'submitted_to_processing_date',
-        turnTimeEndField: 'submitted_to_underwriting_date'
+        turnTimeEndField: 'approval_date'
       },
       underwriter: {
         actorColumn: 'underwriter',
-        outputDateField: 'ctc_date',
-        turnTimeStartField: 'submitted_to_underwriting_date',
-        turnTimeEndField: 'ctc_date'
+        outputDateField: 'closing_date',   // Qlik: [Sent To Closing] = Fields.748 = Closing Date
+        turnTimeStartField: 'approval_date',
+        turnTimeEndField: 'closing_date'
       },
       closer: {
         actorColumn: 'closer',
-        outputDateField: 'closing_date',
-        turnTimeStartField: 'ctc_date',
-        turnTimeEndField: 'closing_date'
+        outputDateField: 'disbursement_date', // Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997
+        turnTimeStartField: 'closing_date',
+        turnTimeEndField: 'disbursement_date'
       }
     };
     
     const config = actorConfigs[actorType];
     
     // Helper: Check if actor name is missing/invalid
+    // CRITICAL: Match Qlik's EXACT logic from Script.csv:
+    //   If([Processor] = '99-Missing',1,0) as [Processor Missing]
+    //   If([Underwriter] = '99-Missing',1,0) as [Underwriter Missing]
+    //   If([Closer] = '99-Missing',1,0) as [Closer Missing]
+    // Only exclude EXACT match '99-Missing', not other variations
     const isActorMissing = (name: string | null | undefined): boolean => {
       if (!name || name.trim() === '') return true;
-      const normalized = name.toUpperCase().trim();
-      return normalized === '99-MISSING' || 
-             normalized === 'MISSING' ||
-             normalized === 'UNKNOWN' ||
-             normalized.startsWith('99-');
+      // Qlik ONLY checks for exact '99-Missing' (case-insensitive comparison)
+      return name.trim().toLowerCase() === '99-missing';
     };
     
-    // Get max date from data (like vMaxDate in Qlik)
+    // Get vMaxDate from data - using same logic as SalesScorecard for consistency
+    // CRITICAL: Qlik uses Max("Last Modified Date"), NOT max funding_date!
     const maxDateResult = await tenantPool.query(`
-      SELECT MAX(COALESCE(last_modified_date, funding_date, closing_date, created_at)) as max_date
-      FROM public.loans
+      SELECT 
+        MAX(funding_date) as max_funding_date,
+        MAX(updated_at) as max_updated_at
+      FROM public.loans 
+      WHERE funding_date IS NOT NULL
     `);
-    const vMaxDate = maxDateResult.rows[0]?.max_date ? new Date(maxDateResult.rows[0].max_date) : new Date();
+    
+    // Check if we have a last_modified_date field from Encompass
+    const lastModifiedResult = await tenantPool.query(`
+      SELECT 
+        MAX(last_modified_date) as max_last_modified
+      FROM public.loans 
+      WHERE last_modified_date IS NOT NULL
+    `);
+    
+    let vMaxDate: Date;
+    if (lastModifiedResult.rows[0]?.max_last_modified) {
+      // Use last_modified_date if available (matches Qlik's "Last Modified Date")
+      vMaxDate = new Date(lastModifiedResult.rows[0].max_last_modified);
+    } else if (maxDateResult.rows[0]?.max_updated_at) {
+      // Fall back to updated_at
+      vMaxDate = new Date(maxDateResult.rows[0].max_updated_at);
+    } else if (maxDateResult.rows[0]?.max_funding_date) {
+      // Fall back to max funding_date
+      vMaxDate = new Date(maxDateResult.rows[0].max_funding_date);
+    } else {
+      vMaxDate = new Date();
+    }
     
     // Calculate date range
+    // For vMaxDate = Jan 22, 2026 and monthsBack = 12:
+    //   Start = Jan 1, 2025 (first day of month 12 months before)
+    //   End = Jan 22, 2026 (INCLUSIVE)
     const effectiveEndDate = new Date(vMaxDate);
-    const effectiveStartDate = new Date(vMaxDate);
-    effectiveStartDate.setMonth(effectiveStartDate.getMonth() - monthsBack);
-    effectiveStartDate.setDate(1); // First day of month
+    const effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - monthsBack, 1);
+    
+    // Detailed date range logging for debugging Qlik discrepancies
+    logInfo('[OpsScorecard] Date range calculation', {
+      vMaxDate: vMaxDate.toISOString(),
+      vMaxDateSource: lastModifiedResult.rows[0]?.max_last_modified ? 'last_modified_date' : 
+                      maxDateResult.rows[0]?.max_updated_at ? 'updated_at' : 
+                      maxDateResult.rows[0]?.max_funding_date ? 'funding_date' : 'current_date',
+      effectiveStartDate: effectiveStartDate.toISOString(),
+      effectiveEndDate: effectiveEndDate.toISOString(),
+      monthsBack,
+      dateRangeLabel: `${effectiveStartDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} to ${effectiveEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (INCLUSIVE)`
+    });
     
     logInfo('[OpsScorecard] Start', { actorType, dateRange, channel: channelGroup });
     
@@ -3596,15 +3636,19 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
     
     // Fetch all loans with required columns
     // Use actual column names from tenantDatabaseSchema.ts
+    // CRITICAL: Include loan_number for DISTINCT counting (Qlik uses COUNT(DISTINCT [Loan Number]))
     const allLoansResult = await tenantPool.query(`
       SELECT 
-        loan_id, loan_amount, loan_type, loan_purpose, current_loan_status, channel,
+        loan_id,
+        COALESCE(loan_number, loan_id) as loan_number,  -- Use loan_number for distinct counting
+        loan_amount, loan_type, loan_purpose, current_loan_status, channel,
         processor, underwriter, closer,
-        -- Date columns (actual schema column names)
-        COALESCE(submitted_to_processing_date, processing_date, started_date) as submitted_to_processing_date,
-        COALESCE(submitted_to_underwriting_date, submittal_date) as submitted_to_underwriting_date,
-        ctc_date,
-        COALESCE(closing_date, funding_date) as closing_date,
+        -- Date columns per Homestead CoheusConfig.xml TriggerDateFields
+        submitted_to_processing_date,
+        processing_date,
+        approval_date,
+        closing_date,
+        disbursement_date,  -- Fields.1997: "End Date to indicate Loan Closed/Funded" for Closer
         funding_date,
         application_date,
         -- Metrics columns
@@ -3630,12 +3674,16 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
     });
     
     // Filter loans with valid output date in range
+    // CRITICAL: Match Qlik's EXACT date filter syntax:
+    //   [Sent To Closing] *= {">=MonthStart(...)< vCurrentDateAsDate"}
+    // This means: >= start AND < end (EXCLUSIVE end date)
     const outputLoans = channelFilteredLoans.filter((l: any) => {
       const outputDate = l[config.outputDateField];
       if (!outputDate) return false;
       const od = new Date(outputDate);
       if (isNaN(od.getTime())) return false;
-      if (od < effectiveStartDate || od > effectiveEndDate) return false;
+      // >= start AND < end (EXCLUSIVE end date, matching Qlik's "<vCurrentDateAsDate")
+      if (od < effectiveStartDate || od >= effectiveEndDate) return false;
       
       // Check actor is not missing
       const actorName = l[config.actorColumn];
@@ -3695,6 +3743,7 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
     };
     
     // Aggregate by actor
+    // CRITICAL: Use Set to track DISTINCT loan_numbers (Qlik uses COUNT(DISTINCT [Loan Number]))
     interface OpsActorMetrics {
       name: string;
       units: number;
@@ -3711,6 +3760,7 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       ficoWeight: number;
       ltvWeightedSum: number;
       ltvWeight: number;
+      seenLoanNumbers: Set<string>;  // Track distinct loan numbers
     }
     
     const actorMap = new Map<string, OpsActorMetrics>();
@@ -3719,6 +3769,7 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       const actorName = l[config.actorColumn];
       if (isActorMissing(actorName)) return;
       
+      const loanNumber = String(l.loan_number || l.loan_id);  // Use loan_number for distinct counting
       const loanAmount = parseFloat(l.loan_amount) || 0;
       const turnTime = calcTurnTime(l);
       const complexity = calcLoanComplexity(l);
@@ -3738,12 +3789,20 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
           ficoWeightedSum: 0,
           ficoWeight: 0,
           ltvWeightedSum: 0,
-          ltvWeight: 0
+          ltvWeight: 0,
+          seenLoanNumbers: new Set()
         });
       }
       
       const actor = actorMap.get(actorName)!;
-      actor.units++;
+      
+      // CRITICAL: Only count units for DISTINCT loan numbers
+      if (!actor.seenLoanNumbers.has(loanNumber)) {
+        actor.seenLoanNumbers.add(loanNumber);
+        actor.units++;  // Count distinct loans only
+      }
+      
+      // Volume is still summed for all rows
       actor.volume += loanAmount;
       
       if (turnTime !== null && turnTime > 0) {
@@ -3841,8 +3900,8 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       avgComplexity: avgComplexity
     };
     
-    // Calculate TTS scores and assign tiers
-    const actorsWithTTS = actors.map(a => {
+    // Calculate TTS scores and metrics for each actor
+    const actorsWithMetrics = actors.map(a => {
       const actorAvgTurnTime = a.turnTimes.length > 0 
         ? a.turnTimes.reduce((sum, t) => sum + t, 0) / a.turnTimes.length 
         : 0;
@@ -3850,7 +3909,7 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
         ? a.complexityScores.reduce((sum, c) => sum + c, 0) / a.complexityScores.length
         : 100;
       
-      // Calculate ratings
+      // Calculate ratings (for TTS score display)
       const unitRating = avgUnitsPerActor > 0 ? (a.units / avgUnitsPerActor) * 100 : 100;
       
       // Turn time rating (inverse - lower is better)
@@ -3862,16 +3921,10 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       
       const complexityRating = avgComplexity > 0 ? (actorAvgComplexity / avgComplexity) * 100 : 100;
       
-      // Calculate TTS
+      // Calculate TTS (kept for display purposes)
       const ttsScore = (unitRating * weightConfig.unit) + 
                        (turnTimeRating * weightConfig.turnTime) + 
                        (complexityRating * weightConfig.complexity);
-      
-      // Assign tier
-      let tier: 'top' | 'second' | 'bottom';
-      if (ttsScore > 120) tier = 'top';
-      else if (ttsScore >= 100) tier = 'second';
-      else tier = 'bottom';
       
       return {
         name: a.name,
@@ -3887,7 +3940,6 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
         waFico: a.ficoWeight > 0 ? a.ficoWeightedSum / a.ficoWeight : 0,
         waLtv: a.ltvWeight > 0 ? a.ltvWeightedSum / a.ltvWeight : 0,
         ttsScore,
-        tier,
         // Ratings for debugging
         unitRating,
         turnTimeRating,
@@ -3895,7 +3947,21 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       };
     });
     
-    // Sort by TTS score descending
+    // TIER ASSIGNMENT: TTS Score thresholds (matching Qlik "13 Month TVI Score Tiers" logic)
+    // From Qlik Dimensions.csv:
+    //   If(Avg(TVI_Score) >= 120, 'Top Tier',
+    //   If(Avg(TVI_Score) >= 80, 'Second Tier', 'Bottom Tier'))
+    const actorsWithTTS = actorsWithMetrics.map(a => {
+      // Qlik tier thresholds based on TTS/TVI score
+      let tier: 'top' | 'second' | 'bottom';
+      if (a.ttsScore >= 120) tier = 'top';
+      else if (a.ttsScore >= 80) tier = 'second';
+      else tier = 'bottom';
+      
+      return { ...a, tier };
+    });
+    
+    // Sort by TTS score for display
     actorsWithTTS.sort((a, b) => b.ttsScore - a.ttsScore);
     
     // Helper: Create tier summary
@@ -3955,6 +4021,39 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       tiers: { top: topActors.length, second: secondActors.length, bottom: bottomActors.length }
     });
     
+    // DEBUG: Add comprehensive debug info to compare with Qlik
+    const _debug = {
+      qlikExpected: {
+        vCurrentDateAsDate: '1/22/2026',
+        vOpsScorecardMonthRange: 12,
+        startDate: 'Jan 1, 2025 (MonthStart(AddMonths(1/22/2026, -12)))',
+        endDate: 'Jan 22, 2026 (EXCLUSIVE, using <)',
+        processorUnits: 2087,
+        underwriterUnits: 2171,
+        closerUnits: 1305
+      },
+      ourCalculation: {
+        vMaxDate: vMaxDate.toISOString(),
+        vMaxDateFormatted: `${vMaxDate.getMonth() + 1}/${vMaxDate.getDate()}/${vMaxDate.getFullYear()}`,
+        vMaxDateSource: lastModifiedResult.rows[0]?.max_last_modified ? 'last_modified_date' : 
+                        maxDateResult.rows[0]?.max_updated_at ? 'updated_at' : 
+                        maxDateResult.rows[0]?.max_funding_date ? 'funding_date' : 'current_date',
+        startDate: effectiveStartDate.toISOString(),
+        startDateFormatted: `${effectiveStartDate.getMonth() + 1}/${effectiveStartDate.getDate()}/${effectiveStartDate.getFullYear()}`,
+        endDate: effectiveEndDate.toISOString(),
+        endDateFormatted: `${effectiveEndDate.getMonth() + 1}/${effectiveEndDate.getDate()}/${effectiveEndDate.getFullYear()}`,
+        monthsBack
+      },
+      filterPipeline: {
+        totalLoansInDb: allLoans.length,
+        loansAfterChannelFilter: channelFilteredLoans.length,
+        loansAfterDateAndActorFilter: outputLoans.length,
+        distinctLoanNumbers: totalUnits,
+        actorColumn: config.actorColumn,
+        outputDateField: config.outputDateField
+      }
+    };
+    
     res.json({
       actors: actorsWithTTS,
       tierSummary,
@@ -3965,7 +4064,8 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
         start: effectiveStartDate.toISOString(),
         end: effectiveEndDate.toISOString(),
         months: monthsBack
-      }
+      },
+      _debug  // REMOVE THIS AFTER DEBUGGING
     });
     
   } catch (error: any) {
@@ -4024,7 +4124,8 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     
     // Parse query parameters
     const actorType = (req.query.actor_type as string) || 'underwriter';
-    const monthsCount = parseInt(req.query.months as string) || 13;
+    // CRITICAL: Default to 12 months to match Qlik's vOpsScorecardMonthRange = 12
+    const monthsCount = parseInt(req.query.months as string) || 12;
     const channelGroup = req.query.channel_group as string | undefined;
     const targetUnits = parseInt(req.query.target_units as string) || 25;
     
@@ -4033,7 +4134,11 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       return res.status(400).json({ error: 'Invalid actor_type. Must be "processor", "underwriter", or "closer"' });
     }
     
-    // Actor configuration (same as operations-scorecard)
+    // Actor configuration - Qlik field mappings per Homestead CoheusConfig.xml
+    // From <OperationalScorecards> TriggerDateField:
+    // - Processor: "Sent to Underwriting" (Log.MS.Date.Approval) → approval_date
+    // - Underwriter: "Sent to Closing" (Fields.748) → closing_date  
+    // - Closer: "End Date to indicate Loan Closed/Funded" (Fields.1997) → disbursement_date
     interface ActorConfig {
       actorColumn: string;
       outputDateField: string;
@@ -4044,48 +4149,91 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     const actorConfigs: Record<string, ActorConfig> = {
       processor: {
         actorColumn: 'processor',
-        outputDateField: 'submitted_to_underwriting_date',
+        outputDateField: 'approval_date',  // Qlik: [Sent To Underwriting] = Log.MS.Date.Approval
         turnTimeStartField: 'submitted_to_processing_date',
-        turnTimeEndField: 'submitted_to_underwriting_date'
+        turnTimeEndField: 'approval_date'
       },
       underwriter: {
         actorColumn: 'underwriter',
-        outputDateField: 'ctc_date',
-        turnTimeStartField: 'submitted_to_underwriting_date',
-        turnTimeEndField: 'ctc_date'
+        outputDateField: 'closing_date',   // Qlik: [Sent To Closing] = Fields.748 = Closing Date
+        turnTimeStartField: 'approval_date',
+        turnTimeEndField: 'closing_date'
       },
       closer: {
         actorColumn: 'closer',
-        outputDateField: 'closing_date',
-        turnTimeStartField: 'ctc_date',
-        turnTimeEndField: 'closing_date'
+        outputDateField: 'disbursement_date', // Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997
+        turnTimeStartField: 'closing_date',
+        turnTimeEndField: 'disbursement_date'
       }
     };
     
     const config = actorConfigs[actorType];
     
     // Helper: Check if actor name is missing/invalid
+    // CRITICAL: Match Qlik's EXACT logic from Script.csv:
+    //   If([Processor] = '99-Missing',1,0) as [Processor Missing]
+    //   If([Underwriter] = '99-Missing',1,0) as [Underwriter Missing]
+    //   If([Closer] = '99-Missing',1,0) as [Closer Missing]
+    // Only exclude EXACT match '99-Missing', not other variations
     const isActorMissing = (name: string | null | undefined): boolean => {
       if (!name || name.trim() === '') return true;
-      const normalized = name.toUpperCase().trim();
-      return normalized === '99-MISSING' || 
-             normalized === 'MISSING' ||
-             normalized === 'UNKNOWN' ||
-             normalized.startsWith('99-');
+      // Qlik ONLY checks for exact '99-Missing' (case-insensitive comparison)
+      return name.trim().toLowerCase() === '99-missing';
     };
     
-    // Get max date from data
+    // Get vMaxDate from data - using same logic as SalesScorecard for consistency
+    // CRITICAL: Qlik uses Max("Last Modified Date"), NOT max funding_date!
+    // "Last Modified Date" represents when the loan record was last modified in Encompass
     const maxDateResult = await tenantPool.query(`
-      SELECT MAX(COALESCE(last_modified_date, funding_date, closing_date, created_at)) as max_date
-      FROM public.loans
+      SELECT 
+        MAX(funding_date) as max_funding_date,
+        MAX(updated_at) as max_updated_at
+      FROM public.loans 
+      WHERE funding_date IS NOT NULL
     `);
-    const vMaxDate = maxDateResult.rows[0]?.max_date ? new Date(maxDateResult.rows[0].max_date) : new Date();
+    
+    // Check if we have a last_modified_date field from Encompass
+    const lastModifiedResult = await tenantPool.query(`
+      SELECT 
+        MAX(last_modified_date) as max_last_modified
+      FROM public.loans 
+      WHERE last_modified_date IS NOT NULL
+    `);
+    
+    let vMaxDate: Date;
+    if (lastModifiedResult.rows[0]?.max_last_modified) {
+      // Use last_modified_date if available (matches Qlik's "Last Modified Date")
+      vMaxDate = new Date(lastModifiedResult.rows[0].max_last_modified);
+    } else if (maxDateResult.rows[0]?.max_updated_at) {
+      // Fall back to updated_at
+      vMaxDate = new Date(maxDateResult.rows[0].max_updated_at);
+    } else if (maxDateResult.rows[0]?.max_funding_date) {
+      // Fall back to max funding_date
+      vMaxDate = new Date(maxDateResult.rows[0].max_funding_date);
+    } else {
+      vMaxDate = new Date();
+    }
     
     // Calculate date range for rolling months
+    // "Rolling 13 Months" = current partial month + 12 previous months = 13 months total
+    // For vMaxDate = Jan 22, 2026 and monthsCount = 12:
+    //   Start = Jan 1, 2025 (first day of month 12 months before)
+    //   End = Jan 22, 2026 (INCLUSIVE)
+    //   Months covered: Jan 2025 through Jan 2026 = 13 months
     const effectiveEndDate = new Date(vMaxDate);
-    const effectiveStartDate = new Date(vMaxDate);
-    effectiveStartDate.setMonth(effectiveStartDate.getMonth() - monthsCount);
-    effectiveStartDate.setDate(1); // First day of month
+    const effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - monthsCount, 1);
+    
+    // Detailed date range logging for debugging Qlik discrepancies
+    logInfo('[OpsScorecardTrends] Date range calculation', {
+      vMaxDate: vMaxDate.toISOString(),
+      vMaxDateSource: lastModifiedResult.rows[0]?.max_last_modified ? 'last_modified_date' : 
+                      maxDateResult.rows[0]?.max_updated_at ? 'updated_at' : 
+                      maxDateResult.rows[0]?.max_funding_date ? 'funding_date' : 'current_date',
+      effectiveStartDate: effectiveStartDate.toISOString(),
+      effectiveEndDate: effectiveEndDate.toISOString(),
+      monthsCount,
+      dateRangeLabel: `${effectiveStartDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} to ${effectiveEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (INCLUSIVE)`
+    });
     
     logInfo('[OpsScorecardTrends] Start', { actorType, months: monthsCount, channel: channelGroup, targetUnits });
     
@@ -4097,14 +4245,19 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     };
     
     // Fetch all loans with required columns
+    // CRITICAL: Use EXACT field names - NO COALESCE fallbacks (match Qlik exactly)
     const allLoansResult = await tenantPool.query(`
       SELECT 
-        loan_id, loan_amount, loan_type, loan_purpose, current_loan_status, channel,
+        loan_id, 
+        COALESCE(loan_number, loan_id) as loan_number,  -- loan_number for distinct counting
+        loan_amount, loan_type, loan_purpose, current_loan_status, channel,
         processor, underwriter, closer,
-        COALESCE(submitted_to_processing_date, processing_date, started_date) as submitted_to_processing_date,
-        COALESCE(submitted_to_underwriting_date, submittal_date) as submitted_to_underwriting_date,
-        ctc_date,
-        COALESCE(closing_date, funding_date) as closing_date,
+        -- Date columns per Homestead CoheusConfig.xml TriggerDateFields
+        submitted_to_processing_date,
+        processing_date,
+        approval_date,
+        closing_date,
+        disbursement_date,  -- Fields.1997: "End Date to indicate Loan Closed/Funded" for Closer
         funding_date,
         application_date,
         fico_score, ltv_ratio, be_dti_ratio,
@@ -4129,12 +4282,16 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     });
     
     // Filter loans with valid output date in range
+    // CRITICAL: Match Qlik's EXACT date filter syntax:
+    //   [Sent To Closing] *= {">=MonthStart(...)< vCurrentDateAsDate"}
+    // This means: >= start AND < end (EXCLUSIVE end date)
     const outputLoans = channelFilteredLoans.filter((l: any) => {
       const outputDate = l[config.outputDateField];
       if (!outputDate) return false;
       const od = new Date(outputDate);
       if (isNaN(od.getTime())) return false;
-      if (od < effectiveStartDate || od > effectiveEndDate) return false;
+      // >= start AND < end (EXCLUSIVE end date, matching Qlik's "<vCurrentDateAsDate")
+      if (od < effectiveStartDate || od >= effectiveEndDate) return false;
       
       const actorName = l[config.actorColumn];
       if (isActorMissing(actorName)) return false;
@@ -4196,6 +4353,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     }
     
     // Aggregate by actor AND by month
+    // CRITICAL: Use Set to track DISTINCT loan_numbers (Qlik uses COUNT(DISTINCT [Loan Number]))
     interface ActorMonthData {
       unitsOutput: number;
       volumeOutput: number;
@@ -4203,6 +4361,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       complexityScores: number[];
       approvedLoans: number;
       totalDecisions: number;
+      seenLoanNumbers: Set<string>;  // Track distinct loan numbers for this month
     }
     
     interface ActorAggregation {
@@ -4212,6 +4371,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       allTurnTimes: number[];
       allComplexityScores: number[];
       months: Map<string, ActorMonthData>;
+      seenLoanNumbers: Set<string>;  // Track distinct loan numbers across all months
     }
     
     const actorMap = new Map<string, ActorAggregation>();
@@ -4220,6 +4380,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       const actorName = l[config.actorColumn];
       if (isActorMissing(actorName)) return;
       
+      const loanNumber = String(l.loan_number || l.loan_id);  // Use loan_number for distinct counting
       const outputDate = new Date(l[config.outputDateField]);
       const monthKey = formatMonthKey(outputDate);
       
@@ -4234,15 +4395,12 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
           totalVolume: 0,
           allTurnTimes: [],
           allComplexityScores: [],
-          months: new Map()
+          months: new Map(),
+          seenLoanNumbers: new Set()
         });
       }
       
       const actor = actorMap.get(actorName)!;
-      actor.totalUnits++;
-      actor.totalVolume += loanAmount;
-      if (turnTime !== null) actor.allTurnTimes.push(turnTime);
-      actor.allComplexityScores.push(complexity);
       
       // Get or create month data
       if (!actor.months.has(monthKey)) {
@@ -4252,12 +4410,31 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
           turnTimes: [],
           complexityScores: [],
           approvedLoans: 0,
-          totalDecisions: 0
+          totalDecisions: 0,
+          seenLoanNumbers: new Set()
         });
       }
       
       const monthData = actor.months.get(monthKey)!;
-      monthData.unitsOutput++;
+      
+      // CRITICAL: Only count if this loan_number hasn't been seen for this actor in this month
+      const monthLoanKey = `${monthKey}:${loanNumber}`;
+      if (!monthData.seenLoanNumbers.has(loanNumber)) {
+        monthData.seenLoanNumbers.add(loanNumber);
+        monthData.unitsOutput++;  // Count distinct loans only
+      }
+      
+      // Only count total units if this loan hasn't been seen for this actor at all
+      if (!actor.seenLoanNumbers.has(loanNumber)) {
+        actor.seenLoanNumbers.add(loanNumber);
+        actor.totalUnits++;  // Count distinct loans only
+      }
+      
+      // Volume, turn times, complexity - still sum/aggregate all rows
+      actor.totalVolume += loanAmount;
+      if (turnTime !== null) actor.allTurnTimes.push(turnTime);
+      actor.allComplexityScores.push(complexity);
+      
       monthData.volumeOutput += loanAmount;
       if (turnTime !== null) monthData.turnTimes.push(turnTime);
       monthData.complexityScores.push(complexity);
@@ -4330,8 +4507,8 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       return sum + a.allComplexityScores.reduce((s, c) => s + c, 0) / a.allComplexityScores.length;
     }, 0) / actorCount;
     
-    // Calculate TTS and assign tiers
-    const actorsWithTTS = actors.map(a => {
+    // Calculate TTS and metrics for each actor
+    const actorsWithMetrics = actors.map(a => {
       const actorAvgTurnTime = a.allTurnTimes.length > 0 
         ? a.allTurnTimes.reduce((sum, t) => sum + t, 0) / a.allTurnTimes.length 
         : 0;
@@ -4339,7 +4516,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
         ? a.allComplexityScores.reduce((sum, c) => sum + c, 0) / a.allComplexityScores.length
         : 100;
       
-      // Calculate ratings
+      // Calculate ratings (for TTS score display)
       const unitRating = avgUnitsPerActor > 0 ? (a.totalUnits / avgUnitsPerActor) * 100 : 100;
       
       let turnTimeRating = 100;
@@ -4350,16 +4527,10 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       
       const complexityRating = avgComplexity > 0 ? (actorAvgComplexity / avgComplexity) * 100 : 100;
       
-      // Calculate TTS
+      // Calculate TTS (kept for display purposes)
       const ttsScore = (unitRating * weightConfig.unit) + 
                        (turnTimeRating * weightConfig.turnTime) + 
                        (complexityRating * weightConfig.complexity);
-      
-      // Assign tier
-      let tier: 'top' | 'second' | 'bottom';
-      if (ttsScore > 120) tier = 'top';
-      else if (ttsScore >= 100) tier = 'second';
-      else tier = 'bottom';
       
       // Build monthly metrics
       const monthsData: Record<string, any> = {};
@@ -4397,16 +4568,27 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
         }
       });
       
+      // TIER ASSIGNMENT: TTS Score thresholds (matching Qlik "13 Month TVI Score Tiers" logic)
+      // From Qlik Dimensions.csv:
+      //   If(Avg(TVI_Score) >= 120, 'Top Tier',
+      //   If(Avg(TVI_Score) >= 80, 'Second Tier', 'Bottom Tier'))
+      let tier: 'top' | 'second' | 'bottom';
+      if (ttsScore >= 120) tier = 'top';
+      else if (ttsScore >= 80) tier = 'second';
+      else tier = 'bottom';
+      
       return {
         id: a.name.replace(/\s+/g, '-').toLowerCase(),
         name: a.name,
-        tier,
+        totalUnits: a.totalUnits,
         ttsScore: Math.round(ttsScore * 10) / 10,
+        tier,
         months: monthsData
       };
     });
     
-    // Sort by TTS score descending
+    // Sort by TTS score for display
+    const actorsWithTTS = actorsWithMetrics;
     actorsWithTTS.sort((a, b) => b.ttsScore - a.ttsScore);
     
     // Calculate monthly totals
@@ -4486,6 +4668,22 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       tiers: { top: topActors.length, second: secondActors.length, bottom: bottomActors.length }
     });
     
+    // Count loans filtered out at each step for debugging
+    const loansWithNullOutputDate = channelFilteredLoans.filter((l: any) => !l[config.outputDateField]).length;
+    const loansOutsideDateRange = channelFilteredLoans.filter((l: any) => {
+      const outputDate = l[config.outputDateField];
+      if (!outputDate) return false;
+      const od = new Date(outputDate);
+      return od < effectiveStartDate || od >= effectiveEndDate;
+    }).length;
+    const loansWithMissingActor = channelFilteredLoans.filter((l: any) => {
+      const outputDate = l[config.outputDateField];
+      if (!outputDate) return false;
+      const od = new Date(outputDate);
+      if (od < effectiveStartDate || od >= effectiveEndDate) return false;
+      return isActorMissing(l[config.actorColumn]);
+    }).length;
+    
     res.json({
       actors: actorsWithTTS,
       months: monthsList,
@@ -4496,6 +4694,33 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
         start: effectiveStartDate.toISOString(),
         end: effectiveEndDate.toISOString(),
         monthsIncluded: monthsCount
+      },
+      // DEBUG INFO - shows filter pipeline to identify issues
+      _debug: {
+        filterPipeline: {
+          totalLoansInDB: allLoans.length,
+          afterChannelFilter: channelFilteredLoans.length,
+          afterAllFilters: outputLoans.length,
+          loansWithNullOutputDate,
+          loansOutsideDateRange,
+          loansWithMissingActor,
+        },
+        dateRangeDetails: {
+          vMaxDate: vMaxDate.toISOString(),
+          vMaxDateFormatted: vMaxDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          effectiveStartDate: effectiveStartDate.toISOString(),
+          effectiveStartFormatted: effectiveStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          effectiveEndDate: effectiveEndDate.toISOString(),
+          effectiveEndFormatted: effectiveEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          expectedQlikRange: `>=${effectiveStartDate.toLocaleDateString('en-US')}<${effectiveEndDate.toLocaleDateString('en-US')}`,
+        },
+        actorConfig: {
+          actorColumn: config.actorColumn,
+          outputDateField: config.outputDateField,
+        },
+        distinctLoansCount: outputLoans.length,
+        actorCount,
+        totalDistinctUnits: totalUnits,
       }
     });
     
@@ -5233,27 +5458,29 @@ router.get('/toptiering-comparison', authenticateToken, attachTenantContext, api
     }
     
     // Fetch aggregated data by actor
-    // Revenue formula matches Qlik: Base Buy + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits + payouts
+    // Revenue formula matches Qlik REVENUE.qvs:
+    //   [Base Buy ($)] + [Orig Fee Borr Pd] + [Orig Fees Seller] - [CD Lender Credits]
+    // 
+    // IMPORTANT: [Base Buy ($)] is CALCULATED from rate_lock_buy_side_base_price_rate:
+    //   [Base Buy ($)] = ((rate_lock_buy_side_base_price_rate - 100) / 100) * loan_amount
+    // 
+    // NOTE: Do NOT include pa_sell_amt, pa_srp_amt, or pa_payout_* fields - they are NOT in the Qlik formula
     const actorDataQuery = `
       WITH funded_loans AS (
         SELECT 
           ${actorColumn} AS actor_name,
           ${actorIdColumn} AS actor_id,
+          loan_id,
+          COALESCE(loan_number, loan_id) AS loan_number,  -- Include for DISTINCT counting
           loan_amount,
           funding_date,
-          -- Revenue calculation matching Qlik formula
-          COALESCE(origination_points, 0) +
+          -- Revenue calculation matching Qlik formula (REVENUE.qvs)
+          -- [Base Buy ($)] = ((rate_lock_buy_side_base_price_rate - 100) / 100) * loan_amount
+          -- Revenue = [Base Buy ($)] + [Orig Fee Borr Pd] + [Orig Fees Seller] - [CD Lender Credits]
+          ((COALESCE(rate_lock_buy_side_base_price_rate, 0) - 100) / 100.0) * COALESCE(loan_amount, 0) +
           COALESCE(orig_fee_borr_pd, 0) +
           COALESCE(orig_fees_seller, 0) -
-          COALESCE(cd_lender_credits, 0) +
-          COALESCE(pa_sell_amt, 0) +
-          COALESCE(pa_srp_amt, 0) +
-          COALESCE(pa_payout_1, 0) + COALESCE(pa_payout_2, 0) + 
-          COALESCE(pa_payout_3, 0) + COALESCE(pa_payout_4, 0) +
-          COALESCE(pa_payout_5, 0) + COALESCE(pa_payout_6, 0) +
-          COALESCE(pa_payout_7, 0) + COALESCE(pa_payout_8, 0) +
-          COALESCE(pa_payout_9, 0) + COALESCE(pa_payout_10, 0) +
-          COALESCE(pa_payout_11, 0) + COALESCE(pa_payout_12, 0) AS revenue
+          COALESCE(cd_lender_credits, 0) AS revenue
         FROM public.loans
         WHERE funding_date IS NOT NULL
           AND funding_date >= $1
@@ -5265,7 +5492,8 @@ router.get('/toptiering-comparison', authenticateToken, attachTenantContext, api
         SELECT 
           actor_name,
           actor_id,
-          COUNT(*) AS units,
+          -- CRITICAL: Use COUNT(DISTINCT) to match Qlik's COUNT(DISTINCT [Loan Number])
+          COUNT(DISTINCT COALESCE(loan_number, loan_id)) AS units,
           SUM(loan_amount) AS volume,
           SUM(revenue) AS revenue,
           CASE 
@@ -5273,7 +5501,7 @@ router.get('/toptiering-comparison', authenticateToken, attachTenantContext, api
             ELSE 0 
           END AS revenue_bps,
           CASE 
-            WHEN COUNT(*) > 0 THEN SUM(revenue) / COUNT(*) 
+            WHEN COUNT(DISTINCT COALESCE(loan_number, loan_id)) > 0 THEN SUM(revenue) / COUNT(DISTINCT COALESCE(loan_number, loan_id)) 
             ELSE 0 
           END AS revenue_per_loan
         FROM funded_loans

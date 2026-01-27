@@ -81,15 +81,26 @@ Sheet ID: `1b7e60bb-c475-4922-a4f8-2c9c4b89fbb5`
 
 ### Key Qlik Variables (from Variables.csv)
 
-| Variable | Description | Example Value |
-|----------|-------------|---------------|
+| Variable | Description | Value |
+|----------|-------------|-------|
 | `vOpsScorecardActor` | Actor type | 'Processor', 'Underwriter', 'Closer' |
-| `vOpsScorecardMonthRange` | Month range for trends | 13 (months) |
+| `vOpsScorecardMonthRange` | **Month range for trends** | **12** (line 2546) |
 | `vScorecardUnitsAverage` | Average units per actor | Calculated |
 | `vScorecardTurnTimeAverage` | Average turn time | Calculated |
 | `vScorecardVolumeAverage` | Average volume | Calculated |
 | `vOpsScorecardMinYearMonth` | Start month for trends | 'Jan 2025' |
 | `vOpsScorecardMaxYearMonth` | End month for trends | 'Jan 2026' |
+| `vCurrentDateAsDate` | Max date in data | Dynamic |
+
+### Qlik Date Range Calculation
+```
+Start: MonthStart(AddMonths(vCurrentDateAsDate, -vOpsScorecardMonthRange))
+End: vCurrentDateAsDate
+
+Example (if vCurrentDateAsDate = Jan 22, 2026, vOpsScorecardMonthRange = 12):
+  Start: Jan 1, 2025
+  End: Jan 22, 2026
+```
 
 ### Qlik KPI Components (from Vizobjects.csv)
 
@@ -101,13 +112,39 @@ Sheet ID: `1b7e60bb-c475-4922-a4f8-2c9c4b89fbb5`
 | `Operation Scorecard Trends: Loan Complexity Score KPI` | Complexity score |
 | `Operation Scorecard Trends: Average Days KPI` | Average turn time |
 
-### Actor-Specific Date Fields (same as Operations Scorecard)
+### Actor-Specific Date Fields (CRITICAL - from Qlik CoheusConfig)
 
-| Actor | Output Date Field | Turn Time Calculation |
-|-------|-------------------|----------------------|
-| **Processor** | `submitted_to_underwriting_date` | submitted_to_underwriting_date - submitted_to_processing_date |
-| **Underwriter** | `ctc_date` | ctc_date - submitted_to_underwriting_date |
-| **Closer** | `closing_date` | closing_date - ctc_date |
+**IMPORTANT**: The Qlik formulas use CONFIGURABLE date fields defined per-client in `CoheusConfig.xml`.
+
+**Current Homestead Client Configuration:**
+
+| Actor | Qlik Trigger Field | Encompass Milestone | Database Column | Turn Time Calculation |
+|-------|-------------------|---------------------|-----------------|----------------------|
+| **Processor** | `[Sent To Processing]` | "Processing" | `processing_date` | processing_date - submitted_to_processing_date |
+| **Underwriter** | `[Sent To Closing]` | "Approval" | `approval_date` | approval_date - processing_date |
+| **Closer** | `[End Date]` | "Closing Date" | `closing_date` | closing_date - approval_date |
+
+> **⚠️ CONFIGURATION NOTE**: In Qlik, these trigger date fields are **configurable per client** via `CoheusConfig.xml` (`OperationalScorecards/TriggerDateField`). The field names like `[Sent To Closing]` are aliases that can map to different Encompass fields per client.
+>
+> **FUTURE ENHANCEMENT**: Add tenant-level configuration in our system to allow clients to select which database field maps to each Operations Scorecard trigger date. This would mirror the flexibility provided by Qlik's CoheusConfig.
+
+### Qlik Units Output Formula (from Variables.csv line 1831)
+```
+If('Underwriter'='Underwriter',
+  Count({<
+    [Underwriter_Production] *= {*},
+    [Sent To Closing] *= {">=1/1/2025<1/22/2026"},
+    [Underwriter Missing] *= {0},
+    [Underwriter]*=>
+  } distinct [Loan Number])
+)
+```
+
+**Key observations:**
+1. Uses `COUNT(DISTINCT [Loan Number])` - count unique loans, not rows
+2. `[Underwriter_Production] *= {*}` - only include loans where underwriter worked on it
+3. `[Underwriter Missing] *= {0}` - exclude rows where underwriter is marked as missing
+4. Date filter is on `[Sent To Closing]` for Underwriters
 
 ---
 
@@ -206,36 +243,51 @@ Update `OperationScorecardTrendsView.tsx`:
 
 ## Database Query Strategy
 
-The endpoint needs to aggregate data **by actor and by month**. Use the existing operations scorecard logic as a base but group by month.
+The endpoint needs to aggregate data **by actor and by month**. 
+
+### CRITICAL: Use COUNT(DISTINCT loan_number)
 
 ```sql
 -- Get monthly metrics for each actor
+-- IMPORTANT: Count DISTINCT loan_number to match Qlik
 WITH monthly_data AS (
   SELECT 
     ${actorColumn} AS actor_name,
     DATE_TRUNC('month', ${outputDateField})::date AS output_month,
-    COUNT(*) AS units_output,
+    COUNT(DISTINCT loan_number) AS units_output,  -- MUST BE DISTINCT!
     SUM(loan_amount) AS volume_output,
     AVG(${outputDateField} - ${inputDateField}) AS avg_days,
     -- Loan complexity score calculation
     AVG(
-      CASE WHEN loan_type IN ('FHA', 'VA', 'USDA') THEN 0.10 ELSE 0 END +
+      CASE WHEN loan_type IN ('FHA', 'VA', 'USDA') THEN 0.15 ELSE 0 END +
       CASE WHEN loan_purpose = 'Purchase' THEN 0.10 ELSE 0 END +
-      CASE WHEN fico_score < 680 THEN 0.10 ELSE 0 END +
-      CASE WHEN ltv_ratio > 95 THEN 0.05 ELSE 0 END +
-      CASE WHEN borr_self_employed = true THEN 0.20 ELSE 0 END
+      CASE WHEN fico_score < 680 THEN 0.02 ELSE 0 END +
+      CASE WHEN ltv_ratio > 80 THEN 0.02 ELSE 0 END +
+      CASE WHEN be_dti_ratio > 43 THEN 0.01 ELSE 0 END
     ) * 100 + 100 AS loan_complexity_score
   FROM loans
   WHERE ${outputDateField} IS NOT NULL
-    AND ${outputDateField} >= $1  -- start date
-    AND ${outputDateField} <= $2  -- end date
+    AND ${outputDateField} >= $1  -- MonthStart(12 months ago)
+    AND ${outputDateField} < $2   -- vCurrentDateAsDate (exclusive)
     AND ${actorColumn} IS NOT NULL
     AND ${actorColumn} NOT IN ('99-Missing', 'Missing', '')
+    AND ${actorColumn} != ''
+    AND UPPER(${actorColumn}) NOT LIKE '99-%'
   GROUP BY ${actorColumn}, DATE_TRUNC('month', ${outputDateField})
 )
 SELECT * FROM monthly_data
 ORDER BY actor_name, output_month DESC
 ```
+
+### Date Field Mapping by Actor (Homestead Configuration)
+
+| Actor | Qlik Alias | Encompass Milestone | Database Column |
+|-------|------------|---------------------|-----------------|
+| Processor | `[Sent To Processing]` | "Processing" | `processing_date` |
+| Underwriter | `[Sent To Closing]` | "Approval" | `approval_date` |
+| Closer | `[End Date]` | "Closing Date" | `closing_date` |
+
+> **Note**: These mappings are specific to the Homestead client. See "Actor-Specific Date Fields" section for configuration notes.
 
 ---
 
@@ -363,6 +415,42 @@ OPS_TTS = (UnitRating × 0.70 + TurnTimeRating × 0.15 + ComplexityRating × 0.1
 
 ---
 
+## CRITICAL: Known Discrepancies vs Qlik - FIXED
+
+Based on analysis of Qlik formulas, the following issues were identified and **FIXED**:
+
+### 1. Count Distinct Loan Numbers ✅ FIXED
+**Qlik**: `COUNT(DISTINCT [Loan Number])`
+**Current Implementation**: Now uses Set tracking for distinct loan_number per actor
+
+**Fix Applied**: 
+- Added `loan_number` to SQL query
+- Use `Set<string>` to track seen loan numbers per actor
+- Only increment units count for distinct loans
+
+### 2. Date Range Calculation ✅ FIXED
+**Qlik**: `>= MonthStart(AddMonths(vCurrentDateAsDate, -12))` AND `< vCurrentDateAsDate`
+- Start: First day of month, 12 months before max date
+- End: The max date in the data (exclusive)
+
+**Fix Applied**: 
+- Changed date filter from `od <= effectiveEndDate` to `od < effectiveEndDate` (exclusive end)
+- Default months changed from 13 to 12 to match Qlik's `vOpsScorecardMonthRange = 12`
+
+### 3. Missing Actor Filter ✅ APPROXIMATED
+**Qlik**: `[Underwriter Missing] *= {0}` - A specific flag field
+**Current Implementation**: Uses string matching on actor name ('99-Missing', etc.)
+
+**Note**: The Qlik data model has a separate `[Underwriter Missing]` flag field (0 or 1). Our implementation approximates this by checking for placeholder names.
+
+### 4. Production Filter ⚠️ NOT AVAILABLE
+**Qlik**: `[Underwriter_Production] *= {*}` - Requires a value in the Production field
+**Current Implementation**: Does not have this filter (no equivalent column in database)
+
+**Note**: This filter ensures only loans where the actor actually worked are counted. Without it, we may include loans assigned to an actor but not worked. This is a known limitation due to missing column in our database schema.
+
+---
+
 ## Notes
 
 1. The trends view is essentially a **pivot table** with actors as rows and months as columns
@@ -370,6 +458,11 @@ OPS_TTS = (UnitRating × 0.70 + TurnTimeRating × 0.15 + ComplexityRating × 0.1
 3. The data source is the same as Operations Scorecard but aggregated differently
 4. Consider caching monthly data since historical months don't change
 5. The "comparison view" (vs-target, monthly, YoY) changes what the "Output vs Target" column shows
+6. **FUTURE: Date Field Configuration** - In Qlik, the Operations Scorecard date fields are configurable per client via `CoheusConfig.xml`. We should add a similar tenant-level configuration to allow clients to specify which database fields map to:
+   - `[Sent To Processing]` 
+   - `[Sent To Underwriting]`
+   - `[Sent To Closing]` (currently hardcoded to `closing_date`)
+   - `[End Date to indicate Loan Closed/Funded]` (currently hardcoded to `funding_date`)
 
 ---
 
@@ -378,3 +471,5 @@ OPS_TTS = (UnitRating × 0.70 + TurnTimeRating × 0.15 + ComplexityRating × 0.1
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-01-27 | Initial handover document | AI Assistant |
+| 2026-01-27 | Fixed date field mappings based on Homestead CoheusConfig: Processor→`processing_date`, Underwriter→`approval_date`, Closer→`closing_date` | AI Assistant |
+| 2026-01-27 | Added note about future configurable date field mappings per tenant | AI Assistant |

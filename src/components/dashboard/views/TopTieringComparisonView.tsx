@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { useTheme } from '@/components/theme-provider';
-import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2, AlertCircle } from 'lucide-react';
+import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2, AlertCircle, Maximize2, X } from 'lucide-react';
 import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ComposedChart, Tooltip, Cell, ReferenceLine } from 'recharts';
 import { formatCompactNumber } from '@/utils/formatting';
 import { 
@@ -19,7 +19,7 @@ import {
 
 type TopTieringActor = 'branch' | 'loan-officer';
 type TimeFilter = 'last-year' | 'last-quarter' | 'last-month' | 'custom';
-type ChartSorting = 'default' | 'revenue-desc' | 'revenue-asc' | 'units-desc' | 'units-asc';
+type ChartSorting = 'desc' | 'asc';
 
 interface ActorData {
   id: string;
@@ -146,7 +146,7 @@ export function TopTieringComparisonView({
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   const isMobile = useIsMobile();
-  const chartHeight = isMobile ? 250 : 300;
+  const chartHeight = isMobile ? 280 : 350;
   
   const [selectedActor, setSelectedActor] = useState<TopTieringActor>(() => {
     const saved = localStorage.getItem('toptiering-comparison-actor');
@@ -156,14 +156,26 @@ export function TopTieringComparisonView({
     const saved = localStorage.getItem('toptiering-comparison-time');
     return (saved as TimeFilter) || 'last-year';
   });
-  const [chartSorting, setChartSorting] = useState<ChartSorting>(() => {
-    const saved = localStorage.getItem('toptiering-comparison-sorting');
-    return (saved as ChartSorting) || 'default';
+  // Per-chart sorting states (desc = high to low, asc = low to high)
+  const [revenueChartSorting, setRevenueChartSorting] = useState<ChartSorting>(() => {
+    const saved = localStorage.getItem('toptiering-comparison-revenue-sorting');
+    return (saved === 'asc' ? 'asc' : 'desc');
+  });
+  const [unitsChartSorting, setUnitsChartSorting] = useState<ChartSorting>(() => {
+    const saved = localStorage.getItem('toptiering-comparison-units-sorting');
+    return (saved === 'asc' ? 'asc' : 'desc');
+  });
+  const [bpsChartSorting, setBpsChartSorting] = useState<ChartSorting>(() => {
+    const saved = localStorage.getItem('toptiering-comparison-bps-sorting');
+    return (saved === 'asc' ? 'asc' : 'desc');
   });
   const [selectedChartTab, setSelectedChartTab] = useState<'units' | 'volume' | 'detail'>('units');
   const [selectedRevenueTab, setSelectedRevenueTab] = useState<'revenue-bps' | 'revenue-per-loan'>('revenue-bps');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Expanded chart states
+  const [expandedChart, setExpandedChart] = useState<'revenue' | 'units' | 'bps' | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   
   // Custom date range state (for when timeFilter is 'custom')
@@ -190,8 +202,16 @@ export function TopTieringComparisonView({
   }, [timeFilter]);
 
   useEffect(() => {
-    localStorage.setItem('toptiering-comparison-sorting', chartSorting);
-  }, [chartSorting]);
+    localStorage.setItem('toptiering-comparison-revenue-sorting', revenueChartSorting);
+  }, [revenueChartSorting]);
+
+  useEffect(() => {
+    localStorage.setItem('toptiering-comparison-units-sorting', unitsChartSorting);
+  }, [unitsChartSorting]);
+
+  useEffect(() => {
+    localStorage.setItem('toptiering-comparison-bps-sorting', bpsChartSorting);
+  }, [bpsChartSorting]);
 
   const formatCurrency = (value: number) => {
     return formatCompactNumber(value);
@@ -325,6 +345,7 @@ export function TopTieringComparisonView({
 
   const totalRevenue = currentData.reduce((sum, item) => sum + item.revenue, 0);
   const totalUnits = currentData.reduce((sum, item) => sum + item.units, 0);
+  const totalVolume = currentData.reduce((sum, item) => sum + item.volume, 0);
   const totalRevenueBPS = currentData.reduce((sum, item) => sum + item.revenueBPS, 0) / currentData.length;
 
   // Calculate tier summaries dynamically
@@ -345,35 +366,58 @@ export function TopTieringComparisonView({
   const actorLabelPlural = selectedActor === 'branch' ? 'Branches' : 'Loan Officers';
   const actorLabelSingular = selectedActor === 'branch' ? 'Branch' : 'Loan Officer';
 
-  // Prepare chart data with cumulative percentage
-  const chartData = useMemo(() => {
-    let sorted = [...filteredData];
+  // Helper function to sort and add cumulative percentages
+  const sortAndAddCumulative = (data: ActorData[], sorting: ChartSorting, metric: 'revenue' | 'units' | 'volume' | 'revenueBPS' | 'revenuePerLoan') => {
+    let sorted = [...data];
     
-    if (chartSorting === 'revenue-desc') {
-      sorted.sort((a, b) => b.revenue - a.revenue);
-    } else if (chartSorting === 'revenue-asc') {
-      sorted.sort((a, b) => a.revenue - b.revenue);
-    } else if (chartSorting === 'units-desc') {
-      sorted.sort((a, b) => b.units - a.units);
-    } else if (chartSorting === 'units-asc') {
-      sorted.sort((a, b) => a.units - b.units);
+    if (metric === 'revenue') {
+      sorted.sort((a, b) => sorting === 'desc' ? b.revenue - a.revenue : a.revenue - b.revenue);
+    } else if (metric === 'units') {
+      sorted.sort((a, b) => sorting === 'desc' ? b.units - a.units : a.units - b.units);
+    } else if (metric === 'volume') {
+      sorted.sort((a, b) => sorting === 'desc' ? b.volume - a.volume : a.volume - b.volume);
+    } else if (metric === 'revenueBPS') {
+      sorted.sort((a, b) => sorting === 'desc' ? b.revenueBPS - a.revenueBPS : a.revenueBPS - b.revenueBPS);
+    } else if (metric === 'revenuePerLoan') {
+      sorted.sort((a, b) => sorting === 'desc' ? b.revenuePerLoan - a.revenuePerLoan : a.revenuePerLoan - b.revenuePerLoan);
     }
 
     let cumulativeRevenue = 0;
     let cumulativeUnits = 0;
-    const filteredTotalRevenue = filteredData.reduce((sum, item) => sum + item.revenue, 0);
-    const filteredTotalUnits = filteredData.reduce((sum, item) => sum + item.units, 0);
+    let cumulativeVolume = 0;
+    const totalRev = data.reduce((sum, item) => sum + item.revenue, 0);
+    const totalUnitsVal = data.reduce((sum, item) => sum + item.units, 0);
+    const totalVol = data.reduce((sum, item) => sum + item.volume, 0);
 
     return sorted.map((item) => {
       cumulativeRevenue += item.revenue;
       cumulativeUnits += item.units;
+      cumulativeVolume += item.volume;
       return {
         ...item,
-        cumulativeRevenuePercent: filteredTotalRevenue > 0 ? (cumulativeRevenue / filteredTotalRevenue) * 100 : 0,
-        cumulativeUnitsPercent: filteredTotalUnits > 0 ? (cumulativeUnits / filteredTotalUnits) * 100 : 0,
+        cumulativeRevenuePercent: totalRev > 0 ? (cumulativeRevenue / totalRev) * 100 : 0,
+        cumulativeUnitsPercent: totalUnitsVal > 0 ? (cumulativeUnits / totalUnitsVal) * 100 : 0,
+        cumulativeVolumePercent: totalVol > 0 ? (cumulativeVolume / totalVol) * 100 : 0,
       };
     });
-  }, [filteredData, chartSorting]);
+  };
+
+  // Prepare chart data with cumulative percentage - separate for each chart
+  const revenueChartData = useMemo(() => {
+    return sortAndAddCumulative(filteredData, revenueChartSorting, 'revenue');
+  }, [filteredData, revenueChartSorting]);
+
+  // Units/Volume chart uses the correct metric based on selected tab
+  const unitsChartData = useMemo(() => {
+    const metric = selectedChartTab === 'volume' ? 'volume' : 'units';
+    return sortAndAddCumulative(filteredData, unitsChartSorting, metric);
+  }, [filteredData, unitsChartSorting, selectedChartTab]);
+
+  // BPS chart sorts by the currently selected metric (BPS or Revenue per Loan)
+  const bpsChartData = useMemo(() => {
+    const metric = selectedRevenueTab === 'revenue-bps' ? 'revenueBPS' : 'revenuePerLoan';
+    return sortAndAddCumulative(filteredData, bpsChartSorting, metric);
+  }, [filteredData, bpsChartSorting, selectedRevenueTab]);
 
   // Get tier color
   const getTierColor = (tier: 'top' | 'second' | 'bottom') => {
@@ -542,25 +586,6 @@ export function TopTieringComparisonView({
                         </TabsTrigger>
                       </TabsList>
                     </Tabs>
-                  </div>
-
-                  {/* Chart Sorting */}
-                  <div>
-                    <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Choose Chart Sorting
-                    </label>
-                    <Select value={chartSorting} onValueChange={(v) => setChartSorting(v as ChartSorting)}>
-                      <SelectTrigger className={`${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="default">Default Sort</SelectItem>
-                        <SelectItem value="revenue-desc">Revenue (High to Low)</SelectItem>
-                        <SelectItem value="revenue-asc">Revenue (Low to High)</SelectItem>
-                        <SelectItem value="units-desc">Units (High to Low)</SelectItem>
-                        <SelectItem value="units-asc">Units (Low to High)</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </CardContent>
               </Card>
@@ -846,14 +871,38 @@ export function TopTieringComparisonView({
             {/* Chart 1: Revenue by Branch (Pareto Chart) */}
             <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
               <CardHeader className={`border-b pb-2 sm:pb-3 px-4 sm:px-6 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
-                <CardTitle className="text-sm sm:text-base">Revenue by {actorLabel}</CardTitle>
-                <CardDescription className="text-[10px] sm:text-xs">Pareto chart showing revenue and accumulated percentage</CardDescription>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+                  <div>
+                    <CardTitle className="text-sm sm:text-base">Revenue by {actorLabel}</CardTitle>
+                    <CardDescription className="text-[10px] sm:text-xs">Pareto chart showing revenue and accumulated percentage</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select value={revenueChartSorting} onValueChange={(v) => setRevenueChartSorting(v as ChartSorting)}>
+                      <SelectTrigger className={`w-[120px] h-8 text-xs ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="desc">High to Low</SelectItem>
+                        <SelectItem value="asc">Low to High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setExpandedChart('revenue')}
+                      className={`h-8 w-8 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                      title="Expand chart"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
                <CardContent className="pt-3 pb-3 px-3 sm:px-6">
                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                    <div className="min-w-[600px]">
                      <ResponsiveContainer width="100%" height={chartHeight}>
-                       <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                       <ComposedChart data={revenueChartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                          <XAxis 
                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
@@ -901,7 +950,7 @@ export function TopTieringComparisonView({
                             return [value, name];
                           }}
                           labelFormatter={(label) => {
-                            const entry = chartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
+                            const entry = revenueChartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
                             return entry ? `${entry.name} (${entry.id})` : label;
                           }}
                         />
@@ -910,7 +959,7 @@ export function TopTieringComparisonView({
                           dataKey="revenue" 
                           radius={[4, 4, 0, 0]}
                         >
-                          {chartData.map((entry, index) => (
+                          {revenueChartData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
                           ))}
                         </Bar>
@@ -938,98 +987,193 @@ export function TopTieringComparisonView({
               </CardContent>
             </Card>
 
-            {/* Chart 2: Units by Branch (Pareto Chart) */}
+            {/* Chart 2: Units/Volume/Detail by Actor */}
             <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
               <CardHeader className={`border-b pb-2 sm:pb-3 px-4 sm:px-6 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
                   <div>
-                    <CardTitle className="text-sm sm:text-base">Units by {actorLabel}</CardTitle>
-                    <CardDescription className="text-[10px] sm:text-xs">Total Units are {formatNumber(totalUnits)}</CardDescription>
+                    <CardTitle className="text-sm sm:text-base">
+                      {selectedChartTab === 'units' && `Units by ${actorLabel}`}
+                      {selectedChartTab === 'volume' && `Volume by ${actorLabel}`}
+                      {selectedChartTab === 'detail' && `Detail by ${actorLabel}`}
+                    </CardTitle>
+                    <CardDescription className="text-[10px] sm:text-xs">
+                      {selectedChartTab === 'units' && `Total Units: ${formatNumber(totalUnits)}`}
+                      {selectedChartTab === 'volume' && `Total Volume: ${formatCurrency(totalVolume)}`}
+                      {selectedChartTab === 'detail' && `${formatNumber(filteredData.length)} ${actorLabelPlural}`}
+                    </CardDescription>
                   </div>
-                  <Tabs value={selectedChartTab} onValueChange={(v) => setSelectedChartTab(v as 'units' | 'volume' | 'detail')}>
-                    <TabsList className={`h-9 sm:h-8 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                      <TabsTrigger value="units" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Units</TabsTrigger>
-                      <TabsTrigger value="volume" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Volume</TabsTrigger>
-                      <TabsTrigger value="detail" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Detail</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  <div className="flex items-center gap-2">
+                    {selectedChartTab !== 'detail' && (
+                      <Select value={unitsChartSorting} onValueChange={(v) => setUnitsChartSorting(v as ChartSorting)}>
+                        <SelectTrigger className={`w-[120px] h-8 text-xs ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="desc">High to Low</SelectItem>
+                          <SelectItem value="asc">Low to High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Tabs value={selectedChartTab} onValueChange={(v) => setSelectedChartTab(v as 'units' | 'volume' | 'detail')}>
+                      <TabsList className={`h-9 sm:h-8 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
+                        <TabsTrigger value="units" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Units</TabsTrigger>
+                        <TabsTrigger value="volume" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Volume</TabsTrigger>
+                        <TabsTrigger value="detail" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Detail</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                    {selectedChartTab !== 'detail' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setExpandedChart('units')}
+                        className={`h-8 w-8 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                        title="Expand chart"
+                      >
+                        <Maximize2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
-               <CardContent className="pt-3 pb-3 px-3 sm:px-6">
-                 <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
-                   <div className="min-w-[600px]">
-                     <ResponsiveContainer width="100%" height={chartHeight}>
-                       <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
-                         <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
-                         <XAxis 
-                           dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
-                           stroke={isDarkMode ? '#94a3b8' : '#64748b'}
-                           tick={{ fontSize: 11 }}
-                           angle={selectedActor === 'loan-officer' ? -45 : 0}
-                           textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                           height={40}
-                         />
-                         <YAxis 
-                           yAxisId="left"
-                           label={{ value: 'Units', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '11px' } }}
-                           stroke={isDarkMode ? '#94a3b8' : '#64748b'}
-                           tick={{ fontSize: 11 }}
-                           width={60}
-                         />
-                         <YAxis 
-                           yAxisId="right"
-                           orientation="right"
-                           label={{ value: 'Accumulated %', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '11px' } }}
-                           stroke={isDarkMode ? '#3b82f6' : '#3b82f6'}
-                           tick={{ fontSize: 11 }}
-                           domain={[0, 100]}
-                           tickFormatter={(value) => `${value.toFixed(1)}%`}
-                           width={60}
-                         />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
-                            border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
-                            borderRadius: '8px',
-                            boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
-                          }}
-                          formatter={(value: any, name: string, props: any) => {
-                            if (name === 'Units') {
-                              const entry = props.payload;
-                              return [
-                                `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(entry.revenuePerLoan)}/unit\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
-                                'Units'
-                              ];
-                            }
-                            if (name === 'Accumulated %') return [`${value.toFixed(1)}%`, 'Cumulative %'];
-                            return [value, name];
-                          }}
-                          labelFormatter={(label) => {
-                            const entry = chartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
-                            return entry ? `${entry.name} (${entry.id})` : label;
-                          }}
-                        />
-                        <Bar 
-                          yAxisId="left"
-                          dataKey="units" 
-                          radius={[4, 4, 0, 0]}
-                        >
-                          {chartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
-                          ))}
-                        </Bar>
-                        <Line 
-                          yAxisId="right"
-                          type="monotone" 
-                          dataKey="cumulativeUnitsPercent" 
-                          stroke="#3b82f6" 
-                          strokeWidth={2}
-                          dot={{ fill: '#3b82f6', r: 4 }}
-                        />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+              <CardContent className="pt-3 pb-3 px-3 sm:px-6">
+                {selectedChartTab === 'detail' ? (
+                  /* Detail Table View */
+                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
+                    <table className={`w-full text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                      <thead>
+                        <tr className={`border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <th className={`text-left py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{actorLabelSingular}</th>
+                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Units</th>
+                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Volume</th>
+                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Revenue</th>
+                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Rev BPS</th>
+                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Rev/Loan</th>
+                          <th className={`text-center py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Tier</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {unitsChartData.map((actor, index) => (
+                          <tr 
+                            key={actor.id} 
+                            className={`border-b ${isDarkMode ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-slate-100 hover:bg-slate-50'}`}
+                          >
+                            <td className="py-2 px-3">
+                              <div className="font-medium">{actor.name}</div>
+                              <div className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{actor.id}</div>
+                            </td>
+                            <td className="text-right py-2 px-3 tabular-nums">{formatNumber(actor.units)}</td>
+                            <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(actor.volume)}</td>
+                            <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(actor.revenue)}</td>
+                            <td className="text-right py-2 px-3 tabular-nums">{actor.revenueBPS.toFixed(0)}</td>
+                            <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(actor.revenuePerLoan)}</td>
+                            <td className="text-center py-2 px-3">
+                              <span 
+                                className="inline-block px-2 py-0.5 rounded text-[10px] font-medium"
+                                style={{ 
+                                  backgroundColor: getTierColor(actor.tier) + '20', 
+                                  color: getTierColor(actor.tier) 
+                                }}
+                              >
+                                {actor.tier === 'top' ? 'Top 50%' : actor.tier === 'second' ? 'Second 30%' : 'Bottom 20%'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
+                ) : (
+                  /* Units or Volume Chart View */
+                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
+                    <div className="min-w-[600px]">
+                      <ResponsiveContainer width="100%" height={chartHeight}>
+                        <ComposedChart data={unitsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
+                          <XAxis 
+                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
+                            stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                            tick={{ fontSize: 11 }}
+                            angle={selectedActor === 'loan-officer' ? -45 : 0}
+                            textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
+                            height={40}
+                          />
+                          <YAxis 
+                            yAxisId="left"
+                            label={{ 
+                              value: selectedChartTab === 'units' ? 'Units' : 'Volume ($)', 
+                              angle: -90, 
+                              position: 'insideLeft', 
+                              style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '11px' } 
+                            }}
+                            stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                            tick={{ fontSize: 11 }}
+                            tickFormatter={selectedChartTab === 'volume' ? (value) => formatCurrency(value) : undefined}
+                            width={selectedChartTab === 'volume' ? 70 : 60}
+                          />
+                          <YAxis 
+                            yAxisId="right"
+                            orientation="right"
+                            label={{ value: 'Accumulated %', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '11px' } }}
+                            stroke={isDarkMode ? '#3b82f6' : '#3b82f6'}
+                            tick={{ fontSize: 11 }}
+                            domain={[0, 100]}
+                            tickFormatter={(value) => `${value.toFixed(1)}%`}
+                            width={60}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+                              border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
+                              borderRadius: '8px',
+                              boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                            }}
+                            formatter={(value: any, name: string, props: any) => {
+                              const entry = props.payload;
+                              if (name === 'Units') {
+                                return [
+                                  `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(entry.revenuePerLoan)}/unit\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                  'Units'
+                                ];
+                              }
+                              if (name === 'Volume') {
+                                return [
+                                  `${formatCurrency(value)}\n${formatNumber(entry.units)} units · ${formatCurrency(entry.revenue)} revenue\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                  'Volume'
+                                ];
+                              }
+                              if (name === 'Accumulated %') return [`${value.toFixed(1)}%`, 'Cumulative %'];
+                              return [value, name];
+                            }}
+                            labelFormatter={(label) => {
+                              const entry = unitsChartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
+                              return entry ? `${entry.name} (${entry.id})` : label;
+                            }}
+                          />
+                          <Bar 
+                            yAxisId="left"
+                            dataKey={selectedChartTab === 'units' ? 'units' : 'volume'} 
+                            name={selectedChartTab === 'units' ? 'Units' : 'Volume'}
+                            radius={[4, 4, 0, 0]}
+                          >
+                            {unitsChartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                            ))}
+                          </Bar>
+                          <Line 
+                            yAxisId="right"
+                            type="monotone" 
+                            dataKey={selectedChartTab === 'units' ? 'cumulativeUnitsPercent' : 'cumulativeVolumePercent'} 
+                            name="Accumulated %"
+                            stroke="#3b82f6" 
+                            strokeWidth={2}
+                            dot={{ fill: '#3b82f6', r: 4 }}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -1044,19 +1188,39 @@ export function TopTieringComparisonView({
                       Bar height indicates Revenue BPS. Bar Color indicates Revenue $ Tier.
                     </p>
                   </div>
-                  <Tabs value={selectedRevenueTab} onValueChange={(v) => setSelectedRevenueTab(v as 'revenue-bps' | 'revenue-per-loan')}>
-                    <TabsList className={`h-9 sm:h-8 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                      <TabsTrigger value="revenue-bps" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Revenue BPS</TabsTrigger>
-                      <TabsTrigger value="revenue-per-loan" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Revenue per Loan ($)</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  <div className="flex items-center gap-2">
+                    <Select value={bpsChartSorting} onValueChange={(v) => setBpsChartSorting(v as ChartSorting)}>
+                      <SelectTrigger className={`w-[120px] h-8 text-xs ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="desc">High to Low</SelectItem>
+                        <SelectItem value="asc">Low to High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Tabs value={selectedRevenueTab} onValueChange={(v) => setSelectedRevenueTab(v as 'revenue-bps' | 'revenue-per-loan')}>
+                      <TabsList className={`h-9 sm:h-8 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
+                        <TabsTrigger value="revenue-bps" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Revenue BPS</TabsTrigger>
+                        <TabsTrigger value="revenue-per-loan" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Revenue per Loan ($)</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setExpandedChart('bps')}
+                      className={`h-8 w-8 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                      title="Expand chart"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
                <CardContent className="pt-3 pb-3 px-3 sm:px-6">
                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                    <div className="min-w-[600px]">
                      <ResponsiveContainer width="100%" height={chartHeight}>
-                       <BarChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                       <BarChart data={bpsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                          <XAxis 
                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
@@ -1093,7 +1257,7 @@ export function TopTieringComparisonView({
                             ];
                           }}
                           labelFormatter={(label) => {
-                            const entry = chartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
+                            const entry = bpsChartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
                             return entry ? `${entry.name} (${entry.id})` : label;
                           }}
                         />
@@ -1101,7 +1265,7 @@ export function TopTieringComparisonView({
                           dataKey={selectedRevenueTab === 'revenue-bps' ? 'revenueBPS' : 'revenuePerLoan'} 
                           radius={[4, 4, 0, 0]}
                         >
-                          {chartData.map((entry, index) => (
+                          {bpsChartData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
                           ))}
                         </Bar>
@@ -1115,6 +1279,285 @@ export function TopTieringComparisonView({
             )}
           </div>
         </div>
+
+        {/* Expanded Chart Modal */}
+        {expandedChart && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className={`w-full max-w-7xl max-h-[90vh] rounded-xl overflow-hidden ${isDarkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'} shadow-2xl`}>
+              {/* Modal Header */}
+              <div className={`flex items-center justify-between px-6 py-4 border-b ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-slate-50'}`}>
+                <div>
+                  <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    {expandedChart === 'revenue' && `Revenue by ${actorLabel}`}
+                    {expandedChart === 'units' && (selectedChartTab === 'units' ? `Units by ${actorLabel}` : `Volume by ${actorLabel}`)}
+                    {expandedChart === 'bps' && `${selectedRevenueTab === 'revenue-bps' ? 'Revenue BPS' : 'Revenue per Loan'} by ${actorLabel}`}
+                  </h2>
+                  <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                    {expandedChart === 'revenue' && 'Pareto chart showing revenue and accumulated percentage'}
+                    {expandedChart === 'units' && (selectedChartTab === 'units' ? `Total Units: ${formatNumber(totalUnits)}` : `Total Volume: ${formatCurrency(totalVolume)}`)}
+                    {expandedChart === 'bps' && `Total Revenue: ${totalRevenueBPS.toFixed(0)} BPS`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* Sorting dropdown in modal */}
+                  <Select 
+                    value={expandedChart === 'revenue' ? revenueChartSorting : expandedChart === 'units' ? unitsChartSorting : bpsChartSorting} 
+                    onValueChange={(v) => {
+                      if (expandedChart === 'revenue') setRevenueChartSorting(v as ChartSorting);
+                      else if (expandedChart === 'units') setUnitsChartSorting(v as ChartSorting);
+                      else setBpsChartSorting(v as ChartSorting);
+                    }}
+                  >
+                    <SelectTrigger className={`w-[130px] h-9 ${isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="desc">High to Low</SelectItem>
+                      <SelectItem value="asc">Low to High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {/* Units/Volume chart tab selector */}
+                  {expandedChart === 'units' && (
+                    <Tabs value={selectedChartTab} onValueChange={(v) => setSelectedChartTab(v as 'units' | 'volume' | 'detail')}>
+                      <TabsList className={`h-9 ${isDarkMode ? 'bg-slate-800 border border-slate-600' : 'bg-slate-100 border border-slate-300'}`}>
+                        <TabsTrigger value="units" className="text-xs px-3">Units</TabsTrigger>
+                        <TabsTrigger value="volume" className="text-xs px-3">Volume</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  )}
+                  {/* BPS chart tab selector */}
+                  {expandedChart === 'bps' && (
+                    <Tabs value={selectedRevenueTab} onValueChange={(v) => setSelectedRevenueTab(v as 'revenue-bps' | 'revenue-per-loan')}>
+                      <TabsList className={`h-9 ${isDarkMode ? 'bg-slate-800 border border-slate-600' : 'bg-slate-100 border border-slate-300'}`}>
+                        <TabsTrigger value="revenue-bps" className="text-xs px-3">Revenue BPS</TabsTrigger>
+                        <TabsTrigger value="revenue-per-loan" className="text-xs px-3">Revenue per Loan</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedChart(null)}
+                    className={`h-9 w-9 p-0 ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
+              </div>
+              
+              {/* Modal Chart Content */}
+              <div className="p-6 overflow-auto" style={{ maxHeight: 'calc(90vh - 80px)' }}>
+                <div className="w-full">
+                  <ResponsiveContainer width="100%" height={550}>
+                    {expandedChart === 'revenue' ? (
+                      <ComposedChart data={revenueChartData} margin={{ top: 20, right: 40, left: 30, bottom: 60 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
+                        <XAxis 
+                          dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
+                          stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                          tick={{ fontSize: 12 }}
+                          angle={selectedActor === 'loan-officer' ? -45 : 0}
+                          textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
+                          height={60}
+                          interval={0}
+                        />
+                        <YAxis 
+                          yAxisId="left"
+                          label={{ value: 'Revenue', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '12px' } }}
+                          stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => formatCurrency(value)}
+                          width={70}
+                        />
+                        <YAxis 
+                          yAxisId="right"
+                          orientation="right"
+                          label={{ value: 'Accumulated %', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '12px' } }}
+                          stroke={isDarkMode ? '#3b82f6' : '#3b82f6'}
+                          tick={{ fontSize: 12 }}
+                          domain={[0, 100]}
+                          tickFormatter={(value) => `${value.toFixed(0)}%`}
+                          width={60}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+                            border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                          }}
+                          formatter={(value: any, name: string, props: any) => {
+                            if (name === 'Revenue') {
+                              const entry = props.payload;
+                              return [
+                                `${formatCurrency(value)}\n${entry.units} units · ${formatCurrency(entry.revenuePerLoan)}/loan\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                'Revenue'
+                              ];
+                            }
+                            if (name === 'Accumulated %') return [`${value.toFixed(1)}%`, 'Cumulative %'];
+                            return [value, name];
+                          }}
+                          labelFormatter={(label) => {
+                            const entry = revenueChartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
+                            return entry ? `${entry.name} (${entry.id})` : label;
+                          }}
+                        />
+                        <Bar yAxisId="left" dataKey="revenue" radius={[4, 4, 0, 0]} name="Revenue">
+                          {revenueChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                          ))}
+                        </Bar>
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="cumulativeRevenuePercent" 
+                          stroke="#3b82f6" 
+                          strokeWidth={2}
+                          dot={{ fill: '#3b82f6', r: 4 }}
+                          name="Accumulated %"
+                        />
+                        <ReferenceLine yAxisId="right" y={50} stroke={isDarkMode ? '#64748b' : '#94a3b8'} strokeDasharray="5 5" strokeWidth={1} />
+                      </ComposedChart>
+                    ) : expandedChart === 'units' ? (
+                      <ComposedChart data={unitsChartData} margin={{ top: 20, right: 40, left: 30, bottom: 60 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
+                        <XAxis 
+                          dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
+                          stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                          tick={{ fontSize: 12 }}
+                          angle={selectedActor === 'loan-officer' ? -45 : 0}
+                          textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
+                          height={60}
+                          interval={0}
+                        />
+                        <YAxis 
+                          yAxisId="left"
+                          label={{ 
+                            value: selectedChartTab === 'units' ? 'Units' : 'Volume ($)', 
+                            angle: -90, 
+                            position: 'insideLeft', 
+                            style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '12px' } 
+                          }}
+                          stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={selectedChartTab === 'volume' ? (value) => formatCurrency(value) : undefined}
+                          width={selectedChartTab === 'volume' ? 80 : 60}
+                        />
+                        <YAxis 
+                          yAxisId="right"
+                          orientation="right"
+                          label={{ value: 'Accumulated %', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '12px' } }}
+                          stroke={isDarkMode ? '#3b82f6' : '#3b82f6'}
+                          tick={{ fontSize: 12 }}
+                          domain={[0, 100]}
+                          tickFormatter={(value) => `${value.toFixed(0)}%`}
+                          width={60}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+                            border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                          }}
+                          formatter={(value: any, name: string, props: any) => {
+                            const entry = props.payload;
+                            if (name === 'Units') {
+                              return [
+                                `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(entry.revenuePerLoan)}/unit\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                'Units'
+                              ];
+                            }
+                            if (name === 'Volume') {
+                              return [
+                                `${formatCurrency(value)}\n${formatNumber(entry.units)} units · ${formatCurrency(entry.revenue)} revenue\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                'Volume'
+                              ];
+                            }
+                            if (name === 'Accumulated %') return [`${value.toFixed(1)}%`, 'Cumulative %'];
+                            return [value, name];
+                          }}
+                          labelFormatter={(label) => {
+                            const entry = unitsChartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
+                            return entry ? `${entry.name} (${entry.id})` : label;
+                          }}
+                        />
+                        <Bar 
+                          yAxisId="left" 
+                          dataKey={selectedChartTab === 'units' ? 'units' : 'volume'} 
+                          name={selectedChartTab === 'units' ? 'Units' : 'Volume'}
+                          radius={[4, 4, 0, 0]}
+                        >
+                          {unitsChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                          ))}
+                        </Bar>
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey={selectedChartTab === 'units' ? 'cumulativeUnitsPercent' : 'cumulativeVolumePercent'} 
+                          stroke="#3b82f6" 
+                          strokeWidth={2}
+                          dot={{ fill: '#3b82f6', r: 4 }}
+                          name="Accumulated %"
+                        />
+                      </ComposedChart>
+                    ) : (
+                      <BarChart data={bpsChartData} margin={{ top: 20, right: 40, left: 30, bottom: 60 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
+                        <XAxis 
+                          dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
+                          stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                          tick={{ fontSize: 12 }}
+                          angle={selectedActor === 'loan-officer' ? -45 : 0}
+                          textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
+                          height={60}
+                          interval={0}
+                        />
+                        <YAxis 
+                          label={{ value: selectedRevenueTab === 'revenue-bps' ? 'Revenue BPS' : 'Revenue per Loan ($)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '12px' } }}
+                          stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                          tick={{ fontSize: 12 }}
+                          width={70}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
+                            border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                          }}
+                          formatter={(value: any, name: string, props: any) => {
+                            const entry = props.payload;
+                            if (selectedRevenueTab === 'revenue-bps') {
+                              return [
+                                `${value} BPS\n${formatCurrency(entry.revenue)} revenue · ${formatNumber(entry.units)} units\n${formatCurrency(entry.revenuePerLoan)}/loan · ${entry.tier} tier`,
+                                'Revenue BPS'
+                              ];
+                            }
+                            return [
+                              `${formatCurrency(value)}\n${formatCurrency(entry.revenue)} total · ${formatNumber(entry.units)} units\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                              'Revenue per Loan'
+                            ];
+                          }}
+                          labelFormatter={(label) => {
+                            const entry = bpsChartData.find(d => (selectedActor === 'branch' ? d.id : d.name) === label);
+                            return entry ? `${entry.name} (${entry.id})` : label;
+                          }}
+                        />
+                        <Bar dataKey={selectedRevenueTab === 'revenue-bps' ? 'revenueBPS' : 'revenuePerLoan'} radius={[4, 4, 0, 0]}>
+                          {bpsChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    )}
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

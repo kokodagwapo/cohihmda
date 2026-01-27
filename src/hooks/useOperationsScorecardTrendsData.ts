@@ -157,7 +157,9 @@ export const useOperationsScorecardTrendsData = (
             top: responseData.tierSummary?.top?.count,
             second: responseData.tierSummary?.second?.count,
             bottom: responseData.tierSummary?.bottom?.count,
-          }
+          },
+          dateRange: (responseData as any).dateRange,
+          _debug: (responseData as any)._debug
         }, null, 2));
         
         if (responseData && responseData.actors) {

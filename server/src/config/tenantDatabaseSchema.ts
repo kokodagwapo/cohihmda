@@ -156,6 +156,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         estimated_closing_date DATE,
         funding_date TIMESTAMPTZ,
         funds_sent_date DATE,
+        disbursement_date DATE,
         shipped_date DATE,
         investor_purchase_date DATE,
         purchased_date DATE,

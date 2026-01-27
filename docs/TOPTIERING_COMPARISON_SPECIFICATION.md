@@ -30,27 +30,35 @@ The TopTiering Comparison page displays Pareto charts showing revenue, units, an
 | `vParetoMeasure` | 'Loan Amount' | - | Default measure: 'Loan Amount' or 'Branch Concession ($)' |
 | `vChannelGroup` | 'Retail' | 'TPO' | Channel filter |
 
-### Revenue Calculation (matches Qlik)
+### Revenue Calculation (matches Qlik REVENUE.qvs)
 
 ```qvs
-// Revenue is the sum of all revenue components for funded loans
-Revenue = Sum({<DateType={'Funding'}, [Rate Lock Buy Side Base Price Rate] = {">0"}>}[Revenue])
+// From Qlik REVENUE.qvs - Default revenue formula:
+// [Base Buy ($)] + [Orig Fee Borr Pd] + [Orig Fees Seller] - [CD Lender Credits]
 
-// [Revenue] field is calculated during load as:
-// BaseBuy($) + OrigFeeBorrPd + OrigFeesSeller - CDLenderCredits + PayoutAmounts
+// IMPORTANT: [Base Buy ($)] is CALCULATED from rate:
+// [Base Buy ($)] = ((Rate Lock Buy Side Base Price Rate - 100) / 100) * Loan Amount
+
+// Revenue is the sum of revenue components for funded loans with valid rate lock
+Revenue = Sum({<DateType={'Funding'}, [Rate Lock Buy Side Base Price Rate] = {">0"}>}[Revenue])
 ```
+
+**IMPORTANT**: 
+- The Qlik formula does NOT include payout fields (`pa_sell_amt`, `pa_srp_amt`, `pa_payout_*`)
+- `[Base Buy ($)]` must be CALCULATED from `rate_lock_buy_side_base_price_rate` and `loan_amount`
 
 In our implementation:
 ```sql
 revenue = 
-  COALESCE(origination_points, 0) +
+  -- [Base Buy ($)] calculated from rate
+  ((COALESCE(rate_lock_buy_side_base_price_rate, 0) - 100) / 100.0) * COALESCE(loan_amount, 0) +
   COALESCE(orig_fee_borr_pd, 0) +
   COALESCE(orig_fees_seller, 0) -
-  COALESCE(cd_lender_credits, 0) +
-  COALESCE(pa_sell_amt, 0) +
-  COALESCE(pa_srp_amt, 0) +
-  COALESCE(pa_payout_1, 0) + ... + COALESCE(pa_payout_12, 0)
+  COALESCE(cd_lender_credits, 0)
 ```
+
+**Example**: If `rate_lock_buy_side_base_price_rate` = 101.5% and `loan_amount` = $200,000:
+- Base Buy ($) = ((101.5 - 100) / 100) * 200,000 = 0.015 * 200,000 = $3,000
 
 ---
 
@@ -276,8 +284,8 @@ When an actor's cumulative revenue crosses a threshold (e.g., exactly at 50%), o
 ### 2. Date Calculations
 Our `vMaxDate` uses `MAX(COALESCE(last_modified_date, funding_date))`. Qlik uses `Max("Last Modified Date")`. If `last_modified_date` is not populated consistently, results may vary.
 
-### 3. Revenue Components
-We include all payout fields (`pa_payout_1` through `pa_payout_12`). If Qlik uses additional or different payout fields, revenue totals may differ slightly.
+### 3. Channel Default
+Qlik defaults to `vChannelGroup = 'Retail'`. Our API does not apply a default channel filter - it must be explicitly passed. To match Qlik exactly, the frontend should pass `channel_group=Retail`.
 
 ---
 
@@ -285,4 +293,6 @@ We include all payout fields (`pa_payout_1` through `pa_payout_12`). If Qlik use
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-27 | Fixed revenue formula - [Base Buy ($)] must be CALCULATED as ((rate_lock_buy_side_base_price_rate - 100) / 100) * loan_amount, NOT origination_points | AI Assistant |
+| 2026-01-27 | Removed payout fields (pa_sell_amt, pa_srp_amt, pa_payout_*) that were incorrectly included | AI Assistant |
 | 2026-01-27 | Initial specification document | AI Assistant |
