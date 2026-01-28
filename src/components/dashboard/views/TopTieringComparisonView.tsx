@@ -419,6 +419,12 @@ export function TopTieringComparisonView({
     return sortAndAddCumulative(filteredData, bpsChartSorting, metric);
   }, [filteredData, bpsChartSorting, selectedRevenueTab]);
 
+  // Calculate minimum chart width based on data count for horizontal scrolling
+  const getChartMinWidth = (dataCount: number) => {
+    const minWidthPerBar = 70; // pixels per bar for readable labels
+    return Math.max(600, dataCount * minWidthPerBar);
+  };
+
   // Get tier color - Updated to match new tier colors
   const getTierColor = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
@@ -816,7 +822,7 @@ export function TopTieringComparisonView({
                         {totalRevenueBPS.toFixed(0)}
                       </p>
                       <p className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                        Range: {statisticalInsights.revenueBPS.min}-{statisticalInsights.revenueBPS.max}
+                        Range: {Math.round(statisticalInsights.revenueBPS.min)}-{Math.round(statisticalInsights.revenueBPS.max)}
                       </p>
                     </div>
                     <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
@@ -900,18 +906,18 @@ export function TopTieringComparisonView({
               </CardHeader>
                <CardContent className="pt-3 pb-3 px-3 sm:px-6">
                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
-                   <div className="min-w-[600px]">
+                   <div style={{ minWidth: getChartMinWidth(revenueChartData.length) }}>
                      <ResponsiveContainer width="100%" height={chartHeight}>
-                       <ComposedChart data={revenueChartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                       <ComposedChart data={revenueChartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                          <XAxis 
                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                            stroke={isDarkMode ? '#94a3b8' : '#64748b'}
-                           tick={{ fontSize: 10 }}
-                           angle={selectedActor === 'loan-officer' ? -45 : 0}
-                           textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                           height={50}
-                           interval="preserveStartEnd"
+                           tick={{ fontSize: 11 }}
+                           angle={-45}
+                           textAnchor="end"
+                           height={80}
+                           interval={0}
                          />
                          <YAxis 
                            yAxisId="left"
@@ -942,7 +948,7 @@ export function TopTieringComparisonView({
                             if (name === 'Revenue') {
                               const entry = props.payload;
                               return [
-                                `${formatCurrency(value)}\n${entry.units} units · ${formatCurrency(entry.revenuePerLoan)}/loan\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                `${formatCurrency(value)}\n${entry.units} units · ${formatCurrency(Math.round(entry.revenuePerLoan))}/loan\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                                 'Revenue'
                               ];
                             }
@@ -1066,7 +1072,7 @@ export function TopTieringComparisonView({
                             <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(actor.volume)}</td>
                             <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(actor.revenue)}</td>
                             <td className="text-right py-2 px-3 tabular-nums">{actor.revenueBPS.toFixed(0)}</td>
-                            <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(actor.revenuePerLoan)}</td>
+                            <td className="text-right py-2 px-3 tabular-nums">{formatCurrency(Math.round(actor.revenuePerLoan))}</td>
                             <td className="text-center py-2 px-3">
                               <span 
                                 className="inline-block px-2 py-0.5 rounded text-[10px] font-medium"
@@ -1086,17 +1092,18 @@ export function TopTieringComparisonView({
                 ) : (
                   /* Units or Volume Chart View */
                   <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
-                    <div className="min-w-[600px]">
+                    <div style={{ minWidth: getChartMinWidth(unitsChartData.length) }}>
                       <ResponsiveContainer width="100%" height={chartHeight}>
-                        <ComposedChart data={unitsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                        <ComposedChart data={unitsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                           <XAxis 
                             dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                             stroke={isDarkMode ? '#94a3b8' : '#64748b'}
                             tick={{ fontSize: 11 }}
-                            angle={selectedActor === 'loan-officer' ? -45 : 0}
-                            textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                            height={40}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                            interval={0}
                           />
                           <YAxis 
                             yAxisId="left"
@@ -1132,13 +1139,13 @@ export function TopTieringComparisonView({
                               const entry = props.payload;
                               if (name === 'Units') {
                                 return [
-                                  `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(entry.revenuePerLoan)}/unit\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                  `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(Math.round(entry.revenuePerLoan))}/unit\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                                   'Units'
                                 ];
                               }
                               if (name === 'Volume') {
                                 return [
-                                  `${formatCurrency(value)}\n${formatNumber(entry.units)} units · ${formatCurrency(entry.revenue)} revenue\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                  `${formatCurrency(value)}\n${formatNumber(entry.units)} units · ${formatCurrency(entry.revenue)} revenue\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                                   'Volume'
                                 ];
                               }
@@ -1218,17 +1225,18 @@ export function TopTieringComparisonView({
               </CardHeader>
                <CardContent className="pt-3 pb-3 px-3 sm:px-6">
                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
-                   <div className="min-w-[600px]">
+                   <div style={{ minWidth: getChartMinWidth(bpsChartData.length) }}>
                      <ResponsiveContainer width="100%" height={chartHeight}>
-                       <BarChart data={bpsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
+                       <BarChart data={bpsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                          <XAxis 
                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                            stroke={isDarkMode ? '#94a3b8' : '#64748b'}
                            tick={{ fontSize: 11 }}
-                           angle={selectedActor === 'loan-officer' ? -45 : 0}
-                           textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                           height={40}
+                           angle={-45}
+                           textAnchor="end"
+                           height={80}
+                           interval={0}
                          />
                          <YAxis 
                            label={{ value: selectedRevenueTab === 'revenue-bps' ? 'Revenue BPS' : 'Revenue per Loan ($)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: isDarkMode ? '#94a3b8' : '#64748b', fontSize: '11px' } }}
@@ -1247,12 +1255,12 @@ export function TopTieringComparisonView({
                             const entry = props.payload;
                             if (selectedRevenueTab === 'revenue-bps') {
                               return [
-                                `${value} BPS\n${formatCurrency(entry.revenue)} revenue · ${formatNumber(entry.units)} units\n${formatCurrency(entry.revenuePerLoan)}/loan · ${entry.tier} tier`,
+                                `${Math.round(value)} BPS\n${formatCurrency(entry.revenue)} revenue · ${formatNumber(entry.units)} units\n${formatCurrency(Math.round(entry.revenuePerLoan))}/loan · ${entry.tier} tier`,
                                 'Revenue BPS'
                               ];
                             }
                             return [
-                              `${formatCurrency(value)}\n${formatCurrency(entry.revenue)} total · ${formatNumber(entry.units)} units\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                              `${formatCurrency(Math.round(value))}\n${formatCurrency(entry.revenue)} total · ${formatNumber(entry.units)} units\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                               'Revenue per Loan'
                             ];
                           }}
@@ -1350,15 +1358,15 @@ export function TopTieringComparisonView({
                 <div className="w-full">
                   <ResponsiveContainer width="100%" height={550}>
                     {expandedChart === 'revenue' ? (
-                      <ComposedChart data={revenueChartData} margin={{ top: 20, right: 40, left: 30, bottom: 60 }}>
+                      <ComposedChart data={revenueChartData} margin={{ top: 20, right: 40, left: 30, bottom: 100 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                         <XAxis 
                           dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                           stroke={isDarkMode ? '#94a3b8' : '#64748b'}
                           tick={{ fontSize: 12 }}
-                          angle={selectedActor === 'loan-officer' ? -45 : 0}
-                          textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                          height={60}
+                          angle={-45}
+                          textAnchor="end"
+                          height={100}
                           interval={0}
                         />
                         <YAxis 
@@ -1390,7 +1398,7 @@ export function TopTieringComparisonView({
                             if (name === 'Revenue') {
                               const entry = props.payload;
                               return [
-                                `${formatCurrency(value)}\n${entry.units} units · ${formatCurrency(entry.revenuePerLoan)}/loan\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                `${formatCurrency(value)}\n${entry.units} units · ${formatCurrency(Math.round(entry.revenuePerLoan))}/loan\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                                 'Revenue'
                               ];
                             }
@@ -1419,15 +1427,15 @@ export function TopTieringComparisonView({
                         <ReferenceLine yAxisId="right" y={50} stroke={isDarkMode ? '#64748b' : '#94a3b8'} strokeDasharray="5 5" strokeWidth={1} />
                       </ComposedChart>
                     ) : expandedChart === 'units' ? (
-                      <ComposedChart data={unitsChartData} margin={{ top: 20, right: 40, left: 30, bottom: 60 }}>
+                      <ComposedChart data={unitsChartData} margin={{ top: 20, right: 40, left: 30, bottom: 100 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                         <XAxis 
                           dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                           stroke={isDarkMode ? '#94a3b8' : '#64748b'}
                           tick={{ fontSize: 12 }}
-                          angle={selectedActor === 'loan-officer' ? -45 : 0}
-                          textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                          height={60}
+                          angle={-45}
+                          textAnchor="end"
+                          height={100}
                           interval={0}
                         />
                         <YAxis 
@@ -1464,13 +1472,13 @@ export function TopTieringComparisonView({
                             const entry = props.payload;
                             if (name === 'Units') {
                               return [
-                                `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(entry.revenuePerLoan)}/unit\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                `${formatNumber(value)} units\n${formatCurrency(entry.revenue)} revenue · ${formatCurrency(Math.round(entry.revenuePerLoan))}/unit\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                                 'Units'
                               ];
                             }
                             if (name === 'Volume') {
                               return [
-                                `${formatCurrency(value)}\n${formatNumber(entry.units)} units · ${formatCurrency(entry.revenue)} revenue\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                                `${formatCurrency(value)}\n${formatNumber(entry.units)} units · ${formatCurrency(entry.revenue)} revenue\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                                 'Volume'
                               ];
                             }
@@ -1503,15 +1511,15 @@ export function TopTieringComparisonView({
                         />
                       </ComposedChart>
                     ) : (
-                      <BarChart data={bpsChartData} margin={{ top: 20, right: 40, left: 30, bottom: 60 }}>
+                      <BarChart data={bpsChartData} margin={{ top: 20, right: 40, left: 30, bottom: 100 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                         <XAxis 
                           dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                           stroke={isDarkMode ? '#94a3b8' : '#64748b'}
                           tick={{ fontSize: 12 }}
-                          angle={selectedActor === 'loan-officer' ? -45 : 0}
-                          textAnchor={selectedActor === 'loan-officer' ? 'end' : 'middle'}
-                          height={60}
+                          angle={-45}
+                          textAnchor="end"
+                          height={100}
                           interval={0}
                         />
                         <YAxis 
@@ -1531,12 +1539,12 @@ export function TopTieringComparisonView({
                             const entry = props.payload;
                             if (selectedRevenueTab === 'revenue-bps') {
                               return [
-                                `${value} BPS\n${formatCurrency(entry.revenue)} revenue · ${formatNumber(entry.units)} units\n${formatCurrency(entry.revenuePerLoan)}/loan · ${entry.tier} tier`,
+                                `${Math.round(value)} BPS\n${formatCurrency(entry.revenue)} revenue · ${formatNumber(entry.units)} units\n${formatCurrency(Math.round(entry.revenuePerLoan))}/loan · ${entry.tier} tier`,
                                 'Revenue BPS'
                               ];
                             }
                             return [
-                              `${formatCurrency(value)}\n${formatCurrency(entry.revenue)} total · ${formatNumber(entry.units)} units\n${entry.revenueBPS} BPS · ${entry.tier} tier`,
+                              `${formatCurrency(Math.round(value))}\n${formatCurrency(entry.revenue)} total · ${formatNumber(entry.units)} units\n${Math.round(entry.revenueBPS)} BPS · ${entry.tier} tier`,
                               'Revenue per Loan'
                             ];
                           }}

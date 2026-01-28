@@ -71,6 +71,11 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
   const tierSummary = data?.tierSummary;
   const kpis = data?.kpis;
   
+  // Filter actors by search query
+  const filteredActors = searchQuery.trim() 
+    ? actors.filter(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : actors;
+  
   // Convert tier summary to array format for rendering
   const tierSummaries: TierSummary[] = tierSummary ? [
     tierSummary.top,
@@ -553,68 +558,87 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                 </div>
               </CardHeader>
               <CardContent>
-                {/* Key Insights Banner */}
-                <div className={`mb-4 p-4 rounded-lg border ${isDarkMode ? 'bg-blue-900/10 border-blue-700/30' : 'bg-blue-50 border-blue-200'}`}>
-                  <div className="flex items-start gap-3">
-                    <Info className={`w-5 h-5 mt-0.5 flex-shrink-0 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
-                    <div className="flex-1">
-                      <h4 className={`text-sm font-semibold mb-2 ${isDarkMode ? 'text-blue-300' : 'text-blue-900'}`}>
-                        Performance Insights
-                      </h4>
-                      <div className={`grid grid-cols-1 md:grid-cols-3 gap-3 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                        <div>
-                          <span className="font-semibold">Top Performer:</span> Michelle Neuf
-                          <span className="ml-1 text-emerald-600 dark:text-emerald-400">(+48 vs target)</span>
-                        </div>
-                        <div>
-                          <span className="font-semibold">Needs Support:</span> Brett Smith, Katherine Goodey
-                          <span className="ml-1 text-red-600 dark:text-red-400">(Below target)</span>
-                        </div>
-                        <div>
-                          <span className="font-semibold">Avg Performance:</span> {Math.round((totalUnits / actors.length) / months.length)} units/month
-                          <span className={`ml-1 ${totalUnits / actors.length / months.length >= targetUnitsPerMonth ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                            ({totalUnits / actors.length / months.length >= targetUnitsPerMonth ? 'On track' : 'Below target'})
-                          </span>
+                {/* Key Insights Banner - Dynamically calculated from data */}
+                {(() => {
+                  // Calculate insights from actual data
+                  const latestMonth = months[0];
+                  
+                  // Find top performer (highest units in latest month)
+                  const actorsByLatestUnits = [...actors].sort((a, b) => {
+                    const aUnits = a.months[latestMonth]?.unitsOutput || 0;
+                    const bUnits = b.months[latestMonth]?.unitsOutput || 0;
+                    return bUnits - aUnits;
+                  });
+                  const topPerformer = actorsByLatestUnits[0];
+                  const topPerformerUnits = topPerformer?.months[latestMonth]?.unitsOutput || 0;
+                  const topPerformerVsTarget = topPerformerUnits - targetUnitsPerMonth;
+                  
+                  // Find actors needing support (below target in latest month)
+                  const needsSupport = actors
+                    .filter(a => (a.months[latestMonth]?.unitsOutput || 0) < targetUnitsPerMonth)
+                    .slice(0, 2)
+                    .map(a => a.name);
+                  
+                  // Average performance
+                  const avgPerformance = actors.length > 0 && months.length > 0 
+                    ? Math.round((totalUnits / actors.length) / months.length) 
+                    : 0;
+                  const isOnTrack = avgPerformance >= targetUnitsPerMonth;
+                  
+                  return (
+                    <div className={`mb-4 p-4 rounded-lg border ${isDarkMode ? 'bg-blue-900/10 border-blue-700/30' : 'bg-blue-50 border-blue-200'}`}>
+                      <div className="flex items-start gap-3">
+                        <Info className={`w-5 h-5 mt-0.5 flex-shrink-0 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+                        <div className="flex-1">
+                          <h4 className={`text-sm font-semibold mb-2 ${isDarkMode ? 'text-blue-300' : 'text-blue-900'}`}>
+                            Performance Insights
+                          </h4>
+                          <div className={`grid grid-cols-1 md:grid-cols-3 gap-3 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                            <div>
+                              <span className="font-semibold">Top Performer:</span> {topPerformer?.name || 'N/A'}
+                              {topPerformer && (
+                                <span className={`ml-1 ${topPerformerVsTarget >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                  ({topPerformerVsTarget >= 0 ? '+' : ''}{topPerformerVsTarget} vs target)
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="font-semibold">Needs Support:</span> {needsSupport.length > 0 ? needsSupport.join(', ') : 'None'}
+                              {needsSupport.length > 0 && (
+                                <span className="ml-1 text-red-600 dark:text-red-400">(Below target)</span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="font-semibold">Avg Performance:</span> {avgPerformance} units/month
+                              <span className={`ml-1 ${isOnTrack ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                ({isOnTrack ? 'On track' : 'Below target'})
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Controls Row */}
                 <div className="flex items-center gap-4 mb-4 flex-wrap">
-                  {/* Filter Buttons */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`gap-2 ${isDarkMode ? 'border-slate-600 hover:bg-slate-800' : 'border-slate-300 hover:bg-slate-50'}`}
-                  >
-                    <Search className="h-4 w-4" />
-                    Processor
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`gap-2 ${isDarkMode ? 'border-slate-600 hover:bg-slate-800' : 'border-slate-300 hover:bg-slate-50'}`}
-                  >
-                    Scorecard Year...
-                  </Button>
-
-                  <Badge variant="secondary" className={`${isDarkMode ? 'border-slate-600 text-slate-300' : 'border-slate-300 text-slate-700'}`}>
-                    Values
-                  </Badge>
-
+                  {/* Search Input - filters actors by name */}
                   <div className="relative flex-1 max-w-xs">
                     <Search className={`absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
                     <Input
                       type="text"
-                      placeholder="13 Month TVI..."
+                      placeholder={`Search ${selectedActor}s...`}
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className={`pl-9 h-9 ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200'}`}
                     />
                   </div>
+                  
+                  {/* Actor count badge */}
+                  <Badge variant="secondary" className={`${isDarkMode ? 'border-slate-600 text-slate-300' : 'border-slate-300 text-slate-700'}`}>
+                    {searchQuery ? `${filteredActors.length} of ${actors.length}` : actors.length} {selectedActor}{actors.length !== 1 ? 's' : ''}
+                  </Badge>
 
                   {/* Export Button */}
                   <Button
@@ -652,9 +676,7 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                               Units Output
                             </th>
                             <th className={`text-center py-2 px-2 text-xs font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                              {comparisonView === 'vs-target' ? 'vs Target' : 
-                               comparisonView === 'monthly' ? 'vs Prev Month' : 
-                               'vs Last Year'}
+                              vs Target
                             </th>
                             <th className={`text-center py-2 px-2 text-xs font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                               Average Days
@@ -728,8 +750,8 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                         })}
                       </tr>
 
-                      {/* Individual Processor Rows */}
-                      {actors.map((processor) => {
+                      {/* Individual Actor Rows (filtered by search) */}
+                      {filteredActors.map((processor) => {
                         // Define backdrop styles for each tier
                         const tierBackdropStyles = {
                           top: isDarkMode 

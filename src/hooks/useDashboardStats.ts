@@ -53,32 +53,14 @@ export const useDashboardStats = (
       // Build URL with query parameters - respect dateFilter prop, default to 'all' to show all imported data
       const filterParam = dateFilter === 'custom' ? 'all' : dateFilter; // 'custom' not supported by API
       const url = `/api/loans/stats?dateFilter=${filterParam}&_t=${Date.now()}`; // Add timestamp to prevent caching
-      console.log('🔍 Fetching stats from:', url, 'dateFilter prop:', dateFilter);
       const data = await api.request<DashboardStatsData>(url);
-      console.log('📊 Stats data from API:', JSON.stringify({
-        total: data.total,
-        active: data.active,
-        closed: data.closed,
-        locked: data.locked,
-        avgCycleTime: data.avgCycleTime,
-        pullThroughRate: data.pullThroughRate,
-        creditPulls: data.creditPulls,
-        totalVolume: data.totalVolume,
-        activeVolume: data.activeVolume,
-        closedVolume: data.closedVolume
-      }, null, 2));
       
       // Check if we got valid data - accept any response with expected structure
       if (data && (data.total !== undefined || data.active !== undefined)) {
-        console.log('✅ Setting statsData:', data);
-        // Set statsData with the API response - zeros are valid (means no loans)
         setStatsData(data);
-      } else {
-        console.warn('⚠️ API returned data but it appears empty or invalid:', data);
+      } else if (data && typeof data === 'object') {
         // If we got a response but it's malformed, still try to use it
-        if (data && typeof data === 'object') {
-          setStatsData(data);
-        }
+        setStatsData(data);
       }
     } catch (error: any) {
       // Handle unauthorized errors silently (user not logged in)
@@ -88,6 +70,9 @@ export const useDashboardStats = (
       } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
         // For timeout errors, log as warning since component has fallback handling
         console.warn('⚠️ Stats data request timed out, using fallback:', error.message);
+        setStatsData(null);
+      } else if (error.message?.includes('not found') || error.message?.includes('404') || error.message?.includes('Tenant not found')) {
+        // Stats endpoint doesn't exist or tenant not found - silently use fallback
         setStatsData(null);
       } else {
         console.error('❌ Failed to fetch stats data from API:', error);
@@ -115,41 +100,25 @@ export const useDashboardStats = (
     
     try {
       setFunnelLoading(true);
-      console.log('🔍 Fetching funnel data from /api/loans/funnel');
       const data = await api.request<LOSFunnelData>('/api/loans/funnel');
-      console.log('📈 Funnel data from API:', JSON.stringify({
-        loansStarted: data.loansStarted?.units,
-        stillActive: data.stillActive?.units,
-        originated: data.originated?.units,
-        falloutWithdrawn: data.falloutWithdrawn?.units,
-        falloutDenied: data.falloutDenied?.units,
-        loansStartedVolume: data.loansStarted?.volume,
-        stillActiveVolume: data.stillActive?.volume,
-        originatedVolume: data.originated?.volume
-      }, null, 2));
       
       // Check if we got valid data
       if (data && (data.loansStarted?.units !== undefined || data.stillActive?.units !== undefined)) {
         setFunnelData(data);
       } else {
-        console.warn('⚠️ API returned funnel data but it appears empty or invalid:', data);
         setFunnelData(null);
       }
     } catch (error: any) {
-      // Handle unauthorized errors silently (user not logged in)
-      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
-        // User not authenticated - set data to null without logging error
-        setFunnelData(null);
-      } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-        // For timeout errors, log as warning since component has fallback handling
-        console.warn('⚠️ Funnel data request timed out, using fallback:', error.message);
+      // Silently handle common errors
+      if (error.message?.includes('Unauthorized') || 
+          error.message?.includes('401') ||
+          error.message?.includes('timed out') || 
+          error.message?.includes('timeout') ||
+          error.message?.includes('not found') ||
+          error.message?.includes('Tenant not found')) {
         setFunnelData(null);
       } else {
-        console.error('❌ Failed to fetch funnel data from API:', error);
-        console.error('Error details:', {
-          message: error.message,
-          stack: error.stack
-        });
+        console.error('Failed to fetch funnel data:', error.message);
         setFunnelData(null);
       }
     } finally {

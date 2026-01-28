@@ -330,9 +330,19 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
     const sortColumn = allowedSortColumns.includes(sort_by as string) ? sort_by : 'created_at';
     const sortDirection = sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // Execute main query
+    // Execute main query - exclude raw_data to reduce response size significantly
+    // raw_data is a huge JSONB column that's not needed for list views
+    // Only select columns that exist in the tenant schema (from tenantDatabaseSchema.ts)
     const query = `
-      SELECT * FROM public.loans 
+      SELECT 
+        loan_id, loan_number, loan_amount, interest_rate,
+        loan_type, loan_purpose, property_type, property_state, property_city,
+        property_street, property_zip, occupancy_type,
+        application_date, lock_date, closing_date, funding_date,
+        current_loan_status, branch, loan_officer, underwriter, closer, processor,
+        fico_score, be_dti_ratio, ltv_ratio, cltv,
+        created_at, updated_at
+      FROM public.loans 
       ${whereClause}
       ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
@@ -370,180 +380,47 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
 /**
  * GET /api/loans/stats
  * Get aggregated loan statistics for business overview
+ * Uses tenant-specific database via attachTenantContext middleware
  */
-router.get('/stats', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id from query or user profile (supports super admins)
-    let tenantId = req.query.tenant_id as string;
-    
-    if (!tenantId) {
-      const profileResult = await retryQuery(
-        () => pool.query(
-          'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-          [req.userId]
-        ),
-        3, 1000
-      );
-      tenantId = profileResult.rows[0]?.tenant_id;
-    }
-    
-    // If still no tenant, check if user is super admin and use Default Tenant
-    if (!tenantId) {
-      const userResult = await retryQuery(
-        () => pool.query(
-          'SELECT role FROM public.users WHERE id = $1',
-          [req.userId]
-        ),
-        3, 1000
-      );
-      if (userResult.rows[0]?.role === 'super_admin') {
-        const defaultTenantResult = await retryQuery(
-          () => pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`
-          ),
-          3, 1000
-        );
-        if (defaultTenantResult.rows.length > 0) {
-          tenantId = defaultTenantResult.rows[0].id;
-        }
-      }
-    }
+    const tenantContext = getTenantContext(req);
+    const tenantPool = tenantContext.tenantPool;
+    const tenantId = tenantContext.tenantId;
 
-    if (!tenantId) {
-      logWarn('No tenant found for user', { userId: req.userId });
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-    logDebug('User to tenant mapping', { userId: req.userId, tenantId });
+    // Get all loans for tenant using tenant database (no tenant_id column needed)
+    // Select only columns that exist in tenantDatabaseSchema.ts
+    const loansResult = await tenantPool.query(`
+      SELECT 
+        loan_id, loan_number, loan_amount, loan_type, current_loan_status,
+        application_date, closing_date, lock_date, funding_date, interest_rate,
+        loan_purpose, branch, loan_officer, credit_pull_date,
+        fico_score, ltv_ratio, be_dti_ratio
+      FROM public.loans 
+      ORDER BY application_date DESC NULLS LAST
+    `);
 
+    const loans = loansResult.rows;
 
-    // Get date filter (today, mtd, ytd, or custom)
-    // For business overview stats, always use 'all' to show all imported loans
-    // This ensures the overview cards show correct counts regardless of date filter selection
-    const { dateFilter = 'all' } = req.query;
-    const effectiveDateFilter = 'all'; // Always use 'all' for stats to show all imported data
+    logDebug('Stats API request', { tenantId, loanCount: loans.length });
 
-    // Calculate date range - always use 'all' to show all loans
-    let startDate: Date | null = null;
-
-    // Get all loans for tenant (optimized query - only select needed columns)
-    // Use retryQuery for database resilience
-    // Note: Include loans with NULL application_date to match funnel endpoint behavior
-    const loansResult = await retryQuery(
-      () => {
-        if (startDate) {
-          return pool.query(
-            `SELECT 
-              loan_id, borrower_name, loan_amount, loan_type, status, 
-              application_date, closing_date, lock_date, interest_rate,
-              loan_purpose, branch, credit_pull_date, cycle_time_days,
-              raw_data
-             FROM public.loans 
-             WHERE tenant_id = $1 
-             AND (application_date >= $2 OR application_date IS NULL)
-             ORDER BY application_date DESC NULLS LAST`,
-            [tenantId, startDate]
-          );
-        } else {
-          // Get all loans without date filter
-          return pool.query(
-            `SELECT 
-              loan_id, borrower_name, loan_amount, loan_type, status, 
-              application_date, closing_date, lock_date, interest_rate,
-              loan_purpose, branch, credit_pull_date, cycle_time_days,
-              raw_data
-             FROM public.loans 
-             WHERE tenant_id = $1 
-             ORDER BY application_date DESC NULLS LAST`,
-            [tenantId]
-          );
-        }
-      },
-      2, // max retries
-      500 // delay between retries
-    );
-
-    // Enhance loans with data from raw_data for fields not in main columns
-    const loans = loansResult.rows.map(loan => {
-      const rawData = typeof loan.raw_data === 'string' ? JSON.parse(loan.raw_data) : (loan.raw_data || {});
-      return {
-        ...loan,
-        // Extract fields from raw_data if not in main columns
-        fico_score: rawData.fico_score || rawData.fico,
-        ltv: rawData.ltv || rawData.loan_to_value,
-        respa_date: rawData.respa_date || rawData.respaDate,
-        fallout_reason: rawData.fallout_reason || rawData.falloutReason || rawData.fallout,
-        loan_officer_name: rawData.loan_officer_name || rawData.loan_officer || rawData.officer_name,
-      };
-    });
-
-
-    // Debug logging - detailed
-    logDebug('Stats API request', { tenantId, loanCount: loans.length, dateFilter, startDate });
-    if (loans.length > 0) {
-      logDebug('Sample loans', {
-        tenantId,
-        sampleLoans: loans.slice(0, 3).map(l => ({
-          loan_id: l.loan_id,
-          status: l.status,
-          application_date: l.application_date,
-          has_lock_date: !!l.lock_date,
-          has_closing_date: !!l.closing_date,
-          has_credit_pull_date: !!l.credit_pull_date
-        }))
-      });
-    } else {
-      // Check if there are ANY loans in the database for debugging
-      const allLoansCheck = await pool.query('SELECT COUNT(*) as total FROM public.loans');
-      const tenantLoansCheck = await pool.query('SELECT COUNT(*) as total FROM public.loans WHERE tenant_id = $1', [tenantId]);
-      const loansWithNullDate = await pool.query('SELECT COUNT(*) as total FROM public.loans WHERE tenant_id = $1 AND application_date IS NULL', [tenantId]);
-      const allTenantsCheck = await pool.query('SELECT tenant_id, COUNT(*) as count FROM public.loans GROUP BY tenant_id LIMIT 5');
-      logDebug('No loans found for tenant', {
-        tenantId,
-        totalLoansInDB: allLoansCheck.rows[0]?.total || 0,
-        tenantLoans: tenantLoansCheck.rows[0]?.total || 0,
-        loansWithNullDate: loansWithNullDate.rows[0]?.total || 0,
-        loansByTenant: allTenantsCheck.rows
-      });
-    }
-
-    // Calculate statistics with smart status detection
-    // Infer status based on dates and raw status
-    const getInferredStatus = (loan: any) => {
-      if (loan.closing_date) return 'Closed';
-      if (loan.lock_date) return 'Locked';
-      const rawStatus = (loan.status || '').toString().toUpperCase();
-      // Handle all possible status values from both LOS imports and sample data
-      if (['ACTIVE', 'SUBMITTED', 'APPROVED', 'CTC', 'STARTED', 'INQUIRY', 'PROCESSING', 'UNDERWRITING'].includes(rawStatus)) return 'Active';
-      if (['WITHDRAWN', 'CANCELLED'].includes(rawStatus)) return 'Withdrawn';
-      if (['DENIED', 'DECLINED', 'REJECTED'].includes(rawStatus)) return 'Denied';
-      if (['ORIGINATED', 'FUNDED', 'CLOSED', 'COMPLETE', 'COMPLETED'].includes(rawStatus)) return 'Closed';
-      if (['LOCKED'].includes(rawStatus)) return 'Locked';
-      // If status is a state code (2 letters), treat as active
-      if (/^[A-Z]{2}$/.test(rawStatus)) return 'Active';
-      return 'Active'; // Default
-    };
-
-    const loansWithInferredStatus = loans.map(loan => ({
-      ...loan,
-      inferred_status: getInferredStatus(loan)
-    }));
-
-    const activeLoans = loansWithInferredStatus.filter(l =>
-      ['Active', 'Locked'].includes(l.inferred_status)
+    // Active Loans: Use EXACT same definition as metricsService.ts active_loans metric
+    // current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+    const activeLoans = loans.filter(l => 
+      l.current_loan_status === 'Active Loan' && 
+      l.application_date !== null && 
+      l.application_date !== ''
     );
     
-    const closedLoans = loansWithInferredStatus.filter(l =>
-      l.inferred_status === 'Closed'
-    );
+    // Closed Loans: Has funding_date (matches metricsService closed_loans metric)
+    const closedLoans = loans.filter(l => l.funding_date !== null);
     
-    // Locked Loans - use inferred_status for consistency
-    const lockedLoans = loansWithInferredStatus.filter(l =>
-      l.inferred_status === 'Locked'
-    );
+    // Locked Loans: Has lock_date (matches metricsService locked_loans metric)
+    const lockedLoans = loans.filter(l => l.lock_date !== null);
 
 
-    // Group by loan type - use loansWithInferredStatus to include inferred_status
-    const byLoanType = loansWithInferredStatus.reduce((acc: any, loan: any) => {
+    // Group by loan type
+    const byLoanType = loans.reduce((acc: any, loan: any) => {
       const type = loan.loan_type || 'Other';
       if (!acc[type]) {
         acc[type] = { count: 0, volume: 0, loans: [] };
@@ -554,9 +431,9 @@ router.get('/stats', authenticateToken, apiLimiter, async (req: AuthRequest, res
       return acc;
     }, {});
 
-    // Group by status
+    // Group by status (using current_loan_status column)
     const byStatus = loans.reduce((acc: any, loan: any) => {
-      const status = loan.status || 'Unknown';
+      const status = loan.current_loan_status || 'Unknown';
       if (!acc[status]) {
         acc[status] = { count: 0, volume: 0 };
       }
@@ -576,22 +453,9 @@ router.get('/stats', authenticateToken, apiLimiter, async (req: AuthRequest, res
       : 0;
 
     // Calculate cycle time (average days from application to closing)
-    // Use cycle_time_days if available, otherwise calculate from dates
-    const loansWithCycleTime = loans.filter(l => {
-      // Prefer cycle_time_days if it exists and is valid
-      if (l.cycle_time_days && !isNaN(parseFloat(l.cycle_time_days)) && parseFloat(l.cycle_time_days) > 0) {
-        return true;
-      }
-      // Fall back to calculating from dates
-      return l.application_date && l.closing_date;
-    });
+    const loansWithCycleTime = loans.filter(l => l.application_date && l.closing_date);
     const avgCycleTime = loansWithCycleTime.length > 0
       ? loansWithCycleTime.reduce((sum, l) => {
-          // Use cycle_time_days if available, otherwise calculate from dates
-          if (l.cycle_time_days && !isNaN(parseFloat(l.cycle_time_days)) && parseFloat(l.cycle_time_days) > 0) {
-            return sum + parseFloat(l.cycle_time_days);
-          }
-          // Fall back to calculating from dates
           const days = daysBetween(l.application_date, l.closing_date);
           return sum + (days || 0);
         }, 0) / loansWithCycleTime.length
@@ -619,16 +483,15 @@ router.get('/stats', authenticateToken, apiLimiter, async (req: AuthRequest, res
       creditPulls
     });
     
-    // Additional debug: Show status breakdown
+    // Additional debug: Show status breakdown by current_loan_status
     if (loans.length > 0) {
-      const statusBreakdown = loansWithInferredStatus.reduce((acc: any, loan: any) => {
-        const status = loan.inferred_status || 'Unknown';
+      const statusBreakdown = loans.reduce((acc: any, loan: any) => {
+        const status = loan.current_loan_status || 'Unknown';
         acc[status] = (acc[status] || 0) + 1;
         return acc;
       }, {});
       logDebug('Status breakdown', { tenantId, statusBreakdown });
       logDebug('Loans with credit_pull_date', { tenantId, count: loans.filter(l => l.credit_pull_date).length });
-      logDebug('Loans with cycle_time_days', { tenantId, count: loans.filter(l => l.cycle_time_days && parseFloat(l.cycle_time_days) > 0).length });
     }
 
     res.json({
@@ -5541,7 +5404,8 @@ router.get('/toptiering-comparison', authenticateToken, attachTenantContext, api
 
 /**
  * POST /api/loans/predict
- * Predict outcomes for active loans using AI
+ * Predict outcomes for active loans - simplified version with instant bucketing
+ * Returns signal strength buckets and rule-based risk summaries
  */
 router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
@@ -5549,22 +5413,68 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     const tenantPool = tenantContext.tenantPool;
     const tenantId = tenantContext.tenantId;
 
-    // Get request body
-    const { customPrompt, loanIds } = req.body;
+    // Get request body - maxLoanAgeMonths filters out loans older than X months
+    // Default: 0 (no filter) to match metrics service active_loans definition
+    const { customPrompt, loanIds, maxLoanAgeMonths = 0, limit = 1000 } = req.body;
 
-    // Fetch all loans
-    const loansResult = await tenantPool.query(
-      `SELECT * FROM public.loans ORDER BY application_date DESC`
-    );
-    const allLoans = loansResult.rows;
+    // Calculate the age cutoff date upfront for SQL filtering (only if maxLoanAgeMonths > 0)
+    const cutoffDate = maxLoanAgeMonths && maxLoanAgeMonths > 0 
+      ? new Date(Date.now() - maxLoanAgeMonths * 30 * 24 * 60 * 60 * 1000)
+      : null;
 
-    // Active Loan Flag from Qlik: if("Current Loan Status" = 'Active Loan' AND Len([Application Date])>0, 'Yes', 'No')
-    // This is the EXACT same logic used in /api/loans/funnel for "Still Active" count
-    let activeLoans = allLoans.filter(l => {
-      const currentStatus = (l.current_loan_status || '').toString().toLowerCase().trim();
-      const hasApplicationDate = l.application_date !== null && l.application_date !== undefined && String(l.application_date).trim() !== '';
-      return currentStatus === 'active loan' && hasApplicationDate;
+    // Fetch ONLY active loans with essential columns (avoid raw_data which is huge)
+    // Column names from tenantDatabaseSchema.ts
+    // Use EXACT same criteria as metricsService.ts active_loans definition:
+    //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
+    const activeLoansQuery = `
+      SELECT 
+        loan_id, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, closing_date, funding_date,
+        current_loan_status, current_milestone, branch, loan_officer,
+        fico_score, be_dti_ratio, ltv_ratio, cltv,
+        loan_purpose, property_type, occupancy_type,
+        underwriter, closer, processor
+      FROM public.loans 
+      WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
+        AND application_date::text != ''
+        ${cutoffDate ? `AND application_date >= $1` : ''}
+      ORDER BY application_date DESC
+      LIMIT ${Math.min(limit, 2000)}
+    `;
+    
+    logInfo('Predict endpoint query', { 
+      query: activeLoansQuery.replace(/\s+/g, ' ').trim(),
+      cutoffDate: cutoffDate?.toISOString() || 'none',
+      maxLoanAgeMonths
     });
+    
+    const loansResult = await tenantPool.query(
+      activeLoansQuery,
+      cutoffDate ? [cutoffDate.toISOString().split('T')[0]] : []
+    );
+    let activeLoans = loansResult.rows;
+    
+    logInfo('Predict endpoint result', { 
+      activeLoansCount: activeLoans.length,
+      sampleStatuses: activeLoans.slice(0, 3).map(l => l.current_loan_status)
+    });
+    
+    // For pullthrough calculations, we need historical loans too (limited set)
+    // Exclude 'Active Loan' status (exact match, consistent with active loans query)
+    const historicalLoansQuery = `
+      SELECT 
+        loan_id, current_loan_status, loan_officer, underwriter, closer, processor,
+        application_date, funding_date
+      FROM public.loans 
+      WHERE current_loan_status != 'Active Loan' OR current_loan_status IS NULL
+      ORDER BY application_date DESC
+      LIMIT 5000
+    `;
+    const historicalResult = await tenantPool.query(historicalLoansQuery);
+    const allLoans = [...activeLoans, ...historicalResult.rows];
+
+    // Note: Active loan filtering and age filtering already done in SQL above
     
     // If specific loan IDs provided, filter to those
     if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
@@ -5572,9 +5482,12 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
       activeLoans = activeLoans.filter(l => loanIdSet.has(l.loan_id));
     }
 
-    logInfo('Prediction active loans (Qlik Active Loan Flag)', { 
-      totalLoans: allLoans.length,
-      activeLoans: activeLoans.length
+    logInfo('Prediction active loans (SQL filtered)', { 
+      activeLoans: activeLoans.length,
+      historicalLoans: allLoans.length - activeLoans.length,
+      maxLoanAgeMonths,
+      limit,
+      cutoffDate: cutoffDate?.toISOString() || 'none'
     });
 
     if (activeLoans.length === 0) {
@@ -5638,9 +5551,44 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     }
     
     // Only send essential loan fields and limit per bucket
-    const essentialFields = ['loan_id', 'borrower_name', 'loan_amount', 'interest_rate', 'loan_type', 
-      'bucket', 'signal_strength', 'inferred_status', 'application_date', 'lock_date', 
-      'closing_date', 'funding_date', 'current_loan_status', 'status', 'branch', 'loan_officer'];
+    // Use snake_case to match database column naming convention
+    const essentialFields = [
+      // Core loan identifiers (snake_case matching DB)
+      'loan_id', 'loan_number', 'loan_amount', 'loan_type',
+      
+      // Status and dates (snake_case matching DB)
+      'bucket', 'current_loan_status', 'status', 'branch',
+      'application_date', 'lock_date', 'closing_date', 'funding_date',
+      'estimated_closing_date',
+      
+      // Credit metrics (snake_case matching DB)
+      'fico_score', 'ltv_ratio', 'be_dti_ratio',
+      
+      // Personnel (snake_case matching DB)
+      'loan_officer', 'underwriter', 'closer', 'processor',
+      
+      // Rates and market delta details
+      'interest_rate', 'market_rate',
+      'marketChangeDelta', 'lockMarketRate', 'closeMarketRate',
+      
+      // Milestone and time in motion
+      'current_milestone', 'lastCompletedMilestone', 'milestoneNumber',
+      'activeDays',
+      
+      // Pullthrough percentages (actual values for display)
+      'loPullthroughPercentage', 'uwPullthroughPercentage', 
+      'closerPullthroughPercentage', 'processorPullthroughPercentage',
+      
+      // Signal strength fields from bucketing (camelCase - computed fields)
+      'creditMetricsSignalStrength', 'loanCharacteristicsSignalStrength', 
+      'timeInMotionSignalStrength', 'mloAeFalloutProneSignalStrength',
+      'interestLockVsMarketSignalStrength', 'uwPullthroughSignalStrength',
+      'closerPullthroughSignalStrength', 'processorPullthroughSignalStrength',
+      'ficoScoreSignal', 'ltvSignal', 'dtiSignal', 'loPullthroughSignal', 'marketChangeDeltaSignal',
+      
+      // Risk summary
+      'riskSummary'
+    ];
     
     // Group by bucket and take top N from each
     const bucketGroups: Record<string, any[]> = {};
@@ -5831,6 +5779,221 @@ router.post('/sync-market-rates', authenticateToken, apiLimiter, async (req: Aut
     });
   }
 });
+
+/**
+ * GET /api/loans/:loanId/recommendations
+ * Get AI-powered recommendations for a specific loan (on-demand)
+ * Uses loan signal data to generate actionable recommendations via GPT
+ */
+router.get('/:loanId/recommendations', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantContext = getTenantContext(req);
+    const tenantPool = tenantContext.tenantPool;
+    const { loanId } = req.params;
+
+    if (!loanId) {
+      return res.status(400).json({ error: 'Loan ID is required' });
+    }
+
+    // Fetch the loan data
+    const loanResult = await tenantPool.query(
+      `SELECT * FROM public.loans WHERE loan_id = $1`,
+      [loanId]
+    );
+
+    if (loanResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Loan not found' });
+    }
+
+    const loan = loanResult.rows[0];
+
+    // Fetch OpenAI API key from tenant's rag_settings table
+    let apiKey: string | undefined;
+    try {
+      const { decryptAPIKeys } = await import('../services/encryption.js');
+      const apiKeyResult = await tenantPool.query(
+        `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
+      );
+      if (apiKeyResult.rows[0]?.openai_api_key) {
+        const decrypted = await decryptAPIKeys({ openai_api_key: apiKeyResult.rows[0].openai_api_key });
+        apiKey = decrypted.openai_api_key || undefined;
+      }
+    } catch (apiKeyError: any) {
+      logInfo('Could not fetch tenant API key for recommendations', { error: apiKeyError.message });
+    }
+
+    // Fall back to environment variable if no tenant key
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+    const apiKeyToUse = apiKey || OPENAI_API_KEY;
+    
+    // Validate API key
+    const hasValidApiKey = apiKeyToUse && 
+                          apiKeyToUse.trim().length > 0 && 
+                          !apiKeyToUse.includes('your-api-key') &&
+                          apiKeyToUse.trim().startsWith('sk-');
+
+    if (!hasValidApiKey) {
+      // Return rule-based recommendations without AI
+      const recommendations = generateRuleBasedRecommendations(loan);
+      return res.json({
+        loanId,
+        recommendations,
+        source: 'rule-based',
+        message: 'AI recommendations unavailable - using rule-based suggestions'
+      });
+    }
+
+    // Generate AI recommendations
+    try {
+      const recommendations = await generateAIRecommendations(loan, apiKeyToUse);
+      res.json({
+        loanId,
+        recommendations,
+        source: 'ai'
+      });
+    } catch (aiError: any) {
+      logError('AI recommendation generation failed, falling back to rules', aiError);
+      const recommendations = generateRuleBasedRecommendations(loan);
+      res.json({
+        loanId,
+        recommendations,
+        source: 'rule-based',
+        message: 'AI generation failed - using rule-based suggestions'
+      });
+    }
+
+  } catch (error: any) {
+    logError('Error getting loan recommendations', error, { userId: req.userId, loanId: req.params.loanId });
+    res.status(500).json({ error: error.message || 'Failed to get loan recommendations' });
+  }
+});
+
+/**
+ * Generate rule-based recommendations based on loan characteristics
+ */
+function generateRuleBasedRecommendations(loan: any): string[] {
+  const recommendations: string[] = [];
+  
+  // Credit-based recommendations
+  const fico = loan.fico_score || loan.credit_score;
+  const dti = loan.dti_ratio || loan.dti;
+  const ltv = loan.ltv || loan.loan_to_value;
+  
+  if (fico && fico < 680) {
+    recommendations.push('Consider credit counseling or rapid rescoring to improve FICO score before proceeding');
+  }
+  if (dti && dti > 43) {
+    recommendations.push('High DTI detected - explore debt payoff strategies or income documentation to improve qualification');
+  }
+  if (ltv && ltv > 80) {
+    recommendations.push('High LTV may require PMI - discuss options with borrower including larger down payment');
+  }
+  
+  // Time-based recommendations
+  const appDate = loan.application_date ? new Date(loan.application_date) : null;
+  if (appDate) {
+    const daysSinceApp = Math.floor((Date.now() - appDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSinceApp > 30) {
+      recommendations.push(`Loan has been in pipeline ${daysSinceApp} days - review status and address any outstanding conditions`);
+    }
+    if (daysSinceApp > 45) {
+      recommendations.push('Consider rate lock extension options to protect borrower from market volatility');
+    }
+  }
+  
+  // Loan type recommendations
+  const loanType = (loan.loan_type || '').toLowerCase();
+  if (loanType.includes('jumbo') || loanType.includes('non-conforming')) {
+    recommendations.push('Jumbo loan - ensure all reserve requirements and documentation are complete');
+  }
+  if (loanType.includes('investment') || loanType.includes('investor')) {
+    recommendations.push('Investment property - verify rental income documentation and DSCR requirements');
+  }
+  
+  // Purpose-based recommendations  
+  const loanPurpose = (loan.loan_purpose || loan.purpose || '').toLowerCase();
+  if (loanPurpose.includes('cash') && loanPurpose.includes('out')) {
+    recommendations.push('Cash-out refinance - confirm seasoning requirements and verify use of funds');
+  }
+  
+  // Default recommendations if none specific
+  if (recommendations.length === 0) {
+    recommendations.push('Continue monitoring loan progress and maintain regular borrower communication');
+    recommendations.push('Ensure all conditions are cleared promptly to minimize pipeline time');
+  }
+  
+  return recommendations;
+}
+
+/**
+ * Generate AI-powered recommendations using GPT
+ */
+async function generateAIRecommendations(loan: any, apiKey: string): Promise<string[]> {
+  const loanSummary = {
+    loanAmount: loan.loan_amount,
+    loanType: loan.loan_type,
+    loanPurpose: loan.loan_purpose || loan.purpose,
+    fico: loan.fico_score || loan.credit_score,
+    dti: loan.dti_ratio || loan.dti,
+    ltv: loan.ltv || loan.loan_to_value,
+    interestRate: loan.interest_rate,
+    applicationDate: loan.application_date,
+    currentStatus: loan.current_loan_status || loan.status,
+    loanOfficer: loan.loan_officer,
+    branch: loan.branch,
+    propertyType: loan.property_type,
+    occupancy: loan.occupancy_type
+  };
+  
+  const prompt = `You are a mortgage loan advisor. Based on the following loan details, provide 3-5 specific, actionable recommendations to help this loan close successfully.
+
+Loan Details:
+${JSON.stringify(loanSummary, null, 2)}
+
+Provide recommendations as a JSON array of strings. Focus on:
+1. Risk mitigation strategies
+2. Communication touchpoints
+3. Documentation requirements
+4. Timeline optimization
+5. Borrower support actions
+
+Return ONLY a JSON array of recommendation strings, no other text.
+Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'You are a mortgage lending expert. Respond only with valid JSON arrays.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 500
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || '[]';
+  
+  try {
+    // Parse the JSON response
+    const cleanContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    const recommendations = JSON.parse(cleanContent);
+    return Array.isArray(recommendations) ? recommendations : [];
+  } catch (parseError) {
+    logError('Failed to parse AI recommendations', parseError);
+    return [];
+  }
+}
 
 /**
  * DELETE /api/loans/:loanId

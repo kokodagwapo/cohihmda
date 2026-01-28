@@ -54,7 +54,7 @@ Each component contributes a fixed weight to the total score based on specific c
 | > 760 | **-0.10** | Excellent credit reduces complexity (credit toward score) |
 | 681 < FICO ≤ 760 | 0 | Good credit, standard processing |
 | 620 < FICO ≤ 681 | +0.05 | Fair credit, may require compensating factors |
-| ≤ 620 | +0.15 | Subprime, extensive documentation and layered risk |
+| ≤ 620 | +0.15 | High-risk credit, extensive documentation and layered risk |
 | Missing / Null | Null() | No contribution |
 
 ### LTV Complexity

@@ -919,46 +919,7 @@ const Dashboard = () => {
     }, 15000);
     return () => clearTimeout(timer);
   }, [showNotifications]);
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadDashboardData();
-    }
-  }, [isAuthenticated]);
-  const loadDashboardData = async () => {
-    // Check if user has a valid token before making API call
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
-      // No token - skip API call
-      return;
-    }
-    
-    try {
-      // Fetch call sessions
-      const calls = await api.getCallSessions(5);
-      if (calls && calls.length > 0) {
-        setRecentCalls(calls);
-
-        // Calculate stats
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const callsToday = calls.filter(c => new Date(c.started_at) >= today).length;
-        const flaggedCases = calls.filter(c => c.status === 'flagged').length;
-        setStats({
-          callsToday,
-          documentsVerified: calls.length * 2,
-          // Mock calculation
-          flaggedCases
-        });
-      }
-    } catch (error: any) {
-      // Handle unauthorized errors silently (user not logged in)
-      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
-        // User not authenticated - skip silently
-        return;
-      }
-      console.error('Error loading dashboard:', error);
-    }
-  };
+  // Note: Call sessions feature (/api/calls) not implemented - removed loadDashboardData call
   const handleLogout = async () => {
     await authLogout();
     sessionStorage.removeItem('dashboard_auth');

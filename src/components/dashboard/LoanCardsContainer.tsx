@@ -3,9 +3,16 @@ import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { LoanDrilldownModal } from './LoanDrilldownModal';
 
+interface RiskSummary {
+  risks: string[];
+  positives: string[];
+  overallRisk: string;
+  predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk';
+  confidence: number;
+}
+
 interface LoanCard {
   id: string;
-  borrower: string;
   officer: string;
   amount: string;
   amountValue?: number;
@@ -15,6 +22,36 @@ interface LoanCard {
   ficoScore: number | null;
   ltvRatio: number | null;
   dtiRatio: number | null;
+  loanType?: string | null;
+  // Milestone and time in motion
+  currentMilestone?: string | null;
+  activeDays?: number | null;
+  // Rates and market
+  interestRate?: number | null;
+  marketRate?: number | null;
+  marketChangeDelta?: number | null;
+  // Pullthrough percentages
+  loPullthroughPct?: number | null;
+  uwPullthroughPct?: number | null;
+  closerPullthroughPct?: number | null;
+  processorPullthroughPct?: number | null;
+  // Rule-based risk summary from backend
+  riskSummary?: RiskSummary | null;
+  // Composite bucket scores from prediction
+  creditMetricsSignalStrength?: number | null;
+  loanCharacteristicsSignalStrength?: number | null;
+  timeInMotionSignalStrength?: number | null;
+  mloAeFalloutProneSignalStrength?: number | null;
+  interestLockVsMarketSignalStrength?: number | null;
+  uwPullthroughSignalStrength?: number | null;
+  closerPullthroughSignalStrength?: number | null;
+  processorPullthroughSignalStrength?: number | null;
+  // Individual signal buckets
+  ficoScoreSignal?: number | null;
+  ltvSignal?: number | null;
+  dtiSignal?: number | null;
+  loPullthroughSignal?: number | null;
+  marketChangeDeltaSignal?: number | null;
 }
 
 interface LoanPrediction {
@@ -53,12 +90,29 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
     setCurrentPage(1);
   }, [activeTab, searchTerm, sortBy, sortOrder]);
 
+  // Create prediction map for filtering
+  const predictionMap = useMemo(() => {
+    const map = new Map<string, LoanPrediction>();
+    predictions.forEach(pred => map.set(pred.loanId, pred));
+    return map;
+  }, [predictions]);
+
   const filteredLoans = useMemo(() => {
     let result = [...loans];
 
     if (activeTab !== 'all') {
       result = result.filter(loan => {
         switch (activeTab) {
+          case 'likely-withdraw':
+            // Check riskSummary first (from bucketed data)
+            if (loan.riskSummary?.predictedOutcome === 'withdraw') return true;
+            // Fall back to predictions array
+            return predictionMap.get(loan.id)?.predictedOutcome === 'withdraw';
+          case 'likely-decline':
+            // Check riskSummary first (from bucketed data)
+            if (loan.riskSummary?.predictedOutcome === 'deny') return true;
+            // Fall back to predictions array
+            return predictionMap.get(loan.id)?.predictedOutcome === 'deny';
           case 'critical': return loan.riskLevel === 'Very High';
           case 'at-risk': return loan.riskLevel === 'Medium';
           case 'low': return loan.riskLevel === 'Low';
@@ -71,7 +125,6 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
       const term = searchTerm.toLowerCase();
       result = result.filter(loan =>
         loan.id.toLowerCase().includes(term) ||
-        loan.borrower.toLowerCase().includes(term) ||
         loan.officer.toLowerCase().includes(term)
       );
     }
@@ -117,6 +170,8 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
   }, [filteredLoans, currentPage]);
 
   const tabCounts = useMemo(() => {
+    // Use riskSummary.predictedOutcome on each loan (primary source)
+    // Fall back to predictions array if riskSummary is not available
     const predictionMapForCounts = new Map<string, LoanPrediction>();
     predictions.forEach(pred => {
       predictionMapForCounts.set(pred.loanId, pred);
@@ -125,10 +180,16 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
     return {
       all: loans.length,
       'likely-withdraw': loans.filter(l => {
+        // Check riskSummary first (from bucketed data)
+        if (l.riskSummary?.predictedOutcome === 'withdraw') return true;
+        // Fall back to predictions array
         const pred = predictionMapForCounts.get(l.id);
         return pred?.predictedOutcome === 'withdraw';
       }).length,
       'likely-decline': loans.filter(l => {
+        // Check riskSummary first (from bucketed data)
+        if (l.riskSummary?.predictedOutcome === 'deny') return true;
+        // Fall back to predictions array
         const pred = predictionMapForCounts.get(l.id);
         return pred?.predictedOutcome === 'deny';
       }).length
@@ -266,41 +327,56 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
                       </svg>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className={`font-medium text-[13px] sm:text-sm tracking-tight truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{loan.borrower}</p>
-                      <p className={`text-[10px] sm:text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                        #{loan.id.length > 8 ? loan.id.substring(0, 8) + '...' : loan.id}
+                      <p className={`font-medium text-[13px] sm:text-sm tracking-tight truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                        Loan #{loan.id.length > 12 ? loan.id.substring(0, 12) + '...' : loan.id}
                       </p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelectedOfficer(loan.officer); }}
+                        className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1 hover:underline ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
+                      >
+                        <svg className="w-3 h-3 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        <span className="truncate max-w-[100px] sm:max-w-none">{loan.officer || 'Unknown LO'}</span>
+                      </button>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className={`font-semibold text-sm sm:text-base tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{loan.amount}</p>
-                    <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block mt-0.5 ${
-                      loan.riskLevel === 'Very High' 
-                        ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
-                        : loan.riskLevel === 'Medium' 
-                          ? (isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-50 text-amber-600')
-                          : (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
-                    }`}>
-                      {loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW'}
-                    </span>
+                    <div className="flex flex-col items-end gap-0.5 mt-0.5">
+                      {/* Predicted outcome badge - withdraw/deny/originate */}
+                      {loan.riskSummary?.predictedOutcome && loan.riskSummary.predictedOutcome !== 'originate' && (
+                        <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                          loan.riskSummary.predictedOutcome === 'deny'
+                            ? (isDarkMode ? 'bg-red-600/30 text-red-300' : 'bg-red-100 text-red-700')
+                            : loan.riskSummary.predictedOutcome === 'withdraw'
+                              ? (isDarkMode ? 'bg-orange-500/30 text-orange-300' : 'bg-orange-100 text-orange-700')
+                              : (isDarkMode ? 'bg-amber-500/30 text-amber-300' : 'bg-amber-100 text-amber-700')
+                        }`}>
+                          {loan.riskSummary.predictedOutcome === 'deny' ? '⚠ Likely Decline' : 
+                           loan.riskSummary.predictedOutcome === 'withdraw' ? '↩ Likely Withdraw' : 
+                           '⚡ At Risk'}
+                        </span>
+                      )}
+                      <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
+                        loan.riskLevel === 'Very High' 
+                          ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
+                          : loan.riskLevel === 'Medium' 
+                            ? (isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-50 text-amber-600')
+                            : (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
+                      }`}>
+                        {loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between text-[11px] sm:text-[12px] mb-2">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setSelectedOfficer(loan.officer); }}
-                    className={`font-medium flex items-center gap-1.5 hover:underline ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
-                  >
-                    <svg className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    <span className="truncate max-w-[100px] sm:max-w-none">{loan.officer}</span>
-                  </button>
                   <div className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
                       loan.riskLevel === 'Very High' ? 'bg-rose-500' : loan.riskLevel === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'
                     }`}></span>
-                    <span className="font-medium">{loan.riskScore}/100</span>
+                    <span className="font-medium">Risk Score: {loan.riskScore}/100</span>
                   </div>
                 </div>
                 

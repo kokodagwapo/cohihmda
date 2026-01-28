@@ -167,7 +167,7 @@ export function generateAlethiaInsightsForMetric(args: {
   if (pullThrough !== null && pullThrough < 50) critical.push(`Pull-through at ${pullThrough}% is below target and will pressure closings without intervention.`);
   if (criticalRiskCount > 0) critical.push(`${criticalRiskCount} critical-risk loans need immediate attention to prevent fallout.`);
   if (highLtvCount > 0) critical.push(`${highLtvCount} loans with LTV > 95% face elevated PMI/decline friction—tighten borrower readiness.`);
-  if (lowFicoCount > 0) critical.push(`${lowFicoCount} loans with subprime FICO (<620) increase denial probability—validate compensating factors early.`);
+  if (lowFicoCount > 0) critical.push(`${lowFicoCount} loans with high-risk FICO (<620) increase denial probability—validate compensating factors early.`);
   if (highDtiCount > 0) warning.push(`${highDtiCount} loans with DTI > 43% may trigger underwriting conditions—preempt documentation gaps.`);
 
   // Metric-specific emphasis
