@@ -33,7 +33,7 @@ interface RAGSettingsData {
   // API Keys
   openai_api_key: string | null;
   gemini_api_key: string | null;
-  // Ailethia Voice Agentic specific settings
+  // Cohi Voice Agentic specific settings
   voice_agentic_enabled: boolean;
   voice_name: string;
   voice_top_k: number;
@@ -522,20 +522,20 @@ export const RAGSettings = memo(function RAGSettings({ activeSection = 'settings
         </CardContent>
       </Card>
 
-      {/* Ailethia Voice Agentic Settings */}
+      {/* Cohi Voice Agentic Settings */}
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
             <Mic className="h-5 w-5 text-orange-600" />
-            <CardTitle>Ailethia Voice Agentic Settings</CardTitle>
+            <CardTitle>Cohi Voice Agentic Settings</CardTitle>
           </div>
-          <CardDescription>Configure RAG and AI settings specifically for Ailethia voice conversations</CardDescription>
+          <CardDescription>Configure RAG and AI settings specifically for Cohi voice conversations</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label htmlFor="voice_agentic_enabled">Enable Voice Agentic</Label>
-              <p className="text-sm text-muted-foreground">Enable Ailethia voice agentic with RAG-powered conversations</p>
+              <p className="text-sm text-muted-foreground">Enable Cohi voice agentic with RAG-powered conversations</p>
             </div>
             <Switch
               id="voice_agentic_enabled"
@@ -565,7 +565,7 @@ export const RAGSettings = memo(function RAGSettings({ activeSection = 'settings
                     <SelectItem value="nova">Nova (OpenAI - Female, Bright)</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-sm text-muted-foreground">Voice personality for Ailethia conversations</p>
+                <p className="text-sm text-muted-foreground">Voice personality for Cohi conversations</p>
               </div>
 
               <div className="flex items-center justify-between">
@@ -695,11 +695,11 @@ export const RAGSettings = memo(function RAGSettings({ activeSection = 'settings
                   id="voice_system_prompt"
                   value={settings.voice_system_prompt || ''}
                   onChange={(e) => updateSetting('voice_system_prompt', e.target.value)}
-                  placeholder="Custom system prompt for Ailethia voice conversations. Leave empty to use default executive intelligence prompt."
+                  placeholder="Custom system prompt for Cohi voice conversations. Leave empty to use default executive intelligence prompt."
                   rows={6}
                 />
                 <p className="text-sm text-muted-foreground">
-                  Override the default Ailethia system prompt. The default includes executive intelligence, mortgage industry knowledge, and proactive insights.
+                  Override the default Cohi system prompt. The default includes executive intelligence, mortgage industry knowledge, and proactive insights.
                 </p>
               </div>
             </>

@@ -204,9 +204,9 @@ export const loPerformanceData: ReportData = {
       type: 'bar',
       title: 'Revenue by Tier',
       data: [
-        { name: 'Top Tier', revenue: 15600000, loans: 1250, color: '#10b981' },
-        { name: 'Middle Tier', revenue: 6300000, loans: 630, color: '#f59e0b' },
-        { name: 'Bottom Tier', revenue: 2100000, loans: 210, color: '#ef4444' }
+        { name: 'Top Tier', revenue: 15600000, loans: 1250, color: '#00008F' },
+        { name: 'Second Tier', revenue: 6300000, loans: 630, color: '#52B852' },
+        { name: 'Bottom Tier', revenue: 2100000, loans: 210, color: '#B2DCB2' }
       ]
     },
     {
@@ -223,9 +223,9 @@ export const loPerformanceData: ReportData = {
       type: 'pie',
       title: 'LO Distribution by Tier',
       data: [
-        { name: 'Top Tier', value: 20, color: '#10b981' },
-        { name: 'Middle Tier', value: 30, color: '#f59e0b' },
-        { name: 'Bottom Tier', value: 50, color: '#ef4444' }
+        { name: 'Top Tier', value: 20, color: '#00008F' },
+        { name: 'Second Tier', value: 30, color: '#52B852' },
+        { name: 'Bottom Tier', value: 50, color: '#B2DCB2' }
       ]
     }
   ],
@@ -351,7 +351,7 @@ export const rateCompetitivenessData: ReportData = {
       'Rate competitiveness score: 87/100 - strong position in market',
       'Margin compression: -2 bps this week - within acceptable range',
       'Lock/float ratio: 68% locked - healthy balance',
-      'Aletheia recommendation: Maintain current pricing strategy'
+      'Cohi recommendation: Maintain current pricing strategy'
     ],
     primaryKPI: [
       { label: 'Competitiveness Score', value: '87/100', trend: 'up', change: '+2 points' },

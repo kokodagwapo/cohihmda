@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# AILETHIA / COHEUS - Initial Setup Script
+# Cohi / COHEUS - Initial Setup Script
 # ============================================================================
 # This script sets up the development environment
 
@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🔧 Setting up Ailethia/Coheus Development Environment${NC}"
+echo -e "${BLUE}🔧 Setting up Cohi/Coheus Development Environment${NC}"
 echo ""
 
 # Check Node.js version

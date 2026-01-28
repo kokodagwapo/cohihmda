@@ -1,0 +1,243 @@
+//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce
+//on-going maintenance effort.  
+//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI
+
+// The original script from the Mapping tab of the Operations apps now support this app, Performance, as well:
+
+
+//$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/OperationsMapping.qvs); ///////TW 10/25 Commented out 
+
+
+// //vScriptPath and vCCA_ScriptPath were set on the script tab named "CCA for TVI".SET vOpsScorecardWeightPath='lib://QlikShare/SharedData/Include Files/OpsScorecardWeights.qss';
+/*****************************
+TW 10/25 must include script added 
+Changes made include
+Grouped Mapping tables at the top
+Added Dynamic build of the Turn Time table
+Created Excel work book that contains inline table data
+Added load list from excel tables (place holder file loaction used). 
+
+*****************************/
+Trace '-------------------------------------------------------------';
+Trace 'Entering Include File: OperationsMapping.qvs under $(vScriptPath)';
+Trace '-------------------------------------------------------------';
+/**********************************************************************************************************************************************************
+	File:		OperationsMapping.qvs
+	Purpose:	Externalized script for TVI calculations from the CCA (Coheus Component Architecture) 
+	Reference:	https://teraverde.atlassian.net/browse/CRR-37
+	
+	Author:		Jeff R. Robbins
+	Email:		jrobbins@teraverde.com
+	
+	Version:	1.0.0
+	Date:		2024-01-08
+**********************************************************************************************************************************************************/
+//////
+//Mapping tables TW 10/25
+/////
+
+
+
+USRegionMap:
+MAPPING LOAD
+    UPPER(SourceName) as SourceName,
+    TransformName
+FROM [lib://QlikShare/SharedData\Misc. Data\DEMO\Coheus_2.0\Coheus2019_2.0_Mapping_20190218.xlsx]
+(ooxml, embedded labels, table is USRegion);
+
+//Mapping of State Abbreviation to State Name
+$(Must_Include=[lib://QlikShare/SharedData/Include Files/StateNameMapping.qss]);
+
+
+ActiveAgingSort:
+Mapping Load * Inline [
+ActiveAgingRange, ActiveAgingRangeSort
+'0-15', 1
+'16-30',2
+'31-45',3
+'46-60', 4
+'61-90',5
+'> 90',6
+];
+
+ActiveAgingGreater90Sort:
+Mapping Load * Inline [
+ActiveAgingGreater90, ActiveAgingGreater90Sort
+'91-120', 1
+'121-150', 2
+'151-180', 3
+'181-210', 4
+'211-240', 5
+'241-270', 6
+'> 270', 7
+];
+
+ClosingProjectionGroupList:
+Mapping Load * Inline [
+ClosingProjectionGroup, ClosingProjectionGroupSort
+'Funded', 1
+'CTC', 2
+'Approved', 3
+'Conditional Approved', 4
+'Locked', 5
+'In Processing', 6
+'Not Yet In Processing', 7
+];
+
+//////////////////////////////////
+//////////////TW 10/2025 These In line tables become Island tables.
+///////////// common fields need to be found to create link tables or to create these field list with in the fact table 
+/////////////////////////////////
+For t = 1 to 25
+
+LET vTurnTime$(t) ='Turn Time $(t)';// '$(vTurnTime$(t))';
+LET vStart$(t) =;// '$(vStart$(t))';
+LET vEnd$(t) =;// '$(vEnd$(t))';
+
+Next t;
+/********************************************
+TW 10/25
+Dynamicly created this TurnTimeList. Code can be updated for more rows as needed. 
+
+********************************************/
+
+TurnTimeList:
+LOAD 'Turn Time ' & RecNo() AS TurnTime
+AUTOGENERATE 5;
+
+
+Trace --------Table build from Excel file start----------;
+KPI_ClosingProjections:
+Load
+*
+FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]
+(ooxml, embedded labels, table is Sheet3);
+
+
+// KPI_ClosingProjections:
+// Load * Inline [
+// KPI_ClosingProjections, Sort
+// 'Closed Current Month Units', 1
+// 'Closed Current Month Volume', 2
+// 'Clear to Close Units', 3
+// 'Clear to Close Volume', 4
+// 'Estimated to Close Units', 5
+// 'Estimated to Close Volume', 6
+// ];
+
+ScorecardActors:
+Load
+*
+FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]
+(ooxml, embedded labels, table is Sheet4);
+
+
+
+
+// ScorecardActors:
+// Load * Inline [ 
+// ScorecardActors
+// Processors
+// Processor Units
+// Processor Volume
+// Processor Turn Times
+// Processor Min TVI
+// Processor Max TVI
+// Underwriters
+// Underwriter Units
+// Underwriter Volume
+// Underwriter Avg Conditions
+// Underwriter % Approved
+// Underwriter % Denied
+// Underwriter Turn Times
+// Underwriter Min TVI
+// Underwriter Max TVI
+// Closers
+// Closer Units
+// Closer Volume
+// Closer Turn Times
+// Closer Min TVI
+// Closer Max TVI
+// ];
+
+ScorecardCalcs:
+Load
+*
+FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]
+(ooxml, embedded labels, table is Sheet5);
+
+// ScorecardCalcs:
+// Load * Inline [ 
+// ScorecardCalcs
+// Processors
+// Underwriters
+// Closers
+// ];
+
+ClosingProjDims:
+Load
+*
+FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]
+(ooxml, embedded labels, table is Sheet6);
+
+
+
+// ClosingProjDims:
+// Load * Inline [ 
+// ClosingProjDims
+// Projected To Close
+// Funded
+// Remaining To Close
+// CTC
+// Approved
+// Conditional Approved
+// Locked
+// In Processing
+// Not Yet In Processing
+// ];
+
+NewOpportunityDimensions:
+Load
+*
+FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]
+(ooxml, embedded labels, table is Sheet7);
+
+
+// NewOpportunityDimensions:
+// load * inline [
+// OpportunityBuckets
+// Credit Pull
+// Apps Taken
+// LE Sent
+// Appraisals Received
+// Submission to Underwriting
+// Conditional Approval
+// Final Approvals
+// CTC
+// CD Sent
+// CD Received
+// Funded
+// Investor Purchase
+// ];
+
+KPI_TimeRange:
+Load
+*
+FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]
+(ooxml, embedded labels, table is Sheet8);
+
+
+
+// KPI_TimeRange:
+// Load * Inline [
+// KPI_TimeRange
+// 'Month to Date'
+// 'Quarter to Date'
+// 'Year to Date'
+// ];
+
+
+
+Trace '-------------------------------------------------------------';
+Trace 'Exiting Include File: OperationsMapping.qvs under $(vScriptPath)';
+Trace '-------------------------------------------------------------';

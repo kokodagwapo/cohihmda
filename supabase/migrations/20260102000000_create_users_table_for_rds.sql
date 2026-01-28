@@ -37,7 +37,7 @@ ALTER TABLE public.profiles
 -- Password hash for 'admin123' using bcryptjs (10 rounds)
 INSERT INTO public.users (email, password_hash, full_name, role, is_active)
 VALUES (
-  'admin@ailethia.com',
+  'admin@Cohi.com',
   '$2a$10$vbbt8TWzAGU1Nf5QPom4bu9rxKx.8QqK/COn1HScKq3TysCmYJFlK',  -- admin123
   'Admin User',
   'admin',
@@ -55,11 +55,11 @@ DECLARE
   default_tenant_id UUID;
 BEGIN
   -- Get admin user ID
-  SELECT id INTO admin_user_id FROM public.users WHERE email = 'admin@ailethia.com';
+  SELECT id INTO admin_user_id FROM public.users WHERE email = 'admin@Cohi.com';
   
   -- Create or get default tenant
   INSERT INTO public.tenants (name)
-  VALUES ('Ailethia Admin')
+  VALUES ('Cohi Admin')
   ON CONFLICT DO NOTHING
   RETURNING id INTO default_tenant_id;
   
@@ -75,7 +75,7 @@ BEGIN
   
   -- Create or update profile for admin
   INSERT INTO public.profiles (user_id, tenant_id, full_name, email)
-  VALUES (admin_user_id, default_tenant_id, 'Admin User', 'admin@ailethia.com')
+  VALUES (admin_user_id, default_tenant_id, 'Admin User', 'admin@Cohi.com')
   ON CONFLICT (user_id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     full_name = EXCLUDED.full_name,

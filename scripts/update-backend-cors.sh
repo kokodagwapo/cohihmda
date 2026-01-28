@@ -15,7 +15,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Use environment variables for security
-S3_FRONTEND_URL="${S3_FRONTEND_URL:-http://ailethia-frontend-1767135651.s3-website-us-east-1.amazonaws.com}"
+S3_FRONTEND_URL="${S3_FRONTEND_URL:-http://Cohi-frontend-1767135651.s3-website-us-east-1.amazonaws.com}"
 BACKEND_IP="${1:-${EC2_HOST}}"
 BACKEND_PORT="${2:-3001}"
 SSH_KEY="${3:-${EC2_SSH_KEY:-~/.ssh/id_rsa}}"
@@ -34,7 +34,7 @@ echo -e "Backend: ${YELLOW}${BACKEND_IP}:${BACKEND_PORT}${NC}"
 echo ""
 
 # Check if SSH key exists
-if [ ! -f "$SSH_KEY" ] && [ "$SSH_KEY" = "~/.ssh/ailethia-key.pem" ]; then
+if [ ! -f "$SSH_KEY" ] && [ "$SSH_KEY" = "~/.ssh/Cohi-key.pem" ]; then
     echo -e "${YELLOW}⚠️  SSH key not found at ${SSH_KEY}${NC}"
     echo -e "Please provide the path to your SSH key:"
     echo -e "  ${BLUE}./scripts/update-backend-cors.sh [backend-ip] [port] [ssh-key-path]${NC}"
@@ -91,4 +91,4 @@ fi
 
 echo ""
 echo -e "${GREEN}After updating, test the login at:${NC}"
-echo -e "${BLUE}http://ailethia-frontend-1767135651.s3-website-us-east-1.amazonaws.com/admin${NC}"
+echo -e "${BLUE}http://Cohi-frontend-1767135651.s3-website-us-east-1.amazonaws.com/admin${NC}"

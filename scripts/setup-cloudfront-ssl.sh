@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# CloudFront SSL Setup Script for Ailethia
+# CloudFront SSL Setup Script for Cohi
 # ============================================================================
 # This script sets up CloudFront distribution with SSL certificate for S3 bucket
 # Prerequisites:
@@ -18,12 +18,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-S3_BUCKET="ailethia-frontend-1767135651"
+S3_BUCKET="Cohi-frontend-1767135651"
 REGION="us-east-1"
 DOMAIN_NAME="${1:-}"  # Optional: pass domain as first argument
 CERTIFICATE_ARN="${2:-}"  # Optional: pass certificate ARN as second argument
 
-echo -e "${GREEN}🌐 Setting up CloudFront with SSL for Ailethia${NC}"
+echo -e "${GREEN}🌐 Setting up CloudFront with SSL for Cohi${NC}"
 echo -e "S3 Bucket: ${YELLOW}${S3_BUCKET}${NC}"
 echo -e "Region: ${YELLOW}${REGION}${NC}"
 
@@ -46,7 +46,7 @@ echo -e "${BLUE}📦 S3 Website Endpoint: ${S3_WEBSITE_ENDPOINT}${NC}"
 
 # Create CloudFront Origin Access Control (OAC) - recommended over OAI
 echo -e "${GREEN}🔐 Creating Origin Access Control...${NC}"
-OAC_NAME="ailethia-s3-oac"
+OAC_NAME="Cohi-s3-oac"
 OAC_CONFIG=$(aws cloudfront create-origin-access-control \
     --origin-access-control-config Name="${OAC_NAME}",OriginAccessControlOriginType=s3,SigningBehavior=always,SigningProtocol=sigv4 \
     --region ${REGION} 2>/dev/null || echo "")
@@ -111,8 +111,8 @@ fi
 
 DISTRIBUTION_CONFIG=$(cat <<EOF
 {
-  "CallerReference": "ailethia-$(date +%s)",
-  "Comment": "Ailethia Frontend Distribution",
+  "CallerReference": "Cohi-$(date +%s)",
+  "Comment": "Cohi Frontend Distribution",
   "DefaultRootObject": "index.html",
   "Origins": {
     "Quantity": 1,

@@ -10,9 +10,13 @@
     "start": "node dist/index.js",
     "migrate": "node dist/migrations/run.js",
     "create-admin": "node ../scripts/create-admin-user.js",
+    "check-user": "tsx scripts/check-user-and-create-super-admin.js",
     "create-default-tenant": "node ../scripts/create-default-tenant.js",
     "seed:users": "node ../scripts/seed-default-users.js",
-    "seed:users:prod": "NODE_ENV=production node ../scripts/seed-default-users.js"
+    "seed:users:prod": "NODE_ENV=production node ../scripts/seed-default-users.js",
+    "migrate:tenants": "tsx scripts/migrate-tenant-schemas.ts",
+    "migrate:tenants:report": "tsx scripts/migrate-tenant-schemas.ts --report",
+    "seed:local": "tsx scripts/seed-local-dev.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.958.0",
@@ -39,7 +43,8 @@
     "stripe": "^14.0.0",
     "uuid": "^13.0.0",
     "ws": "^8.14.2",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "@aws-sdk/client-secrets-manager": "^3.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

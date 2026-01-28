@@ -50,8 +50,11 @@ function isYearString(v: string): boolean {
   return /^\d{4}$/.test(v);
 }
 
-export function getPeriodRange(period: PeriodValue, now: Date = new Date()): { start: Date | null; end: Date | null } {
+export function getPeriodRange(period: PeriodValue, now: Date = new Date(), year?: number): { start: Date | null; end: Date | null } {
   if (period === 'all' || period === 'custom') return { start: null, end: null };
+
+  // Use provided year, or parse from period string, or use current year
+  const targetYear = year || (typeof period === 'string' && isYearString(period) ? parseInt(period, 10) : now.getFullYear());
 
   if (typeof period === 'string' && isYearString(period)) {
     const year = parseInt(period, 10);
@@ -65,26 +68,29 @@ export function getPeriodRange(period: PeriodValue, now: Date = new Date()): { s
   }
 
   if (period === 'mtd') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const start = new Date(targetYear, now.getMonth(), 1);
+    const end = new Date(targetYear, now.getMonth(), now.getDate() + 1);
     return { start, end };
   }
 
   if (period === 'last_month') {
-    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const end = new Date(now.getFullYear(), now.getMonth(), 1);
+    const start = new Date(targetYear, now.getMonth() - 1, 1);
+    const end = new Date(targetYear, now.getMonth(), 1);
     return { start, end };
   }
 
   if (period === 'ytd') {
-    const start = new Date(now.getFullYear(), 0, 1);
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const start = new Date(targetYear, 0, 1);
+    // For YTD, end should be today if targetYear is current year, or end of year if past year
+    const end = targetYear === now.getFullYear() 
+      ? new Date(targetYear, now.getMonth(), now.getDate() + 1)
+      : new Date(targetYear + 1, 0, 1);
     return { start, end };
   }
 
   if (period === 'last_year') {
-    const start = new Date(now.getFullYear() - 1, 0, 1);
-    const end = new Date(now.getFullYear(), 0, 1);
+    const start = new Date(targetYear - 1, 0, 1);
+    const end = new Date(targetYear, 0, 1);
     return { start, end };
   }
 

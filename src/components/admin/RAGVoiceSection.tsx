@@ -15,7 +15,6 @@ import {
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   Loader2, 
   Brain, 
@@ -29,13 +28,12 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
+import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
 interface RAGVoiceSectionProps {
   ragVoiceSettings: any;
   ragVoiceCosts: any[];
   loading: boolean;
-  isSuperAdmin: boolean;
-  tenants: any[];
   onSave: (settings: any) => Promise<any>;
   onRefresh: (useCache?: boolean, tenantId?: string | null) => Promise<any>;
   onSaveApiKeys?: (openaiKey: string, geminiKey: string) => Promise<any>;
@@ -45,14 +43,12 @@ export const RAGVoiceSection = ({
   ragVoiceSettings,
   ragVoiceCosts,
   loading,
-  isSuperAdmin,
-  tenants,
   onRefresh,
 }: RAGVoiceSectionProps) => {
   const { toast } = useToast();
   
-  // Tenant Selection State (for Super Admin)
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  // Use admin tenant context for tenant selection
+  const { selectedTenantId, isPlatformAdmin, currentTenantName, tenants } = useAdminTenant();
   
   // API Keys Modal State
   const [apiKeysModalOpen, setApiKeysModalOpen] = useState(false);
@@ -67,7 +63,7 @@ export const RAGVoiceSection = ({
     setSavingKeys(true);
     try {
       const targetTenantId = selectedTenantId || undefined;
-      const url = targetTenantId && isSuperAdmin
+      const url = targetTenantId && isPlatformAdmin
         ? `/api/rag/settings?tenant_id=${targetTenantId}`
         : '/api/rag/settings';
       await api.request(url, {
@@ -79,9 +75,9 @@ export const RAGVoiceSection = ({
       });
       toast({
         title: 'Success',
-        description: selectedTenantId && isSuperAdmin
-          ? `API keys saved successfully for ${tenants.find(t => t.id === selectedTenantId)?.name || 'selected tenant'}.`
-          : 'API keys saved successfully. Ailethia voice agentic is now ready to use!',
+        description: selectedTenantId && isPlatformAdmin
+          ? `API keys saved successfully for ${currentTenantName || 'selected tenant'}.`
+          : 'API keys saved successfully. Cohi voice agentic is now ready to use!',
       });
       setApiKeysModalOpen(false);
       await onRefresh(false, selectedTenantId);
@@ -99,7 +95,7 @@ export const RAGVoiceSection = ({
   const handleSaveTopicsAndRules = async () => {
     try {
       const targetTenantId = selectedTenantId || undefined;
-      const url = targetTenantId && isSuperAdmin
+      const url = targetTenantId && isPlatformAdmin
         ? `/api/rag/settings?tenant_id=${targetTenantId}`
         : '/api/rag/settings';
       await api.request(url, {
@@ -181,7 +177,7 @@ https://www.optimallending.com/executive-insights`;
     
     toast({
       title: 'Default Content Loaded',
-      description: 'Default Ailethia topics, rules, and knowledge base links have been loaded. You can edit them as needed.',
+      description: 'Default Cohi topics, rules, and knowledge base links have been loaded. You can edit them as needed.',
     });
   };
 
@@ -192,60 +188,13 @@ https://www.optimallending.com/executive-insights`;
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* Tenant Selector for Super Admin */}
-      {isSuperAdmin && (
-        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <CardHeader>
-            <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-              Support Access
-            </CardTitle>
-            <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-              Select a tenant to view or manage their RAG & Voice Agentic settings for support purposes
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <Select
-                value={selectedTenantId || '__super_admin__'}
-                onValueChange={async (value) => {
-                  const actualValue = value === '__super_admin__' ? null : value;
-                  setSelectedTenantId(actualValue);
-                  await onRefresh(false, actualValue);
-                }}
-              >
-                <SelectTrigger className="w-full max-w-md font-light">
-                  <SelectValue placeholder="Select tenant for support access..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__super_admin__">My Account (Super Admin)</SelectItem>
-                  {tenants && Array.isArray(tenants) && tenants.length > 0 ? tenants.map((tenant) => (
-                    <SelectItem key={tenant.id} value={tenant.id}>
-                      {tenant.name}
-                    </SelectItem>
-                  )) : null}
-                </SelectContent>
-              </Select>
-              {selectedTenantId && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    setSelectedTenantId(null);
-                    await onRefresh(true, null);
-                  }}
-                  className="font-extralight"
-                >
-                  Clear Selection
-                </Button>
-              )}
-            </div>
-            {selectedTenantId && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-light">
-                ⚠️ You are viewing settings for: {tenants.find(t => t.id === selectedTenantId)?.name || 'Selected Tenant'}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      {/* Tenant context info for platform admins */}
+      {isPlatformAdmin && selectedTenantId && (
+        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <p className="text-sm text-amber-700 dark:text-amber-300 font-light">
+            ⚠️ Viewing settings for: <strong>{currentTenantName || 'Selected Tenant'}</strong>
+          </p>
+        </div>
       )}
 
       {loading && !ragVoiceSettings ? (
@@ -260,11 +209,11 @@ https://www.optimallending.com/executive-insights`;
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-                    API Keys {selectedTenantId && isSuperAdmin && <span className="text-xs text-amber-600">(Support Mode)</span>}
+                    API Keys {selectedTenantId && isPlatformAdmin && <span className="text-xs text-amber-600">(Support Mode)</span>}
                   </CardTitle>
                   <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
                     Configure OpenAI and Gemini API keys for RAG and voice agentic features
-                    {selectedTenantId && isSuperAdmin && ' - These keys are tenant-specific'}
+                    {selectedTenantId && isPlatformAdmin && ' - These keys are tenant-specific'}
                   </CardDescription>
                 </div>
                 <Dialog open={apiKeysModalOpen} onOpenChange={setApiKeysModalOpen}>
@@ -276,7 +225,7 @@ https://www.optimallending.com/executive-insights`;
                       onClick={async () => {
                         try {
                           const targetTenantId = selectedTenantId || undefined;
-                          const url = targetTenantId && isSuperAdmin
+                          const url = targetTenantId && isPlatformAdmin
                             ? `/api/rag/settings?tenant_id=${targetTenantId}`
                             : '/api/rag/settings';
                           const response = await api.request<{ settings: any }>(url);
@@ -295,10 +244,10 @@ https://www.optimallending.com/executive-insights`;
                     <DialogHeader className="pb-6 border-b border-slate-200 px-0">
                       <DialogTitle className="flex items-center gap-2 text-xl font-semibold !text-slate-900">
                         <Key className="h-6 w-6 text-purple-600" />
-                        API Keys Configuration for Ailethia Voice Agentic
+                        API Keys Configuration for Cohi Voice Agentic
                       </DialogTitle>
                       <DialogDescription className="pt-3 !text-slate-600 text-sm leading-relaxed">
-                        Configure tenant-specific API keys for OpenAI and Google Gemini. These keys are used for RAG embeddings, chat models, and Ailethia's real-time voice agentic features.
+                        Configure tenant-specific API keys for OpenAI and Google Gemini. These keys are used for RAG embeddings, chat models, and Cohi's real-time voice agentic features.
                       </DialogDescription>
                     </DialogHeader>
                     
@@ -306,11 +255,11 @@ https://www.optimallending.com/executive-insights`;
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 space-y-3">
                         <h3 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
                           <Info className="h-4 w-4" />
-                          About Ailethia Voice Agentic
+                          About Cohi Voice Agentic
                         </h3>
                         <div className="text-xs text-blue-800 space-y-2 leading-relaxed pl-6">
                           <p>
-                            <strong>Ailethia</strong> is an executive-intelligent AI voice assistant powered by <strong>Google Gemini 2.0 Flash Live</strong>. 
+                            <strong>Cohi</strong> is an executive-intelligent AI voice assistant powered by <strong>Google Gemini 2.0 Flash Live</strong>. 
                             It provides real-time, bidirectional voice conversations with your team.
                           </p>
                           <div className="mt-3 space-y-1">
@@ -394,7 +343,7 @@ https://www.optimallending.com/executive-insights`;
                           />
                           <div className="text-xs !text-slate-600 space-y-1 leading-relaxed pl-1">
                             <p>
-                              <strong>Used for:</strong> Ailethia voice agentic conversations, real-time voice interactions, and Gemini 2.0 Flash Live model.
+                              <strong>Used for:</strong> Cohi voice agentic conversations, real-time voice interactions, and Gemini 2.0 Flash Live model.
                             </p>
                             <p>
                               Get your API key from{' '}
@@ -428,7 +377,7 @@ https://www.optimallending.com/executive-insights`;
                           <div>
                             <strong className="text-slate-900">Gemini Key:</strong>
                             <ul className="list-disc list-inside ml-2 mt-1 space-y-0.5">
-                              <li>Real-time voice conversations with Ailethia</li>
+                              <li>Real-time voice conversations with Cohi</li>
                               <li>WebSocket-based bidirectional audio streaming</li>
                               <li>Voice agentic personality and behavior configuration</li>
                             </ul>
@@ -475,7 +424,7 @@ https://www.optimallending.com/executive-insights`;
                     Topics and Rules
                   </CardTitle>
                   <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-                    Configure conversation topics and rules for Ailethia voice agentic. Current settings are loaded below and can be edited, added to, or deleted.
+                    Configure conversation topics and rules for Cohi voice agentic. Current settings are loaded below and can be edited, added to, or deleted.
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
@@ -526,7 +475,7 @@ https://www.optimallending.com/executive-insights`;
                   className="font-extralight bg-white border-slate-200 text-slate-900 p-4 min-h-[120px] resize-y"
                 />
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-light">
-                  List topics Ailethia can discuss. Leave empty to allow all topics. Current values are displayed above and can be edited, added to, or deleted.
+                  List topics Cohi can discuss. Leave empty to allow all topics. Current values are displayed above and can be edited, added to, or deleted.
                 </p>
               </div>
               
@@ -548,7 +497,7 @@ https://www.optimallending.com/executive-insights`;
                   className="font-extralight bg-white border-slate-200 text-slate-900 p-4 min-h-[120px] resize-y"
                 />
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-light">
-                  Rules that Ailethia must follow during conversations. Current values are displayed above and can be edited, added to, or deleted.
+                  Rules that Cohi must follow during conversations. Current values are displayed above and can be edited, added to, or deleted.
                 </p>
               </div>
               
@@ -570,7 +519,7 @@ https://www.optimallending.com/executive-insights`;
                   className="font-extralight bg-white border-slate-200 text-slate-900 p-4 min-h-[100px] resize-y"
                 />
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-light">
-                  Links to knowledge base resources that Ailethia can reference during conversations. Current values are displayed above and can be edited, added to, or deleted.
+                  Links to knowledge base resources that Cohi can reference during conversations. Current values are displayed above and can be edited, added to, or deleted.
                 </p>
               </div>
 
@@ -582,12 +531,12 @@ https://www.optimallending.com/executive-insights`;
                   id="personality_custom"
                   value={settings?.personality_custom ?? ''}
                   onChange={(e) => setSettings({ ...settings, personality_custom: e.target.value })}
-                  placeholder="Describe how Ailethia should behave (e.g., Be proactive and predictive, Think like a Chief of Staff)"
+                  placeholder="Describe how Cohi should behave (e.g., Be proactive and predictive, Think like a Chief of Staff)"
                   rows={4}
                   className="font-extralight bg-white border-slate-200 text-slate-900 p-4 min-h-[100px] resize-y"
                 />
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-light">
-                  Define Ailethia's personality and behavior during conversations.
+                  Define Cohi's personality and behavior during conversations.
                 </p>
               </div>
               

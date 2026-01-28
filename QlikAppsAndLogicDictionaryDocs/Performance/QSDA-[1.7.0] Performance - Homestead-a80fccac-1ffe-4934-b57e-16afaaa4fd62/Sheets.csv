@@ -1,0 +1,71 @@
+Id,Name,Description,Rank,Published,Approved,OwnerName,QsdaVersion,MetaId
+010844d6-8576-4ac3-806d-585e14afa503,='Company Performance Overview | Loan Funnel for Loans Started in $(vYear) as of $(=vCurrentDateAsDate)',,-3.5781155,False,False,Undetermined,3.4.5,2039
+1b7e60bb-c475-4922-a4f8-2c9c4b89fbb5,Operation Scorecard Trends,,-0.8281155,False,False,Undetermined,3.4.5,2041
+3c65849c-a82a-4180-85b3-febe540f3e81,Operation Scorecard,,-1.0781155,False,False,Undetermined,3.4.5,2042
+476fa677-4840-4007-8954-4d6ce5c472bf,Sales Scorecard,,-1.3281155,False,False,Undetermined,3.4.5,2043
+58b57188-4641-4d9d-b40e-7b22fc8cecc6,Sales Trends,,-1.1718655,False,False,Undetermined,3.4.5,2044
+83e0ca73-adb3-4c36-968f-a150fb3c005f,Geography,,1.5156759,False,False,Undetermined,3.4.5,2045
+9e40861a-280a-4315-a241-346e8393458e,"=if($(vYear)=$(vMaxYear),
+
+'Company Performance Detail $(vToDateLabel)',
+
+'Company Performance Detail | Loan Funnel for Loans Started in $(vYear) as of $(=vCurrentDateAsDate)'
+
+)",,-3.2031155,False,False,Undetermined,3.4.5,2046
+HaKkDSY,Financial Modeling Sandbox,,4,False,False,Undetermined,3.4.5,2049
+RErxppg,"=if($(vYear)=$(vMaxYear),
+
+'Company Performance Detail $(vToDateLabel)',
+
+'Company Performance Detail | Loan Funnel for Loans Started in $(vYear) as of $(=vCurrentDateAsDate)'
+
+)",,-3.1718655,False,False,Undetermined,3.4.5,2050
+a306217b-be8d-4f68-9adb-7ce8ab0fb851,"='TopTiering by $(=if($(vCompanyScorecardShowHide)=0,'$(vScorecard)','$(vScorecardActor)')) | Production Data  
+	$(=Pick(
+		Match(vToDate,
+			'LastWeekFlag',
+			'MTD',
+			'PreviousMonthFlag',
+			'QTD',
+			'PreviousQuarterFlag',
+			'YTDFlag',
+			'PreviousYearFlag'
+			),
+			
+		'Last Week',
+		'Month to Date',
+		'Last Month',
+		'Quarter to Date',
+		'Last Quarter',
+		'Year to Date',
+		'Last Year'
+		)
+	)' 
+",,-3.1406155,False,False,Undetermined,3.4.5,2053
+ad273c1f-6c56-436d-8cbf-d50952a254fd,Loan Detail,,2.9219508,False,False,Undetermined,3.4.5,2055
+c0a0a8aa-c2cd-46e6-bdb5-4bf219986d3d,Credit Risk Management,,1.0469177,False,False,Undetermined,3.4.5,2056
+fbbbbdc6-3942-4455-a269-a4d0c371e231,"=' Company Scorecard | Applications Taken 
+
+$(=Pick(
+		Match(vToDate,
+			'LastWeekFlag',
+			'MTD',
+			'PreviousMonthFlag',
+			'QTD',
+			'PreviousQuarterFlag',
+			'YTDFlag',
+			'PreviousYearFlag'
+			),
+			
+		'Last Week',
+		'Month to Date',
+		'Last Month',
+		'Quarter to Date',
+		'Last Quarter',
+		'Year to Date',
+		'Last Year'
+		
+	)
+)
+
+from $(=min({$<DateType={Application},[$(vToDate)]={Yes}>}Date)) to $(=max({$<DateType={Application},[$(vToDate)]={Yes}>}Date))'",,-2.3281155,False,False,Undetermined,3.4.5,2057

@@ -15,7 +15,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Responsive
 import { api } from '@/lib/api';
 
 interface Message {
-  role: 'Ailethia' | 'User' | 'System';
+  role: 'Cohi' | 'User' | 'System';
   text: string;
   timestamp: Date;
   teamMembers?: TeamMember[];
@@ -126,7 +126,7 @@ CURRENT INTELLIGENCE:
 - Volume: ${dashboardContext.stats?.callsToday} calls.
       `;
     }
-    return `You are Ailethia, an elite Executive Intelligence Agent. 
+    return `You are Cohi, an elite Executive Intelligence Agent. 
     You are warm, professional, and sharp. 
     ${contextString}
     Goal: Provide high-value executive insights with a human touch.`;
@@ -158,7 +158,7 @@ CURRENT INTELLIGENCE:
 
       ws.onopen = () => {
         setIsConnected(true);
-        console.log('Connected to Ailethia via backend WebSocket');
+        console.log('Connected to Cohi via backend WebSocket');
         toast({ title: 'Connected', description: 'Live voice activated' });
         
         if (!hasGreeted) {
@@ -177,7 +177,7 @@ CURRENT INTELLIGENCE:
             data = event.data;
           }
 
-          console.log('Ailethia message:', data);
+          console.log('Cohi message:', data);
 
           // Handle audio data from Gemini
           if (data.serverContent?.modelTurn?.parts) {
@@ -194,7 +194,7 @@ CURRENT INTELLIGENCE:
             for (const part of data.serverContent.modelTurn.parts) {
               if (part.text) {
                 setMessages(prev => [...prev, {
-                  role: 'Ailethia',
+                  role: 'Cohi',
                   text: part.text,
                   timestamp: new Date()
                 }]);
@@ -208,7 +208,7 @@ CURRENT INTELLIGENCE:
 
       ws.onclose = (event) => {
         setIsConnected(false);
-        console.log('Ailethia WebSocket Disconnected', event.code, event.reason);
+        console.log('Cohi WebSocket Disconnected', event.code, event.reason);
         if (event.code !== 1000) {
           toast({ 
             title: 'Connection Lost', 
@@ -223,7 +223,7 @@ CURRENT INTELLIGENCE:
         const backendUrl = localStorage.getItem('BACKEND_API_URL') || 'not configured';
         toast({ 
           title: 'Connection Error', 
-          description: `Unable to connect to Ailethia. Backend: ${backendUrl.includes('http') ? backendUrl.replace(/^https?:\/\//, '').split('/')[0] : 'not configured'}. Check console for details.`,
+          description: `Unable to connect to Cohi. Backend: ${backendUrl.includes('http') ? backendUrl.replace(/^https?:\/\//, '').split('/')[0] : 'not configured'}. Check console for details.`,
           variant: 'destructive',
           duration: 10000 // Show longer for debugging
         });
@@ -343,7 +343,7 @@ CURRENT INTELLIGENCE:
   const startVoiceRecognition = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
     
-    // Do not suspend audio context anymore - we want to hear Ailethia while talking
+    // Do not suspend audio context anymore - we want to hear Cohi while talking
     // if (audioCtxRef.current) audioCtxRef.current.suspend();
 
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
@@ -399,11 +399,11 @@ CURRENT INTELLIGENCE:
       await api.getCurrentUser();
       setIsInCall(true);
       connectToLiveAPI();
-      toast({ title: 'Call Started', description: 'Connecting to Ailethia...' });
+      toast({ title: 'Call Started', description: 'Connecting to Cohi...' });
     } catch (error) {
       toast({
         title: 'Authentication Required',
-        description: 'Please sign in to use Ailethia',
+        description: 'Please sign in to use Cohi',
         variant: 'destructive'
       });
     }
@@ -566,7 +566,7 @@ CURRENT INTELLIGENCE:
     const chartData = generateMockChartData(file.name, fileType || '');
     
     const analysisMessage: Message = {
-      role: 'Ailethia',
+      role: 'Cohi',
       text: `I've analyzed your ${fileType?.toUpperCase()} file "${file.name}". Here's what I found:`,
       timestamp: new Date(),
       chartData
@@ -703,7 +703,7 @@ CURRENT INTELLIGENCE:
                   <div className="space-y-4">
                     {messages.length === 0 && (
                       <div className="text-white/50 text-sm text-center py-8">
-                        Start a conversation with Ailethia
+                        Start a conversation with Cohi
                       </div>
                     )}
                     {messages.map((msg, idx) => (
@@ -905,7 +905,7 @@ CURRENT INTELLIGENCE:
               <Button
                 onClick={() => {
                   const teamMessage: Message = {
-                    role: 'Ailethia',
+                    role: 'Cohi',
                     text: 'Here are your top team members and their current performance:',
                     timestamp: new Date(),
                     teamMembers: mockTeamMembers
@@ -930,7 +930,7 @@ CURRENT INTELLIGENCE:
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-6 sm:mb-12 px-4">
-              <h2 className="text-2xl sm:text-3xl font-light text-white tracking-wide">I'm Ailethia</h2>
+              <h2 className="text-2xl sm:text-3xl font-light text-white tracking-wide">I'm Cohi</h2>
               <p className="text-white/60 text-xs sm:text-sm mt-2">
                 {isInCall ? 'In Call' : 'Ready to assist'}
               </p>

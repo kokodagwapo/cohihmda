@@ -1,0 +1,24 @@
+//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce
+//on-going maintenance effort.  
+//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI
+
+// Code common to all apps (Exec, Sales, Ops, Contribution):
+$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/QSS.qvs);
+
+// Include file for just Contribution (vCCA_App was set to Contribution on script tab "CCA for TVI"):
+$(Must_Include=$(vCCA_ScriptPath)CCA_$(vCCA_App)AppIncludePostProcessing.qvs);
+
+//vScriptPath and vCCA_ScriptPath were set on the script tab named "CCA for TVI".
+
+// Weights pulled from the Setup Tool XML (divided by 10 to maintain the current production trait of the weights being out of 10.)
+LET vScorecardVolumeWeight = $(SalesVolumeWeight) / 10;
+LET vScorecardMarginWeight = $(SalesMarginWeight) / 10;
+LET vScorecardTurnTimeWeight = $(SalesTurnTimeWeight) / 10;
+LET vScorecardPullThroughWeight = $(SalesPullThroughWeight) / 10;
+LET vScorecardUnitWeight = $(SalesUnitWeight) / 10;
+LET vScorecardConcessionWeight = $(SalesConcessionsWeight) / 10;
+LET vScorecardOpsUnitWeight = $(OpsUnitWeight) / 10;
+LET vScorecardOpsTurnTimeWeight = $(OpsTurnTimeWeight) / 10;
+LET vScorecardOpsComplexityWeight = $(OpsComplexityWeight) / 10;
+
+

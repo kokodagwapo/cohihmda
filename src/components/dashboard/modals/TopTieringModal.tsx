@@ -114,7 +114,7 @@ export function TopTieringModal({
         <DialogHeader>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <DialogTitle className="flex items-center gap-2 sm:gap-3 text-lg sm:text-xl font-extralight tracking-tight leading-[1.05]">
-              <div className="w-1 sm:w-1.5 h-5 sm:h-6 bg-gradient-to-b from-emerald-500 via-amber-500 to-rose-500 rounded-full flex-shrink-0" />
+              <div className="w-1 sm:w-1.5 h-5 sm:h-6 bg-gradient-to-b from-tier-top via-tier-second to-tier-bottom rounded-full flex-shrink-0" />
               {selectedBranch ? <span className="flex items-center gap-2">
                   <button onClick={() => setSelectedBranch(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                     <ArrowDown className="w-4 h-4 rotate-90" />
@@ -155,7 +155,7 @@ export function TopTieringModal({
           label: 'Trends'
         }].map(tab => <button key={tab.id} onClick={() => setTopTieringTab(tab.id as any)} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors relative whitespace-nowrap ${topTieringTab === tab.id ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
                 {tab.label}
-                {topTieringTab === tab.id && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500" />}
+                {topTieringTab === tab.id && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-tier-top" />}
               </button>)}
           </div>}
         
@@ -203,9 +203,9 @@ export function TopTieringModal({
                   Loan Officers (12 Active)
                 </h4>
                 <div className="grid gap-2 max-h-48 sm:max-h-64 overflow-y-auto">
-                  {branchLOs.map((lo, idx) => <div key={idx} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between py-2 px-2 sm:px-3 rounded-lg gap-2 ${lo.tier === 'top' ? 'bg-emerald-50/30 dark:bg-emerald-900/10' : lo.tier === 'middle' ? 'bg-amber-50/30 dark:bg-amber-900/10' : 'bg-rose-50/30 dark:bg-rose-900/10'}`}>
+                  {branchLOs.map((lo, idx) => <div key={idx} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between py-2 px-2 sm:px-3 rounded-lg gap-2 ${lo.tier === 'top' ? 'bg-tier-top-light dark:bg-tier-top-dark' : lo.tier === 'middle' ? 'bg-tier-second-light dark:bg-tier-second-dark' : 'bg-tier-bottom-light dark:bg-tier-bottom-dark'}`}>
                       <div className="flex items-center gap-2 sm:gap-3">
-                        <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold flex-shrink-0 ${lo.tier === 'top' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400' : lo.tier === 'middle' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-400'}`}>
+                        <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold flex-shrink-0 ${lo.tier === 'top' ? 'bg-tier-top text-white' : lo.tier === 'middle' ? 'bg-tier-second text-white' : 'bg-tier-bottom text-slate-800'}`}>
                           {lo.score}
                         </div>
                         <div className="min-w-0">
@@ -223,7 +223,7 @@ export function TopTieringModal({
                           <p className="text-[9px] sm:text-[10px] text-slate-500">loans</p>
                         </div>
                         <div className="text-left sm:text-right">
-                          <p className={lo.tier === 'top' ? 'text-emerald-600' : lo.tier === 'middle' ? 'text-amber-600' : 'text-rose-600'}>{lo.pullThrough}</p>
+                          <p className={lo.tier === 'top' ? 'text-tier-top' : lo.tier === 'middle' ? 'text-tier-second' : 'text-tier-bottom'}>{lo.pullThrough}</p>
                           <p className="text-[9px] sm:text-[10px] text-slate-500">pull-thru</p>
                         </div>
                       </div>
@@ -326,7 +326,7 @@ export function TopTieringModal({
           {!selectedBranch && topTieringTab === 'branches' && <div className="space-y-4">
               {[{
             tier: 'top',
-            color: 'emerald',
+            color: 'tier-top',
             title: 'Top Tier — 3 Branches (55.6%)',
             total: '$8.10M',
             branches: [{
@@ -353,7 +353,7 @@ export function TopTieringModal({
             }]
           }, {
             tier: 'middle',
-            color: 'amber',
+            color: 'tier-second',
             title: 'Second Tier — 2 Branches (24.5%)',
             total: '$3.57M',
             branches: [{
@@ -373,7 +373,7 @@ export function TopTieringModal({
             }]
           }, {
             tier: 'bottom',
-            color: 'rose',
+            color: 'tier-bottom',
             title: 'Bottom Tier — 9 Branches (19.9%)',
             total: '$2.90M',
             branches: [{
@@ -449,7 +449,7 @@ export function TopTieringModal({
                     <span className="ml-auto text-sm sm:text-lg font-light text-slate-900 dark:text-white">{tierData.total}</span>
                   </div>
                   <div className="grid gap-2">
-                    {tierData.branches.map((branch, idx) => <button key={idx} onClick={() => setSelectedBranch(branch.name)} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between py-2 px-2 sm:px-3 rounded-lg hover:shadow-md transition-all cursor-pointer text-left w-full gap-2 ${tierData.tier === 'top' ? 'bg-emerald-50/30 dark:bg-emerald-900/10 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20' : tierData.tier === 'middle' ? 'bg-amber-50/30 dark:bg-amber-900/10 hover:bg-amber-100/40 dark:hover:bg-amber-900/20' : 'bg-rose-50/30 dark:bg-rose-900/10 hover:bg-rose-100/40 dark:hover:bg-rose-900/20'}`}>
+                    {tierData.branches.map((branch, idx) => <button key={idx} onClick={() => setSelectedBranch(branch.name)} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between py-2 px-2 sm:px-3 rounded-lg hover:shadow-md transition-all cursor-pointer text-left w-full gap-2 ${tierData.tier === 'top' ? 'bg-tier-top-light dark:bg-tier-top-dark hover:bg-tier-top/20 dark:hover:bg-tier-top/30' : tierData.tier === 'middle' ? 'bg-tier-second-light dark:bg-tier-second-dark hover:bg-tier-second/20 dark:hover:bg-tier-second/30' : 'bg-tier-bottom-light dark:bg-tier-bottom-dark hover:bg-tier-bottom/40 dark:hover:bg-tier-bottom/50'}`}>
                         <div className="flex items-center gap-2 sm:gap-3">
                           <span className={`text-[10px] sm:text-xs font-medium w-4 sm:w-5 ${tierData.tier === 'top' ? 'text-emerald-600 dark:text-emerald-400' : tierData.tier === 'middle' ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>#{tierIdx === 0 ? idx + 1 : tierIdx === 1 ? idx + 4 : idx + 6}</span>
                           <div className="min-w-0">

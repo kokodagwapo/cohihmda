@@ -234,9 +234,47 @@ END as loan_amount_populated
 
 ---
 
+## Stratification
+
+**See**: `derived/stratification.md` for complete stratification documentation including:
+- Complete range definitions (FICO, DTI, LTV, Interest Rate, Loan Amount)
+- Configurable min/max values
+- Range sort mappings
+- Date year stratification
+
+## Custom Report Fields
+
+**See**: `core/custom-report-fields.md` for custom field logic:
+- Ad hoc fields
+- Field swap logic
+- Field density calculations
+- Crucial fields identification
+
+## Range Validation
+
+**See**: `derived/stratification.md` for range definitions and:
+- `core/mapping-tables.md` for range sort mappings
+- Configurable range min/max values from XML
+
+## Expression Usage
+
+**See**: `validation/expression-categories.md` for expression categorization and:
+- `validation/qsda-cross-reference.md` for QSDA analysis findings
+- Range-based metrics (_InRange, _OutOfRange)
+
+---
+
 ## Notes
 
 - DataPilot focuses heavily on data validation and stratification
 - Range validations use configurable min/max variables
 - Stratification fields handle missing values explicitly
 - Global Ranges aggregates individual validations
+
+## See Also
+
+- **Stratification**: `derived/stratification.md` - Complete range definitions
+- **Custom Fields**: `core/custom-report-fields.md` - Custom field logic
+- **Mapping Tables**: `core/mapping-tables.md` - Range sort mappings
+- **Expression Categories**: `validation/expression-categories.md` - Expression patterns
+- **QSDA Cross-Reference**: `validation/qsda-cross-reference.md` - App-specific findings

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { BarChart3, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
@@ -8,12 +8,44 @@ import { CompanyDetailView } from './CompanyDetailView';
 
 interface SalesViewProps {
   onTabChange: (tab: 'company' | 'sales' | 'ops') => void;
+  selectedTenantId?: string | null;
+  selectedChannel?: string | null;
+  year: number;
+  dateFilterType: 'year' | 'custom';
+  customDateRange: { start: Date | null; end: Date | null };
 }
 
-export const SalesView = ({ onTabChange }: SalesViewProps) => {
+export const SalesView = ({ 
+  onTabChange, 
+  selectedTenantId, 
+  selectedChannel, 
+  year, 
+  dateFilterType, 
+  customDateRange 
+}: SalesViewProps) => {
   const [showDetailView, setShowDetailView] = useState(false);
-  const [year, setYear] = useState(2025);
-  const { companyOverviewData } = useSalesData();
+  
+  // Build date range for the hook
+  const dateRange = useMemo(() => {
+    if (dateFilterType === 'custom' && customDateRange.start && customDateRange.end) {
+      return {
+        startDate: customDateRange.start.toISOString().split('T')[0],
+        endDate: customDateRange.end.toISOString().split('T')[0],
+      };
+    }
+    
+    // For year-based filtering
+    const startOfYear = `${year}-01-01`;
+    const today = new Date();
+    const isCurrentYear = year === today.getFullYear();
+    const endDate = isCurrentYear 
+      ? today.toISOString().split('T')[0]
+      : `${year}-12-31`;
+    
+    return { startDate: startOfYear, endDate };
+  }, [dateFilterType, year, customDateRange.start, customDateRange.end]);
+  
+  const { companyOverviewData, loading } = useSalesData(dateRange, selectedTenantId, selectedChannel);
 
   // Show detail view if requested
   if (showDetailView) {
@@ -170,24 +202,11 @@ export const SalesView = ({ onTabChange }: SalesViewProps) => {
           </div>
         </div>
 
-        {/* Year Selection */}
+        {/* Date Range Info - controlled by parent */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mb-6">
-          <span className="text-[10px] sm:text-xs md:text-sm font-light text-slate-500 dark:text-slate-400">Year:</span>
-          <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
-            {[2025, 2024, 2023, 2022].map(y => (
-              <button 
-                key={y} 
-                onClick={() => setYear(y)} 
-                className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all tracking-tight ${
-                  year === y 
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                {y}
-              </button>
-            ))}
-          </div>
+          <span className="text-[10px] sm:text-xs md:text-sm font-light text-slate-500 dark:text-slate-400">
+            Showing data for: <span className="text-slate-900 dark:text-white">{dateRange.startDate} - {dateRange.endDate}</span>
+          </span>
         </div>
 
         {/* Summary Cards Row */}

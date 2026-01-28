@@ -44,7 +44,8 @@ const getDemoInsights = (): AletheiaInsight[] => [
 
 export const useAletheiaData = (
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom',
-  onDataAvailabilityChange?: (hasData: boolean) => void
+  onDataAvailabilityChange?: (hasData: boolean) => void,
+  selectedTenantId?: string | null
 ) => {
   const [allInsights, setAllInsights] = useState<AletheiaInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
@@ -52,6 +53,9 @@ export const useAletheiaData = (
   const [funnelData, setFunnelData] = useState<any>(null);
 
   // Fetch dynamic insights from API
+  // Note: onDataAvailabilityChange is intentionally NOT in the dependency array
+  // because it's a callback for reporting state, not for triggering fetches.
+  // Including it would cause infinite re-renders if the parent doesn't memoize it.
   useEffect(() => {
     const fetchInsights = async () => {
       setInsightsLoading(true);
@@ -64,13 +68,13 @@ export const useAletheiaData = (
         const demoInsights = getDemoInsights();
         setAllInsights(demoInsights);
         setInsightsError(null);
-        onDataAvailabilityChange?.(true);
         setInsightsLoading(false);
         return;
       }
       
       try {
-        const data = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}`);
+        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+        const data = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
         
         if (data.insights && Array.isArray(data.insights) && data.insights.length > 0) {
           // Map API insights to component format with icons, preserving source information
@@ -83,13 +87,11 @@ export const useAletheiaData = (
             source: insight.source || 'other', // Preserve source for grouping
           }));
           setAllInsights(mappedInsights);
-          onDataAvailabilityChange?.(true);
         } else {
           // If API returns empty or no insights, use demo data
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
           setInsightsError(null);
-          onDataAvailabilityChange?.(true);
         }
       } catch (error: any) {
         // Handle unauthorized errors silently (user not logged in)
@@ -98,21 +100,18 @@ export const useAletheiaData = (
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
           setInsightsError(null);
-          onDataAvailabilityChange?.(true);
         } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
           // For timeout errors, log as warning since we have demo data fallback
           console.warn('Insights request timed out, using demo data fallback:', error.message);
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
           setInsightsError(null);
-          onDataAvailabilityChange?.(true);
         } else {
           // Other errors - log but still use demo data
           console.error('Error fetching insights:', error);
           setInsightsError(error.message || 'Failed to fetch insights');
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
-          onDataAvailabilityChange?.(true);
         }
       } finally {
         setInsightsLoading(false);
@@ -120,7 +119,7 @@ export const useAletheiaData = (
     };
 
     fetchInsights();
-  }, [dateFilter, onDataAvailabilityChange]);
+  }, [dateFilter, selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch funnel data for briefing context
   useEffect(() => {
@@ -133,7 +132,8 @@ export const useAletheiaData = (
       }
       
       try {
-        const data = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}`);
+        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+        const data = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`);
         setFunnelData(data);
       } catch (error: any) {
         // Handle unauthorized errors silently (user not logged in)
@@ -152,7 +152,7 @@ export const useAletheiaData = (
     };
 
     fetchFunnelData();
-  }, [dateFilter]);
+  }, [dateFilter, selectedTenantId]);
 
   // Handle error state and set demo insights if needed
   useEffect(() => {
@@ -160,9 +160,15 @@ export const useAletheiaData = (
       // Fallback to demo insights if API fails
       const demoInsights = getDemoInsights();
       setAllInsights(demoInsights);
+    }
+  }, [insightsError, allInsights.length, insightsLoading]);
+  
+  // Notify parent about data availability changes (separate effect to avoid loop)
+  useEffect(() => {
+    if (!insightsLoading && allInsights.length > 0) {
       onDataAvailabilityChange?.(true);
     }
-  }, [insightsError, allInsights.length, insightsLoading, onDataAvailabilityChange]);
+  }, [allInsights.length, insightsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     allInsights,

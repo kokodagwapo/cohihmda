@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 
+export interface DateRange {
+  startDate: string;
+  endDate: string;
+}
+
 export interface CompanyOverviewData {
   activeLoans?: {
     count: number;
@@ -29,7 +34,11 @@ export interface CompanyOverviewData {
   fundedByType?: Record<string, number>;
 }
 
-export const useSalesData = () => {
+export const useSalesData = (
+  dateRange?: DateRange,
+  selectedTenantId?: string | null,
+  selectedChannel?: string | null
+) => {
   const [companyOverviewData, setCompanyOverviewData] = useState<CompanyOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -45,8 +54,18 @@ export const useSalesData = () => {
       }
       
       try {
-        console.log('🔍 Fetching company overview from /api/loans/company-overview');
-        const data = await api.request<CompanyOverviewData>('/api/loans/company-overview');
+        // Build query parameters
+        const params = new URLSearchParams();
+        if (dateRange?.startDate) params.append('startDate', dateRange.startDate);
+        if (dateRange?.endDate) params.append('endDate', dateRange.endDate);
+        if (selectedTenantId) params.append('tenant_id', selectedTenantId);
+        if (selectedChannel) params.append('channel_group', selectedChannel);
+        
+        const queryString = params.toString();
+        const url = `/api/loans/company-overview${queryString ? `?${queryString}` : ''}`;
+        
+        console.log('🔍 Fetching company overview from', url);
+        const data = await api.request<CompanyOverviewData>(url);
         console.log('📊 Company overview data from API:', JSON.stringify({
           activeLoans: data.activeLoans,
           submittedMTD: data.submittedMTD,
@@ -77,7 +96,7 @@ export const useSalesData = () => {
       }
     };
     fetchCompanyOverview();
-  }, []);
+  }, [dateRange?.startDate, dateRange?.endDate, selectedTenantId, selectedChannel]);
 
   return { companyOverviewData, loading };
 };

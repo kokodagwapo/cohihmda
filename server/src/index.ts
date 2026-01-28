@@ -48,7 +48,7 @@ initSentry();
 // Middleware
 // Get allowed origins from environment or use defaults
 // Supports both HTTP (dev) and HTTPS (production) origins
-const defaultOrigins = 'http://localhost:5175,http://localhost:8080,http://localhost:8081,http://localhost:8083,http://localhost:8084,http://localhost:8080/ailethia,http://localhost:8081/ailethia,http://localhost:8083/ailethia,http://localhost:8084/ailethia,https://d2wvs4i87rs881.cloudfront.net,http://ailethia-frontend-1767135651.s3-website-us-east-1.amazonaws.com';
+const defaultOrigins = 'http://localhost:5175,http://localhost:8080,http://localhost:8081,http://localhost:8083,http://localhost:8084,http://localhost:8080/Cohi,http://localhost:8081/Cohi,http://localhost:8083/Cohi,http://localhost:8084/Cohi,https://d2wvs4i87rs881.cloudfront.net,http://Cohi-frontend-1767135651.s3-website-us-east-1.amazonaws.com';
 const envOrigins = process.env.FRONTEND_URL || '';
 // Always include CloudFront URL in production
 const cloudFrontOrigin = 'https://d2wvs4i87rs881.cloudfront.net';

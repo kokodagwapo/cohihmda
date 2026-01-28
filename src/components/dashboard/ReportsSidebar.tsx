@@ -1,7 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, Zap, Newspaper, TrendingUp, BarChart3, Target, Check, GripVertical, Home, Trophy, X } from 'lucide-react';
+import { ChevronRight, ChevronDown, ChevronLeft, Zap, BarChart3, Target, Check, Home, Trophy, X, Sun, FileText, LayoutGrid, TrendingUp, LayoutDashboard, Filter, ArrowLeftRight, Shield, ClipboardList, Calculator, LineChart } from 'lucide-react';
 import { getReportById, ReportData, allReports } from '@/data/reportSimulations';
+import { useTheme } from '@/components/theme-provider';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarFooter,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from '@/components/ui/sidebar';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 export interface DashboardVisibility {
   executiveDashboard: boolean;
@@ -13,6 +31,8 @@ export interface DashboardVisibility {
   trends: boolean;
   forecasting: boolean;
   kpiReports: boolean;
+  financialModeling: boolean;
+  myWorkbench: boolean;
 }
 
 export type SectionId = keyof DashboardVisibility;
@@ -25,6 +45,9 @@ interface ReportsSidebarProps {
   onSectionOrderChange?: (order: SectionId[]) => void;
   mobileMenuOpen?: boolean;
   onMobileMenuToggle?: () => void;
+  onSectionClick?: (sectionId: string) => void;
+  /** Visitor's first name for "Welcome {firstName}" in the sidebar header. */
+  visitorFirstName?: string | null;
 }
 
 // Complete realtime data for each report
@@ -143,29 +166,60 @@ const statusConfig = {
 
 // Dashboard section configuration
 const dashboardSectionsConfig = [
-  { id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-purple-500' },
-  { id: 'industryNews' as SectionId, label: 'Industry News', icon: Newspaper, color: 'text-blue-500' },
-  { id: 'aletheiaInsights' as SectionId, label: 'Ailethia Prompts', icon: Zap, color: 'text-emerald-500' },
-  { id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500' },
-  { id: 'topTiering' as SectionId, label: 'Top Tiering', icon: TrendingUp, color: 'text-amber-500' },
-  { id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500' },
+  { id: 'aletheiaInsights' as SectionId, label: 'Cohi Daily Briefings', icon: Sun, color: 'text-emerald-500', section: 'main' },
+  { id: 'industryNews' as SectionId, label: 'Mortgage News', icon: FileText, color: 'text-blue-500', section: 'main' },
+  { id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', section: 'dashboards' },
+  { id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', section: 'dashboards' },
+  { id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', section: 'dashboards' },
 ];
 
 // Default section order - matches actual display order on /insights page
 export const defaultSectionOrder: SectionId[] = [
   'aletheiaInsights',
   'industryNews',
+  'leaderboard',
   'executiveDashboard',
   'closingFalloutForecast',
-  'topTiering',
-  'leaderboard',
 ];
 
-// Get section config by id
-const getSectionConfig = (id: SectionId) => dashboardSectionsConfig.find(s => s.id === id);
+// Nav menu structure mirroring top Navigation (keep sidemenu icons: Sun, FileText, Trophy, Target, BarChart3 for sections)
+const INSIGHTS_CHILDREN = [
+  { type: 'section' as const, id: 'aletheiaInsights' as SectionId, label: 'Cohi Daily Briefings', icon: Sun, color: 'text-emerald-500' },
+  { type: 'section' as const, id: 'industryNews' as SectionId, label: 'Mortgage News', icon: FileText, color: 'text-blue-500' },
+];
+type SubsectionKey = 'dashboard' | 'topTiering' | 'sales' | 'operations' | 'financialModeling';
+
+const DASHBOARD_CHILDREN = [
+  { type: 'subheader' as const, label: 'Dashboard', subsectionKey: 'dashboard' as SubsectionKey },
+  { type: 'section' as const, id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', subsectionKey: 'dashboard' as SubsectionKey },
+  { type: 'section' as const, id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', subsectionKey: 'dashboard' as SubsectionKey },
+  { type: 'section' as const, id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', subsectionKey: 'dashboard' as SubsectionKey },
+  { type: 'route' as const, id: 'topTieringLink', label: 'Top Tiering', icon: ArrowLeftRight, path: '/loan-funnel', subsectionKey: 'dashboard' as SubsectionKey, visibilityId: 'topTiering' as SectionId },
+  { type: 'subheader' as const, label: 'Top Tiering', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, path: '/loan-funnel', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, path: '/performance/toptiering-comparison', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, path: '/credit-risk-management', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'route' as const, id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, path: '/company-scorecard', subsectionKey: 'topTiering' as SubsectionKey },
+  { type: 'subheader' as const, label: 'Sales', subsectionKey: 'sales' as SubsectionKey },
+  { type: 'route' as const, id: 'salesScorecard', label: 'Scorecard', icon: Target, path: '/sales-scorecard', subsectionKey: 'sales' as SubsectionKey },
+  { type: 'route' as const, id: 'salesTrends', label: 'Trends', icon: TrendingUp, path: '/sales-trends', subsectionKey: 'sales' as SubsectionKey },
+  { type: 'subheader' as const, label: 'Operations', subsectionKey: 'operations' as SubsectionKey },
+  { type: 'route' as const, id: 'operationsScorecard', label: 'Scorecard', icon: Target, path: '/performance/operation-scorecard', subsectionKey: 'operations' as SubsectionKey },
+  { type: 'route' as const, id: 'operationsTrends', label: 'Trends', icon: LineChart, path: '/performance/operation-scorecard-trends', subsectionKey: 'operations' as SubsectionKey },
+  { type: 'subheader' as const, label: 'Financial Modeling', subsectionKey: 'financialModeling' as SubsectionKey },
+  { type: 'route' as const, id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, path: '/performance/financial-modeling-sandbox', subsectionKey: 'financialModeling' as SubsectionKey },
+];
+
+// Color mapping for section colors
+const colorMap: Record<string, { bg: string; text: string }> = {
+  'text-emerald-500': { bg: 'rgba(16, 185, 129, 0.1)', text: '#10b981' },
+  'text-blue-500': { bg: 'rgba(59, 130, 246, 0.1)', text: '#3b82f6' },
+  'text-amber-500': { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
+  'text-indigo-500': { bg: 'rgba(99, 102, 241, 0.1)', text: '#6366f1' },
+};
 
 // Bypass Landing Page Toggle Component
-const BypassLandingToggle = ({ isExpanded, onInteraction }: { isExpanded: boolean; onInteraction?: () => void }) => {
+const BypassLandingToggle = ({ isExpanded }: { isExpanded: boolean }) => {
   const [bypassEnabled, setBypassEnabled] = useState(() => {
     const stored = localStorage.getItem('bypass-landing-page');
     return stored === 'true';
@@ -175,7 +229,6 @@ const BypassLandingToggle = ({ isExpanded, onInteraction }: { isExpanded: boolea
     const newValue = !bypassEnabled;
     setBypassEnabled(newValue);
     localStorage.setItem('bypass-landing-page', String(newValue));
-    if (onInteraction) onInteraction();
   };
 
   return (
@@ -237,103 +290,39 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   sectionOrder: externalOrder,
   onSectionOrderChange,
   mobileMenuOpen: externalMobileOpen,
-  onMobileMenuToggle
+  onMobileMenuToggle,
+  onSectionClick,
+  visitorFirstName
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { state, isMobile } = useSidebar();
+  const { theme } = useTheme();
+  const isDarkMode = theme === 'dark';
+  const isExpanded = state !== 'collapsed';
   const [internalMobileOpen, setInternalMobileOpen] = useState(false);
   const isMobileOpen = externalMobileOpen !== undefined ? externalMobileOpen : internalMobileOpen;
-  const [hoveredReport, setHoveredReport] = useState<string | null>(null);
-  const [draggedItem, setDraggedItem] = useState<SectionId | null>(null);
-  const [dragOverItem, setDragOverItem] = useState<SectionId | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const autoHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [insightsExpanded, setInsightsExpanded] = useState(true);
+  const [dashboardExpanded, setDashboardExpanded] = useState(true);
+  const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(false);
+  const [salesSubExpanded, setSalesSubExpanded] = useState(false);
+  const [operationsSubExpanded, setOperationsSubExpanded] = useState(false);
+  const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(false);
   const realtimeStats = useRealtimeStats();
 
-  // Use external order or load from localStorage
-  const [internalOrder, setInternalOrder] = useState<SectionId[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('dashboard-section-order');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as SectionId[];
-          // Merge with default order to include any new sections
-          const newSections = defaultSectionOrder.filter(id => !parsed.includes(id));
-          if (newSections.length > 0) {
-            const merged = [...parsed, ...newSections];
-            localStorage.setItem('dashboard-section-order', JSON.stringify(merged));
-            return merged;
-          }
-          return parsed;
-        } catch {
-          return defaultSectionOrder;
-        }
-      }
-    }
-    return defaultSectionOrder;
-  });
-
-  const sectionOrder = externalOrder || internalOrder;
-
-  // Get ordered sections
-  const orderedSections = sectionOrder
-    .map(id => getSectionConfig(id))
-    .filter((s): s is NonNullable<typeof s> => s !== undefined);
-
-  // Drag handlers
-  const handleDragStart = (e: React.DragEvent, sectionId: SectionId) => {
-    setDraggedItem(sectionId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', sectionId);
-    // Add a slight delay to show the dragging state
-    setTimeout(() => {
-      const target = e.target as HTMLElement;
-      target.style.opacity = '0.5';
-    }, 0);
+  const subExpanded: Record<SubsectionKey, boolean> = {
+    dashboard: true,
+    topTiering: topTieringSubExpanded,
+    sales: salesSubExpanded,
+    operations: operationsSubExpanded,
+    financialModeling: financialModelingSubExpanded,
   };
-
-  const handleDragEnd = (e: React.DragEvent) => {
-    const target = e.target as HTMLElement;
-    target.style.opacity = '1';
-    setDraggedItem(null);
-    setDragOverItem(null);
-  };
-
-  const handleDragOver = (e: React.DragEvent, sectionId: SectionId) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (draggedItem && draggedItem !== sectionId) {
-      setDragOverItem(sectionId);
-    }
-  };
-
-  const handleDragLeave = () => {
-    setDragOverItem(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetId: SectionId) => {
-    e.preventDefault();
-    const draggedId = e.dataTransfer.getData('text/plain') as SectionId;
-    
-    if (draggedId && draggedId !== targetId) {
-      const newOrder = [...sectionOrder];
-      const draggedIndex = newOrder.indexOf(draggedId);
-      const targetIndex = newOrder.indexOf(targetId);
-      
-      // Remove dragged item and insert at new position
-      newOrder.splice(draggedIndex, 1);
-      newOrder.splice(targetIndex, 0, draggedId);
-      
-      // Update state
-      if (onSectionOrderChange) {
-        onSectionOrderChange(newOrder);
-      } else {
-        setInternalOrder(newOrder);
-        localStorage.setItem('dashboard-section-order', JSON.stringify(newOrder));
-      }
-    }
-    
-    setDraggedItem(null);
-    setDragOverItem(null);
+  const setSubExpanded = (k: SubsectionKey, v: boolean) => {
+    if (k === 'topTiering') setTopTieringSubExpanded(v);
+    else if (k === 'sales') setSalesSubExpanded(v);
+    else if (k === 'operations') setOperationsSubExpanded(v);
+    else if (k === 'financialModeling') setFinancialModelingSubExpanded(v);
   };
 
   // Default visibility state
@@ -347,9 +336,16 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
     trends: false,
     forecasting: false,
     kpiReports: false,
+    financialModeling: true,
+    myWorkbench: true,
   };
 
   const currentVisibility = visibility || defaultVisibility;
+
+  // Count active sections - only count sections that are in dashboardSectionsConfig
+  const activeCount = dashboardSectionsConfig.filter(section => currentVisibility[section.id]).length;
+
+  const { setOpenMobile } = useSidebar();
 
   const handleToggleSection = (sectionId: keyof DashboardVisibility) => {
     if (onVisibilityChange) {
@@ -358,69 +354,10 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
         [sectionId]: !currentVisibility[sectionId],
       });
     }
-  };
-
-  // Count active sections - only count sections that are in dashboardSectionsConfig
-  const activeCount = dashboardSectionsConfig.filter(section => currentVisibility[section.id]).length;
-
-  // Helper function to reset auto-hide timer
-  const resetAutoHideTimer = () => {
-    if (autoHideTimeoutRef.current) clearTimeout(autoHideTimeoutRef.current);
-    if (isExpanded) {
-      autoHideTimeoutRef.current = setTimeout(() => {
-        setIsExpanded(false);
-      }, 6000);
+    if (isMobile) {
+      setOpenMobile(false);
     }
   };
-
-  const handleMouseEnter = () => {
-    // Clear any pending collapse timeouts
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (autoHideTimeoutRef.current) clearTimeout(autoHideTimeoutRef.current);
-    
-    // Expand immediately
-    setIsExpanded(true);
-    
-    // Set auto-hide after 6 seconds
-    autoHideTimeoutRef.current = setTimeout(() => {
-      setIsExpanded(false);
-    }, 6000);
-  };
-
-  const handleMouseLeave = () => {
-    // Clear auto-hide timeout since we're leaving
-    if (autoHideTimeoutRef.current) clearTimeout(autoHideTimeoutRef.current);
-    
-    // Collapse immediately when mouse leaves (no delay)
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    setIsExpanded(false);
-  };
-
-  // Handle click outside to close sidebar
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      // Only handle if sidebar is expanded
-      if (!isExpanded) return;
-      
-      // Check if click is outside the sidebar
-      const sidebarElement = document.querySelector('[data-sidebar-container]');
-      if (sidebarElement && !sidebarElement.contains(event.target as Node)) {
-        setIsExpanded(false);
-        // Clear any pending timeouts
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        if (autoHideTimeoutRef.current) clearTimeout(autoHideTimeoutRef.current);
-      }
-    };
-
-    // Add event listener when sidebar is expanded
-    if (isExpanded) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isExpanded]);
 
   const toggleMobile = () => {
     if (onMobileMenuToggle) {
@@ -437,13 +374,6 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
     }
   };
 
-  // Cleanup timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (autoHideTimeoutRef.current) clearTimeout(autoHideTimeoutRef.current);
-    };
-  }, []);
 
   // Check if any report has an alert
   const hasActiveAlerts = Object.values(realtimeStats).some(s => s.alert);
@@ -467,7 +397,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: '-100%', opacity: 0 }}
               transition={{ type: 'tween', duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-              className="md:hidden fixed top-16 left-0 right-0 z-50 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto overscroll-contain"
+              className="md:hidden fixed top-14 sm:top-16 left-0 right-0 z-50 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 shadow-2xl max-h-[calc(100dvh-3.5rem)] sm:max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain"
               style={{ fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif' }}
             >
               <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between z-10">
@@ -482,21 +412,21 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 </div>
                 <button
                   onClick={toggleMobile}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors touch-manipulation min-w-[40px] min-h-[40px] flex items-center justify-center"
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors touch-manipulation min-w-[44px] min-h-[44px] flex items-center justify-center"
                   aria-label="Close menu"
                 >
                   <X className="w-5 h-5" strokeWidth={2} />
                 </button>
               </div>
               
-              {/* Quick Actions */}
+              {/* Quick Actions - toggles for the 5 Insights sections */}
               <div className="px-4 pt-3 pb-2 flex items-center gap-2">
                 <button
                   onClick={() => {
                     const allVisible = activeCount === dashboardSectionsConfig.length;
                     if (onVisibilityChange) {
                       const newVisibility: DashboardVisibility = { ...currentVisibility };
-                      orderedSections.forEach(section => {
+                      dashboardSectionsConfig.forEach(section => {
                         newVisibility[section.id] = !allVisible;
                       });
                       onVisibilityChange(newVisibility);
@@ -508,87 +438,158 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 </button>
               </div>
               
-              <div className="p-4 pt-2 space-y-2">
-                {orderedSections.map((section, index) => {
-                  const Icon = section.icon;
-                  const isActive = currentVisibility[section.id];
-                  const isDragging = draggedItem === section.id;
-                  const isDragOver = dragOverItem === section.id;
-                  const isIndustryNews = section.id === 'industryNews';
-                  const nextSection = orderedSections[index + 1];
-                  const isNextDashboard = nextSection && ['executiveDashboard', 'closingFalloutForecast', 'topTiering', 'leaderboard'].includes(nextSection.id);
-                  const showSeparator = isIndustryNews && isNextDashboard;
-                  
-                  return (
-                    <React.Fragment key={section.id}>
-                      <div
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, section.id)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => handleDragOver(e, section.id)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, section.id)}
-                        onTouchStart={() => {}}
-                        className={`
-                          w-full flex items-center gap-2 p-3 rounded-xl transition-all duration-150 
-                          hover:bg-slate-100/80 dark:hover:bg-slate-800/80
-                          ${isDragging ? 'opacity-50 scale-95' : 'opacity-100'}
-                          ${isDragOver ? 'ring-2 ring-emerald-500 ring-offset-1 bg-emerald-50 dark:bg-emerald-950/30' : ''}
-                          cursor-grab active:cursor-grabbing
-                        `}
-                      >
-                        {/* Drag handle */}
-                        <div className="flex-shrink-0 opacity-40">
-                          <GripVertical className="w-4 h-4 text-slate-400" />
-                        </div>
+              <div className="p-4 pt-2 space-y-1">
+                {/* Insights */}
+                <div>
+                  <button
+                    onClick={() => setInsightsExpanded(!insightsExpanded)}
+                    className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation"
+                  >
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
+                      <LayoutGrid className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1 text-left">Insights</p>
+                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", !insightsExpanded && "-rotate-90")} />
+                  </button>
+                  {insightsExpanded && (
+                    <div className="pl-4 pr-2 pb-2 space-y-1">
+                      {INSIGHTS_CHILDREN.map((it) => {
+                        if (it.type !== 'section') return null;
+                        const Icon = it.icon;
+                        const isActive = currentVisibility[it.id];
+                        return (
+                          <div key={it.id} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
+                            <button onClick={() => handleToggleSection(it.id)} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isActive ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                                <Icon className={cn("w-4 h-4", isActive ? it.color : "text-slate-400 dark:text-slate-500")} />
+                              </div>
+                              {isActive && <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500" />}
+                            </button>
+                            <button
+                              onClick={() => { onSectionClick?.(it.id); onMobileMenuToggle?.(); }}
+                              className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center"
+                            >
+                              {it.label}
+                            </button>
+                            <button
+                              onClick={() => handleToggleSection(it.id)}
+                              className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", isActive ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}
+                            >
+                              <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
-                        <button
-                          onClick={() => handleToggleSection(section.id)}
-                          className="relative flex-shrink-0"
-                        >
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isActive ? 'bg-slate-100 dark:bg-slate-800/60' : 'bg-slate-50 dark:bg-slate-800/30'}`}>
-                            <Icon className={`w-5 h-5 ${isActive ? section.color : 'text-slate-400 dark:text-slate-500'}`} />
-                          </div>
-                          <div className={`absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center transition-all duration-150 ${isActive ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                            {isActive && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
-                          </div>
-                        </button>
-                        <button
-                          onClick={() => handleToggleSection(section.id)}
-                          className="flex-1 text-left"
-                        >
-                          <p className={`text-sm font-thin ${isActive ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'}`}>
-                            {section.label}
-                          </p>
-                          <p className={`text-xs mt-0.5 font-thin ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                            {isActive ? 'Visible' : 'Hidden'}
-                          </p>
-                        </button>
-                        <button
-                          onClick={() => handleToggleSection(section.id)}
-                          className={`w-10 h-6 rounded-full transition-colors duration-150 flex items-center ${isActive ? 'bg-emerald-500 justify-end' : 'bg-slate-300 dark:bg-slate-600 justify-start'}`}
-                        >
-                          <div className="w-5 h-5 rounded-full bg-white shadow-sm mx-0.5" />
-                        </button>
-                      </div>
-                      
-                      {/* Dashboards Separator - after Industry News */}
-                      {showSeparator && (
-                        <div className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
-                            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                              Dashboards
-                            </p>
-                            <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
-                          </div>
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                {/* Dashboard */}
+                <div>
+                  <button
+                    onClick={() => setDashboardExpanded(!dashboardExpanded)}
+                    className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation"
+                  >
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
+                      <TrendingUp className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1 text-left">Dashboards</p>
+                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", !dashboardExpanded && "-rotate-90")} />
+                  </button>
+                  {dashboardExpanded && (
+                    <div className="pl-4 pr-2 pb-2 space-y-1">
+                      {DASHBOARD_CHILDREN.map((it, i) => {
+                        if (it.type === 'subheader') {
+                          const key = it.subsectionKey;
+                          if (key === 'dashboard') {
+                            return (
+                              <div key={`sh-${i}`} className="px-2 pt-3 pb-1">
+                                <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{it.label}</p>
+                              </div>
+                            );
+                          }
+                          const isExp = subExpanded[key];
+                          return (
+                            <button
+                              key={`sh-${i}`}
+                              type="button"
+                              onClick={() => setSubExpanded(key, !isExp)}
+                              className="w-full flex items-center gap-2 px-2 pt-2 pb-1 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation"
+                            >
+                              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex-1">{it.label}</p>
+                              <ChevronDown className={cn("w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform", !isExp && "-rotate-90")} />
+                            </button>
+                          );
+                        }
+                        if (!subExpanded[it.subsectionKey]) return null;
+                        if (it.type === 'section') {
+                          const Icon = it.icon;
+                          const isActive = currentVisibility[it.id];
+                          return (
+                            <div key={it.id} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
+                              <button onClick={() => handleToggleSection(it.id)} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isActive ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                                  <Icon className={cn("w-4 h-4", isActive ? it.color : "text-slate-400 dark:text-slate-500")} />
+                                </div>
+                                {isActive && <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500" />}
+                              </button>
+                              <button onClick={() => { onSectionClick?.(it.id); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{it.label}</button>
+                              <button onClick={() => handleToggleSection(it.id)} className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", isActive ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
+                                <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
+                              </button>
+                            </div>
+                          );
+                        }
+                        const Icon = it.icon;
+                        const isCurrent = location.pathname === it.path;
+                        const vid = 'visibilityId' in it ? (it as { visibilityId?: SectionId }).visibilityId : undefined;
+                        if (vid) {
+                          const isActive = currentVisibility[vid];
+                          return (
+                            <div key={it.id} className="flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation">
+                              <button onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isCurrent ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                                  <Icon className={cn("w-4 h-4", isCurrent ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                                </div>
+                              </button>
+                              <button onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">{it.label}</button>
+                              <button onClick={(e) => { e.stopPropagation(); handleToggleSection(vid); }} className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", isActive ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
+                                <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
+                              </button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            key={it.id}
+                            onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }}
+                            className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation", isCurrent && "bg-slate-100 dark:bg-slate-800/60")}
+                          >
+                            <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isCurrent ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                              <Icon className={cn("w-4 h-4", isCurrent ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                            </div>
+                            <span className={cn("text-sm", isCurrent ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>{it.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* My Workbench */}
+                <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", location.pathname === '/my-dashboard' && "bg-slate-100 dark:bg-slate-800/60")}>
+                  <button onClick={() => { navigate('/my-dashboard'); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
+                    <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", location.pathname === '/my-dashboard' ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                      <LayoutDashboard className={cn("w-4 h-4", location.pathname === '/my-dashboard' ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                    </div>
+                  </button>
+                  <button onClick={() => { navigate('/my-dashboard'); onMobileMenuToggle?.(); }} className="flex-1 text-left text-sm text-slate-700 dark:text-slate-300 min-h-[44px] flex items-center">My Workbench</button>
+                  <button onClick={(e) => { e.stopPropagation(); handleToggleSection('myWorkbench'); }} className={cn("w-8 h-5 min-w-[44px] min-h-[44px] rounded-full flex items-center transition-colors touch-manipulation", currentVisibility.myWorkbench ? "bg-emerald-500 justify-end" : "bg-slate-300 dark:bg-slate-600 justify-start")}>
+                    <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
+                  </button>
+                </div>
               </div>
-              <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="px-4 py-3 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
                 <p className="text-xs font-thin text-slate-500 dark:text-slate-400 text-center">
                   Toggle to show/hide sections
                 </p>
@@ -599,176 +600,246 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Desktop: Left sidebar */}
-      <motion.div
-        initial={false}
-        animate={{ width: isExpanded ? 260 : 52 }}
-        transition={{ 
-          type: 'tween',
-          duration: 0.2,
-          ease: [0.4, 0, 0.2, 1]
+      {/* Desktop: Fixed left sidebar below top nav */}
+      <div 
+        className={cn("hidden md:block", sidebarOpen ? 'open' : '')}
+        style={{
+          position: 'fixed',
+          left: sidebarOpen ? '0' : '-320px',
+          top: '64px',
+          transform: 'none',
+          width: 'min(320px, 85vw)',
+          height: 'calc(100vh - 64px)',
+          maxHeight: 'calc(100vh - 64px)',
+          backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(10px)',
+          borderRight: isDarkMode ? '1px solid rgba(148, 163, 184, 0.18)' : '1px solid rgba(0, 0, 0, 0.08)',
+          boxShadow: isDarkMode ? '4px 0 20px rgba(0, 0, 0, 0.45)' : '4px 0 20px rgba(0, 0, 0, 0.08)',
+          zIndex: 1000,
+          transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          overflowY: 'auto',
+          padding: '24px 0',
+          borderRadius: '0',
         }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        className="hidden md:block fixed left-0 top-[50%] -translate-y-1/2 z-40"
-        data-sidebar-container
       >
-        <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-r-2xl border border-l-0 border-slate-200/60 dark:border-slate-700/40 shadow-xl overflow-hidden">
-        {/* Header - always visible but content fades */}
-        <div className="relative px-2 py-2 bg-gradient-to-r from-slate-50 to-transparent dark:from-slate-800/50 dark:to-transparent border-b border-slate-100 dark:border-slate-800 h-10 flex items-center justify-center">
-          {/* Expanded header content */}
-          <motion.div
-            initial={false}
-            animate={{ opacity: isExpanded ? 1 : 0 }}
-            transition={{ duration: 0.15 }}
-            className="flex items-center justify-between w-full px-2"
-            style={{ visibility: isExpanded ? 'visible' : 'hidden', position: isExpanded ? 'relative' : 'absolute' }}
-          >
-            <div className="flex items-center gap-2">
-              <Zap className="w-3.5 h-3.5 text-emerald-500" />
-              <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
-                Favorites
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full">
-              <span className="text-[9px] font-medium text-slate-600 dark:text-slate-400">{activeCount} of {dashboardSectionsConfig.length}</span>
-            </div>
-          </motion.div>
-          {/* Collapsed: Show count indicator - centered */}
-          <motion.div
-            initial={false}
-            animate={{ opacity: isExpanded ? 0 : 1 }}
-            transition={{ duration: 0.15 }}
-            className="flex items-center justify-center"
-            style={{ visibility: isExpanded ? 'hidden' : 'visible', position: isExpanded ? 'absolute' : 'relative' }}
-          >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-bold text-white">
-              {activeCount}
-            </span>
-          </motion.div>
-        </div>
-
-        {/* Section Toggles - fixed height container */}
-        <div className="space-y-1 py-2" style={{ padding: isExpanded ? '0.5rem' : '0.5rem 0.375rem' }}>
-          {orderedSections.map((section, index) => {
-            const Icon = section.icon;
-            const isActive = currentVisibility[section.id];
-            const isHoveredItem = hoveredReport === section.id;
-            const isDragging = draggedItem === section.id;
-            const isDragOver = dragOverItem === section.id;
-            const isIndustryNews = section.id === 'industryNews';
-            const nextSection = orderedSections[index + 1];
-            const isNextDashboard = nextSection && ['executiveDashboard', 'closingFalloutForecast', 'topTiering', 'leaderboard'].includes(nextSection.id);
-            const showSeparator = isIndustryNews && isNextDashboard;
-            
-            return (
-              <React.Fragment key={section.id}>
-                <div
-                  className={`
-                    w-full flex items-center rounded-xl transition-all duration-150 group 
-                    hover:bg-slate-100/80 dark:hover:bg-slate-800/80 
-                    ${isHoveredItem ? 'bg-slate-100/80 dark:bg-slate-800/80 shadow-sm' : ''} 
-                    ${isExpanded ? 'h-11 gap-2 px-2' : 'h-10'}
-                  `}
-                  style={{ justifyContent: isExpanded ? 'flex-start' : 'center' }}
-                >
-
-                  {/* Icon with checkbox overlay */}
-                  <button
-                    onClick={() => {
-                      handleToggleSection(section.id);
-                      resetAutoHideTimer();
-                    }}
-                    className="relative flex-shrink-0"
-                  >
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors duration-150 ${isActive ? 'bg-slate-100 dark:bg-slate-800/60' : 'bg-slate-50 dark:bg-slate-800/30'}`}>
-                      <Icon className={`w-4 h-4 ${isActive ? section.color : 'text-slate-400 dark:text-slate-500'}`} />
-                    </div>
-                    {/* Checkbox indicator on icon */}
-                    <div className={`absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center transition-all duration-150 ${isActive ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                      {isActive && <Check className="w-2 h-2 text-white" strokeWidth={3} />}
-                    </div>
-                  </button>
-                  
-                  {/* Content - only render when expanded */}
-                  {isExpanded && (
-                    <>
-                      <button
-                        onClick={() => {
-                          handleToggleSection(section.id);
-                          resetAutoHideTimer();
-                        }}
-                        onMouseEnter={() => {
-                          setHoveredReport(section.id);
-                          resetAutoHideTimer();
-                        }}
-                        onMouseLeave={() => setHoveredReport(null)}
-                        className="flex-1 min-w-0 text-left overflow-hidden"
-                      >
-                        {/* Label */}
-                        <p className={`text-xs font-semibold truncate leading-tight transition-colors ${isActive ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'}`}>
-                          {section.label}
-                        </p>
-                        {/* Status text */}
-                        <p className={`text-[10px] mt-0.5 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                          {isActive ? 'Visible' : 'Hidden'}
-                        </p>
-                      </button>
-                      
-                      {/* Toggle indicator */}
-                      <button
-                        onClick={() => {
-                          handleToggleSection(section.id);
-                          resetAutoHideTimer();
-                        }}
-                        className="flex-shrink-0"
-                      >
-                        <div className={`w-8 h-5 rounded-full transition-colors duration-150 flex items-center ${isActive ? 'bg-emerald-500 justify-end' : 'bg-slate-300 dark:bg-slate-600 justify-start'}`}>
-                          <div className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5" />
-                        </div>
-                      </button>
-                    </>
-                  )}
-                </div>
-                
-                {/* Dashboards Separator - after Industry News */}
-                {showSeparator && isExpanded && (
-                  <div className="px-2 py-2 mt-2 mb-1">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
-                      <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                        Dashboards
-                      </p>
-                      <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
-                    </div>
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-          
-          {/* Bypass Landing Page Toggle - Separate from sections */}
-          <div className="border-t border-slate-200 dark:border-slate-700 mt-2 pt-2">
-            <BypassLandingToggle isExpanded={isExpanded} onInteraction={resetAutoHideTimer} />
+        <div style={{ padding: '8px 20px 10px', borderBottom: isDarkMode ? '1px solid rgba(148, 163, 184, 0.15)' : '1px solid rgba(0, 0, 0, 0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29' }}>Welcome{visitorFirstName ? ` ${visitorFirstName}` : ''}</span>
+            <span style={{ fontSize: '11px', color: isDarkMode ? '#64748b' : '#94a3b8' }}>{activeCount}/{dashboardSectionsConfig.length}</span>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center', color: isDarkMode ? '#94a3b8' : '#64748b' }}
+              aria-label="Close sidebar"
+            >
+              <X size={16} />
+            </button>
           </div>
         </div>
+        <div style={{ padding: '12px 0' }}>
+          {/* Insights */}
+          <div>
+            <button
+              onClick={() => setInsightsExpanded(!insightsExpanded)}
+              style={{ width: '100%', padding: '16px 20px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
+                <LayoutGrid size={20} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+              </div>
+              <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>Insights</h4>
+              <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: insightsExpanded ? 'none' : 'rotate(-90deg)' }} />
+            </button>
+            {insightsExpanded && INSIGHTS_CHILDREN.map((it) => {
+              if (it.type !== 'section') return null;
+              const Icon = it.icon;
+              const isActive = currentVisibility[it.id];
+              return (
+                <button
+                  key={it.id}
+                  onClick={() => onSectionClick?.(it.id)}
+                  style={{ width: '100%', padding: '12px 20px 12px 56px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: colorMap[it.color]?.bg || 'rgba(100, 116, 139, 0.1)' }}>
+                    <Icon size={18} style={{ color: colorMap[it.color]?.text || '#64748b' }} />
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
+                    style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
+                  >
+                    <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
+                  </button>
+                </button>
+              );
+            })}
+          </div>
 
-        {/* Info text - fixed height container */}
-        <div className={`border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-center ${isExpanded ? 'px-3 py-2 h-8' : 'h-2'}`}>
-          <motion.p
-            initial={false}
-            animate={{ opacity: isExpanded ? 1 : 0, height: isExpanded ? 'auto' : 0 }}
-            transition={{ duration: 0.15 }}
-            className="text-[9px] text-slate-500 dark:text-slate-400 text-center overflow-hidden"
+          {/* Dashboard */}
+          <div>
+            <button
+              onClick={() => setDashboardExpanded(!dashboardExpanded)}
+              style={{ width: '100%', padding: '16px 20px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
+                <TrendingUp size={20} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+              </div>
+              <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>Dashboards</h4>
+              <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: dashboardExpanded ? 'none' : 'rotate(-90deg)' }} />
+            </button>
+            {dashboardExpanded && DASHBOARD_CHILDREN.map((it, i) => {
+              if (it.type === 'subheader') {
+                const key = it.subsectionKey;
+                if (key === 'dashboard') {
+                  return (
+                    <div key={`sh-${i}`} style={{ padding: '12px 20px 4px 56px' }}>
+                      <p style={{ fontSize: 10, fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{it.label}</p>
+                    </div>
+                  );
+                }
+                const isExp = subExpanded[key];
+                return (
+                  <button
+                    key={`sh-${i}`}
+                    onClick={() => setSubExpanded(key, !isExp)}
+                    style={{ width: '100%', padding: '10px 20px 10px 56px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <p style={{ fontSize: 10, fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, flex: 1 }}>{it.label}</p>
+                    <ChevronDown size={14} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', flexShrink: 0, transform: isExp ? 'none' : 'rotate(-90deg)' }} />
+                  </button>
+                );
+              }
+              const skip = !subExpanded[it.subsectionKey];
+              if (skip) return null;
+              if (it.type === 'section') {
+                const Icon = it.icon;
+                const isActive = currentVisibility[it.id];
+                return (
+                  <button
+                    key={it.id}
+                    onClick={() => onSectionClick?.(it.id)}
+                    style={{ width: '100%', padding: '12px 20px 12px 56px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: colorMap[it.color]?.bg || 'rgba(100, 116, 139, 0.1)' }}>
+                      <Icon size={18} style={{ color: colorMap[it.color]?.text || '#64748b' }} />
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleToggleSection(it.id); }}
+                      style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}
+                    >
+                      <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
+                    </button>
+                  </button>
+                );
+              }
+              const Icon = it.icon;
+              const vid = 'visibilityId' in it ? (it as { visibilityId?: SectionId }).visibilityId : undefined;
+              if (vid) {
+                const isActive = currentVisibility[vid];
+                const handleNavToPath = () => {
+                  setSidebarOpen(false);
+                  setTimeout(() => navigate(it.path), 300);
+                };
+                return (
+                  <div
+                    key={it.id}
+                    style={{ width: '100%', padding: '12px 20px 12px 56px', display: 'flex', alignItems: 'center', gap: 12 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <button onClick={handleNavToPath} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+                      <Icon size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+                    </button>
+                    <button onClick={handleNavToPath} style={{ flex: 1, fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>{it.label}</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleToggleSection(vid); }} style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: isActive ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: isActive ? 'flex-end' : 'flex-start' }}>
+                      <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
+                    </button>
+                  </div>
+                );
+              }
+              return (
+                <button
+                  key={it.id}
+                  onClick={() => navigate(it.path)}
+                  style={{ width: '100%', padding: '12px 20px 12px 56px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
+                    <Icon size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* My Workbench */}
+          <div
+            style={{ width: '100%', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
           >
-            Drag to reorder • Toggle to show/hide
-          </motion.p>
+            <button onClick={() => navigate('/my-dashboard')} style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)', border: 'none', cursor: 'pointer' }}>
+              <LayoutDashboard size={20} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+            </button>
+            <button onClick={() => navigate('/my-dashboard')} style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>My Workbench</button>
+            <button onClick={(e) => { e.stopPropagation(); handleToggleSection('myWorkbench'); }} style={{ flexShrink: 0, width: 32, height: 20, borderRadius: 9999, backgroundColor: currentVisibility.myWorkbench ? '#10b981' : (isDarkMode ? '#475569' : '#cbd5e1'), border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2, justifyContent: currentVisibility.myWorkbench ? 'flex-end' : 'flex-start' }}>
+              <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }} />
+            </button>
+          </div>
         </div>
-
-        {/* Footer accent */}
-        <div className="h-1 bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 opacity-60" />
+        <div style={{ padding: '16px 20px', borderTop: isDarkMode ? '1px solid rgba(148, 163, 184, 0.15)' : '1px solid rgba(0, 0, 0, 0.06)', marginTop: 'auto' }}>
+          <BypassLandingToggle isExpanded={true} />
+        </div>
       </div>
-    </motion.div>
+
+      {/* Sidebar Toggle Button */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="hidden lg:flex"
+        style={{
+          position: 'fixed',
+          left: sidebarOpen ? 'min(320px, 85vw)' : '0',
+          top: 'calc(64px + (100vh - 64px) / 2)',
+          transform: 'translateY(-50%)',
+          width: '48px',
+          height: '64px',
+          backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(10px)',
+          border: isDarkMode ? '1px solid rgba(148, 163, 184, 0.18)' : '1px solid rgba(0, 0, 0, 0.08)',
+          borderLeft: 'none',
+          borderTopRightRadius: '12px',
+          borderBottomRightRadius: '12px',
+          boxShadow: isDarkMode ? '2px 0 12px rgba(0, 0, 0, 0.45)' : '2px 0 12px rgba(0, 0, 0, 0.08)',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 999,
+          transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          color: isDarkMode ? '#94a3b8' : '#64748b',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)';
+          e.currentTarget.style.color = isDarkMode ? '#e2e8f0' : '#1a1d29';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+          e.currentTarget.style.color = isDarkMode ? '#94a3b8' : '#64748b';
+        }}
+      >
+        {sidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+      </button>
     </>
   );
 };

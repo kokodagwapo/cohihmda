@@ -1,0 +1,25 @@
+Discriminator,Statement,QsdaVersion,MetaId
+AUTOGENERATE;,,3.4.5,1200
+INLINE;,,3.4.5,1201
+RESIDENT Closer Calendar;,,3.4.5,1202
+RESIDENT Coheus_Input;,,3.4.5,1203
+RESIDENT Coheus_Input_temp;,,3.4.5,1204
+RESIDENT CommonCalendar;,,3.4.5,1205
+RESIDENT Date Calendar;,,3.4.5,1206
+RESIDENT DateLink;,,3.4.5,1207
+RESIDENT FederalHolidays;,,3.4.5,1208
+RESIDENT Processor Calendar;,,3.4.5,1209
+RESIDENT Tmp_Variable_Repository;,,3.4.5,1210
+RESIDENT Tmp_XLS_Contents;,,3.4.5,1211
+RESIDENT Underwriter Calendar;,,3.4.5,1212
+c:\qlikdata\development\qvd-transform\tvd-coheus-inc-builder\v2\dev\hfm\gold\l2\hfm.coheus_input.l2.qvd;,,3.4.5,1213
+c:\qlikdata\development\tvd-coheus-git\v1\include\script tabs\front-end dashboards\performanceinlinetables.xlsx;,,3.4.5,1214
+c:\qlikdata\development\tvd-coheus-git\v1\include\tseeq\source documents\cca\variables\cca cp variables.xls;,,3.4.5,1215
+c:\qlikdata\development\tvd-coheus-git\v1\include\tseeq\source documents\cca\variables\cca variables v6.xls;,,3.4.5,1216
+c:\qlikdata\development\tvd-coheus-git\v1\include\tseeq\source documents\cca\variables\cca variables v6_master for ops.xls;,,3.4.5,1217
+c:\qlikdata\development\tvd-coheus-git\v1\shareddata\etlmc\odag config.xlsx;,,3.4.5,1218
+c:\qlikdata\development\tvd-coheus-git\v1\shareddata\misc. data\demo\coheus_2.0\coheus2019_2.0_mapping_20190218.xlsx;,,3.4.5,1219
+https://coheus-setup.azurewebsites.net/api/coheusconfig/getxml?encompassid=3011158960;,,3.4.5,1220
+https://coheussetup.teraverde.com/api/coheusconfig/getxml?encompassid=3011110182;,,3.4.5,1221
+qmem://<fieldtext>/<configurationdata>/<full_xml>/<0>;,,3.4.5,1222
+qmem://<fieldtext>/<mockconfig>/<xml>/<0>;,,3.4.5,1223

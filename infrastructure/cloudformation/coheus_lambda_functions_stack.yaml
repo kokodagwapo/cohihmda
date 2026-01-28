@@ -236,15 +236,15 @@ Resources:
   # ============================================================================
   # Lambda Functions - HTTP (REST API)
   # ============================================================================
-  AilethiaBriefingFunction:
+  CohiBriefingFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub 'coheus-ailethia-briefing-${Stage}'
+      FunctionName: !Sub 'coheus-Cohi-briefing-${Stage}'
       Runtime: nodejs20.x
       Handler: index.handler
       Code:
         S3Bucket: !Ref LambdaDeploymentBucket
-        S3Key: !Sub 'lambda/ailethia-briefing-${Stage}.zip'
+        S3Key: !Sub 'lambda/Cohi-briefing-${Stage}.zip'
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 30
       MemorySize: 512
@@ -462,8 +462,8 @@ Resources:
   RestApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
-      - AilethiaBriefingMethod
-      - AilethiaBriefingOptionsMethod
+      - CohiBriefingMethod
+      - CohiBriefingOptionsMethod
       - StripeCheckoutMethod
       - StripeWebhookMethod
       - SeedDemoDataMethod
@@ -472,25 +472,25 @@ Resources:
       RestApiId: !Ref RestApi
       StageName: !Ref Stage
 
-  # Resource and Method for Ailethia Briefing
-  AilethiaBriefingResource:
+  # Resource and Method for Cohi Briefing
+  CohiBriefingResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       RestApiId: !Ref RestApi
       ParentId: !GetAtt RestApi.RootResourceId
-      PathPart: ailethia-briefing
+      PathPart: Cohi-briefing
 
-  AilethiaBriefingMethod:
+  CohiBriefingMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       RestApiId: !Ref RestApi
-      ResourceId: !Ref AilethiaBriefingResource
+      ResourceId: !Ref CohiBriefingResource
       HttpMethod: POST
       AuthorizationType: NONE
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AilethiaBriefingFunction.Arn}/invocations'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CohiBriefingFunction.Arn}/invocations'
       MethodResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -498,11 +498,11 @@ Resources:
             method.response.header.Access-Control-Allow-Headers: true
             method.response.header.Access-Control-Allow-Methods: true
 
-  AilethiaBriefingOptionsMethod:
+  CohiBriefingOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       RestApiId: !Ref RestApi
-      ResourceId: !Ref AilethiaBriefingResource
+      ResourceId: !Ref CohiBriefingResource
       HttpMethod: OPTIONS
       AuthorizationType: NONE
       Integration:
@@ -522,10 +522,10 @@ Resources:
             method.response.header.Access-Control-Allow-Headers: true
             method.response.header.Access-Control-Allow-Methods: true
 
-  AilethiaBriefingPermission:
+  CohiBriefingPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref AilethiaBriefingFunction
+      FunctionName: !Ref CohiBriefingFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*'
@@ -777,10 +777,10 @@ Resources:
   # ============================================================================
   # CloudWatch Log Groups
   # ============================================================================
-  AilethiaBriefingLogGroup:
+  CohiBriefingLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '/aws/lambda/coheus-ailethia-briefing-${Stage}'
+      LogGroupName: !Sub '/aws/lambda/coheus-Cohi-briefing-${Stage}'
       RetentionInDays: 14
 
   StripeCheckoutLogGroup:

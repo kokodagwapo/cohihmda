@@ -4,10 +4,40 @@
  */
 
 import { Response, NextFunction } from 'express';
+import pg from 'pg';
 import { AuthRequest } from './auth.js';
 import { pool } from '../config/database.js';
 import { auditLog } from '../services/auditLogger.js';
 import { logError, logWarn, logInfo, logDebug } from '../services/logger.js';
+
+const { Pool } = pg;
+
+// Management database pool for checking super admins
+let managementPool: pg.Pool | null = null;
+
+function getManagementPool(): pg.Pool {
+  if (!managementPool) {
+    const dbHost = (process.env.DB_HOST || 'localhost').trim();
+    const rawHost = dbHost === 'localhost' || dbHost === '127.0.0.1' ? '127.0.0.1' : dbHost;
+    
+    managementPool = new Pool({
+      host: rawHost,
+      port: parseInt(process.env.DB_PORT || '5432'),
+      database: process.env.MANAGEMENT_DB_NAME || 'coheus_management',
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || 'postgres',
+      ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    managementPool.on('error', (err: any) => {
+      logError('[RBAC] Management pool error', err, {});
+    });
+  }
+  return managementPool;
+}
 
 export interface RBACRequest extends AuthRequest {
   userRole?: string;
@@ -77,12 +107,40 @@ export async function checkPermission(
 
 /**
  * Get user's role and tenant from database
+ * First checks management DB for super admins, then falls back to legacy users table
  */
 async function getUserRoleAndTenant(userId: string): Promise<{ role: string; tenantId: string | null }> {
   try {
-    // FIX: Query public.users instead of auth.users (RDS migration moved users to public schema)
-    // Also map 'admin' role to 'super_admin' for RBAC compatibility
     logDebug('getUserRoleAndTenant: querying for userId', { userId });
+    
+    // First, check management database for super admins (coheus_users)
+    try {
+      const mgmtPool = getManagementPool();
+      const superAdminResult = await mgmtPool.query(
+        `SELECT role, is_active FROM coheus_users WHERE id = $1`,
+        [userId]
+      );
+      
+      if (superAdminResult.rows.length > 0) {
+        const user = superAdminResult.rows[0];
+        if (!user.is_active) {
+          throw new Error('User account is disabled');
+        }
+        logDebug('getUserRoleAndTenant: found super admin', { userId, role: user.role });
+        return {
+          role: user.role, // super_admin, platform_admin, or support
+          tenantId: null,  // Super admins don't belong to a specific tenant
+        };
+      }
+    } catch (mgmtError: any) {
+      // Management DB might not be set up or coheus_users table doesn't exist
+      // Fall through to legacy check
+      if (mgmtError.code !== '42P01') { // Not a "table doesn't exist" error
+        logDebug('getUserRoleAndTenant: management DB check failed', { userId, error: mgmtError.message });
+      }
+    }
+    
+    // Fall back to legacy public.users table for tenant users
     const userResult = await pool.query(
       `SELECT 
          CASE 
@@ -99,7 +157,7 @@ async function getUserRoleAndTenant(userId: string): Promise<{ role: string; ten
        WHERE u.id = $1`,
       [userId]
     );
-    logDebug('getUserRoleAndTenant: found user', { userId, rowCount: userResult.rows.length, role: userResult.rows[0]?.role, tenantId: userResult.rows[0]?.tenant_id });
+    logDebug('getUserRoleAndTenant: legacy query result', { userId, rowCount: userResult.rows.length, role: userResult.rows[0]?.role, tenantId: userResult.rows[0]?.tenant_id });
 
     if (userResult.rows.length === 0) {
       throw new Error('User not found');
@@ -125,9 +183,10 @@ export function requirePermission(resource: string, action: string) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      // Get user's role and tenant
-      const { role, tenantId } = await getUserRoleAndTenant(req.userId);
-      req.userRole = role;
+      // Use role from JWT (set by authenticateToken middleware)
+      // This avoids expensive database lookups since we already have the info
+      const role = req.userRole || 'user';
+      const tenantId = req.tenantId || null;
       req.userTenantId = tenantId;
       
       // Debug logging
@@ -178,17 +237,17 @@ export function requireRole(...allowedRoles: string[]) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      // Get user's role and tenant
-      const { role, tenantId } = await getUserRoleAndTenant(req.userId);
-      req.userRole = role;
+      // Use role from JWT (set by authenticateToken middleware)
+      const role = req.userRole || 'user';
+      const tenantId = req.tenantId || null;
       req.userTenantId = tenantId;
       
       // Debug logging
       logDebug('requireRole check', { userId: req.userId, role, allowedRoles, path: req.path });
 
       if (!allowedRoles.includes(role)) {
-        // Log failed authorization attempt
-        await auditLog({
+        // Log failed authorization attempt (ignore errors since audit may fail for new users)
+        auditLog({
           userId: req.userId,
           userEmail: req.userEmail,
           userRole: role,
@@ -199,7 +258,7 @@ export function requireRole(...allowedRoles: string[]) {
           errorMessage: `Role denied: ${role} not in allowed roles [${allowedRoles.join(', ')}]`,
           ipAddress: req.ip,
           userAgent: req.get('user-agent'),
-        });
+        }).catch(() => {}); // Ignore audit errors
 
         return res.status(403).json({ 
           error: 'Forbidden', 
@@ -226,13 +285,13 @@ export function enforceTenantIsolation() {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      // Get user's role and tenant
-      const { role, tenantId } = await getUserRoleAndTenant(req.userId);
-      req.userRole = role;
+      // Use role and tenant from JWT (set by authenticateToken middleware)
+      const role = req.userRole || 'user';
+      const tenantId = req.tenantId || null;
       req.userTenantId = tenantId;
 
-      // Super admin can access any tenant
-      if (role === 'super_admin') {
+      // Super admin and platform staff can access any tenant
+      if (role === 'super_admin' || role === 'platform_admin' || role === 'support') {
         return next();
       }
 
@@ -248,7 +307,7 @@ export function enforceTenantIsolation() {
       const requestedTenantId = req.query.tenant_id || req.body.tenant_id || req.params.tenant_id;
       
       if (requestedTenantId && requestedTenantId !== tenantId) {
-        await auditLog({
+        auditLog({
           userId: req.userId,
           userEmail: req.userEmail,
           userRole: role,
@@ -259,7 +318,7 @@ export function enforceTenantIsolation() {
           errorMessage: `Attempted to access another tenant's data: ${requestedTenantId}`,
           ipAddress: req.ip,
           userAgent: req.get('user-agent'),
-        });
+        }).catch(() => {}); // Ignore audit errors
 
         return res.status(403).json({ 
           error: 'Forbidden', 

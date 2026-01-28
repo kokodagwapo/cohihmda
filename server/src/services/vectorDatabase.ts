@@ -4,6 +4,7 @@
  */
 
 import { pool } from '../config/database.js';
+import pg from 'pg';
 
 export interface VectorSearchResult {
   id: string;
@@ -268,6 +269,78 @@ async function searchPgVector(
     }));
   } catch (error: any) {
     throw new Error(`Failed to search pgvector: ${error.message}`);
+  }
+}
+
+/**
+ * Store loan embedding directly on loans table
+ */
+export async function storeLoanEmbedding(
+  tenantPool: pg.Pool,
+  loanId: string,
+  embedding: number[]
+): Promise<void> {
+  try {
+    // Check if pgvector extension is installed
+    await tenantPool.query('CREATE EXTENSION IF NOT EXISTS vector');
+
+    // Convert array to pgvector format
+    const embeddingStr = `[${embedding.join(',')}]`;
+
+    await tenantPool.query(
+      `UPDATE public.loans
+       SET embedding = $1::vector, updated_at = NOW()
+       WHERE loan_id = $2`,
+      [embeddingStr, loanId]
+    );
+  } catch (error: any) {
+    if (error.message?.includes('type "vector" does not exist')) {
+      throw new Error('pgvector extension not installed. Run: CREATE EXTENSION vector;');
+    }
+    throw new Error(`Failed to store loan embedding: ${error.message}`);
+  }
+}
+
+/**
+ * Search loans by embedding similarity
+ */
+export async function searchLoansByEmbedding(
+  tenantPool: pg.Pool,
+  queryEmbedding: number[],
+  topK: number = 10,
+  similarityThreshold: number = 0.75
+): Promise<Array<{
+  loan_id: string;
+  borrower_name: string;
+  loan_amount: number;
+  similarity: number;
+}>> {
+  try {
+    const embeddingStr = `[${queryEmbedding.join(',')}]`;
+
+    // Use cosine similarity (1 - cosine_distance)
+    const result = await tenantPool.query(
+      `SELECT 
+        loan_id,
+        borrower_name,
+        loan_amount,
+        1 - (embedding <=> $1::vector) as similarity
+       FROM public.loans
+       WHERE embedding IS NOT NULL
+         AND 1 - (embedding <=> $1::vector) >= $2
+       ORDER BY embedding <=> $1::vector
+       LIMIT $3`,
+      [embeddingStr, similarityThreshold, topK]
+    );
+
+    return result.rows.map((row) => ({
+      loan_id: row.loan_id,
+      borrower_name: row.borrower_name,
+      loan_amount: parseFloat(row.loan_amount) || 0,
+      similarity: parseFloat(row.similarity),
+    }));
+  } catch (error: any) {
+    throw new Error(`Failed to search loans by embedding: ${error.message}`);
   }
 }
 

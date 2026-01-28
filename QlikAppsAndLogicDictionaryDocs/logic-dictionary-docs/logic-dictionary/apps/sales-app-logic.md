@@ -223,9 +223,37 @@ END as registration_date_rolling_12_month_flag
 
 ---
 
+## Revenue Calculations
+
+**See**: `derived/revenue-calculations.md` for complete revenue calculation documentation including:
+- Revenue_Sales formula
+- Revenue configuration logic
+- Formula parsing and evaluation
+- Margin (BPS) calculations (default uses Revenue_Sales)
+
+## Pull Through Calculations
+
+**See**: `derived/pull-through-calculations.md` for pull-through metrics used in Sales app
+
+## Expression Usage
+
+**See**: `validation/expression-categories.md` for expression categorization and:
+- `validation/qsda-cross-reference.md` for QSDA analysis findings
+- Common expression patterns used in Sales app
+
+---
+
 ## Notes
 
 - Sales app extends core logic with active loan aging calculations
 - Lock expiration logic is more detailed than core Transform.qvs
 - Revenue field extraction is dynamic from configuration
 - TPO-specific fields are conditionally added based on `vTPOCheck`
+
+## See Also
+
+- **Revenue Calculations**: `derived/revenue-calculations.md` - Revenue_Sales and margin calculations
+- **Pull Through**: `derived/pull-through-calculations.md` - Pull-through metrics
+- **Date Functions**: `core/functions.md` - Date flag functions (TPO-specific)
+- **Expression Categories**: `validation/expression-categories.md` - Expression patterns
+- **QSDA Cross-Reference**: `validation/qsda-cross-reference.md` - App-specific findings

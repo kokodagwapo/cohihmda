@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Phone, FileCheck, AlertTriangle, TrendingUp, Users, DollarSign, Clock, BarChart3, ArrowUp, ArrowDown, Target, MessageSquare, X, FileSpreadsheet, FileText, Presentation, Bell, BellOff, Activity, CheckCircle2, Info, Zap, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Newspaper, Building2, ExternalLink, Pause, Play, Minimize2, Maximize2, KeyRound, CalendarDays, Pin, Archive, Medal, Award, Star, Crown, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Settings, Check, RefreshCw, MoreVertical, Search, Database, Loader2 } from 'lucide-react';
+import { Phone, FileCheck, AlertTriangle, TrendingUp, Users, DollarSign, Clock, BarChart3, ArrowUp, ArrowDown, Target, MessageSquare, X, FileSpreadsheet, FileText, Presentation, Bell, BellOff, Activity, CheckCircle2, Info, Zap, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Newspaper, Building2, ExternalLink, Pause, Play, Minimize2, Maximize2, KeyRound, CalendarDays, Pin, Archive, Medal, Award, Star, Crown, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Settings, Check, RefreshCw, MoreVertical, Search, Database, Loader2, ClipboardList } from 'lucide-react';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -23,13 +23,14 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Area, AreaChart } from 'recharts';
 import { Copy, Code2, Sparkles } from 'lucide-react';
 import { AletheiaVoiceAssistant } from '@/components/aletheia/AletheiaVoiceAssistant';
-import { AilethiaPodcast } from '@/components/aletheia/AilethiaPodcast';
+import { CohiPodcast } from '@/components/aletheia/CohiPodcast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePDF } from '@/utils/pdfExport';
 import { ReportsSidebar, DashboardVisibility } from '@/components/dashboard/ReportsSidebar';
 import { ReportModal } from '@/components/dashboard/ReportModal';
 import { ReportData, allReports } from '@/data/reportSimulations';
 import { useEdit } from '@/contexts/EditContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { EditableText, EditableNumber } from '@/components/ui/EditableText';
 import { LOSFunnelData, LOSApiResponse, mapLOSDataToUniversalSchema } from '@/lib/losSchema';
 import { FunnelVisualization } from '@/components/FunnelVisualization';
@@ -59,6 +60,8 @@ import { ExportModal } from '@/components/dashboard/modals/ExportModal';
 import { ShareModal } from '@/components/dashboard/modals/ShareModal';
 import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
+import { TenantSelector } from '@/components/dashboard/TenantSelector';
+import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
 
 
 
@@ -72,20 +75,62 @@ const Dashboard = () => {
   const {
     toast
   } = useToast();
-  const {
-    isAuthenticated: contextAuthenticated,
-    setIsAuthenticated: setContextAuthenticated
-  } = useEdit();
+  
+  // Use AuthContext for proper authentication (not useEdit)
+  const { isAuthenticated: authContextAuthenticated, user, logout: authLogout } = useAuth();
+  // Keep useEdit for content editing only (auth properties are deprecated)
+  const editContext = useEdit();
+  
   // Use custom hooks for state management
   const dashboardState = useDashboardState();
   const dashboardFilters = useDashboardFilters();
   const { dashboardVisibility, isLoadingVisibility, handleVisibilityChange } = useDashboardVisibility();
   
-  // Local state for authentication and error handling
-  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-authenticate by default
-  const [authChecked, setAuthChecked] = useState(false);
-  const [loading, setLoading] = useState(false); // No loading needed since we're auto-authenticating
+  // Local state for loading and error handling
+  // Note: Authentication is now handled by ProtectedRoute wrapper in App.tsx
+  // If we reach this component, user is already authenticated via AuthContext
+  const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState<Error | null>(null);
+  
+  // Use auth from AuthContext - this component is protected by ProtectedRoute
+  const isAuthenticated = authContextAuthenticated;
+  
+  // User state for greeting - derive from AuthContext user
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  
+  // Tenant selection state for admins
+  // For tenant_admin users, this is automatically set to their tenant_id
+  const isTenantAdmin = user?.role === 'tenant_admin';
+  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  
+  // Track user ID to detect user changes and reset state
+  const [prevUserId, setPrevUserId] = useState<string | null>(null);
+  
+  // Reset tenant selection when user changes (login/logout/switch)
+  useEffect(() => {
+    const currentUserId = user?.id || null;
+    
+    if (currentUserId !== prevUserId) {
+      console.log('[Dashboard] User changed, resetting tenant selection', { 
+        from: prevUserId, 
+        to: currentUserId,
+        newRole: user?.role 
+      });
+      
+      // Set tenant based on new user's role
+      if (user?.role === 'tenant_admin' && user?.tenant_id) {
+        setSelectedTenantId(user.tenant_id);
+      } else {
+        setSelectedTenantId(null);
+      }
+      
+      setPrevUserId(currentUserId);
+    }
+  }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
+  
+  // Channel filter state - uses consolidated channel groups (Retail, TPO, etc.)
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   
   // Briefing context state
   const [briefingContext, setBriefingContext] = useState<{
@@ -157,6 +202,18 @@ const Dashboard = () => {
   // Helper function to get filter-based KPI values for reports
   // Now imported from utils/dashboardHelpers.ts
   
+  // Get greeting based on time of day
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      return 'Good morning';
+    } else if (hour < 17) {
+      return 'Good afternoon';
+    } else {
+      return 'Good evening';
+    }
+  };
+  
   // Report sidebar and modal - state is now managed by useDashboardState hook
   const totalEmployees = 100;
 
@@ -167,29 +224,35 @@ const Dashboard = () => {
     bottom: 50
   };
 
-  // Check if user is authenticated via API
+  // Set up display name from user data
   useEffect(() => {
-    const checkAuth = async () => {
-      // Auto-authenticate - no PIN required
-      setIsAuthenticated(true);
-      setContextAuthenticated(true);
-      sessionStorage.setItem('dashboard_auth', 'authenticated');
-      setLoading(false);
-      setAuthChecked(true);
+    if (user?.full_name) {
+      const first = String(user.full_name).trim().split(/\s+/)[0];
+      setDisplayName(first || null);
+    } else if (user?.email) {
+      const emailPrefix = String(user.email).split("@")[0] ?? "";
+      const capitalizedName = emailPrefix ? emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1) : "";
+      setDisplayName(capitalizedName || null);
+    } else {
+      setDisplayName(null);
+    }
+  }, [user?.full_name, user?.email]);
 
-      // Try to get user info if API is available (optional)
-      try {
-        await api.getCurrentUser();
-      } catch (error) {
-        // API not available - that's fine, continue without it
-      }
-    };
-    checkAuth();
-  }, [setContextAuthenticated]);
+  // Authentication is now fully handled by AuthContext and ProtectedRoute
+  // This component only renders when user is already authenticated
+  // No need to check auth here - just set up the dashboard state
+  useEffect(() => {
+    if (isAuthenticated) {
+      sessionStorage.setItem('dashboard_auth', 'authenticated');
+    }
+  }, [isAuthenticated]);
 
   // Fetch briefing context data (insights and funnel data)
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
+  
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || briefingLoading) return;
     
     const fetchBriefingContext = async () => {
       // Check if user has a valid token before making API calls
@@ -204,19 +267,23 @@ const Dashboard = () => {
         return;
       }
       
+      setBriefingLoading(true);
+      setBriefingError(null);
+      
       try {
-        // Fetch insights/dialogues
-        const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}`);
+        // Fetch insights/dialogues with tenant support
+        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+        const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
         const dialogues = insightsData?.insights?.map((insight: any) => ({
           message: insight.message || '',
           type: insight.type || 'info',
           priority: insight.priority || 'standard'
         })) || [];
 
-        // Fetch funnel data
+        // Fetch funnel data with tenant support
         let funnelStory = null;
         try {
-          const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}`);
+          const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`);
           if (funnelData) {
             funnelStory = {
               conversionRates: funnelData.conversionRates || {},
@@ -225,13 +292,10 @@ const Dashboard = () => {
             };
           }
         } catch (error: any) {
-          // Handle unauthorized errors silently
-          if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
-            // User not authenticated - continue without funnel data
-          } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-            // For timeout errors, log as warning since briefing works without funnel data
-            console.warn('Funnel data request timed out for briefing, continuing without it:', error.message);
-          } else {
+          // Handle errors silently - briefing works without funnel data
+          if (!error.message?.includes('Unauthorized') && !error.message?.includes('401') && 
+              !error.message?.includes('timed out') && !error.message?.includes('timeout') &&
+              !error.message?.includes('403')) {
             console.warn('Error fetching funnel data for briefing:', error);
           }
         }
@@ -242,14 +306,23 @@ const Dashboard = () => {
           userName: undefined // Can be set from user profile if available
         });
       } catch (error: any) {
-        // Handle unauthorized errors silently
-        if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+        // Handle 403 (Forbidden) and 401 (Unauthorized) errors gracefully
+        if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+          // Tenant context not available - set empty context
+          setBriefingContext({
+            dialogues: [],
+            funnelStory: null,
+            userName: undefined
+          });
+          setBriefingError('Tenant context not available');
+        } else if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
           // User not authenticated - set empty context
           setBriefingContext({
             dialogues: [],
             funnelStory: null,
             userName: undefined
           });
+          setBriefingError('Not authenticated');
         } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
           // For timeout errors, log as warning since briefing has empty context fallback
           console.warn('Briefing context request timed out, using empty context fallback:', error.message);
@@ -258,6 +331,7 @@ const Dashboard = () => {
             funnelStory: null,
             userName: undefined
           });
+          setBriefingError('Request timed out');
         } else {
           console.error('Error fetching briefing context:', error);
           // Set empty context on error - briefing will still work
@@ -266,12 +340,15 @@ const Dashboard = () => {
             funnelStory: null,
             userName: undefined
           });
+          setBriefingError(error.message || 'Unknown error');
         }
+      } finally {
+        setBriefingLoading(false);
       }
     };
 
     fetchBriefingContext();
-  }, [isAuthenticated, dateFilter]);
+  }, [isAuthenticated, dateFilter, selectedTenantId]);
 
   // Animation cycle: 5 seconds animating, 30 seconds pause (35 second loop)
   useEffect(() => {
@@ -883,12 +960,7 @@ const Dashboard = () => {
     }
   };
   const handleLogout = async () => {
-    try {
-      await api.signOut();
-    } catch (error) {
-      // Continue with logout even if API call fails
-    }
-    setIsAuthenticated(false);
+    await authLogout();
     sessionStorage.removeItem('dashboard_auth');
     toast({
       title: 'Logged out',
@@ -906,6 +978,22 @@ const Dashboard = () => {
     setReportModalOpen(true);
   };
 
+  // Scroll to section handler for sidebar navigation
+  const scrollToSection = (sectionId: string) => {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      // Account for fixed header (64px = 4rem = pt-16)
+      const headerOffset = 80;
+      const elementPosition = element.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
+    }
+  };
+
   return (
     <DashboardContainer
       loading={loading}
@@ -919,6 +1007,30 @@ const Dashboard = () => {
         dashboardVisibility={dashboardVisibility}
         onVisibilityChange={handleVisibilityChange}
         onReportClick={handleReportClick}
+        onSectionClick={scrollToSection}
+        visitorFirstName={displayName}
+        headerContent={
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
+            {isPlatformAdmin && (
+              <>
+                <TenantSelector
+                  selectedTenantId={selectedTenantId}
+                  onTenantChange={setSelectedTenantId}
+                  compact={true}
+                />
+                <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
+              </>
+            )}
+            <ChannelSelector
+              selectedChannel={selectedChannel}
+              onChannelChange={setSelectedChannel}
+              selectedTenantId={selectedTenantId}
+              compact={true}
+              useChannelGroups={true}
+            />
+          </div>
+        }
       >
         {/* Report Modal */}
         <ReportModal open={reportModalOpen} onClose={() => {
@@ -977,15 +1089,25 @@ const Dashboard = () => {
         setTrendsModal={setTrendsModal}
       />
 
-      <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-20 sm:pt-24 md:pt-28 pb-4 sm:pb-8 md:pb-12 relative z-10">
+      <div className="w-full h-full px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
         {/* Insights Section - Minimalist */}
-        {isAuthenticated && <div className="section-insights mb-16 md:mb-20">
-            {/* Ailethia Insights - First */}
+        {isAuthenticated && <div className="section-insights mb-16 md:mb-20 w-full">
+            {/* Greeting */}
             {dashboardVisibility.aletheiaInsights && (
-              <div className="section-aletheia-insights mb-8 md:mb-12">
+              <div className="mb-10 md:mb-12">
+                <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-white">
+                  {getGreeting()}{displayName ? `, ${displayName}` : ''}
+                </h1>
+              </div>
+            )}
+            
+            {/* Cohi Insights - First */}
+            {dashboardVisibility.aletheiaInsights && (
+              <div id="aletheiaInsights" className="section-aletheia-insights mb-8 md:mb-12">
                 <AletheiaPromptsCard 
                   dateFilter={dateFilter} 
                   briefingContext={briefingContext || undefined}
+                  selectedTenantId={selectedTenantId}
                   onDataAvailabilityChange={(hasData) => {
                     if (!hasData && dashboardVisibility.aletheiaInsights) {
                       handleVisibilityChange({
@@ -998,30 +1120,27 @@ const Dashboard = () => {
               </div>
             )}
             
-            {/* Industry News - Second */}
-            {dashboardVisibility.industryNews && <div className="section-industry-news"><IndustryNewsCard /></div>}
+            {/* Mortgage News - Second */}
+            {dashboardVisibility.industryNews && <div id="industryNews" className="section-industry-news"><IndustryNewsCard /></div>}
+            
+            {/* Leaderboard - Third */}
+            {dashboardVisibility.leaderboard && <div id="leaderboard" className="section-leaderboard mt-12 sm:mt-16"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
             
             {/* Dashboards Section */}
-            {(dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast || dashboardVisibility.topTiering || dashboardVisibility.leaderboard) && (
-              <div className="section-dashboards mt-12 sm:mt-16">
+            {(dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast) && (
+              <div className="section-dashboards mt-12 sm:mt-16 w-full">
                 <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">Dashboards</h2>
                 
                 {/* Business Overview */}
-                {dashboardVisibility.executiveDashboard && <div className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} /></div>}
+                {dashboardVisibility.executiveDashboard && <div id="executiveDashboard" className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
                 
                 {/* Closing & Fallout Forecast */}
-                {dashboardVisibility.closingFalloutForecast && <div className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}
-                
-                {/* TopTiering Loan Funnel - Full Width Section */}
-                {dashboardVisibility.topTiering && <div className="section-top-tiering mt-12 sm:mt-16 mb-4 sm:mb-8">
-                    <LoanFunnelView view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} />
-                  </div>}
-                
-                {/* Leader Board Section */}
-                {dashboardVisibility.leaderboard && <div className="section-leaderboard"><LeaderBoardSection dateFilter={dateFilter} /></div>}
+                {dashboardVisibility.closingFalloutForecast && <div id="closingFalloutForecast" className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}
               </div>
             )}
           </div>}
+
+         
       </div>
 
       {/* Contact Modal */}
@@ -1085,7 +1204,7 @@ const Dashboard = () => {
         onClose={() => setFalloutModal({ open: false, category: null, data: [] })}
       />
 
-      {/* Hidden for now - Ailethia Avatar
+      {/* Hidden for now - Cohi Avatar
        <AletheiaVoiceAssistant dashboardContext={{
         stats,
         riskCases,
@@ -1095,6 +1214,15 @@ const Dashboard = () => {
         profitabilityData: profitabilityData[profitabilityData.length - 1] // Latest month
        }} />
        */}
+
+      {/* Floating Data Chat Button - Links to full page */}
+      <Link
+        to="/data-chat"
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all hover:scale-105 group"
+      >
+        <Sparkles className="w-5 h-5" />
+        <span className="font-medium">Ask about your data</span>
+      </Link>
       </DashboardLayout>
     </DashboardContainer>
   );

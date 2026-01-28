@@ -719,7 +719,7 @@ jobs:
         working-directory: ./server
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          PACKAGE_NAME="ailethia-backend-${ENVIRONMENT}-${TIMESTAMP}.zip"
+          PACKAGE_NAME="Cohi-backend-${ENVIRONMENT}-${TIMESTAMP}.zip"
           
           # Build zip command with conditional includes
           ZIP_CMD="zip -r ../${PACKAGE_NAME} dist/ node_modules/ package.json package-lock.json Procfile .ebignore"

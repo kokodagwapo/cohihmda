@@ -4,7 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
-interface AilethiaPodcastProps {
+interface CohiPodcastProps {
   businessContext?: {
     revenue?: string;
     loans?: number;
@@ -15,7 +15,7 @@ interface AilethiaPodcastProps {
   className?: string;
 }
 
-export function AilethiaPodcast({ businessContext, className }: AilethiaPodcastProps) {
+export function CohiPodcast({ businessContext, className }: CohiPodcastProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -49,10 +49,10 @@ export function AilethiaPodcast({ businessContext, className }: AilethiaPodcastP
     setIsListening(false);
 
     try {
-      console.log('Generating Ailethia briefing...');
+      console.log('Generating Cohi briefing...');
       
       // Call Lambda function via API Gateway
-      const data = await api.invokeFunction<{ script: string; generatedAt: string }>('ailethia-briefing', {
+      const data = await api.invokeFunction<{ script: string; generatedAt: string }>('Cohi-briefing', {
         businessContext,
         type: 'briefing'
       });
@@ -72,7 +72,7 @@ export function AilethiaPodcast({ businessContext, className }: AilethiaPodcastP
       console.error('Error starting podcast:', error);
       toast({
         title: 'Briefing Error',
-        description: error.message || 'Failed to start Ailethia briefing',
+        description: error.message || 'Failed to start Cohi briefing',
         variant: 'destructive',
       });
       setIsPlaying(false);
@@ -206,7 +206,7 @@ export function AilethiaPodcast({ businessContext, className }: AilethiaPodcastP
     try {
       setIsLoading(true);
       
-      const data = await api.invokeFunction<{ script: string; generatedAt: string }>('ailethia-briefing', {
+      const data = await api.invokeFunction<{ script: string; generatedAt: string }>('Cohi-briefing', {
         businessContext: {
           ...businessContext,
           question,
@@ -273,7 +273,7 @@ export function AilethiaPodcast({ businessContext, className }: AilethiaPodcastP
         <button
           onClick={startPodcast}
           className="relative w-16 h-16 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white transition-all active:scale-95 shadow-lg flex items-center justify-center group"
-          title="Start Ailethia Briefing"
+          title="Start Cohi Briefing"
         >
           {isLoading ? (
             <Loader2 className="w-6 h-6 animate-spin" />

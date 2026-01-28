@@ -1,4 +1,15 @@
+/**
+ * EditContext - Backward compatibility layer
+ * 
+ * DEPRECATED: This context is being phased out.
+ * - For authentication: Use AuthContext (useAuth hook)
+ * - For content editing: Use ContentContext (useContent hook)
+ * 
+ * This file maintains backward compatibility during migration.
+ */
+
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { useAuth } from './AuthContext';
 
 interface EditableContent {
   [key: string]: string | number;
@@ -9,8 +20,11 @@ interface EditContextType {
   setIsEditMode: (value: boolean) => void;
   editableContent: EditableContent;
   updateContent: (key: string, value: string | number) => void;
+  /** @deprecated Use useAuth() from AuthContext instead */
   isAuthenticated: boolean;
+  /** @deprecated Use useAuth() from AuthContext instead */
   setIsAuthenticated: (value: boolean) => void;
+  /** @deprecated Use useAuth().logout() from AuthContext instead */
   logout: () => void;
   isSaving: boolean;
   lastSaved: Date | null;
@@ -19,11 +33,9 @@ interface EditContextType {
 const EditContext = createContext<EditContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'editable_dashboard_content';
-const AUTH_KEY = 'dashboard_auth';
 
 export function EditProvider({ children }: { children: ReactNode }) {
   const [isEditMode, setIsEditMode] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [editableContent, setEditableContent] = useState<EditableContent>(() => {
@@ -35,18 +47,6 @@ export function EditProvider({ children }: { children: ReactNode }) {
       return {};
     }
   });
-
-  // Check authentication on mount
-  useEffect(() => {
-    try {
-      const storedAuth = sessionStorage.getItem(AUTH_KEY);
-      if (storedAuth === 'authenticated') {
-        setIsAuthenticated(true);
-      }
-    } catch (error) {
-      console.warn('Failed to check authentication:', error);
-    }
-  }, []);
 
   // Persist content changes to localStorage immediately
   useEffect(() => {
@@ -81,25 +81,20 @@ export function EditProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const logout = () => {
-    setIsAuthenticated(false);
-    setIsEditMode(false);
-    try {
-      sessionStorage.removeItem(AUTH_KEY);
-    } catch (error) {
-      console.warn('Failed to remove auth from sessionStorage:', error);
-    }
-  };
-
   return (
     <EditContext.Provider value={{
       isEditMode,
       setIsEditMode,
       editableContent,
       updateContent,
-      isAuthenticated,
-      setIsAuthenticated,
-      logout,
+      // Deprecated auth properties - will be removed in future
+      isAuthenticated: false, // Always false - use AuthContext
+      setIsAuthenticated: () => {
+        console.warn('setIsAuthenticated is deprecated. Use AuthContext instead.');
+      },
+      logout: () => {
+        console.warn('logout is deprecated. Use AuthContext.logout() instead.');
+      },
       isSaving,
       lastSaved
     }}>
@@ -108,6 +103,9 @@ export function EditProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * @deprecated Use useAuth() for authentication, useContent() for content editing
+ */
 export function useEdit() {
   const context = useContext(EditContext);
   if (context === undefined) {

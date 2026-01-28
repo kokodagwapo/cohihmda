@@ -7,7 +7,8 @@ import { AletheiaBriefingControls } from '@/components/aletheia/AletheiaBriefing
 export const AletheiaPromptsCard = ({
   dateFilter,
   onDataAvailabilityChange,
-  briefingContext
+  briefingContext,
+  selectedTenantId
 }: {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
   onDataAvailabilityChange?: (hasData: boolean) => void;
@@ -20,6 +21,7 @@ export const AletheiaPromptsCard = ({
     };
     userName?: string;
   };
+  selectedTenantId?: string | null;
 }) => {
   const [currentSet, setCurrentSet] = useState(0);
   const [expandedInsight, setExpandedInsight] = useState<number | null>(null);
@@ -29,7 +31,8 @@ export const AletheiaPromptsCard = ({
   // Use custom hook for data fetching
   const { allInsights, insightsLoading, insightsError, funnelData } = useAletheiaData(
     dateFilter,
-    onDataAvailabilityChange
+    onDataAvailabilityChange,
+    selectedTenantId
   );
 
   // Create unique ID for each insight based on message content (must be defined before useMemo)
@@ -106,7 +109,7 @@ export const AletheiaPromptsCard = ({
             </div>
             <div>
               <h3 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-extralight text-slate-900 dark:text-white mb-0.5 sm:mb-1 tracking-[-0.02em] leading-[1.05]">
-                Ailethia Insights
+                Cohi Insights
               </h3>
               <p className="text-[10px] sm:text-xs md:text-sm lg:text-base text-slate-600 dark:text-slate-400 font-light tracking-tight">
                 Executive Briefing

@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,29 +14,59 @@ import {
   FileText,
   Server,
   Shield,
+  Key,
   CheckCircle2,
   Cloud,
   CreditCard,
   ChevronRight,
   X,
+  Database,
+  Crown,
+  Briefcase,
 } from 'lucide-react';
 import type { AdminSection } from '@/hooks/admin/useAdminState';
 
-const adminSections = [
-  { id: 'overview' as AdminSection, label: 'Overview', icon: BarChart3, description: 'System statistics and metrics', color: 'text-blue-300 dark:text-blue-400/70' },
-  { id: 'tenants' as AdminSection, label: 'Tenants', icon: Building2, description: 'Manage tenant accounts', color: 'text-emerald-300 dark:text-emerald-400/70' },
-  { id: 'users' as AdminSection, label: 'Users', icon: Users, description: 'User management', color: 'text-purple-300 dark:text-purple-400/70' },
-  { id: 'los' as AdminSection, label: 'LOS Settings', icon: Link2, description: 'Loan Origination System connections', color: 'text-orange-300 dark:text-orange-400/70' },
-  { id: 'synapse' as AdminSection, label: 'Synapse Connect', icon: Zap, description: 'Vendor API integrations', color: 'text-amber-300 dark:text-amber-400/70' },
-  { id: 'rag-voice' as AdminSection, label: 'RAG & Voice Agentic', icon: Brain, description: 'Aletheia voice settings, topics, rules, and costs', color: 'text-orange-300 dark:text-orange-400/70' },
-  { id: 'demo' as AdminSection, label: 'Demo Data', icon: FileText, description: 'Upload test CSV files with anonymized data', color: 'text-indigo-300 dark:text-indigo-400/70' },
-  { id: 'system' as AdminSection, label: 'System', icon: Server, description: 'System configuration', color: 'text-cyan-300 dark:text-cyan-400/70' },
-  { id: 'security' as AdminSection, label: 'Security', icon: Shield, description: 'Security settings', color: 'text-rose-300 dark:text-rose-400/70' },
-  { id: 'soc2' as AdminSection, label: 'SOC 2 Compliance', icon: CheckCircle2, description: 'Audit trail and compliance monitoring', color: 'text-green-300 dark:text-green-400/70' },
-  { id: 'deployment' as AdminSection, label: 'Deployment', icon: Cloud, description: 'Manage deployment instances', color: 'text-sky-300 dark:text-sky-400/70' },
-  { id: 'stripe' as AdminSection, label: 'Stripe Payments', icon: CreditCard, description: 'Subscription and billing management', color: 'text-violet-300 dark:text-violet-400/70' },
-  { id: 'aws-hosting' as AdminSection, label: 'AWS Hosting', icon: Cloud, description: 'Per-lender AWS hosting and billing', color: 'text-orange-300 dark:text-orange-400/70' },
+// Define which sections are available for each role type
+type AdminSectionDef = {
+  id: AdminSection;
+  label: string;
+  icon: any;
+  description: string;
+  color: string;
+  // Which roles can see this section
+  allowedRoles: ('super_admin' | 'platform_admin' | 'support' | 'tenant_admin')[];
+};
+
+const allAdminSections: AdminSectionDef[] = [
+  // Super Admin only sections (platform-wide management)
+  { id: 'overview' as AdminSection, label: 'Platform Overview', icon: BarChart3, description: 'Platform-wide statistics and metrics', color: 'text-blue-300 dark:text-blue-400/70', allowedRoles: ['super_admin', 'platform_admin', 'support'] },
+  { id: 'tenants' as AdminSection, label: 'Tenants', icon: Building2, description: 'Manage all tenant accounts', color: 'text-emerald-300 dark:text-emerald-400/70', allowedRoles: ['super_admin', 'platform_admin'] },
+  { id: 'system' as AdminSection, label: 'System', icon: Server, description: 'System configuration', color: 'text-cyan-300 dark:text-cyan-400/70', allowedRoles: ['super_admin', 'platform_admin'] },
+  { id: 'security' as AdminSection, label: 'Platform Security', icon: Shield, description: 'Platform security settings', color: 'text-rose-300 dark:text-rose-400/70', allowedRoles: ['super_admin', 'platform_admin'] },
+  { id: 'soc2' as AdminSection, label: 'SOC 2 Compliance', icon: CheckCircle2, description: 'Audit trail and compliance monitoring', color: 'text-green-300 dark:text-green-400/70', allowedRoles: ['super_admin', 'platform_admin'] },
+  { id: 'deployment' as AdminSection, label: 'Deployment', icon: Cloud, description: 'Manage deployment instances', color: 'text-sky-300 dark:text-sky-400/70', allowedRoles: ['super_admin', 'platform_admin'] },
+  { id: 'stripe' as AdminSection, label: 'Stripe Payments', icon: CreditCard, description: 'Subscription and billing management', color: 'text-violet-300 dark:text-violet-400/70', allowedRoles: ['super_admin'] },
+  { id: 'aws-hosting' as AdminSection, label: 'AWS Hosting', icon: Cloud, description: 'Per-lender AWS hosting and billing', color: 'text-orange-300 dark:text-orange-400/70', allowedRoles: ['super_admin'] },
+  { id: 'demo' as AdminSection, label: 'Demo Data', icon: FileText, description: 'Upload test CSV files with anonymized data', color: 'text-indigo-300 dark:text-indigo-400/70', allowedRoles: ['super_admin', 'platform_admin'] },
+  { id: 'metrics-catalog' as AdminSection, label: 'Metrics Catalog', icon: Database, description: 'Browse all available metrics and formulas', color: 'text-teal-300 dark:text-teal-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  
+  // Tenant Admin sections (organization management)
+  { id: 'org-overview' as AdminSection, label: 'Overview', icon: BarChart3, description: 'Organization statistics and health', color: 'text-blue-300 dark:text-blue-400/70', allowedRoles: ['tenant_admin'] },
+  { id: 'users' as AdminSection, label: 'Users', icon: Users, description: 'Manage organization users', color: 'text-purple-300 dark:text-purple-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  { id: 'roles' as AdminSection, label: 'Roles & Permissions', icon: Shield, description: 'Role management and field-based access', color: 'text-pink-300 dark:text-pink-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  { id: 'sso' as AdminSection, label: 'SSO Configuration', icon: Key, description: 'Single Sign-On settings', color: 'text-yellow-300 dark:text-yellow-400/70', allowedRoles: ['super_admin', 'tenant_admin'] },
+  { id: 'org' as AdminSection, label: 'Organization Settings', icon: Briefcase, description: 'Organization profile and branding', color: 'text-teal-300 dark:text-teal-400/70', allowedRoles: ['tenant_admin'] },
+  { id: 'data-quality' as AdminSection, label: 'Data Quality', icon: CheckCircle2, description: 'Monitor and resolve data issues', color: 'text-lime-300 dark:text-lime-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  { id: 'data-config' as AdminSection, label: 'Data Configuration', icon: Settings, description: 'Field mappings, ranges, filters, and scoring', color: 'text-indigo-300 dark:text-indigo-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  { id: 'los' as AdminSection, label: 'LOS Settings', icon: Link2, description: 'Loan Origination System connections', color: 'text-orange-300 dark:text-orange-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  { id: 'synapse' as AdminSection, label: 'Integrations', icon: Zap, description: 'Vendor API integrations', color: 'text-amber-300 dark:text-amber-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
+  { id: 'rag-voice' as AdminSection, label: 'AI Assistant', icon: Brain, description: 'Voice settings, topics, and rules', color: 'text-orange-300 dark:text-orange-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'] },
 ];
+
+// Helper to check if user is platform staff (Cohi internal)
+export function isPlatformStaff(role: string | undefined): boolean {
+  return ['super_admin', 'platform_admin', 'support'].includes(role || '');
+}
 
 interface AdminLayoutProps {
   activeSection: AdminSection;
@@ -44,6 +74,8 @@ interface AdminLayoutProps {
   onSectionChange: (section: AdminSection) => void;
   onMobileMenuChange: (open: boolean) => void;
   children: ReactNode;
+  userRole?: string;
+  tenantName?: string;
 }
 
 export const AdminLayout = ({
@@ -52,8 +84,22 @@ export const AdminLayout = ({
   onSectionChange,
   onMobileMenuChange,
   children,
+  userRole = 'user',
+  tenantName,
 }: AdminLayoutProps) => {
-  const renderNavButton = (section: typeof adminSections[0], isMobile: boolean = false) => {
+  // Filter sections based on user role
+  const visibleSections = useMemo(() => {
+    return allAdminSections.filter(section => 
+      section.allowedRoles.includes(userRole as any)
+    );
+  }, [userRole]);
+
+  const isPlatform = isPlatformStaff(userRole);
+  const navTitle = isPlatform ? 'Platform Admin' : 'Organization Admin';
+  const navIcon = isPlatform ? Crown : Briefcase;
+  const NavIcon = navIcon;
+
+  const renderNavButton = (section: AdminSectionDef, isMobile: boolean = false) => {
     const Icon = section.icon;
     const isActive = activeSection === section.id;
 
@@ -126,12 +172,17 @@ export const AdminLayout = ({
         <Card className="sticky top-24 border-blue-200/40 dark:border-slate-700/50 bg-white/95 dark:bg-slate-800/80 backdrop-blur-xl shadow-[0_8px_30px_rgba(59,130,246,0.12)] dark:shadow-[0_8px_30px_rgba(0,0,0,0.3)] rounded-2xl overflow-hidden">
           <CardHeader className="pb-4 border-b border-blue-100/50 dark:border-slate-700/50 bg-gradient-to-r from-blue-50/50 to-purple-50/50">
             <CardTitle className="text-xl font-thin text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-              <Settings className="h-5 w-5 text-blue-500" strokeWidth={1.5} />
-              Navigation
+              <NavIcon className={`h-5 w-5 ${isPlatform ? 'text-amber-500' : 'text-blue-500'}`} strokeWidth={1.5} />
+              {navTitle}
             </CardTitle>
+            {tenantName && !isPlatform && (
+              <p className="text-sm text-slate-500 dark:text-slate-400 font-light mt-1">
+                {tenantName}
+              </p>
+            )}
           </CardHeader>
           <CardContent className="space-y-1 p-3">
-            {adminSections.map((section) => renderNavButton(section, false))}
+            {visibleSections.map((section) => renderNavButton(section, false))}
           </CardContent>
         </Card>
       </div>
@@ -142,10 +193,17 @@ export const AdminLayout = ({
           <div className="h-full flex flex-col">
             <SheetHeader className="px-6 pt-6 pb-4 border-b border-blue-100/50 dark:border-slate-700/50 bg-gradient-to-r from-blue-50/50 to-purple-50/50">
               <div className="flex items-center justify-between">
-                <SheetTitle className="text-xl font-thin text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
-                  <Settings className="h-5 w-5 text-blue-500" strokeWidth={1.5} />
-                  Navigation
-                </SheetTitle>
+                <div>
+                  <SheetTitle className="text-xl font-thin text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                    <NavIcon className={`h-5 w-5 ${isPlatform ? 'text-amber-500' : 'text-blue-500'}`} strokeWidth={1.5} />
+                    {navTitle}
+                  </SheetTitle>
+                  {tenantName && !isPlatform && (
+                    <p className="text-sm text-slate-500 dark:text-slate-400 font-light mt-1">
+                      {tenantName}
+                    </p>
+                  )}
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -157,7 +215,7 @@ export const AdminLayout = ({
               </div>
             </SheetHeader>
             <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-              {adminSections.map((section) => renderNavButton(section, true))}
+              {visibleSections.map((section) => renderNavButton(section, true))}
             </div>
           </div>
         </SheetContent>

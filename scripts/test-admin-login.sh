@@ -20,8 +20,8 @@ if [ -z "$BACKEND_URL" ]; then
     echo -e "   Or set: export BACKEND_URL=http://your-backend:3001"
     exit 1
 fi
-FRONTEND_URL="http://ailethia-frontend-1767135651.s3-website-us-east-1.amazonaws.com"
-ADMIN_EMAIL="${2:-admin@ailethia.com}"
+FRONTEND_URL="http://Cohi-frontend-1767135651.s3-website-us-east-1.amazonaws.com"
+ADMIN_EMAIL="${2:-admin@Cohi.com}"
 ADMIN_PASSWORD="${3:-admin123}"
 
 echo -e "${GREEN}🔍 Testing Admin Login Configuration${NC}"

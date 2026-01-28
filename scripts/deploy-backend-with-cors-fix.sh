@@ -18,11 +18,11 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 # Configuration
-EB_APP_NAME="${EB_APP_NAME:-ailethia-backend}"
-EB_ENV_NAME="${EB_ENV_NAME:-ailethia-backend-production}"
+EB_APP_NAME="${EB_APP_NAME:-Cohi-backend}"
+EB_ENV_NAME="${EB_ENV_NAME:-Cohi-backend-production}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-PACKAGE_NAME="ailethia-backend-cors-fix-${TIMESTAMP}.zip"
+PACKAGE_NAME="Cohi-backend-cors-fix-${TIMESTAMP}.zip"
 
 # Check if AWS CLI is installed
 if ! command -v aws &> /dev/null; then

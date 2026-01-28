@@ -1,0 +1,318 @@
+$(must_include=lib://QlikShare - SharedData/Include Files/Global.FederalHolidays.qss);
+
+/*********************************************************
+TW 10/25
+UPdated 
+Any variable that is being set to a literal string value to use SET 
+Made several changes in this script 
+Several Variables are set to the dame value. These need to be evaluated and updated. 
+Should explore moving this section to an excel table and loading the table
+*********************************************************/
+
+/*
+1.REVENUE[wip]
+2.Ad Hoc | Turn Times | Self Serv
+3.Data Dictionary Addons
+4.Ranges
+5.Section Access
+
+Look over field count
+*/
+LET vCurrentSetupFlag = Peek('Coheus Setup Flag',0,'$(vWriteTableName)');
+If $(vCurrentSetupFlag) = 1 Then
+	
+    LET vXMLName = '30'&Text(Num(Replace('$(vClientID)','BE',''),00000000));
+     
+    EncInstances:
+	Load distinct [Encompass Instance]
+	Resident [$(vWriteTableName)];
+	
+    Let vNumofInstances = NoOfRows('EncInstances')-1;
+	For vInstanceRecord = 0 To $(vNumofInstances)
+		Let vFileName$(vInstanceRecord) = 'lib://QlikShare/CoheusConfigs/30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000))&'_cohuessetup.xml';
+        Let vEncInstance$(vInstanceRecord) = '30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000));
+	Next vInstanceRecord; Drop Table EncInstances;
+    
+	SET vFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_cohuessetup.xml';
+    SET vConfigDictionary = 'Setup/DataDictionary/Field';
+    SET vConfigAdHoc = 'Setup/CoheusConfig/AdHoc/Field';
+    SET vConfigTurnTimes = 'Setup/CoheusConfig/TurnTimes/Field';
+    SET vRevFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_profit_config.xml';
+    SET vConfigProfitDictionary = 'ProfitabilityConfig/Dictionary/Field';
+    SET vConfigProfitSwap = 'Setup/ProfitabilityConfig/FieldSwap/Field';
+    SET vConfigSwap = 'Setup/CoheusConfig/FieldSwap/Field';
+    SET vConfigRange = 'Setup/CoheusConfig/FieldRanges/Range';
+    SET vLevelOneEntry = 'Setup/CoheusConfig/SectionAccess/LevelOne/Entry';
+    SET vLevelOneAccess = 'Setup/CoheusConfig/SectionAccess/LevelOne';
+    SET vLevelTwoEntry = 'Setup/CoheusConfig/SectionAccess/LevelTwo/Entry';
+    SET vLevelTwoAccess = 'Setup/CoheusConfig/SectionAccess/LevelTwo';
+    SET vLevelThreeEntry = 'Setup/CoheusConfig/SectionAccess/LevelThree/Entry';
+    SET vLevelThreeAccess = 'Setup/CoheusConfig/SectionAccess/LevelThree';
+    
+    Drop Fields Revenue_Exec,Revenue_Sales,Revenue_Contribution,Revenue;
+    Rename Field Revenue_Ops To Revenue;
+
+ELSE
+	LET vXMLName = '30'&Text(Num(Replace('$(vClientID)','BE',''),00000000));
+    
+    EncInstances:
+	Load distinct [Encompass Instance]
+	Resident [$(vWriteTableName)];
+
+	Let vNumofInstances = NoOfRows('EncInstances')-1;
+	For vInstanceRecord = 0 To $(vNumofInstances)
+		Let vFileName$(vInstanceRecord) = 'lib://QlikShare/CoheusConfigs/30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000))&'_config.xml';
+        Let vEncInstance$(vInstanceRecord) = '30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000));
+	Next vInstanceRecord; Drop Table EncInstances;
+    
+	SET vFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_config.xml';
+    SET vConfigDictionary = 'CoheusConfig/Dictionary/Field';
+    SET vConfigAdHoc = 'CoheusConfig/AdHoc/Field';
+    SET vConfigTurnTimes = 'CoheusConfig/TurnTimes/Field';
+    SET vRevFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_profit_config.xml';
+    SET vConfigProfitDictionary = 'ProfitabilityConfig/Dictionary/Field';
+    SET vConfigProfitSwap = 'ProfitabilityConfig/FieldSwap/Field';
+    SET vConfigSwap = 'CoheusConfig/FieldSwap/Field';
+    SET vConfigRange = 'CoheusConfig/FieldRanges/Range';
+    SET vLevelOneEntry = 'CoheusConfig/SectionAccess/LevelOne/Entry';
+    SET vLevelOneAccess = 'CoheusConfig/SectionAccess/LevelOne';
+    SET vLevelTwoEntry = 'CoheusConfig/SectionAccess/LevelTwo/Entry';
+    SET vLevelTwoAccess = 'CoheusConfig/SectionAccess/LevelTwo';
+    SET vLevelThreeEntry = 'CoheusConfig/SectionAccess/LevelThree/Entry';
+    SET vLevelThreeAccess = 'CoheusConfig/SectionAccess/LevelThree';
+End If;
+
+
+
+
+
+//Variables for App Information Tooltips & Coheus Logo
+//create variable to capture App Name to use for app name in app/on sheets
+// LET vAppName=SubField(DocumentTitle(),chr(32),2); 						
+LET vAppName=SubField(DocumentTitle(),'_',2) & chr(32) & '$(vConsolidatedChannels)';
+
+Trace '------------------------------------------';
+Trace vAppName: $(vAppName);
+Trace '------------------------------------------';
+
+
+//create variable to capture app id/guid to resolve sheet menu not dynamically assigning the app ID/guid to Coheus logo file. 
+LET vAppID=DocumentName(); 							
+SET vCopyright='© TVMA, Inc. All rights reserved.';
+SET vLogoPath = '../content/coheus/Coheus Logo (transparent)_small.png';
+
+//Variables for selector buttions/dropdowns
+SET vEstFallout = '';
+SET vEstBps = '';
+SET vMeasure='Units';								//added 2/5/2020 for use in Measure selector buttons
+SET vDimension='Branch'; 							//added 2/7/2020 for use in Dimension selector buttons
+SET vStratDim='[Current Loan Status]'; 				//added 2/11/2020 for use as dimension selector on strats sheet
+SET vAllLoans='Exclude Out of Range Loans'; 		//added 2/16/2020 to toggle btw ALL Loans vs Loans excluding Out of Range Values
+SET vOverviewDim='Credit Pulls';					//added 3/2/2020 to toggle charts on Overview
+SET vOverviewMeasure='';							
+
+// LET vToDate='YTDFlag';								//BH 1/23/24 - commented & moved to Calendar | Link to make dynamic and set to Last Year if in beginning of year.
+
+SET vOutOfRange='[FICO Range_Std]';
+SET vStratToggle=0;
+SET vDateSelect = 'Application';
+SET vProjection=1;
+SET vActor='Processor';
+
+SET vOrigScore=0;
+SET vInvStatToggle=0;
+SET vDateToggle1='Funding';
+SET vTurnTimeFormat='Number';
+SET vFieldType = 'Crucial Fields';
+SET vSwapFieldType = 'Standard';//Profitability
+//Variable for Navigation. Not deployed in Gold 2020 apps.
+SET vNavSheetActive = '';
+SET vNavFirstSheet = 'Company Overview: Final Disposition';
+SET vNavLastSheet = 'Loan Stratification';
+SET vStratTableView = 'Summary';
+
+/*********
+tw 10/25 3 variables = ''Volume' could be 1 variable vVolumeTag = 'Volume'
+Call it what it needs to be on the front end. 
+Branch, 'Units','Loan Officer','Application'
+**********/
+SET vLoanMixMeasure='Volume';
+SET vOverviewToggle='Volume';
+SET vOrigScoreMeaure='Volume';
+
+
+
+//2024-04-03 BH modified to load for TPO or Retail based on vConsolidatedChannels variable set in Main
+
+if  '$(vConsolidatedChannels)' = 'Retail' THEN
+
+//Sets for Retail
+SET vScorecard='Branch';
+SET vScorecardActor='Loan Officer';
+SET vScorecardList='Branch|Investor';
+SET vScorecardActorList='Loan Officer|Underwriter';
+
+ELSEIF '$(vConsolidatedChannels)' = 'TPO' THEN
+
+//Sets for TPO
+SET vScorecard='Account Executive';
+SET vScorecardActor='Broker Lender Name';
+SET vScorecardList='Account Executive|Investor';
+SET vScorecardActorList='Broker Lender Name|Loan Officer|Underwriter';
+
+END IF
+
+//Sets Channel Variables based on '$(vConsolidatedChannels)' set in Main
+//These are the same can we reduce them to 1 
+SET vChannel='$(vConsolidatedChannels)';
+SET vChannelGroup='$(vConsolidatedChannels)';
+
+//BH added 1-12-2024 for show/hide TopTiering containers
+SET vTopTieringShow = 1;	
+
+//BH added 12-3-2023 for ability to adjust time range for short term flags in Sales scorecard. Could be used in other places.
+SET vScorecardShortTermRange = 4; //In Months. Needs a Rolling Flag dimension to work
+
+//Formula Toggle
+SET vActionItemsFormula='Avg';
+
+//Milestones
+SET vMilestoneProcess = 'Individual';//or workflow
+SET vMilestoneDateType = 'Range';//or calendar
+SET vMilestoneActor = 'Loan Officer';
+
+SET vOpsScorecardActor = 'Underwriter';
+SET vOpsScorecardMeasure = 'Units';
+SET vOpsScorecardView = 'Scorecard';
+
+//*** NEW - Company Scorecard ***
+SET vCompanyScorecardShowHide = 0; //'Funded';	//set default to Funded Scorecard BH commmented out 12-11-2023 and changed to binary flag
+SET vCompanyScorecardDim = 'Branch';
+SET vCompanyScorecardDateType = 'Application';
+SET vCompanyScorecardActor = 'Loan Officer';
+SET vCompanyScorecardChannel = '*';
+
+SET vSize = Div(Log10(fabs($1)),3);
+SET vAutoDollars = Dual(Num($1/Pow(10,3*$(vSize($1))),'$#,##0.00;($#,##0.00)')&Pick($(vSize($1)),'k','M','B','T'),$1);
+SET vAuto = Dual(Num($1/Pow(10,3*$(vSize($1))),'#,##0;(#,##0)')&Pick($(vSize($1)),'k','M','B','T'),$1);
+//variable to toggle second dimension on Closing Projections Summary pivot table
+SET vCPDim='[Loan Purpose]';		
+
+/************************
+TW 10/25 Grouped Visual mechanism Variables together
+************************/
+//Colors - Credit Box Color Gradient 2020 - added 3/20/2020 
+LET vColorMixDark = RGB(6,43,45);
+LET vColorMixLight = RGB(255,255,0);
+LET vColorMixMiddle = RGB(101,211,218);
+//Colors - Teraverde and Headers
+LET vTVGreen = RGB(76,140,43); //#4C8C2B
+LET vTVBlue = RGB(14,108,139); //#0e6c8b
+LET vTVBlueLight = RGB(208,239,251); //#d0effb
+LET vTVAccent = RGB(173,220,145); //#addc91
+LET vTVAccentLight = RGB(240, 249, 236); //#f0f9ec
+LET vErrorLightRed = RGB(255,199,206);
+//Blue Hover Color in Tables
+SET vTVBlueHover = '#e7f0f3';
+
+//Red/Green indicator colors
+SET vErrorColor='#B00020'; //Red text
+SET vErrorColorBKGD='#F7E6E9'; //Red background
+SET vMatchColor='#007500'; //Green text
+SET vMatchColorBKGD='#E2F1E2'; //Green background
+
+//Variables for alternative method to dynamically resize fonts when resizing browser window. NOT DEPLOYED IN GOLD 2020 apps.
+SET vSheetWidth = 1920;
+SET vSheetHeight = 1080;
+//Adjust the baseline to your targeted screen resolution.
+SET vSheetWidthBaseline = 1920;
+SET vSheetHeightBaseline = 1080;
+SET vScalingFactor = '=pow((vSheetWidth * vSheetHeight),0.5) / pow((vSheetWidthBaseline*vSheetHeightBaseline), 0.5)';
+//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE
+Let vQVDReloadTime = Num(QvdCreateTime('$(vMainFilePath)'));
+
+Trace vQVDReloadTime: $(vQVDReloadTime);
+
+
+//REVISE IN TEMPLATE APPS TO REFERENCE CONFIGURATION VARIABLES -Revised for Jan 2022 Release for Demo client.
+//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE
+DateList:
+Load
+	If('$(vClient)'='Demo',AddYears($(vQVDReloadTime),-5),If(Len(Trim(Min("Last Modified Date")))=0,AddYears(Today(),-5),Min("Last Modified Date"))) as MinDate,
+    If('$(vClient)'='Demo',$(vQVDReloadTime),If(Len(Trim(Max("Last Modified Date")))=0,Today(),Max("Last Modified Date"))) as MaxDate
+FROM [$(vMainFilePath)] (qvd);
+
+Let vMinDate = Num(Peek('MinDate', 0, 'MinMax')); 
+Let vMaxDate = Num(Peek('MaxDate', 0, 'MinMax'));
+
+Let vCurrentDate = Num(Peek('MaxDate', 0, 'MinMax'));
+Let vCurrentDateAsDate = Date(vCurrentDate, 'M/D/YYYY');
+Let vCurrentYearMonth = Year(vCurrentDate)&'-'&Month(vCurrentDate);
+
+Trace vCurrentDate: $(vCurrentDate);
+Trace vCurrentDateAsDate: $(vCurrentDateAsDate);
+Trace vMaxDate: $(vMaxDate);
+Trace vCurrentYearMonth: $(vCurrentYearMonth);
+
+DROP TABLE DateList;
+
+
+ClosingProj:
+Load [Closing Projection Status],
+	Min(RowNo) as RowSort
+Resident [$(vWriteTableName)] 
+Where Len(Trim([Closing Projection Status]))>0
+Group By [Closing Projection Status];
+Let vClosingProjColor=;
+
+For i=0 to NoOfRows('ClosingProj')-1
+Let vClosingProjColor='$(vClosingProjColor)'&'|'&Peek('Closing Projection Status',$(i),'ClosingProj');
+Next i;
+Drop Table ClosingProj;
+
+//BH added 12-3-2023 for sales scorecard
+SET vCurrentProduction = '*';
+
+ChannelList:
+Load
+	Concat(DISTINCT Channel,'|') as ChannelList_Temp
+Resident $(vWriteTableName)
+WHERE WildMatch(Channel,'Corresp*')=0;
+
+Let vChannelList=Peek('ChannelList_Temp', 0, 'ChannelList');
+
+Drop Table ChannelList;
+
+ChannelGroupList:
+Load
+	Concat(DISTINCT [Consolidated Channels],'|') as ConsolidatedChannelList_Temp
+Resident $(vWriteTableName);
+
+Let vChannelGroupList=Peek('ConsolidatedChannelList_Temp', 0, 'ChannelGroupList');
+
+Drop Table ChannelGroupList;
+
+//==============================================
+// TopTiering Variables
+// BH added 2024-01-02
+//==============================================
+// Let vParetoDim = 'Branch';
+SET vParetoMeasure = 'Loan Amount';
+Let vParetoMeasureLabel = 'pick(Match(vParetoMeasure,'& CHR(39) &'Loan Amount'& CHR(39) &','& CHR(39) &'Branch Concession ($)'& CHR(39) &'),'& CHR(39) &'Volume'& CHR(39) &','& CHR(39) &'Concessions'& CHR(39) &')';
+// Let vParetoDimLabel = 'pick(Match(vParetoDim,'& CHR(39) &'Branch'& CHR(39) &','& CHR(39) &'Mortgage Loan Officer (MLO)'& CHR(39) &','& CHR(39) &'Loan Program'& CHR(39) &'),'& CHR(39) &'Branch'& CHR(39) &','& CHR(39) &'Loan Officer'& CHR(39) &','& CHR(39) &'Loan Program'& CHR(39) &')';
+// Let vParetoDimChartTitleLabel = 'pick(Match(vParetoDim,'& CHR(39) &'Branch'& CHR(39) &','& CHR(39) &'Mortgage Loan Officer (MLO)'& CHR(39) &','& CHR(39) &'Loan Program'& CHR(39) &'),'& CHR(39) &'Branches'& CHR(39) &','& CHR(39) &'Loan Officers'& CHR(39) &','& CHR(39) &'Loan Programs'& CHR(39) &')';
+
+
+//===================================================================
+// BH added 02-28-2024 derived date functions for adding date flags
+// ==================================================================
+LET fMTD = 'If(InMonthToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fQTD = 'If(InQuarterToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fYTD = 'If(InYearToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+
+LET fMTDPrevious = 'If(InMonthToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fQTDPrevious = 'If(InQuarterToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+LET fYTDPrevious = 'If(InYearToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';
+
+
+

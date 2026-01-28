@@ -88,9 +88,49 @@ CREATE TABLE staffing_persona_units (
 
 ---
 
+## TTS Scorecard Calculations
+
+**See**: `derived/tts-scorecard.md` for complete TTS scorecard documentation including:
+- Scorecard weight configuration
+- Weighted scorecard formulas
+- Scorecard metric calculations
+- Scorecard aggregation logic
+- Scorecard normalization methods
+- Calendar periods for TTS
+
+## Pull Through Calculations
+
+**See**: `derived/pull-through-calculations.md` for pull-through metrics used in scorecards:
+- Scorecard PullThrough (rolling 13 months)
+- Scorecard PullThrough_2Months (short-term)
+- TVI Pull Through Rating
+
+## Revenue Calculations
+
+**See**: `derived/revenue-calculations.md` for Revenue_Exec calculations:
+- Revenue_Exec formula
+- Margin (BPS)_Exec
+- Revenue configuration logic
+
+## Expression Usage
+
+**See**: `validation/expression-categories.md` for expression categorization and:
+- `validation/qsda-cross-reference.md` for QSDA analysis findings
+- TTS scorecard expressions (unique to Performance app)
+
+---
+
 ## Notes
 
 - Performance app focuses on TTS (Time to Sale) metrics
 - Uses weighted variables for scorecard calculations
 - Includes staffing model calculations
 - TTS-specific calendar periods for analysis
+
+## See Also
+
+- **TTS Scorecard**: `derived/tts-scorecard.md` - Complete TTS scorecard documentation
+- **Pull Through**: `derived/pull-through-calculations.md` - Scorecard pull-through metrics
+- **Revenue**: `derived/revenue-calculations.md` - Revenue_Exec calculations
+- **Expression Categories**: `validation/expression-categories.md` - Expression patterns
+- **QSDA Cross-Reference**: `validation/qsda-cross-reference.md` - App-specific findings

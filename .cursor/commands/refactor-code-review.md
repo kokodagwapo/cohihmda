@@ -122,7 +122,7 @@ AND attempted_at > NOW() - ($1 || ' minutes')::INTERVAL
 1. **Remove bypass logic**:
 ```typescript
 // BEFORE:
-const isAdminEmail = email === 'admin@ailethia.com';
+const isAdminEmail = email === 'admin@Cohi.com';
 if (!isAdminEmail) {
   // rate limiting check
 }

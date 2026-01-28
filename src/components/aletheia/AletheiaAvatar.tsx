@@ -217,7 +217,7 @@ export function AletheiaAvatar({ onClick }: AletheiaAvatarProps) {
           transition={{ delay: 1.3 }}
           className="text-xs font-light text-slate-900 dark:text-white tracking-wide bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 shadow-sm whitespace-nowrap"
         >
-          I'm Ailethia
+          I'm Cohi
         </motion.div>
       </div>
     </motion.div>

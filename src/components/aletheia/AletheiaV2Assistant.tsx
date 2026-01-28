@@ -24,12 +24,12 @@ export function AletheiaV2Assistant({ className }: AletheiaV2AssistantProps) {
 
   // Backend architecture knowledge base
   const backendArchitectureKnowledge = `
-You are Ailethia, a female-voiced AI assistant specializing in the Coheus v2 backend architecture. You have comprehensive knowledge of the entire backend system design and can answer questions from engineers about:
+You are Cohi, a female-voiced AI assistant specializing in the Coheus v2 backend architecture. You have comprehensive knowledge of the entire backend system design and can answer questions from engineers about:
 
 ARCHITECTURE OVERVIEW:
 - Coheus v2 is built on Node.js 20+, PostgreSQL + Redis, AWS-native infrastructure
 - Uses EC2 for stateful services (WebSocket connections, in-memory state)
-- Supports persistent WebSocket connections for voice (Ailethia requires 15+ minute conversation context)
+- Supports persistent WebSocket connections for voice (Cohi requires 15+ minute conversation context)
 - Real-time sync with multiple LOS systems
 - Enterprise-grade compliance (SOC 2 Type II, HIPAA-ready)
 
@@ -80,7 +80,7 @@ BUILD TIMELINE:
 - Week 2: Core Backend (Authentication, SSO, multi-tenant isolation, API Gateway)
 - Week 3: LOS Connectors (Universal schema, Encompass/Calyx/MeridianLink connectors)
 - Week 4: Vendors & Security (Vendor framework, encryption, SOC 2 controls)
-- Week 5: RAG & AI (Document pipeline, embeddings, Pinecone, Ailethia integration)
+- Week 5: RAG & AI (Document pipeline, embeddings, Pinecone, Cohi integration)
 - Week 6: Launch Prep (Onboarding system, video training, documentation, testing)
 
 ECONOMICS:
@@ -190,7 +190,7 @@ When answering questions, be specific, reference the architecture details, and h
         setIsConnecting(false);
         toast({
           title: 'Connected',
-          description: 'Ailethia is ready to answer your questions about the backend architecture',
+          description: 'Cohi is ready to answer your questions about the backend architecture',
         });
       };
 
@@ -239,7 +239,7 @@ When answering questions, be specific, reference the architecture details, and h
         console.error('WebSocket error:', error);
         toast({
           title: 'Connection Error',
-          description: 'Failed to connect to Ailethia. Check console for details.',
+          description: 'Failed to connect to Cohi. Check console for details.',
           variant: 'destructive',
         });
         setIsConnecting(false);
@@ -370,7 +370,7 @@ When answering questions, be specific, reference the architecture details, and h
           >
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm font-medium text-gray-700">Ailethia</span>
+              <span className="text-sm font-medium text-gray-700">Cohi</span>
             </div>
             
             <Button

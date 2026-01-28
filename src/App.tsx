@@ -4,102 +4,45 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
-import { api } from "@/lib/api";
 import Index from "./pages/Index";
 import Dashboard from "./pages/Dashboard";
-import Agentic from "./pages/Agentic";
-import Settings from "./pages/Settings";
+import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
-import V2 from "./pages/V2";
-import CodeRefactor from "./pages/CodeRefactor";
-import AgilePlan from "./pages/AgilePlan";
-import BackendArchitecture from "./pages/BackendArchitecture";
-import CSVEditor from "./pages/CSVEditor";
-import RAG from "./pages/RAG";
-import CodeReview from "./pages/CodeReview";
-import ICEEncompass from "./pages/ICEEncompass";
 import Loans from "./pages/Loans";
-import QlikMigration from "./pages/QlikMigration";
+import MyDashboard from "./pages/MyDashboard";
+import MyDashboardLegacy from "./pages/MyDashboardLegacy";
+import DataChat from "./pages/DataChat";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
+// Top Tiering pages
+import LoanFunnel from "./pages/LoanFunnel";
+import TopTieringComparison from "./pages/TopTieringComparison";
+import OperationScorecard from "./pages/OperationScorecard";
+import OperationScorecardTrends from "./pages/OperationScorecardTrends";
+import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
+import SalesScorecard from "./pages/SalesScorecard";
+import SalesTrends from "./pages/SalesTrends";
+import CompanyScorecard from "./pages/CompanyScorecard";
+import CreditRiskManagement from "./pages/CreditRiskManagement";
+import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
+// Workbench pages
+import SharedWithMe from "./pages/workbench/SharedWithMe";
+import TeamFolders from "./pages/workbench/TeamFolders";
+import Favorites from "./pages/workbench/Favorites";
 
 const queryClient = new QueryClient();
 
 // Component to initialize timezone on app load
 function TimezoneInitializer() {
   useUserTimezone();
-  return null;
-}
-
-// Component to auto-authenticate on app load
-function AutoAuthenticator() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const didAutoLoginRef = useRef(false);
-  const shouldRedirectHomeToInsightsRef = useRef(false);
-  const pathRef = useRef(location.pathname);
-
-  useEffect(() => {
-    pathRef.current = location.pathname;
-  }, [location.pathname]);
-
-  useEffect(() => {
-    const autoLogin = async () => {
-      try {
-        // Check if already authenticated
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-          try {
-            await api.getCurrentUser();
-            // Already authenticated, no need to login again
-            return;
-          } catch (error) {
-            // Token exists but is invalid, clear it and proceed with auto-login
-            api.clearToken();
-          }
-        }
-
-        // Only redirect after auto-login if the user started on the home route.
-        shouldRedirectHomeToInsightsRef.current = pathRef.current === '/';
-
-        // Auto-authenticate with provided credentials
-        await api.signIn('admin@ailethia.com', 'admin123');
-        didAutoLoginRef.current = true;
-
-        // If we're still on home when login completes, redirect immediately.
-        if (shouldRedirectHomeToInsightsRef.current && pathRef.current === '/') {
-          didAutoLoginRef.current = false;
-          shouldRedirectHomeToInsightsRef.current = false;
-          navigate('/insights', { replace: true });
-        }
-        console.log('Auto-authenticated successfully');
-      } catch (error) {
-        // Silently fail - user can still login manually
-        console.warn('Auto-authentication failed:', error);
-      }
-    };
-
-    autoLogin();
-  }, [navigate]);
-
-  // Handle cases where auto-login completes while router is still settling.
-  // Only redirect when the current route is home (/).
-  useEffect(() => {
-    if (!didAutoLoginRef.current) return;
-    if (!shouldRedirectHomeToInsightsRef.current) return;
-    if (location.pathname !== '/') return;
-
-    didAutoLoginRef.current = false;
-    shouldRedirectHomeToInsightsRef.current = false;
-    navigate('/insights', { replace: true });
-  }, [location.pathname, navigate]);
-
   return null;
 }
 
@@ -124,42 +67,147 @@ function Handle404Redirect() {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
-      <EditProvider>
-        <TooltipProvider>
-          <TimezoneInitializer />
-          <Toaster />
-          <Sonner />
-          <Router basename={import.meta.env.BASE_URL}>
-            <Handle404Redirect />
-            <AutoAuthenticator />
-            <ScrollToTop />
-            <Routes>
+      <AuthProvider>
+        <EditProvider>
+          <TooltipProvider>
+            <TimezoneInitializer />
+            <Toaster />
+            <Sonner />
+            <Router basename={import.meta.env.BASE_URL}>
+              <Handle404Redirect />
+              <ScrollToTop />
+              <Routes>
+              {/* Public routes */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
-              <Route path="/insights" element={<Dashboard />} />
-              <Route path="/admin" element={<Admin />} />
-              <Route path="/agentic" element={<Agentic />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/rag" element={<RAG />} />
-              <Route path="/v2" element={<V2 />} />
-              <Route path="/code-refactor" element={<CodeRefactor />} />
-              <Route path="/v2/agileplan" element={<AgilePlan />} />
-              <Route path="/backend-architecture" element={<BackendArchitecture />} />
-              <Route path="/csv-editor" element={<CSVEditor />} />
-              <Route path="/cr" element={<CodeReview />} />
-              <Route path="/ice" element={<ICEEncompass />} />
-              <Route path="/loans" element={<Loans />} />
-              <Route path="/qlik" element={<QlikMigration />} />
-              <Route path="/subscription/success" element={<SubscriptionSuccess />} />
-              <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              
+              {/* Protected routes - require authentication */}
+                <Route path="/insights" element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } />
+                <Route path="/legacy" element={
+                  <ProtectedRoute>
+                    <DashboardLegacy />
+                  </ProtectedRoute>
+                } />
+              <Route path="/loans" element={
+                <ProtectedRoute>
+                  <Loans />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-dashboard" element={
+                <ProtectedRoute>
+                  <MyDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-dashboard-legacy" element={
+                <ProtectedRoute>
+                  <MyDashboardLegacy />
+                </ProtectedRoute>
+              } />
+              <Route path="/workbench/shared" element={
+                <ProtectedRoute>
+                  <SharedWithMe />
+                </ProtectedRoute>
+              } />
+              <Route path="/workbench/team-folders" element={
+                <ProtectedRoute>
+                  <TeamFolders />
+                </ProtectedRoute>
+              } />
+              <Route path="/workbench/favorites" element={
+                <ProtectedRoute>
+                  <Favorites />
+                </ProtectedRoute>
+              } />
+              <Route path="/data-chat" element={
+                <ProtectedRoute>
+                  <DataChat />
+                </ProtectedRoute>
+              } />
+              
+              {/* Top Tiering routes */}
+              <Route path="/loan-funnel" element={
+                <ProtectedRoute>
+                  <LoanFunnel />
+                </ProtectedRoute>
+              } />
+              <Route path="/credit-risk-management" element={
+                <ProtectedRoute>
+                  <CreditRiskManagement />
+                </ProtectedRoute>
+              } />
+              <Route path="/company-scorecard" element={
+                <ProtectedRoute>
+                  <CompanyScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/toptiering-comparison" element={
+                <ProtectedRoute>
+                  <TopTieringComparison />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/financial-modeling-sandbox" element={
+                <ProtectedRoute>
+                  <FinancialModelingSandbox />
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-scorecard" element={
+                <ProtectedRoute>
+                  <SalesScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/sales-trends" element={
+                <ProtectedRoute>
+                  <SalesTrends />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/operation-scorecard" element={
+                <ProtectedRoute>
+                  <OperationScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/performance/operation-scorecard-trends" element={
+                <ProtectedRoute>
+                  <OperationScorecardTrends />
+                </ProtectedRoute>
+              } />
+              
+              {/* Admin route - requires admin role */}
+              <Route path="/admin" element={
+                <ProtectedRoute adminOnly>
+                  <Admin />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin/knowledge-base" element={
+                <ProtectedRoute adminOnly>
+                  <KnowledgeBaseEditor />
+                </ProtectedRoute>
+              } />
+              
+              {/* Subscription routes */}
+              <Route path="/subscription/success" element={
+                <ProtectedRoute>
+                  <SubscriptionSuccess />
+                </ProtectedRoute>
+              } />
+              <Route path="/subscription/cancel" element={
+                <ProtectedRoute>
+                  <SubscriptionCancel />
+                </ProtectedRoute>
+              } />
+              
+              {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Router>
         </TooltipProvider>
       </EditProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
+    </AuthProvider>
+  </ThemeProvider>
+</QueryClientProvider>
 );
 
 export default App;

@@ -333,6 +333,7 @@ export function transformLoanData(loan: any, tenantId: string, userId: string): 
     created_at: parseDate(loan.created_at) || new Date(),
     created_by: userId,
     metadata: {},
+    raw_data: loan, // Store original CSV record
   };
 
   // Build metadata with additional fields for Business Overview, Leaderboard, Loan Funnel, and Ops

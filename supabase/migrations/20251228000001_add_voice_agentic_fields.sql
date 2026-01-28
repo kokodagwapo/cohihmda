@@ -12,9 +12,9 @@ ALTER TABLE public.tenant_rag_settings
   ADD COLUMN IF NOT EXISTS knowledge_base_links TEXT;
 
 -- Add comments
-COMMENT ON COLUMN public.tenant_rag_settings.allowed_topics IS 'Allowed conversation topics for Ailethia voice agentic (one per line)';
-COMMENT ON COLUMN public.tenant_rag_settings.conversation_rules IS 'Conversation rules for Ailethia voice agentic (one per line)';
+COMMENT ON COLUMN public.tenant_rag_settings.allowed_topics IS 'Allowed conversation topics for Cohi voice agentic (one per line)';
+COMMENT ON COLUMN public.tenant_rag_settings.conversation_rules IS 'Conversation rules for Cohi voice agentic (one per line)';
 COMMENT ON COLUMN public.tenant_rag_settings.personality_tone IS 'Personality tone: professional, friendly, executive, consultative, analytical';
 COMMENT ON COLUMN public.tenant_rag_settings.personality_style IS 'Communication style: concise, detailed, conversational, formal';
-COMMENT ON COLUMN public.tenant_rag_settings.personality_custom IS 'Custom personality prompt for Ailethia voice agentic';
+COMMENT ON COLUMN public.tenant_rag_settings.personality_custom IS 'Custom personality prompt for Cohi voice agentic';
 COMMENT ON COLUMN public.tenant_rag_settings.knowledge_base_links IS 'Links to knowledge base resources (one per line)';

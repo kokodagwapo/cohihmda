@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 CLOUDFRONT_URL="https://d2wvs4i87rs881.cloudfront.net"
-EMAIL="admin@ailethia.com"
+EMAIL="admin@Cohi.com"
 PASSWORD="admin123"
 
 echo -e "${BLUE}========================================${NC}"

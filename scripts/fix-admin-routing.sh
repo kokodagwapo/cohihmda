@@ -6,7 +6,7 @@
 
 set -e
 
-S3_BUCKET="ailethia-frontend-1767135651"
+S3_BUCKET="Cohi-frontend-1767135651"
 REGION="us-east-1"
 
 echo "🔧 Fixing admin page routing..."

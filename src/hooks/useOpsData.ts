@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
 
+export interface DateRange {
+  startDate: string;
+  endDate: string;
+}
+
 export interface OpsOverviewData {
   avgCycleTime?: {
     current: number;
@@ -30,7 +35,11 @@ export interface OpsOverviewData {
   };
 }
 
-export const useOpsData = () => {
+export const useOpsData = (
+  dateRange?: DateRange,
+  selectedTenantId?: string | null,
+  selectedChannel?: string | null
+) => {
   const [opsData, setOpsData] = useState<OpsOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -46,7 +55,19 @@ export const useOpsData = () => {
       }
       
       try {
-        const data = await api.request<OpsOverviewData>('/api/loans/operations-overview');
+        // Build query parameters
+        const params = new URLSearchParams();
+        if (dateRange?.startDate) params.append('startDate', dateRange.startDate);
+        if (dateRange?.endDate) params.append('endDate', dateRange.endDate);
+        if (selectedTenantId) params.append('tenant_id', selectedTenantId);
+        if (selectedChannel) params.append('channel_group', selectedChannel);
+        
+        const queryString = params.toString();
+        const url = `/api/loans/operations-overview${queryString ? `?${queryString}` : ''}`;
+        
+        console.log('🔍 Fetching operations overview from', url);
+        const data = await api.request<OpsOverviewData>(url);
+        console.log('📊 Operations overview data from API:', data);
         setOpsData(data);
       } catch (error: any) {
         // Handle unauthorized errors silently (user not logged in)
@@ -62,7 +83,7 @@ export const useOpsData = () => {
       }
     };
     fetchOpsOverview();
-  }, []);
+  }, [dateRange?.startDate, dateRange?.endDate, selectedTenantId, selectedChannel]);
 
   return { opsData, loading };
 };

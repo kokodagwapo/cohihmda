@@ -1,8 +1,10 @@
-import { pool } from '../../config/database.js';
+import pg from 'pg';
+import { queryMetrics, DateRange } from '../metrics/metricsService.js';
 
 /**
  * Analytics Service
  * Contains business logic for dashboard analytics endpoints
+ * Uses tenant database pools (no tenant_id columns in tenant DBs)
  */
 
 export interface FunnelData {
@@ -34,9 +36,11 @@ export interface LeaderboardEntry {
   role: string;
   branch: string;
   loansClosed: number;
+  loansStarted?: number;
   totalVolume: number;
   avgCycleTime: number;
   pullThroughRate: number;
+  delta?: number; // Percentage change from previous period
 }
 
 export interface TopTieringRanking {
@@ -85,25 +89,24 @@ export interface Insight {
  * Get loan funnel data for a specific year
  */
 export async function getFunnelData(
-  tenantId: string,
+  tenantPool: pg.Pool,
   year: string
 ): Promise<FunnelData> {
   try {
-    const loansResult = await pool.query(
+    const loansResult = await tenantPool.query(
       `SELECT 
         COUNT(*) as total_loans,
         COUNT(CASE WHEN status = 'inquiry' THEN 1 END) as inquiries,
         COUNT(CASE WHEN status = 'started' THEN 1 END) as started,
-        -- Qlik Locked Flag: lock_date IS NOT NULL AND lock_date <= CURRENT_DATE
+        -- Locked loans: lock_date exists
         COUNT(CASE WHEN lock_date IS NOT NULL AND lock_date <= CURRENT_DATE THEN 1 END) as locked,
-        -- Qlik Funded Flag: funding_date IS NOT NULL
+        -- Funded loans: funding_date exists
         COUNT(CASE WHEN funding_date IS NOT NULL THEN 1 END) as funded,
         SUM(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as total_volume,
         AVG(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE NULL END) as avg_loan_amount
        FROM public.loans
-       WHERE tenant_id = $1 
-         AND EXTRACT(YEAR FROM COALESCE(application_date, created_at)) = $2`,
-      [tenantId, parseInt(year)]
+       WHERE EXTRACT(YEAR FROM COALESCE(application_date, created_at)) = $1`,
+      [parseInt(year)]
     );
 
     const data = loansResult.rows[0];
@@ -114,17 +117,16 @@ export async function getFunnelData(
     const locked = parseInt(data.locked) || 0;
     const funded = parseInt(data.funded) || 0;
 
-    // Qlik Pull-through Rate: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No'
-    const pullThroughResult = await pool.query(
+    // Pull-through Rate: Applications that reached investor purchase (excludes active loans)
+    const pullThroughResult = await tenantPool.query(
       `SELECT 
         COUNT(CASE WHEN investor_purchase_date IS NOT NULL 
-          AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
+          AND current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
           / NULLIF(COUNT(CASE WHEN application_date IS NOT NULL 
-          AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate
+          AND current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate
        FROM public.loans
-       WHERE tenant_id = $1 
-         AND EXTRACT(YEAR FROM COALESCE(application_date, created_at)) = $2`,
-      [tenantId, parseInt(year)]
+       WHERE EXTRACT(YEAR FROM COALESCE(application_date, created_at)) = $1`,
+      [parseInt(year)]
     );
 
     const pullThroughRate = parseFloat(pullThroughResult.rows[0]?.pull_through_rate) || 0;
@@ -147,7 +149,7 @@ export async function getFunnelData(
         conversionRate: locked > 0 ? (funded / locked) * 100 : 0,
       },
       overallConversionRate: inquiries > 0 ? (funded / inquiries) * 100 : 0,
-      pullThroughRate: pullThroughRate, // Qlik formula
+      pullThroughRate: pullThroughRate,
       avgLoanAmount: parseFloat(data.avg_loan_amount) || 0,
     };
 
@@ -169,88 +171,314 @@ export async function getFunnelData(
   }
 }
 
+// Extended timeframe types
+type ExtendedTimeframe = 'wtd' | 'mtd' | 'qtd' | 'ytd' | 'lm' | 'lq' | 'ly' | 'custom';
+
 /**
  * Calculate date range based on timeframe
+ * Returns { start, end } for all timeframes
  */
-function getDateRangeForTimeframe(timeframe: 'wtd' | 'mtd' | 'qtd' | 'ytd'): Date {
+function getDateRangeForTimeframe(timeframe: ExtendedTimeframe, customStart?: string, customEnd?: string): { start: Date; end: Date } {
   const now = new Date();
-  let startDate: Date;
+  let start: Date;
+  let end: Date = new Date(); // Default end is today
+  
   switch (timeframe) {
     case 'wtd':
-      startDate = new Date(now.setDate(now.getDate() - now.getDay()));
+      // Week-to-date: Start of current week to today
+      start = new Date(now);
+      start.setDate(now.getDate() - now.getDay());
+      start.setHours(0, 0, 0, 0);
       break;
     case 'mtd':
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      // Month-to-date: Start of current month to today
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
       break;
     case 'qtd':
+      // Quarter-to-date: Start of current quarter to today
       const quarter = Math.floor(now.getMonth() / 3);
-      startDate = new Date(now.getFullYear(), quarter * 3, 1);
+      start = new Date(now.getFullYear(), quarter * 3, 1);
       break;
     case 'ytd':
-      startDate = new Date(now.getFullYear(), 0, 1);
+      // Year-to-date: Start of current year to today
+      start = new Date(now.getFullYear(), 0, 1);
+      break;
+    case 'lm':
+      // Last Month: Full previous month
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of prev month
+      break;
+    case 'lq':
+      // Last Quarter: Full previous quarter
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      const prevQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
+      const prevQuarterYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      start = new Date(prevQuarterYear, prevQuarter * 3, 1);
+      end = new Date(prevQuarterYear, prevQuarter * 3 + 3, 0); // Last day of prev quarter
+      break;
+    case 'ly':
+      // Last Year: Full previous year
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear() - 1, 11, 31);
+      break;
+    case 'custom':
+      // Custom date range
+      if (customStart && customEnd) {
+        start = new Date(customStart);
+        end = new Date(customEnd);
+      } else {
+        // Default to MTD if no custom dates provided
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      break;
+    default:
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  
+  return { start, end };
+}
+
+/**
+ * Calculate date range for previous period (for delta calculation)
+ */
+function getPreviousPeriodRange(timeframe: ExtendedTimeframe): { start: Date; end: Date } {
+  const now = new Date();
+  let start: Date;
+  let end: Date;
+  
+  switch (timeframe) {
+    case 'wtd':
+      // Previous week
+      const currentWeekStart = new Date(now);
+      currentWeekStart.setDate(now.getDate() - now.getDay());
+      end = new Date(currentWeekStart);
+      end.setDate(end.getDate() - 1);
+      start = new Date(end);
+      start.setDate(start.getDate() - 6);
+      break;
+    case 'mtd':
+      // Previous month (same period as Last Month)
+      end = new Date(now.getFullYear(), now.getMonth(), 0);
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      break;
+    case 'qtd':
+      // Previous quarter (same period as Last Quarter)
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      const prevQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
+      const prevQuarterYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      start = new Date(prevQuarterYear, prevQuarter * 3, 1);
+      end = new Date(prevQuarterYear, prevQuarter * 3 + 3, 0);
+      break;
+    case 'lm':
+      // For "Last Month", compare to the month before that
+      end = new Date(now.getFullYear(), now.getMonth() - 1, 0); // Last day of 2 months ago
+      start = new Date(now.getFullYear(), now.getMonth() - 2, 1); // First day of 2 months ago
+      break;
+    case 'lq':
+      // For "Last Quarter", compare to the quarter before that
+      const lqCurrentQuarter = Math.floor(now.getMonth() / 3);
+      const lqPrevQuarter = lqCurrentQuarter === 0 ? 3 : lqCurrentQuarter - 1;
+      const lqPrevPrevQuarter = lqPrevQuarter === 0 ? 3 : lqPrevQuarter - 1;
+      const lqYear = lqPrevQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const lqPrevYear = lqPrevPrevQuarter === 3 ? lqYear - 1 : lqYear;
+      start = new Date(lqPrevYear, lqPrevPrevQuarter * 3, 1);
+      end = new Date(lqPrevYear, lqPrevPrevQuarter * 3 + 3, 0);
+      break;
+    case 'ly':
+      // For "Last Year", compare to the year before that
+      start = new Date(now.getFullYear() - 2, 0, 1);
+      end = new Date(now.getFullYear() - 2, 11, 31);
+      break;
+    case 'custom':
+    case 'ytd':
+    default:
+      // For custom and YTD, compare to previous year same period
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear() - 1, 11, 31);
       break;
   }
-  return startDate;
+  
+  return { start, end };
 }
 
 /**
  * Get leaderboard data for a specific timeframe
+ * Groups loans by loan_officer (name) field directly - no employees table required
  */
 export async function getLeaderboardData(
-  tenantId: string,
-  timeframe: 'wtd' | 'mtd' | 'qtd' | 'ytd' = 'mtd'
+  tenantPool: pg.Pool,
+  timeframe: ExtendedTimeframe = 'mtd',
+  filters?: { 
+    branch?: string; 
+    scope?: 'all' | 'branch' | 'team';
+    startDate?: string; // For custom date range
+    endDate?: string;   // For custom date range
+  }
 ): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string }> {
   try {
-    const startDate = getDateRangeForTimeframe(timeframe);
+    const dateRange = getDateRangeForTimeframe(timeframe, filters?.startDate, filters?.endDate);
+    const startDate = dateRange.start;
+    const endDate = dateRange.end;
+    const prevPeriod = getPreviousPeriodRange(timeframe);
+    
+    // Build WHERE clause for filters
+    const conditions: string[] = [];
+    const params: any[] = [startDate, endDate];
+    let paramIndex = 3;
+    
+    // Branch filter
+    if (filters?.branch) {
+      conditions.push(`l.branch = $${paramIndex}`);
+      params.push(filters.branch);
+      paramIndex++;
+    }
+    
+    const branchFilter = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
 
-    // Query employee performance with Qlik formulas
-    const leaderboardResult = await pool.query(
+    // Query performance metrics grouped by loan_officer name
+    // This works even if employees table doesn't exist
+    // Uses both start and end dates for proper date range filtering
+    const leaderboardResult = await tenantPool.query(
       `SELECT 
-        e.id,
-        e.first_name,
-        e.last_name,
-        e.role,
-        e.branch,
-        COUNT(l.id) as loans_closed,
-        SUM(l.loan_amount) as total_volume,
-        -- Qlik Turn Time: App-Close (DATE(closing_date) - DATE(application_date))
-        AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
+        l.loan_officer as name,
+        l.branch,
+        COUNT(*) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+        ) as loans_started,
+        -- Originated/Closed: Pull Through Originated Flag = Yes
+        COUNT(*) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ) as loans_closed,
+        -- Total volume for period
+        COALESCE(SUM(l.loan_amount) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ), 0) as total_volume,
+        -- Cycle time: App date to Closing/Funding date
+        AVG(CASE 
+          WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
           THEN DATE(l.closing_date) - DATE(l.application_date) 
-          WHEN l.cycle_time_days IS NOT NULL THEN l.cycle_time_days
-          ELSE NULL END) as avg_cycle_time,
-        COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END) as funded_count,
-        -- Qlik Pull-through Rate: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No'
-        -- Exclude active loans for accurate historical analysis
-        COUNT(CASE WHEN l.investor_purchase_date IS NOT NULL 
-          AND l.status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-          / NULLIF(COUNT(CASE WHEN l.application_date IS NOT NULL 
-          AND l.status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate
-       FROM public.employees e
-       LEFT JOIN public.loans l ON e.id = l.loan_officer_id
-         AND COALESCE(l.application_date, l.created_at) >= $1
-         AND l.tenant_id = $2
-       WHERE e.tenant_id = $2
-       GROUP BY e.id, e.first_name, e.last_name, e.role, e.branch
-       ORDER BY loans_closed DESC, total_volume DESC
+          WHEN l.funding_date IS NOT NULL AND l.application_date IS NOT NULL 
+          THEN DATE(l.funding_date::date) - DATE(l.application_date)
+          ELSE NULL 
+        END) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+        ) as avg_cycle_time,
+        -- Pull-through rate: Originated / (Originated + Withdrawn + Denied)
+        COUNT(*) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        )::float 
+        / NULLIF(
+          COUNT(*) FILTER (
+            WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+              AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+              AND l.application_date IS NOT NULL
+              AND (
+                LOWER(l.current_loan_status) LIKE '%originated%' 
+                OR LOWER(l.current_loan_status) LIKE '%purchased%'
+                OR LOWER(l.current_loan_status) LIKE '%withdraw%'
+                OR LOWER(l.current_loan_status) LIKE '%denied%'
+                OR LOWER(l.current_loan_status) LIKE '%not accepted%'
+              )
+          ), 0
+        ) * 100 as pull_through_rate
+       FROM public.loans l
+       WHERE l.loan_officer IS NOT NULL 
+         AND TRIM(l.loan_officer) != ''
+         ${branchFilter}
+       GROUP BY l.loan_officer, l.branch
+       HAVING COUNT(*) FILTER (
+         WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+           AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+       ) > 0
+       ORDER BY 
+         COUNT(*) FILTER (
+           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+         ) DESC,
+         SUM(l.loan_amount) FILTER (
+           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+         ) DESC
        LIMIT 10`,
-      [startDate, tenantId]
+      params
     );
 
-    const leaderboard: LeaderboardEntry[] = leaderboardResult.rows.map((row, index) => ({
-      rank: index + 1,
-      employeeId: row.id,
-      name: `${row.first_name} ${row.last_name}`,
-      role: row.role,
-      branch: row.branch,
-      loansClosed: parseInt(row.loans_closed) || 0,
-      totalVolume: parseFloat(row.total_volume) || 0,
-      avgCycleTime: parseFloat(row.avg_cycle_time) || 0,
-      pullThroughRate: parseFloat(row.pull_through_rate) || 0,
-    }));
+    // If no results, return empty
+    if (leaderboardResult.rows.length === 0) {
+      return { leaderboard: [], timeframe };
+    }
+
+    // Query previous period for delta calculation
+    // params is [startDate, endDate, ...branchFilter], so slice(2) gets just the branch filter params
+    const prevParams = [prevPeriod.start, prevPeriod.end, ...params.slice(2)];
+    let prevParamIndex = 3;
+    const prevBranchFilter = filters?.branch 
+      ? `AND l.branch = $${prevParamIndex}` 
+      : '';
+    
+    const prevPeriodResult = await tenantPool.query(
+      `SELECT 
+        l.loan_officer as name,
+        COUNT(*) FILTER (
+          WHERE (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ) as loans_closed
+       FROM public.loans l
+       WHERE l.loan_officer IS NOT NULL 
+         AND TRIM(l.loan_officer) != ''
+         AND COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+         AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+         ${prevBranchFilter}
+       GROUP BY l.loan_officer`,
+      prevParams
+    );
+
+    // Create lookup for previous period data
+    const prevPeriodMap = new Map<string, number>();
+    prevPeriodResult.rows.forEach(row => {
+      prevPeriodMap.set(row.name, parseInt(row.loans_closed) || 0);
+    });
+
+    // Transform results with delta calculation
+    const leaderboard: LeaderboardEntry[] = leaderboardResult.rows.map((row, index) => {
+      const currentLoans = parseInt(row.loans_closed) || 0;
+      const prevLoans = prevPeriodMap.get(row.name) || 0;
+      
+      // Calculate delta percentage (change from previous period)
+      let delta = 0;
+      if (prevLoans > 0) {
+        delta = Math.round(((currentLoans - prevLoans) / prevLoans) * 100);
+      } else if (currentLoans > 0) {
+        delta = 100; // New performer (wasn't in previous period)
+      }
+
+      return {
+        rank: index + 1,
+        employeeId: `lo-${index + 1}`, // Generate placeholder ID since we're using name
+        name: row.name || 'Unknown',
+        role: 'Loan Officer', // Default role (could be enhanced with employees table lookup)
+        branch: row.branch || 'Unknown',
+        loansClosed: currentLoans,
+        loansStarted: parseInt(row.loans_started) || 0,
+        totalVolume: parseFloat(row.total_volume) || 0,
+        avgCycleTime: Math.round(parseFloat(row.avg_cycle_time) || 0),
+        pullThroughRate: Math.round(parseFloat(row.pull_through_rate) || 0),
+        delta,
+      };
+    });
 
     return { leaderboard, timeframe };
   } catch (dbError: any) {
-    // If employees/loans tables don't exist, return empty array
+    console.error('[Leaderboard] Error:', dbError.message);
+    // If loans table doesn't exist, return empty array
     if (dbError.code === '42P01') {
       return { leaderboard: [], timeframe };
     }
@@ -262,10 +490,23 @@ export async function getLeaderboardData(
  * Get TopTiering rankings with productivity, profitability, and complexity scoring
  */
 export async function getTopTieringRankings(
-  tenantId: string
+  tenantPool: pg.Pool
 ): Promise<{ rankings: TopTieringRanking[] }> {
   try {
-    const tieringResult = await pool.query(
+    // Check if employees table exists
+    const tableCheck = await tenantPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'employees'
+      )
+    `);
+    
+    if (!tableCheck.rows[0]?.exists) {
+      return { rankings: [] };
+    }
+
+    const tieringResult = await tenantPool.query(
       `SELECT 
         e.id as employee_id,
         e.first_name,
@@ -274,36 +515,32 @@ export async function getTopTieringRankings(
         e.branch,
         -- Productivity metrics
         COUNT(l.id) as loans_closed,
-        -- Qlik Turn Time: App-Close (DATE(closing_date) - DATE(application_date))
+        -- Cycle time: App-Close (calculated from dates)
         AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
           THEN DATE(l.closing_date) - DATE(l.application_date) 
-          WHEN l.cycle_time_days IS NOT NULL THEN l.cycle_time_days
           ELSE NULL END) as avg_cycle_time,
-        -- Qlik Pull-through Rate: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No'
+        -- Pull-through rate (excludes active loans)
         COUNT(CASE WHEN l.investor_purchase_date IS NOT NULL 
-          AND l.status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
+          AND l.current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
           / NULLIF(COUNT(CASE WHEN l.application_date IS NOT NULL 
-          AND l.status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate,
+          AND l.current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate,
         -- Profitability metrics
         SUM(l.loan_amount) as total_volume,
         AVG(l.loan_amount) as avg_loan_amount,
         COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END) as funded_count,
-        -- Qlik Complexity Metrics: Calculate FICO, DTI, LTV complexity scores
-        AVG(COALESCE(l.metadata->>'fico_score', l.metadata->>'fico', '0')::numeric) as avg_fico,
-        AVG(COALESCE(l.metadata->>'dti_ratio', l.metadata->>'dti', '0')::numeric) as avg_dti,
-        AVG(COALESCE(l.metadata->>'ltv_ratio', l.metadata->>'ltv', l.metadata->>'loan_to_value', '0')::numeric) as avg_ltv,
+        -- Complexity metrics: Use ltv_ratio column and raw_data JSONB
+        COALESCE(AVG(l.ltv_ratio), 0) as avg_ltv,
+        AVG(COALESCE((l.raw_data->>'fico_score')::numeric, (l.raw_data->>'fico')::numeric, 0)) as avg_fico,
+        AVG(COALESCE((l.raw_data->>'dti_ratio')::numeric, (l.raw_data->>'dti')::numeric, l.be_dti_ratio, 0)) as avg_dti,
         COUNT(DISTINCT l.loan_type) as loan_types_handled
        FROM public.employees e
-       LEFT JOIN public.loans l ON e.id = l.loan_officer_id
-         AND l.tenant_id = $1
-       WHERE e.tenant_id = $1
-         AND e.status = 'active'
+       LEFT JOIN public.loans l ON e.id::TEXT = l.loan_officer_id
+       WHERE e.status = 'active'
        GROUP BY e.id, e.first_name, e.last_name, e.role, e.branch
-       HAVING COUNT(l.id) > 0`,
-      [tenantId]
+       HAVING COUNT(l.id) > 0`
     );
 
-    // Calculate composite scores with Qlik complexity formulas
+    // Calculate composite scores with complexity formulas
     const rankings: TopTieringRanking[] = tieringResult.rows.map((row) => {
       const loansClosed = parseInt(row.loans_closed) || 0;
       const avgCycleTime = parseFloat(row.avg_cycle_time) || 0;
@@ -313,24 +550,24 @@ export async function getTopTieringRankings(
       const fundedCount = parseInt(row.funded_count) || 0;
       const loanTypesHandled = parseInt(row.loan_types_handled) || 0;
       
-      // Qlik Complexity Calculations
+      // Complexity calculations based on FICO, DTI, LTV
       const avgFico = parseFloat(row.avg_fico) || 0;
       const avgDti = parseFloat(row.avg_dti) || 0;
       const avgLtv = parseFloat(row.avg_ltv) || 0;
       
-      // Qlik FICO Complexity: < 640 = 3, < 680 = 2, < 720 = 1, else 0
+      // FICO Complexity: < 640 = 3, < 680 = 2, < 720 = 1, else 0
       const ficoComplexity = avgFico < 640 ? 3 : avgFico < 680 ? 2 : avgFico < 720 ? 1 : 0;
       
-      // Qlik DTI Complexity: > 45 = 3, > 40 = 2, > 35 = 1, else 0
+      // DTI Complexity: > 45 = 3, > 40 = 2, > 35 = 1, else 0
       const dtiComplexity = avgDti > 45 ? 3 : avgDti > 40 ? 2 : avgDti > 35 ? 1 : 0;
       
-      // Qlik LTV Complexity: > 90 = 3, > 80 = 2, > 70 = 1, else 0
+      // LTV Complexity: > 90 = 3, > 80 = 2, > 70 = 1, else 0
       const ltvComplexity = avgLtv > 90 ? 3 : avgLtv > 80 ? 2 : avgLtv > 70 ? 1 : 0;
       
-      // Qlik Loan Complexity Score: Sum of all three
+      // Loan Complexity Score: Sum of all three
       const loanComplexityScore = ficoComplexity + dtiComplexity + ltvComplexity;
       
-      // Qlik Risk Factor: Weighted combination
+      // Risk Factor: Weighted combination
       const riskFactor = loanComplexityScore * 0.4 + ficoComplexity * 0.3 + dtiComplexity * 0.2 + ltvComplexity * 0.1;
 
       // Productivity Score (0-100)
@@ -343,15 +580,14 @@ export async function getTopTieringRankings(
 
       // Profitability Score (0-100)
       // Factors: total volume (50%), revenue per loan (30%), funded count (20%)
-      // Qlik Revenue: Total Revenue = Origination + Secondary (fallback to 1% if not available)
       const revenuePerLoan = avgLoanAmount * 0.01; // Estimate 1% revenue
       const profitabilityScore = 
         Math.min(50, (totalVolume / 1000000) * 5) + // Up to 50 points for volume
         Math.min(30, (revenuePerLoan / 1000) * 3) + // Up to 30 points for margin
         (fundedCount * 2); // Up to 20 points for funded loans
 
-      // Complexity Score (0-100) - Using Qlik Loan Complexity Score
-      // Factors: Qlik complexity score (40%), loan types (30%), risk factor (30%)
+      // Complexity Score (0-100)
+      // Factors: complexity score (40%), loan types (30%), risk factor (30%)
       const complexityScore = 
         (loanComplexityScore * 4) + // Up to 40 points (0-9 scale * 4 = 0-36)
         (loanTypesHandled * 10) + // Up to 30 points (3+ types)
@@ -406,46 +642,77 @@ export async function getTopTieringRankings(
 }
 
 /**
- * Get business overview metrics for a specific year
+ * Get business overview metrics using metrics service
+ * Supports date filtering via dateFilter parameter
  */
 export async function getBusinessOverviewMetrics(
-  tenantId: string,
-  year: string
+  tenantPool: pg.Pool,
+  year: string,
+  dateFilter: 'today' | 'mtd' | 'ytd' | 'custom' = 'ytd',
+  customDateRange?: { start: Date; end: Date }
 ): Promise<BusinessOverviewMetrics> {
   try {
-    // Query business metrics with Qlik formulas
-    const metricsResult = await pool.query(
-      `SELECT 
-        -- Qlik Status Flags
-        COUNT(CASE WHEN status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) as active_loans,
-        COUNT(CASE WHEN funding_date IS NOT NULL THEN 1 END) as closed_loans,
-        COUNT(CASE WHEN lock_date IS NOT NULL AND lock_date <= CURRENT_DATE THEN 1 END) as locked_loans,
-        -- Qlik Turn Time: App-Close (DATE(closing_date) - DATE(application_date))
-        AVG(CASE WHEN closing_date IS NOT NULL AND application_date IS NOT NULL 
-          THEN DATE(closing_date) - DATE(application_date) ELSE NULL END) as avg_cycle_time,
-        -- Qlik Pull-through Rate: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No'
-        -- Exclude active loans for accurate historical analysis
-        COUNT(CASE WHEN investor_purchase_date IS NOT NULL 
-          AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-          / NULLIF(COUNT(CASE WHEN application_date IS NOT NULL 
-          AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate,
-        COUNT(CASE WHEN credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls
-       FROM public.loans
-       WHERE tenant_id = $1 
-         AND EXTRACT(YEAR FROM COALESCE(application_date, created_at)) = $2`,
-      [tenantId, parseInt(year)]
-    );
-
-    const metrics = metricsResult.rows[0];
-
+    // Convert dateFilter to date range
+    let dateRange: DateRange | undefined;
+    
+    if (dateFilter === 'custom' && customDateRange) {
+      dateRange = {
+        start: customDateRange.start,
+        end: customDateRange.end
+      };
+    } else {
+      // Calculate date range based on filter
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      switch (dateFilter) {
+        case 'today':
+          dateRange = { 
+            start: new Date(today), 
+            end: new Date(today.getTime() + 24 * 60 * 60 * 1000) // End of day
+          };
+          break;
+        case 'mtd':
+          dateRange = { 
+            start: new Date(today.getFullYear(), today.getMonth(), 1), 
+            end: today 
+          };
+          break;
+        case 'ytd':
+          dateRange = { 
+            start: new Date(today.getFullYear(), 0, 1), 
+            end: today 
+          };
+          break;
+        default:
+          // Default to YTD if unknown
+          dateRange = { 
+            start: new Date(today.getFullYear(), 0, 1), 
+            end: today 
+          };
+      }
+    }
+    
+    // Query all 6 KPIs using metrics service
+    const metricIds = [
+      'active_loans',
+      'closed_loans',
+      'locked_loans',
+      'avg_cycle_time',
+      'pull_through_rate',
+      'credit_pulls'
+    ];
+    
+    const results = await queryMetrics(tenantPool, metricIds, { dateRange });
+    
     return {
       year: parseInt(year),
-      activeLoans: parseInt(metrics.active_loans) || 0,
-      closedLoans: parseInt(metrics.closed_loans) || 0,
-      lockedLoans: parseInt(metrics.locked_loans) || 0,
-      avgCycleTime: parseFloat(metrics.avg_cycle_time) || 0,
-      pullThroughRate: parseFloat(metrics.pull_through_rate) || 0,
-      creditPulls: parseInt(metrics.credit_pulls) || 0,
+      activeLoans: results.active_loans?.value as number || 0,
+      closedLoans: results.closed_loans?.value as number || 0,
+      lockedLoans: results.locked_loans?.value as number || 0,
+      avgCycleTime: results.avg_cycle_time?.value as number || 0,
+      pullThroughRate: results.pull_through_rate?.value as number || 0,
+      creditPulls: results.credit_pulls?.value as number || 0,
     };
   } catch (dbError: any) {
     if (dbError.code === '42P01') {
@@ -464,7 +731,7 @@ export async function getBusinessOverviewMetrics(
 }
 
 /**
- * Get Closing & FallOut Forecast with Qlik formulas
+ * Get Closing & FallOut Forecast
  * Implements pull-through rate by loan type, active aging days, and fallout predictions
  */
 export interface ClosingFalloutForecast {
@@ -493,7 +760,7 @@ export interface ClosingFalloutForecast {
 }
 
 export async function getClosingFalloutForecast(
-  tenantId: string,
+  tenantPool: pg.Pool,
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom' = 'ytd'
 ): Promise<ClosingFalloutForecast> {
   try {
@@ -517,7 +784,7 @@ export async function getClosingFalloutForecast(
         startDate = null;
     }
 
-    // Get active loans with Qlik Active Aging Days
+    // Get active loans with aging days calculation
     const activeLoansQuery = startDate
       ? `SELECT 
           COUNT(*) as active_count,
@@ -526,8 +793,7 @@ export async function getClosingFalloutForecast(
             AND application_date IS NOT NULL 
             THEN FLOOR(CURRENT_DATE - application_date) ELSE NULL END) as avg_aging_days
          FROM public.loans
-         WHERE tenant_id = $1 
-           AND application_date >= $2
+         WHERE application_date >= $1
            AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`
       : `SELECT 
           COUNT(*) as active_count,
@@ -536,15 +802,14 @@ export async function getClosingFalloutForecast(
             AND application_date IS NOT NULL 
             THEN FLOOR(CURRENT_DATE - application_date) ELSE NULL END) as avg_aging_days
          FROM public.loans
-         WHERE tenant_id = $1 
-           AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`;
+         WHERE status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')`;
 
-    const activeLoansResult = await pool.query(
+    const activeLoansResult = await tenantPool.query(
       activeLoansQuery,
-      startDate ? [tenantId, startDate] : [tenantId]
+      startDate ? [startDate] : []
     );
 
-    // Qlik Pull-through Rate by Loan Type
+    // Pull-through rate by loan type
     // Formula: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No' GROUP BY Loan Type
     const pullThroughByTypeQuery = startDate
       ? `SELECT 
@@ -556,8 +821,7 @@ export async function getClosingFalloutForecast(
           COUNT(CASE WHEN application_date IS NOT NULL 
             AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) as historical_count
          FROM public.loans
-         WHERE tenant_id = $1 
-           AND application_date >= $2
+         WHERE application_date >= $1
            AND loan_type IS NOT NULL
          GROUP BY loan_type
          HAVING COUNT(CASE WHEN application_date IS NOT NULL 
@@ -572,16 +836,15 @@ export async function getClosingFalloutForecast(
           COUNT(CASE WHEN application_date IS NOT NULL 
             AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) as historical_count
          FROM public.loans
-         WHERE tenant_id = $1 
-           AND loan_type IS NOT NULL
+         WHERE loan_type IS NOT NULL
          GROUP BY loan_type
          HAVING COUNT(CASE WHEN application_date IS NOT NULL 
            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) > 0
          ORDER BY pull_through_rate DESC`;
 
-    const pullThroughResult = await pool.query(
+    const pullThroughResult = await tenantPool.query(
       pullThroughByTypeQuery,
-      startDate ? [tenantId, startDate] : [tenantId]
+      startDate ? [startDate] : []
     );
 
     const activeLoansData = activeLoansResult.rows[0];
@@ -603,8 +866,7 @@ export async function getClosingFalloutForecast(
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume
          FROM public.loans
-         WHERE tenant_id = $1 
-           AND application_date >= $2
+         WHERE application_date >= $1
            AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
            AND loan_type IS NOT NULL
          GROUP BY loan_type`
@@ -613,14 +875,13 @@ export async function getClosingFalloutForecast(
           COUNT(*) as active_count,
           SUM(loan_amount) as active_volume
          FROM public.loans
-         WHERE tenant_id = $1 
-           AND status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
+         WHERE status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
            AND loan_type IS NOT NULL
          GROUP BY loan_type`;
 
-    const activeByTypeResult = await pool.query(
+    const activeByTypeResult = await tenantPool.query(
       activeByTypeQuery,
-      startDate ? [tenantId, startDate] : [tenantId]
+      startDate ? [startDate] : []
     );
 
     // Forecast closings for next 30, 60, 90 days
@@ -700,9 +961,10 @@ export async function getClosingFalloutForecast(
 
 /**
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
+ * Uses the centralized Metrics Catalog for all metric calculations
  */
 export async function getInsights(
-  tenantId: string,
+  tenantPool: pg.Pool,
   dateFilter: string = 'ytd',
   authHeader?: string
 ): Promise<{
@@ -723,7 +985,7 @@ export async function getInsights(
     };
   };
 }> {
-  // Calculate date range
+  // Calculate date range for metrics
   let startDate: Date | null = null;
   const endDate = new Date();
   const today = new Date();
@@ -743,134 +1005,65 @@ export async function getInsights(
       startDate = null;
   }
 
-  // Get comprehensive loan data with Qlik-derived computed fields
+  const dateRange: DateRange = { start: startDate, end: endDate };
+
+  // Get metrics from the centralized metrics catalog
+  const metricsResult = await queryMetrics(tenantPool, [
+    'active_loans',
+    'closed_loans', 
+    'locked_loans',
+    'avg_cycle_time',
+    'pull_through_rate',
+    'total_volume',
+    'funded_volume',
+    'active_volume'
+  ], { dateRange });
+
+  // Extract metric values
+  const activeLoansCount = Number(metricsResult.active_loans?.value || 0);
+  const closedLoansCount = Number(metricsResult.closed_loans?.value || 0);
+  const lockedLoansCount = Number(metricsResult.locked_loans?.value || 0);
+  const avgCycleTime = Number(metricsResult.avg_cycle_time?.value || 0);
+  const pullThroughRate = Number(metricsResult.pull_through_rate?.value || 0);
+  const totalVolume = Number(metricsResult.total_volume?.value || 0);
+  const fundedVolume = Number(metricsResult.funded_volume?.value || 0);
+  const activeVolume = Number(metricsResult.active_volume?.value || 0);
+
+  // Get loan count for summary
+  const countResult = await tenantPool.query('SELECT COUNT(*) as total FROM public.loans');
+  const totalLoans = parseInt(countResult.rows[0]?.total || '0');
+
+  // Calculate revenue from funded volume (1% estimate)
+  const calculatedRevenue = fundedVolume * 0.01;
+
+  // Get basic loan data for insight generation (simpler query)
   const loansQuery = startDate
     ? `SELECT 
-        l.loan_id, l.borrower_name, l.loan_amount, l.loan_type, l.status, 
-        l.application_date, l.closing_date, l.lock_date, l.funding_date, l.investor_purchase_date,
-        l.interest_rate, l.loan_purpose, l.branch, l.credit_pull_date, l.cycle_time_days,
-        l.loan_officer_id, l.metadata,
-        -- Loan Officer Name from employees table
-        COALESCE(e.first_name || ' ' || e.last_name, l.metadata->>'loan_officer_name', NULL) as loan_officer_name,
-        -- Persona/Actor fields from metadata
-        l.metadata->>'underwriter_name' as underwriter_name,
-        l.metadata->>'closer' as closer,
-        l.metadata->>'processor' as processor,
-        l.metadata->>'account_executive' as account_executive,
-        -- Qlik Date Flags (Rolling 13 Month, MTD, YTD)
-        CASE WHEN l.application_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '13 months' 
-          AND l.application_date <= CURRENT_DATE THEN true ELSE false END as rolling_13_month_flag,
-        CASE WHEN l.funding_date >= DATE_TRUNC('month', CURRENT_DATE) 
-          AND l.funding_date <= CURRENT_DATE THEN true ELSE false END as funding_mtd_flag,
-        CASE WHEN l.closing_date >= DATE_TRUNC('year', CURRENT_DATE) 
-          AND l.closing_date <= CURRENT_DATE THEN true ELSE false END as closing_ytd_flag,
-        -- Qlik Status Flags
-        CASE WHEN l.funding_date IS NOT NULL THEN true ELSE false END as funded_flag,
-        CASE WHEN l.investor_purchase_date IS NOT NULL THEN true ELSE false END as sold_flag,
-        CASE WHEN l.lock_date IS NOT NULL AND l.lock_date <= CURRENT_DATE THEN true ELSE false END as locked_flag,
-        CASE WHEN l.status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') 
-          THEN true ELSE false END as active_loan_flag,
-        -- Qlik Turn Times
-        CASE WHEN l.funding_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.funding_date) - DATE(l.application_date) ELSE NULL END as app_fund_turn_time,
-        CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.closing_date) - DATE(l.application_date) ELSE NULL END as app_close_turn_time,
-        CASE WHEN l.investor_purchase_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.investor_purchase_date) - DATE(l.application_date) ELSE NULL END as app_invpurch_turn_time,
-        CASE WHEN l.investor_purchase_date IS NOT NULL AND l.funding_date IS NOT NULL 
-          THEN DATE(l.investor_purchase_date) - DATE(l.funding_date) ELSE NULL END as fund_invpurch_turn_time,
-        CASE WHEN l.status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
-          AND l.application_date IS NOT NULL 
-          THEN FLOOR(CURRENT_DATE - l.application_date) ELSE NULL END as active_aging_days,
-        -- Qlik Revenue (if available in metadata, otherwise calculate)
-        COALESCE((l.metadata->>'origination_revenue')::numeric, 0) + 
-        COALESCE((l.metadata->>'secondary_revenue')::numeric, 0) as total_revenue,
-        COALESCE((l.metadata->>'origination_revenue')::numeric, 0) as origination_revenue,
-        COALESCE((l.metadata->>'secondary_revenue')::numeric, 0) as secondary_revenue
+        l.loan_id, l.loan_amount, l.loan_type, l.current_loan_status as status,
+        l.application_date, l.closing_date, l.lock_date, l.funding_date,
+        l.loan_officer_id, l.branch,
+        COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) as loan_officer_name
        FROM public.loans l
-       LEFT JOIN public.employees e ON l.loan_officer_id = e.id AND e.tenant_id = l.tenant_id
-       WHERE l.tenant_id = $1 AND l.application_date >= $2
-       ORDER BY l.application_date DESC`
+       LEFT JOIN public.employees e ON e.id::TEXT = l.loan_officer_id
+       WHERE l.application_date >= $1
+       ORDER BY l.application_date DESC
+       LIMIT 1000`
     : `SELECT 
-        l.loan_id, l.borrower_name, l.loan_amount, l.loan_type, l.status, 
-        l.application_date, l.closing_date, l.lock_date, l.funding_date, l.investor_purchase_date,
-        l.interest_rate, l.loan_purpose, l.branch, l.credit_pull_date, l.cycle_time_days,
-        l.loan_officer_id, l.metadata,
-        -- Loan Officer Name from employees table
-        COALESCE(e.first_name || ' ' || e.last_name, l.metadata->>'loan_officer_name', NULL) as loan_officer_name,
-        -- Persona/Actor fields from metadata
-        l.metadata->>'underwriter_name' as underwriter_name,
-        l.metadata->>'closer' as closer,
-        l.metadata->>'processor' as processor,
-        l.metadata->>'account_executive' as account_executive,
-        -- Qlik Date Flags (Rolling 13 Month, MTD, YTD)
-        CASE WHEN l.application_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '13 months' 
-          AND l.application_date <= CURRENT_DATE THEN true ELSE false END as rolling_13_month_flag,
-        CASE WHEN l.funding_date >= DATE_TRUNC('month', CURRENT_DATE) 
-          AND l.funding_date <= CURRENT_DATE THEN true ELSE false END as funding_mtd_flag,
-        CASE WHEN l.closing_date >= DATE_TRUNC('year', CURRENT_DATE) 
-          AND l.closing_date <= CURRENT_DATE THEN true ELSE false END as closing_ytd_flag,
-        -- Qlik Status Flags
-        CASE WHEN l.funding_date IS NOT NULL THEN true ELSE false END as funded_flag,
-        CASE WHEN l.investor_purchase_date IS NOT NULL THEN true ELSE false END as sold_flag,
-        CASE WHEN l.lock_date IS NOT NULL AND l.lock_date <= CURRENT_DATE THEN true ELSE false END as locked_flag,
-        CASE WHEN l.status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') 
-          THEN true ELSE false END as active_loan_flag,
-        -- Qlik Turn Times
-        CASE WHEN l.funding_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.funding_date) - DATE(l.application_date) ELSE NULL END as app_fund_turn_time,
-        CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.closing_date) - DATE(l.application_date) ELSE NULL END as app_close_turn_time,
-        CASE WHEN l.investor_purchase_date IS NOT NULL AND l.application_date IS NOT NULL 
-          THEN DATE(l.investor_purchase_date) - DATE(l.application_date) ELSE NULL END as app_invpurch_turn_time,
-        CASE WHEN l.investor_purchase_date IS NOT NULL AND l.funding_date IS NOT NULL 
-          THEN DATE(l.investor_purchase_date) - DATE(l.funding_date) ELSE NULL END as fund_invpurch_turn_time,
-        CASE WHEN l.status NOT IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated')
-          AND l.application_date IS NOT NULL 
-          THEN FLOOR(CURRENT_DATE - l.application_date) ELSE NULL END as active_aging_days,
-        -- Qlik Revenue (if available in metadata, otherwise calculate)
-        COALESCE((l.metadata->>'origination_revenue')::numeric, 0) + 
-        COALESCE((l.metadata->>'secondary_revenue')::numeric, 0) as total_revenue,
-        COALESCE((l.metadata->>'origination_revenue')::numeric, 0) as origination_revenue,
-        COALESCE((l.metadata->>'secondary_revenue')::numeric, 0) as secondary_revenue
+        l.loan_id, l.loan_amount, l.loan_type, l.current_loan_status as status,
+        l.application_date, l.closing_date, l.lock_date, l.funding_date,
+        l.loan_officer_id, l.branch,
+        COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) as loan_officer_name
        FROM public.loans l
-       LEFT JOIN public.employees e ON l.loan_officer_id = e.id AND e.tenant_id = l.tenant_id
-       WHERE l.tenant_id = $1
-       ORDER BY l.application_date DESC`;
+       LEFT JOIN public.employees e ON e.id::TEXT = l.loan_officer_id
+       ORDER BY l.application_date DESC
+       LIMIT 1000`;
 
-  const loansResult = await pool.query(
+  const loansResult = await tenantPool.query(
     loansQuery,
-    startDate ? [tenantId, startDate] : [tenantId]
+    startDate ? [startDate] : []
   );
 
-  const loans = loansResult.rows.map(loan => {
-    const metadata = typeof loan.metadata === 'string' ? JSON.parse(loan.metadata) : (loan.metadata || {});
-    const ficoScore = metadata.fico_score || metadata.fico || 0;
-    const dtiRatio = metadata.dti_ratio || metadata.dti || 0;
-    const ltvRatio = metadata.ltv_ratio || metadata.ltv || metadata.loan_to_value || 0;
-    
-    // Qlik Complexity Calculations
-    const ficoComplexity = ficoScore < 640 ? 3 : ficoScore < 680 ? 2 : ficoScore < 720 ? 1 : 0;
-    const dtiComplexity = dtiRatio > 45 ? 3 : dtiRatio > 40 ? 2 : dtiRatio > 35 ? 1 : 0;
-    const ltvComplexity = ltvRatio > 90 ? 3 : ltvRatio > 80 ? 2 : ltvRatio > 70 ? 1 : 0;
-    const loanComplexityScore = ficoComplexity + dtiComplexity + ltvComplexity;
-    const riskFactor = loanComplexityScore * 0.4 + ficoComplexity * 0.3 + dtiComplexity * 0.2 + ltvComplexity * 0.1;
-    
-    return {
-      ...loan,
-      fico_score: ficoScore,
-      dti_ratio: dtiRatio,
-      ltv: ltvRatio,
-      respa_date: metadata.respa_date || metadata.respaDate,
-      fallout_reason: metadata.fallout_reason || metadata.falloutReason,
-      loan_officer_name: loan.loan_officer_name || metadata.loan_officer_name || null,
-      complexity_score: loanComplexityScore,
-      fico_complexity: ficoComplexity,
-      dti_complexity: dtiComplexity,
-      ltv_complexity: ltvComplexity,
-      risk_factor: riskFactor,
-    };
-  });
+  const loans = loansResult.rows;
 
   // If no loans, return demo insights
   if (loans.length === 0) {
@@ -993,132 +1186,64 @@ export async function getInsights(
     };
   }
 
-  // Calculate key metrics using Qlik formulas
-  // Qlik Status Flags
-  const fundedLoans = loans.filter(l => l.funded_flag === true);
-  const soldLoans = loans.filter(l => l.sold_flag === true);
-  const activeLoans = loans.filter(l => l.active_loan_flag === true);
-  const lockedLoans = loans.filter(l => l.locked_flag === true);
+  // Metrics already calculated from the metrics catalog above
+  // Now categorize loans for insights generation
   const withdrawnLoans = loans.filter(l => ['Withdrawn', 'Cancelled'].includes(l.status));
   const deniedLoans = loans.filter(l => ['Denied', 'Declined'].includes(l.status));
+  const lostRevenue = (withdrawnLoans.length + deniedLoans.length) * (totalVolume / Math.max(loans.length, 1)) * 0.01;
 
-  // Qlik: Exclude active loans from pull-through calculations
-  const nonActiveLoans = loans.filter(l => l.active_loan_flag === false);
+  // Business overview data already calculated from metrics catalog
+  const businessOverviewData = {
+    active: activeLoansCount,
+    closed: closedLoansCount,
+    locked: lockedLoansCount,
+    avgCycleTime: Math.round(avgCycleTime),
+    activeVolume: activeVolume,
+    totalVolume: totalVolume,
+    total: totalLoans
+  };
   
-  const totalVolume = loans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-  const fundedVolume = fundedLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-  const activeVolume = activeLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0);
-  
-  // Qlik Revenue Calculation: Total Revenue = Origination + Secondary
-  const revenue = loans.reduce((sum, l) => sum + (parseFloat(l.total_revenue || 0)), 0);
-  const originationRevenue = loans.reduce((sum, l) => sum + (parseFloat(l.origination_revenue || 0)), 0);
-  const secondaryRevenue = loans.reduce((sum, l) => sum + (parseFloat(l.secondary_revenue || 0)), 0);
-  
-  // Fallback: If revenue not in metadata, use 1% of funded volume
-  const calculatedRevenue = revenue > 0 ? revenue : fundedVolume * 0.01;
-  const lostRevenue = (withdrawnLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0) + 
-                      deniedLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0)) * 0.01;
-
-  // Qlik Pull-through Rate: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No'
-  // This matches: Count({<[Active Loan Flag]={'No'}>}[Investor Purchase Date]) / Count({<[Active Loan Flag]={'No'}>}[Application Date])
-  const investorPurchaseCount = nonActiveLoans.filter(l => l.investor_purchase_date).length;
-  const applicationCount = nonActiveLoans.filter(l => l.application_date).length;
-  const pullThroughRate = applicationCount > 0 ? (investorPurchaseCount / applicationCount) * 100 : 0;
-
-  // Qlik App-Fund Pull-through Rate: Count(Funding Date) / Count(Application Date) where Active Loan Flag = 'No'
-  const fundingCount = nonActiveLoans.filter(l => l.funding_date).length;
-  const appFundPullThroughRate = applicationCount > 0 ? (fundingCount / applicationCount) * 100 : 0;
-
-  // Qlik Average Turn Times
-  const loansWithAppFund = loans.filter(l => l.app_fund_turn_time !== null);
-  const avgAppFundTurnTime = loansWithAppFund.length > 0
-    ? loansWithAppFund.reduce((sum, l) => sum + (l.app_fund_turn_time || 0), 0) / loansWithAppFund.length
-    : 0;
-
-  const loansWithAppClose = loans.filter(l => l.app_close_turn_time !== null);
-  const avgAppCloseTurnTime = loansWithAppClose.length > 0
-    ? loansWithAppClose.reduce((sum, l) => sum + (l.app_close_turn_time || 0), 0) / loansWithAppClose.length
-    : 0;
-
-  // Use App-Close as primary cycle time (Qlik standard)
-  const avgCycleTime = avgAppCloseTurnTime > 0 ? avgAppCloseTurnTime : avgAppFundTurnTime;
-  
-  // Qlik Active Aging Days: Average for active loans
-  const activeLoansWithAging = activeLoans.filter(l => l.active_aging_days !== null);
-  const avgActiveAgingDays = activeLoansWithAging.length > 0
-    ? activeLoansWithAging.reduce((sum, l) => sum + (l.active_aging_days || 0), 0) / activeLoansWithAging.length
-    : 0;
-
   // Fetch additional data sources for comprehensive insights
-  let businessOverviewData: any = null;
   let leaderboardData: any = null;
   let industryNewsData: any = null;
   let funnelData: any = null;
   
-  // Query Business Overview data directly from database
-  try {
-    const statsQuery = startDate
-      ? `SELECT 
-          COUNT(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN 1 END) as active,
-          COUNT(CASE WHEN status IN ('funded', 'closed', 'originated') THEN 1 END) as closed,
-          COUNT(CASE WHEN status = 'locked' THEN 1 END) as locked,
-          AVG(CASE WHEN status IN ('funded', 'closed', 'originated') THEN cycle_time_days ELSE NULL END) as avg_cycle_time,
-          SUM(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN loan_amount ELSE 0 END) as active_volume,
-          SUM(CASE WHEN status IN ('funded', 'closed', 'originated') THEN loan_amount ELSE 0 END) as total_volume,
-          COUNT(*) as total
-         FROM public.loans 
-         WHERE tenant_id = $1 AND application_date >= $2`
-      : `SELECT 
-          COUNT(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN 1 END) as active,
-          COUNT(CASE WHEN status IN ('funded', 'closed', 'originated') THEN 1 END) as closed,
-          COUNT(CASE WHEN status = 'locked' THEN 1 END) as locked,
-          AVG(CASE WHEN status IN ('funded', 'closed', 'originated') THEN cycle_time_days ELSE NULL END) as avg_cycle_time,
-          SUM(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN loan_amount ELSE 0 END) as active_volume,
-          SUM(CASE WHEN status IN ('funded', 'closed', 'originated') THEN loan_amount ELSE 0 END) as total_volume,
-          COUNT(*) as total
-         FROM public.loans 
-         WHERE tenant_id = $1`;
-    
-    const statsResult = await pool.query(statsQuery, startDate ? [tenantId, startDate] : [tenantId]);
-    if (statsResult.rows.length > 0) {
-      const row = statsResult.rows[0];
-      businessOverviewData = {
-        active: parseInt(row.active) || 0,
-        closed: parseInt(row.closed) || 0,
-        locked: parseInt(row.locked) || 0,
-        avgCycleTime: parseFloat(row.avg_cycle_time) || 0,
-        activeVolume: parseFloat(row.active_volume) || 0,
-        totalVolume: parseFloat(row.total_volume) || 0,
-        total: parseInt(row.total) || 0
-      };
-    }
-  } catch (error) {
-    console.error('Error fetching business overview:', error);
-  }
-  
   // Query Leaderboard data directly from database
   try {
-    const leaderboardResult = await pool.query(
-      `SELECT 
-        e.id,
-        e.first_name,
-        e.last_name,
-        e.role,
-        e.branch,
-        COUNT(l.id) as loans_closed,
-        SUM(l.loan_amount) as total_volume,
-        AVG(l.cycle_time_days) as avg_cycle_time,
-        COUNT(CASE WHEN l.status IN ('funded', 'closed', 'originated') THEN 1 END)::float / NULLIF(COUNT(l.id), 0) * 100 as pull_through_rate
-       FROM public.employees e
-       LEFT JOIN public.loans l ON e.id = l.loan_officer_id
-         ${startDate ? 'AND l.application_date >= $2' : ''}
-         AND l.tenant_id = $1
-       WHERE e.tenant_id = $1
-       GROUP BY e.id, e.first_name, e.last_name, e.role, e.branch
-       ORDER BY loans_closed DESC, total_volume DESC
-       LIMIT 10`,
-      startDate ? [tenantId, startDate] : [tenantId]
-    );
+    // Check if employees table exists
+    const tableCheck = await tenantPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'employees'
+      )
+    `);
+    
+    let leaderboardResult;
+    if (tableCheck.rows[0]?.exists) {
+      leaderboardResult = await tenantPool.query(
+        `SELECT 
+          e.id,
+          e.first_name,
+          e.last_name,
+          e.role,
+          e.branch,
+          COUNT(l.id) as loans_closed,
+          SUM(l.loan_amount) as total_volume,
+          AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
+            THEN DATE(l.closing_date) - DATE(l.application_date) ELSE NULL END) as avg_cycle_time,
+          COUNT(CASE WHEN l.current_loan_status IN ('funded', 'closed', 'originated') THEN 1 END)::float / NULLIF(COUNT(l.id), 0) * 100 as pull_through_rate
+         FROM public.employees e
+         LEFT JOIN public.loans l ON e.id::TEXT = l.loan_officer_id
+           ${startDate ? 'AND l.application_date >= $1' : ''}
+         GROUP BY e.id, e.first_name, e.last_name, e.role, e.branch
+         ORDER BY loans_closed DESC, total_volume DESC
+         LIMIT 10`,
+        startDate ? [startDate] : []
+      );
+    } else {
+      leaderboardResult = { rows: [] };
+    }
     
     leaderboardData = {
       leaderboard: leaderboardResult.rows.map((row, index) => ({
@@ -1159,33 +1284,32 @@ export async function getInsights(
   try {
     const funnelQuery = startDate
       ? `SELECT 
-          COUNT(CASE WHEN status IN ('inquiry', 'started') THEN 1 END) as loans_started,
-          SUM(CASE WHEN status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
-          COUNT(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN 1 END) as still_active,
-          SUM(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN loan_amount ELSE 0 END) as still_active_volume,
-          COUNT(CASE WHEN status IN ('funded', 'closed', 'originated') THEN 1 END) as originated,
-          SUM(CASE WHEN status IN ('funded', 'closed', 'originated') THEN loan_amount ELSE 0 END) as originated_volume,
-          COUNT(CASE WHEN status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
-          SUM(CASE WHEN status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
-          COUNT(CASE WHEN status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
-          SUM(CASE WHEN status IN ('denied', 'declined') THEN loan_amount ELSE 0 END) as fallout_denied_volume
+          COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN 1 END) as loans_started,
+          SUM(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
+          COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN 1 END) as still_active,
+          SUM(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN loan_amount ELSE 0 END) as still_active_volume,
+          COUNT(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN 1 END) as originated,
+          SUM(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as originated_volume,
+          COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
+          SUM(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
+          COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
+          SUM(CASE WHEN current_loan_status IN ('denied', 'declined') THEN loan_amount ELSE 0 END) as fallout_denied_volume
          FROM public.loans 
-         WHERE tenant_id = $1 AND application_date >= $2`
+         WHERE application_date >= $1`
       : `SELECT 
-          COUNT(CASE WHEN status IN ('inquiry', 'started') THEN 1 END) as loans_started,
-          SUM(CASE WHEN status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
-          COUNT(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN 1 END) as still_active,
-          SUM(CASE WHEN status IN ('inquiry', 'started', 'locked', 'submitted', 'approved') THEN loan_amount ELSE 0 END) as still_active_volume,
-          COUNT(CASE WHEN status IN ('funded', 'closed', 'originated') THEN 1 END) as originated,
-          SUM(CASE WHEN status IN ('funded', 'closed', 'originated') THEN loan_amount ELSE 0 END) as originated_volume,
-          COUNT(CASE WHEN status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
-          SUM(CASE WHEN status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
-          COUNT(CASE WHEN status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
-          SUM(CASE WHEN status IN ('denied', 'declined') THEN loan_amount ELSE 0 END) as fallout_denied_volume
-         FROM public.loans 
-         WHERE tenant_id = $1`;
+          COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN 1 END) as loans_started,
+          SUM(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
+          COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN 1 END) as still_active,
+          SUM(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN loan_amount ELSE 0 END) as still_active_volume,
+          COUNT(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN 1 END) as originated,
+          SUM(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as originated_volume,
+          COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
+          SUM(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
+          COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
+          SUM(CASE WHEN current_loan_status IN ('denied', 'declined') THEN loan_amount ELSE 0 END) as fallout_denied_volume
+         FROM public.loans`;
     
-    const funnelResult = await pool.query(funnelQuery, startDate ? [tenantId, startDate] : [tenantId]);
+    const funnelResult = await tenantPool.query(funnelQuery, startDate ? [startDate] : []);
     if (funnelResult.rows.length > 0) {
       const row = funnelResult.rows[0];
       funnelData = {
@@ -1222,7 +1346,7 @@ export async function getInsights(
   const businessOverviewInsights: Insight[] = [];
   
   if (businessOverviewData) {
-    // 1. Revenue Performance (Qlik: Total Revenue = Origination + Secondary)
+    // 1. Revenue Performance 
     if (calculatedRevenue > 0 || businessOverviewData.totalVolume) {
       const revenueToUse = calculatedRevenue > 0 ? calculatedRevenue : businessOverviewData.totalVolume * 0.01;
       const revenueFormatted = revenueToUse >= 1000000 
@@ -1231,15 +1355,11 @@ export async function getInsights(
       const seed = new Date().toISOString().split('T')[0].split('-').reduce((sum, n) => sum + parseInt(n), 0);
       const growthRate = dateFilter === 'ytd' ? ((seed % 20) + 10) : ((seed % 15) + 5);
       
-      const revenueBreakdown = originationRevenue > 0 || secondaryRevenue > 0
-        ? ` (${originationRevenue > 0 ? `Origination: $${(originationRevenue / 1000).toFixed(0)}K` : ''}${originationRevenue > 0 && secondaryRevenue > 0 ? ', ' : ''}${secondaryRevenue > 0 ? `Secondary: $${(secondaryRevenue / 1000).toFixed(0)}K` : ''})`
-        : '';
-      
       businessOverviewInsights.push({
         type: 'success',
-        message: `${dateFilter === 'today' ? 'Today' : dateFilter === 'mtd' ? 'MTD' : 'YTD'} total revenue reached ${revenueFormatted}${revenueBreakdown}${dateFilter === 'ytd' ? `, up ${growthRate}% versus last year` : ''} — strong momentum continues.`,
+        message: `${dateFilter === 'today' ? 'Today' : dateFilter === 'mtd' ? 'MTD' : 'YTD'} total revenue reached ${revenueFormatted}${dateFilter === 'ytd' ? `, up ${growthRate}% versus last year` : ''} — strong momentum continues.`,
         priority: 'high',
-        reasoning: `Revenue trajectory shows consistent growth. ${originationRevenue > 0 && secondaryRevenue > 0 ? 'Both origination and secondary revenue streams are contributing.' : ''} At current velocity, you're positioned for a strong quarter.`,
+        reasoning: `Revenue trajectory shows consistent growth. At current velocity, you're positioned for a strong quarter.`,
         source: 'business_overview',
         forPodcast: businessOverviewInsights.length < 2
       });
@@ -1262,34 +1382,32 @@ export async function getInsights(
       });
     }
     
-    // 3. Cycle Time Performance (Qlik: App-Close Turn Time)
+    // 3. Cycle Time Performance (App-Close)
     const cycleTimeToUse = avgCycleTime > 0 ? avgCycleTime : businessOverviewData.avgCycleTime;
     if (cycleTimeToUse) {
       const cycleStatus = cycleTimeToUse <= 30 ? 'excellent' : cycleTimeToUse <= 35 ? 'good' : 'needs improvement';
       const cycleType = cycleTimeToUse <= 30 ? 'success' : cycleTimeToUse <= 35 ? 'info' : 'warning';
       
-      const appFundTime = avgAppFundTurnTime > 0 ? ` (App-Fund: ${Math.round(avgAppFundTurnTime)} days)` : '';
-      
       businessOverviewInsights.push({
         type: cycleType,
-        message: `Average cycle time: ${Math.round(cycleTimeToUse)} days${appFundTime} — ${cycleStatus} performance${cycleTimeToUse <= 30 ? ', industry-leading' : ''}.`,
+        message: `Average cycle time: ${Math.round(cycleTimeToUse)} days — ${cycleStatus} performance${cycleTimeToUse <= 30 ? ', industry-leading' : ''}.`,
         priority: 'medium',
-        reasoning: `Each day saved in cycle time recovers approximately $180 in carry cost per loan. At your volume, improvements compound significantly. ${avgActiveAgingDays > 0 ? `Active loans average ${Math.round(avgActiveAgingDays)} days in pipeline.` : ''}`,
+        reasoning: `Each day saved in cycle time recovers approximately $180 in carry cost per loan. At your volume, improvements compound significantly.`,
         source: 'business_overview',
         forPodcast: false
       });
     }
     
-    // 4. Pull-through Rate (Qlik formula: excludes active loans)
+    // 4. Pull-through Rate (excludes active loans)
     if (pullThroughRate > 0) {
       const pullThroughStatus = pullThroughRate >= 75 ? 'excellent' : pullThroughRate >= 65 ? 'good' : pullThroughRate >= 50 ? 'moderate' : 'needs attention';
       const pullThroughType = pullThroughRate >= 75 ? 'success' : pullThroughRate >= 65 ? 'info' : 'warning';
       
       businessOverviewInsights.push({
         type: pullThroughType,
-        message: `Pull-through rate: ${pullThroughRate.toFixed(1)}% (${investorPurchaseCount}/${applicationCount} loans) — ${pullThroughStatus} conversion${pullThroughRate >= 75 ? ', above industry average' : ''}.`,
+        message: `Pull-through rate: ${pullThroughRate.toFixed(1)}% — ${pullThroughStatus} conversion${pullThroughRate >= 75 ? ', above industry average' : ''}.`,
         priority: 'high',
-        reasoning: `Qlik-calculated pull-through excludes active loans for accurate historical analysis. ${appFundPullThroughRate > 0 ? `App-to-Fund rate: ${appFundPullThroughRate.toFixed(1)}%.` : ''} Focus on maintaining quality while scaling volume.`,
+        reasoning: `Pull-through calculation excludes active loans for accurate historical analysis. Focus on maintaining quality while scaling volume.`,
         source: 'business_overview',
         forPodcast: businessOverviewInsights.length < 2
       });
@@ -1425,8 +1543,7 @@ export async function getInsights(
   const funnelInsights: Insight[] = [];
   
   if (funnelData) {
-    // 1. Conversion Rate Analysis (Qlik Pull-through Rate)
-    // Use Qlik formula: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No'
+    // 1. Conversion Rate Analysis (Pull-through from metrics catalog)
     const funnelConversionRate = pullThroughRate > 0 ? pullThroughRate : 
       (funnelData.originated?.units && funnelData.loansStarted?.units 
         ? (funnelData.originated.units / funnelData.loansStarted.units) * 100 
@@ -1439,9 +1556,9 @@ export async function getInsights(
       
       funnelInsights.push({
         type: funnelConversionRate >= industryAvg ? 'success' : 'warning',
-        message: `Funnel pull-through: ${funnelConversionRate.toFixed(1)}% (Qlik-calculated, excludes active loans) — ${status} industry average of ${industryAvg}%, ${status === 'above' ? 'strong conversion efficiency' : 'needs attention'}.`,
+        message: `Funnel pull-through: ${funnelConversionRate.toFixed(1)}% (excludes active loans) — ${status} industry average of ${industryAvg}%, ${status === 'above' ? 'strong conversion efficiency' : 'needs attention'}.`,
         priority: 'high',
-        reasoning: `Qlik formula excludes active loans for accurate historical analysis. Your ${diff}% ${status === 'above' ? 'advantage' : 'gap'} translates to approximately $${Math.round(Math.abs(funnelConversionRate - industryAvg) * (funnelData.loansStarted.volume || 0) * 0.01 / 100).toLocaleString()} in ${status === 'above' ? 'recovered' : 'lost'} revenue.`,
+        reasoning: `Pull-through calculation excludes active loans for accurate historical analysis. Your ${diff}% ${status === 'above' ? 'advantage' : 'gap'} translates to approximately $${Math.round(Math.abs(funnelConversionRate - industryAvg) * (funnelData.loansStarted.volume || 0) * 0.01 / 100).toLocaleString()} in ${status === 'above' ? 'recovered' : 'lost'} revenue.`,
         source: 'loan_funnel',
         forPodcast: funnelInsights.length < 2
       });

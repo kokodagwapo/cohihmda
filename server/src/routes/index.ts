@@ -1,12 +1,8 @@
 import { Express } from 'express';
 import authRoutes from './auth.js';
-import callsRoutes from './calls.js';
-import newsRoutes from './news.js';
-import voiceRoutes from './voice.js';
-import agileplanRoutes from './agileplan.js';
-import podcastRoutes from './podcast.js';
 import subscriptionsRoutes from './subscriptions.js';
 import ragRoutes from './rag.js';
+import metricsRoutes from './metrics.js';
 import costsRoutes from './costs.js';
 import deploymentsRoutes from './deployments.js';
 import dashboardRoutes from './dashboard.js';
@@ -18,6 +14,11 @@ import fieldMappingsRoutes from './fieldMappings.js';
 import demoRoutes from './demo.js';
 import userPreferencesRoutes from './userPreferences.js';
 import awsHostingRoutes from './aws-hosting.js';
+import encompassRoutes from './encompass.js';
+import tenantRoutes from './tenants.js';
+import tenantConfigRoutes from './tenantConfig.js';
+import dataChatRoutes from './dataChat.js';
+import ragKnowledgeBaseRouter from './ragKnowledgeBase.js';
 import { pool, resetPool } from '../config/database.js';
 import { setupMockLosApi } from '../services/mockLosApi.js';
 import { getVersionInfo } from '../services/versionService.js';
@@ -32,15 +33,12 @@ export function setupRoutes(app: Express) {
   }
   
   app.use('/api/auth', authRoutes);
-  app.use('/api/calls', callsRoutes);
-  app.use('/api/news', newsRoutes);
-  app.use('/api/voice', voiceRoutes);
-  app.use('/api/agileplan', agileplanRoutes);
-  app.use('/api/podcast', podcastRoutes);
   
   // SaaS & Enterprise Features
   app.use('/api/subscriptions', subscriptionsRoutes);
   app.use('/api/rag', ragRoutes);
+  app.use('/api/rag/knowledge-base', ragKnowledgeBaseRouter);
+  app.use('/api/metrics', metricsRoutes);
   app.use('/api/costs', costsRoutes);
   app.use('/api/deployments', deploymentsRoutes);
   app.use('/api/dashboard', dashboardRoutes);
@@ -52,6 +50,10 @@ export function setupRoutes(app: Express) {
   app.use('/api/demo', demoRoutes);
   app.use('/api/user', userPreferencesRoutes);
   app.use('/api/aws-hosting', awsHostingRoutes);
+  app.use('/api/encompass', encompassRoutes);
+  app.use('/api/tenants', tenantRoutes);
+  app.use('/api/tenant-config', tenantConfigRoutes);
+  app.use('/api/data-chat', dataChatRoutes);
   
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

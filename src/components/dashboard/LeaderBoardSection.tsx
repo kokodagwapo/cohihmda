@@ -1,78 +1,95 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLeaderboardData, LeaderboardLeader } from '@/hooks/useLeaderboardData';
+import { useLeaderboardData, LeaderboardLeader, LeaderboardTimeframe } from '@/hooks/useLeaderboardData';
+import { cn } from '@/lib/utils';
 
 interface LeaderBoardSectionProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
+  selectedTenantId?: string | null;
 }
 
-export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
+export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoardSectionProps) => {
   const [timeframe, setTimeframe] = useState<'WTD' | 'MTD' | 'QTD'>('MTD');
   const [scope, setScope] = useState<'All' | 'Branch' | 'Team'>('All');
   const [selectedLeader, setSelectedLeader] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(timeframe);
+  
+  // Map UI timeframe to API timeframe (lowercase)
+  const apiTimeframe = useMemo((): LeaderboardTimeframe => {
+    return timeframe.toLowerCase() as LeaderboardTimeframe;
+  }, [timeframe]);
+  
+  // Map scope filter for API
+  const scopeFilter = useMemo(() => {
+    return scope === 'All' ? 'all' : scope === 'Branch' ? 'branch' : 'team';
+  }, [scope]);
+  
+  const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(
+    apiTimeframe, 
+    selectedTenantId,
+    { scope: scopeFilter as 'all' | 'branch' | 'team' }
+  );
 
-  // Base leader data with different timeframes (fallback)
+  // Base leader data with sample values (fallback when API doesn't return data)
   const baseLeadersData: LeaderboardLeader[] = [{
     id: '1',
     name: 'Sarah Chen',
     role: 'Senior LO',
     branch: 'Downtown',
     avatarUrl: undefined,
-    points: 0,
+    points: 47,
     rank: 1,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 12,
+    loans: 28,
+    pullThru: 94,
+    cycleTime: 28,
+    revenue: '$8.2M',
+    badges: ['Top Performer', 'Pull-Through Pro'],
+    streakDays: 14
   }, {
     id: '2',
     name: 'Michael Rodriguez',
     role: 'Branch Manager',
     branch: 'Westside',
     avatarUrl: undefined,
-    points: 0,
+    points: 42,
     rank: 2,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 8,
+    loans: 24,
+    pullThru: 91,
+    cycleTime: 31,
+    revenue: '$7.1M',
+    badges: ['Volume Champion'],
+    streakDays: 7
   }, {
     id: '3',
     name: 'Emily Johnson',
     role: 'Senior LO',
     branch: 'North Branch',
     avatarUrl: undefined,
-    points: 0,
+    points: 38,
     rank: 3,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 5,
+    loans: 21,
+    pullThru: 88,
+    cycleTime: 33,
+    revenue: '$6.4M',
+    badges: ['Fast Closer'],
+    streakDays: 5
   }, {
     id: '4',
     name: 'David Kim',
     role: 'Loan Officer',
     branch: 'East Valley',
     avatarUrl: undefined,
-    points: 0,
+    points: 31,
     rank: 4,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
+    delta: -2,
+    loans: 18,
+    pullThru: 85,
+    cycleTime: 35,
+    revenue: '$5.2M',
     badges: [],
     streakDays: 0
   }, {
@@ -81,81 +98,34 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
     role: 'Senior LO',
     branch: 'Downtown',
     avatarUrl: undefined,
-    points: 0,
+    points: 28,
     rank: 5,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 3,
+    loans: 16,
+    pullThru: 82,
+    cycleTime: 36,
+    revenue: '$4.8M',
+    badges: ['Rising Star'],
+    streakDays: 3
   }];
 
-  // Calculate data based on timeframe
-  const getTimeframeMultiplier = (tf: 'WTD' | 'MTD' | 'QTD') => {
-    switch (tf) {
-      case 'WTD':
-        return 0.25;
-      // Week-to-date is ~25% of month
-      case 'MTD':
-        return 1.0;
-      // Month-to-date is baseline
-      case 'QTD':
-        return 3.0;
-      // Quarter-to-date is ~3x month
-      default:
-        return 1.0;
-    }
-  };
-
-  // Filter and calculate leader data based on timeframe and scope
-  const getFilteredLeadersData = (): LeaderboardLeader[] => {
+  // Get leader data - API already handles filtering by scope and timeframe
+  const getLeadersData = (): LeaderboardLeader[] => {
     // Use API data if available, otherwise fallback to baseLeadersData
-    const dataSource = leaderboardData.length > 0 ? leaderboardData : baseLeadersData;
-    const multiplier = getTimeframeMultiplier(timeframe);
-
-    // Apply timeframe multiplier to points and metrics
-    const timeframeData = dataSource.map(leader => ({
-      ...leader,
-      points: Math.round(leader.points * multiplier),
-      loans: Math.round(leader.loans * multiplier),
-      revenue: leader.revenue ? `$${(parseFloat(leader.revenue.replace(/[^0-9.]/g, '')) * multiplier).toFixed(1)}M` : leader.revenue,
-      // Adjust delta based on timeframe (shorter timeframes have more volatility)
-      delta: timeframe === 'WTD' ? leader.delta + Math.floor(Math.random() * 10) - 5 // More variation for weekly
-      : timeframe === 'QTD' ? Math.round(leader.delta * 0.8) // More stable for quarterly
-      : leader.delta
-    }));
-
-    // Apply scope filter
-    if (scope === 'Branch') {
-      // Show only top performers from different branches (simulate branch filtering)
-      return timeframeData.filter((_, idx) => idx < 4) // Top 4 for branch view
-      .map((leader, idx) => ({
-        ...leader,
-        rank: idx + 1
-      }));
-    } else if (scope === 'Team') {
-      // Show team-based ranking (simulate team grouping)
-      return timeframeData.slice(0, 5) // Top 5 for team view
-      .map((leader, idx) => ({
-        ...leader,
-        rank: idx + 1,
-        role: leader.role.includes('Manager') ? 'Team Lead' : leader.role
-      }));
+    if (leaderboardData.length > 0) {
+      // Data is already filtered/calculated server-side
+      return leaderboardData;
     }
-
-    // All scope - show all leaders
-    return timeframeData.map((leader, idx) => ({
-      ...leader,
-      rank: idx + 1
-    }));
+    
+    // Fallback to empty state display (baseLeadersData shows 0s)
+    return baseLeadersData;
   };
-  const leadersData = getFilteredLeadersData();
+  
+  const leadersData = getLeadersData();
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5); // Show all remaining entries (ranks 6-10)
 
-  return <section className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
+  return <section className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white/95 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200/70 dark:border-slate-700/70 shadow-md shadow-slate-200/40 dark:shadow-none p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
@@ -203,11 +173,11 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
                 <p className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">{leader.role}</p>
               </div>
 
-              {/* Points */}
+              {/* Units - actual loan count */}
               <div className="flex items-end justify-between">
                 <div>
-                  <p className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">{leader.points.toLocaleString()}</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">points</p>
+                  <p className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">{leader.loans.toLocaleString()}</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">units</p>
                 </div>
                 <div className={`flex items-center gap-0.5 text-[11px] sm:text-xs font-medium ${leader.delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
                   {leader.delta >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
@@ -219,17 +189,22 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
               <div className="flex items-center justify-between pt-2 sm:pt-3 border-t border-white/40 dark:border-slate-700/50">
                 <div className="text-center flex-1 min-w-0">
                   <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.loans}</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Loans</p>
-                </div>
-                <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
-                <div className="text-center flex-1 min-w-0">
-                  <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.pullThru}%</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Pull-thru</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Volume</p>
                 </div>
                 <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
                 <div className="text-center flex-1 min-w-0">
                   <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.cycleTime} days</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Cycle</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Turn-Time</p>
+                </div>
+                <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
+                <div className="text-center flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.pullThru}%</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Pull-through</p>
+                </div>
+                <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
+                <div className="text-center flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-emerald-600 dark:text-emerald-400 truncate">{leader.revenue}</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Revenue</p>
                 </div>
               </div>
 
@@ -258,7 +233,7 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
               <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">{leader.branch}</p>
             </div>
             <div className="text-right flex-shrink-0">
-              <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">{leader.points.toLocaleString()}</p>
+              <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">{leader.loans.toLocaleString()} units</p>
               <p className={`text-[9px] sm:text-[10px] font-medium flex items-center justify-end gap-0.5 ${leader.delta >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
                 {leader.delta >= 0 ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
                 {Math.abs(leader.delta)}%
@@ -276,25 +251,25 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
       <div className="pt-2 sm:pt-3 border-t border-slate-100 dark:border-slate-800">
         <div className="flex items-center justify-center gap-3 sm:gap-4 md:gap-6 lg:gap-8 flex-wrap">
           {[{
-          name: 'Pipeline',
+          name: 'Units',
           Icon: Rocket,
-          tooltip: 'Top 10% in loan volume'
+          tooltip: 'Top unit production'
         }, {
-          name: 'Fast Funder',
+          name: 'Volume',
+          Icon: Zap,
+          tooltip: 'Top volume performance'
+        }, {
+          name: 'Turn-Time',
           Icon: Timer,
-          tooltip: 'Average cycle time 20% faster'
+          tooltip: 'Fastest cycle times'
         }, {
-          name: 'Pull-Through',
+          name: 'Pull-through',
           Icon: Gauge,
-          tooltip: '90%+ pull-through rate'
+          tooltip: 'Highest pull-through rate'
         }, {
-          name: 'Rate Lock',
+          name: 'Revenue',
           Icon: ShieldCheck,
-          tooltip: 'Best-in-class rate lock timing'
-        }, {
-          name: 'On-Time',
-          Icon: CircleCheck,
-          tooltip: '100% on-time delivery'
+          tooltip: 'Top revenue contributor'
         }].map(badge => <div key={badge.name} className="relative group cursor-pointer touch-manipulation">
               <div className="flex flex-col items-center gap-1 sm:gap-1.5">
                 <div className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center group-hover:bg-slate-900 dark:group-hover:bg-slate-700 transition-colors duration-200">
@@ -352,15 +327,29 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
                         <p className="text-xs text-slate-500 dark:text-slate-400">{leader.role} · {leader.branch}</p>
                       </div>
                     </div>
-                    <button onClick={() => setSelectedLeader(null)} className="w-8 h-8 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 backdrop-blur-sm flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1">
-                      <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.5} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "px-2 py-1 rounded-full text-[10px] font-semibold text-white shadow-sm",
+                        leader.rank === 1
+                          ? "bg-amber-500"
+                          : leader.rank === 2
+                            ? "bg-slate-400"
+                            : leader.rank === 3
+                              ? "bg-orange-400"
+                              : "bg-slate-300"
+                      )}>
+                        Rank #{leader.rank}
+                      </span>
+                      <button onClick={() => setSelectedLeader(null)} className="w-8 h-8 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 backdrop-blur-sm flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1">
+                        <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.5} />
+                      </button>
+                    </div>
                   </div>
                   
-                  {/* Points & Delta */}
+                  {/* Units & Delta */}
                   <div className="flex items-center gap-2 mt-3">
-                    <span className="text-2xl font-light text-slate-900 dark:text-white tracking-tight">{leader.points.toLocaleString()}</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">pts</span>
+                    <span className="text-2xl font-light text-slate-900 dark:text-white tracking-tight">{leader.loans.toLocaleString()}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">units</span>
                     <span className={`ml-auto text-xs font-light px-2 py-0.5 rounded-full ${leader.delta >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'}`}>
                       {leader.delta >= 0 ? '↑' : '↓'} {Math.abs(leader.delta)}%
                     </span>
@@ -380,15 +369,15 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
                   <div className="grid grid-cols-4 gap-2">
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-slate-900 dark:text-white tracking-tight">{leader.loans}</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Loans</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Volume</p>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-slate-900 dark:text-white tracking-tight">{leader.pullThru}%</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Pull-thru</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Pull-through</p>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-slate-900 dark:text-white tracking-tight">{leader.cycleTime} days</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Cycle</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Turn-Time</p>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-emerald-600 dark:text-emerald-400 tracking-tight">{leader.revenue}</p>
@@ -419,4 +408,3 @@ export const LeaderBoardSection = ({ dateFilter }: LeaderBoardSectionProps) => {
       </AnimatePresence>
     </section>;
 };
-

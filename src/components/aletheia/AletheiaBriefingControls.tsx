@@ -636,7 +636,7 @@ Use executive terminology and be candid and direct. After the briefing, be ready
           >
             <div className="flex items-center gap-2 mb-2">
               <MessageSquare className="w-4 h-4 text-slate-500" />
-              <span className="text-sm font-semibold text-slate-900 dark:text-white">Chat with Ailethia</span>
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">Chat with Cohi</span>
             </div>
             <div className="flex gap-2">
               <Input

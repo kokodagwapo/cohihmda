@@ -309,67 +309,7 @@ export const FunnelVisualization: React.FC<FunnelVisualizationProps> = ({ data, 
     <div className="w-full flex flex-col xl:flex-row gap-6 xl:gap-10 py-4 px-2 sm:px-4 md:px-6">
       
       {/* Left Column - Loan Funnel Story (Classic Style - Default) */}
-      <div className="w-full xl:w-[300px] 2xl:w-[340px] flex-shrink-0 space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white tracking-tight">Loan Funnel Story</h2>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Fallout analysis & revenue impact</p>
-          </div>
-          <button
-            onClick={() => setShowClassicStyle(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50 rounded-md transition-colors"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            Summary
-          </button>
-        </div>
-
-        {/* Classic Style Content - Default View */}
-        <div className="space-y-6">
-          {/* Introduction Paragraph */}
-          <p className="text-slate-600 dark:text-slate-300 text-[15px] leading-relaxed font-light tracking-tight">
-            Fallout is not a cost of doing business, many times fallout is <span className="text-rose-600 dark:text-rose-400 font-medium">lost revenue opportunity</span>. The "Top of the Funnel" is first customer touch or file started. The funnel shows lost opportunities:
-          </p>
-
-          {/* Divider */}
-          <div className="border-t border-slate-200 dark:border-slate-700"></div>
-
-          {/* No RESPA Section */}
-          {calculateMetrics && (
-            <p className="text-slate-600 dark:text-slate-300 text-[15px] leading-relaxed font-light tracking-tight pl-6 border-l-2 border-slate-300 dark:border-slate-600">
-              Loans started with no RESPA app were <strong className="text-slate-900 dark:text-white font-medium">{formatCurrency(calculateMetrics.simNoRespa)}, {formatValue(Math.round(calculateMetrics.noRespaUnits))} Units</strong>. This is potentially <strong className="text-rose-600 dark:text-rose-400 font-medium">{formatCurrency(calculateMetrics.lostRevenueFromNoRespa)}</strong> of lost revenue. The number of loans started with no RESPA app needs to be managed to ensure loan producers focus on conversion to closed loans.
-            </p>
-          )}
-
-          {/* Customer Said No Section */}
-          {calculateMetrics && (
-            <p className="text-slate-600 dark:text-slate-300 text-[15px] leading-relaxed font-light tracking-tight pl-6 border-l-2 border-amber-400 dark:border-amber-500">
-              Loans where the customer said "no" were <strong className="text-slate-900 dark:text-white font-medium">{formatCurrency(calculateMetrics.simWithdrawn)}, {formatValue(Math.round(calculateMetrics.withdrawnUnits))} Units</strong>. This is potentially <strong className="text-rose-600 dark:text-rose-400 font-medium">{formatCurrency(calculateMetrics.lostRevenueFromWithdrawals)}</strong> of lost revenue. Consider the customer "No" rate by branch and originator.
-            </p>
-          )}
-
-          {/* Denied Section */}
-          {calculateMetrics && (
-            <p className="text-slate-600 dark:text-slate-300 text-[15px] leading-relaxed font-light tracking-tight pl-6 border-l-2 border-rose-400 dark:border-rose-500">
-              Loans denied were <strong className="text-slate-900 dark:text-white font-medium">{formatCurrency(calculateMetrics.simDenied)}, {formatValue(Math.round(calculateMetrics.deniedUnits))} Units</strong>. This is potentially <strong className="text-rose-600 dark:text-rose-400 font-medium">{formatCurrency(calculateMetrics.lostRevenueFromDenials)}</strong> of lost revenue. Consider the loan type, credit box and whether borrowers were referred to credit rehabilitation and other appropriate resources.
-            </p>
-          )}
-
-          {/* Divider */}
-          <div className="border-t border-slate-200 dark:border-slate-700"></div>
-
-          {/* Summary Section */}
-          {calculateMetrics && (
-            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl px-6 py-6 border border-slate-100 dark:border-slate-700">
-              <p className="text-center text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-4 font-medium">Summary</p>
-              <p className="text-slate-600 dark:text-slate-300 text-[15px] leading-relaxed text-center font-light tracking-tight">
-                In summary, potential lost revenue was <strong className="text-rose-600 dark:text-rose-400 text-lg font-medium">{formatCurrency(calculateMetrics.totalLostRevenue)}</strong> on <strong className="text-slate-900 dark:text-white font-medium">{formatCurrency(calculateMetrics.totalFalloutVolume)}, {formatValue(Math.round(calculateMetrics.totalFalloutUnits))} Units</strong>. Also consider how much time and cost was spent on loans falling out.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+      
 
       {/* Right Column - Funnel Visualization */}
       <div className="w-full xl:flex-1 flex flex-col items-center pb-0 -mb-4 sm:-mb-6 md:-mb-8">
