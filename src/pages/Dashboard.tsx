@@ -1008,6 +1008,7 @@ const Dashboard = () => {
         onVisibilityChange={handleVisibilityChange}
         onReportClick={handleReportClick}
         onSectionClick={scrollToSection}
+        visitorFirstName={displayName}
         headerContent={
           <div className="flex items-center gap-4 flex-wrap">
             {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}

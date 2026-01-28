@@ -22,6 +22,22 @@ export default {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        // Custom tier colors for TopTiering/Scorecard pages
+        "tier-top": {
+          DEFAULT: "#00008F",
+          light: "rgba(0, 0, 143, 0.1)",
+          dark: "rgba(0, 0, 143, 0.3)",
+        },
+        "tier-second": {
+          DEFAULT: "#52B852",
+          light: "rgba(82, 184, 82, 0.1)",
+          dark: "rgba(82, 184, 82, 0.3)",
+        },
+        "tier-bottom": {
+          DEFAULT: "#B2DCB2",
+          light: "rgba(178, 220, 178, 0.15)",
+          dark: "rgba(178, 220, 178, 0.25)",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",

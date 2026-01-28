@@ -86,38 +86,40 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
   const avgVolumeOutput = kpis?.avgVolumeOutput || 0;
   const avgLoanComplexityScore = kpis?.avgLoanComplexityScore || 100;
   const targetUnitsPerMonth = kpis?.targetUnitsPerMonth || 25;
+  const avgUnitsOutput = kpis?.avgUnitsOutput || 0;
+  const avgDays = kpis?.avgDays || 0;
 
   // Get tier color - matching operation scorecard
   const getTierColor = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return 'bg-teal-600/10';
+        return 'bg-tier-top-light';
       case 'second':
-        return 'bg-emerald-500/10';
+        return 'bg-tier-second-light';
       case 'bottom':
-        return 'bg-lime-500/10';
+        return 'bg-tier-bottom-light';
     }
   };
 
   const getTierHoverColor = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return 'hover:bg-teal-600/20';
+        return 'hover:bg-tier-top/20';
       case 'second':
-        return 'hover:bg-emerald-500/20';
+        return 'hover:bg-tier-second/20';
       case 'bottom':
-        return 'hover:bg-lime-500/20';
+        return 'hover:bg-tier-bottom/30';
     }
   };
 
   const getTierBadgeColor = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return 'bg-gradient-to-br from-teal-500 via-teal-600 to-teal-700 text-white';
+        return 'bg-tier-top text-white';
       case 'second':
-        return 'bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 text-white';
+        return 'bg-tier-second text-white';
       case 'bottom':
-        return 'bg-gradient-to-br from-lime-400 via-lime-500 to-lime-600 text-white';
+        return 'bg-tier-bottom text-slate-800';
     }
   };
 
@@ -303,28 +305,28 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                   // Define tier-specific styles
                   const tierStyles = {
                     top: {
-                      bg: isDarkMode ? 'bg-gradient-to-br from-teal-500/20 via-teal-500/10 to-transparent' : 'bg-gradient-to-br from-teal-100 via-teal-50 to-teal-50/80',
-                      border: isDarkMode ? 'border-teal-500/40' : 'border-teal-300',
-                      dot: 'bg-teal-500',
-                      text: isDarkMode ? 'text-teal-400' : 'text-teal-600',
-                      iconBg: isDarkMode ? 'bg-teal-500/20' : 'bg-teal-100',
-                      badge: 'bg-teal-500'
+                      bg: isDarkMode ? 'bg-tier-top-dark' : 'bg-tier-top-light',
+                      border: isDarkMode ? 'border-tier-top/40' : 'border-tier-top/30',
+                      dot: 'bg-tier-top',
+                      text: isDarkMode ? 'text-white' : 'text-tier-top',
+                      iconBg: isDarkMode ? 'bg-tier-top/20' : 'bg-tier-top-light',
+                      badge: 'bg-tier-top'
                     },
                     second: {
-                      bg: isDarkMode ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent' : 'bg-gradient-to-br from-emerald-50 via-emerald-25 to-white',
-                      border: isDarkMode ? 'border-emerald-500/30' : 'border-emerald-200',
-                      dot: 'bg-emerald-500',
-                      text: isDarkMode ? 'text-emerald-400' : 'text-emerald-600',
-                      iconBg: isDarkMode ? 'bg-emerald-500/20' : 'bg-emerald-100',
-                      badge: 'bg-emerald-500'
+                      bg: isDarkMode ? 'bg-tier-second-dark' : 'bg-tier-second-light',
+                      border: isDarkMode ? 'border-tier-second/40' : 'border-tier-second/30',
+                      dot: 'bg-tier-second',
+                      text: isDarkMode ? 'text-white' : 'text-tier-second',
+                      iconBg: isDarkMode ? 'bg-tier-second/20' : 'bg-tier-second-light',
+                      badge: 'bg-tier-second'
                     },
                     bottom: {
-                      bg: isDarkMode ? 'bg-gradient-to-br from-lime-500/10 via-lime-500/5 to-transparent' : 'bg-gradient-to-br from-lime-50 via-lime-25 to-white',
-                      border: isDarkMode ? 'border-lime-500/30' : 'border-lime-200',
-                      dot: 'bg-lime-500',
-                      text: isDarkMode ? 'text-lime-400' : 'text-lime-600',
-                      iconBg: isDarkMode ? 'bg-lime-500/20' : 'bg-lime-100',
-                      badge: 'bg-lime-500'
+                      bg: isDarkMode ? 'bg-tier-bottom-dark' : 'bg-tier-bottom-light',
+                      border: isDarkMode ? 'border-tier-bottom/60' : 'border-tier-bottom',
+                      dot: 'bg-tier-bottom',
+                      text: isDarkMode ? 'text-tier-bottom' : 'text-slate-600',
+                      iconBg: isDarkMode ? 'bg-tier-bottom/30' : 'bg-tier-bottom-light',
+                      badge: 'bg-tier-bottom text-slate-800'
                     }
                   }[tierData.tier];
                   
@@ -399,9 +401,9 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                         <div className={`h-1.5 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
                           <div 
                             className={`h-full rounded-full shadow-lg transition-all duration-1000 ease-out ${
-                              tierData.tier === 'top' ? 'bg-gradient-to-r from-teal-600 to-teal-400 shadow-teal-500/30' :
-                              tierData.tier === 'second' ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 shadow-emerald-500/30' :
-                              'bg-gradient-to-r from-lime-600 to-lime-400 shadow-lime-500/30'
+                              tierData.tier === 'top' ? 'bg-tier-top shadow-tier-top/30' :
+                              tierData.tier === 'second' ? 'bg-tier-second shadow-tier-second/30' :
+                              'bg-tier-bottom shadow-tier-bottom/30'
                             }`}
                             style={{ width: `${tierData.percentOfTotal}%` }}
                           />
@@ -438,7 +440,7 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                 </CardContent>
               </Card>
 
-              {/* Total Monthly Output Card */}
+              {/* Average Monthly Output Card */}
               <Card className={`rounded-xl backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-lg overflow-hidden ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-br from-emerald-900/20 via-slate-800/70 to-slate-800/70 hover:border-emerald-600/50' : 'border-emerald-200/40 bg-gradient-to-br from-emerald-50 via-white to-white hover:border-emerald-400/50 hover:shadow-emerald-200/50'}`}>
                 <CardContent className="pt-4 pb-4 relative">
                   <div className="flex items-start justify-between mb-2">
@@ -447,10 +449,10 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                     </div>
                   </div>
                   <p className={`text-[10px] font-semibold mb-1 uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Total Monthly Output
+                    Avg Monthly Output
                   </p>
                   <p className={`text-3xl font-bold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    {formatNumber(totalUnits)}
+                    {formatNumber(avgUnitsOutput)}
                   </p>
                   <div className={`absolute top-0 right-0 w-20 h-20 rounded-full blur-2xl opacity-20 ${isDarkMode ? 'bg-emerald-500' : 'bg-emerald-300'}`}></div>
                 </CardContent>
@@ -493,23 +495,25 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
               </Card>
 
               {/* Average Days Card */}
-              <Card className={`rounded-xl backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-lg overflow-hidden ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-br from-slate-800/70 via-slate-800/70 to-slate-800/70 hover:border-slate-600/50' : 'border-slate-200/40 bg-gradient-to-br from-slate-50 via-white to-white hover:border-slate-300/50 hover:shadow-slate-200/50'}`}>
+              <Card className={`rounded-xl backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-lg overflow-hidden ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-br from-cyan-900/20 via-slate-800/70 to-slate-800/70 hover:border-cyan-600/50' : 'border-cyan-200/40 bg-gradient-to-br from-cyan-50 via-white to-white hover:border-cyan-400/50 hover:shadow-cyan-200/50'}`}>
                 <CardContent className="pt-4 pb-4 relative">
                   <div className="flex items-start justify-between mb-2">
-                    <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
-                      <Clock className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`} />
+                    <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-cyan-500/20' : 'bg-cyan-100'}`}>
+                      <Clock className={`w-4 h-4 ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`} />
                     </div>
                   </div>
                   <p className={`text-[10px] font-semibold mb-1 uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                     Average Days
                   </p>
-                  <p className={`text-3xl font-bold tracking-tight ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                    -
+                  <p className={`text-3xl font-bold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                    {avgDays > 0 ? avgDays : '-'}
                   </p>
-                  <p className={`text-[9px] mt-1 ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-                    Data not available
-                  </p>
-                  <div className={`absolute top-0 right-0 w-20 h-20 rounded-full blur-2xl opacity-20 ${isDarkMode ? 'bg-slate-600' : 'bg-slate-300'}`}></div>
+                  {avgDays === 0 && (
+                    <p className={`text-[9px] mt-1 ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Data not available
+                    </p>
+                  )}
+                  <div className={`absolute top-0 right-0 w-20 h-20 rounded-full blur-2xl opacity-20 ${isDarkMode ? 'bg-cyan-500' : 'bg-cyan-300'}`}></div>
                 </CardContent>
               </Card>
             </div>
@@ -670,16 +674,29 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                           Totals
                         </td>
                         {months.map((month) => {
-                          const monthTotals = actors.reduce((acc, p) => {
-                            const data = p.months[month];
-                            return {
-                              units: acc.units + data.unitsOutput,
-                              vsTarget: acc.vsTarget + data.outputVsTarget,
-                              avgDays: 0,
-                              conversion: 0,
-                              complexity: 0,
-                            };
-                          }, { units: 0, vsTarget: 0, avgDays: 0, conversion: 0, complexity: 0 });
+                          const monthData = actors.map(p => p.months[month]).filter(d => d);
+                          const monthTotals = {
+                            units: monthData.reduce((sum, d) => sum + (d.unitsOutput || 0), 0),
+                            vsTarget: monthData.reduce((sum, d) => sum + (d.outputVsTarget || 0), 0),
+                            avgDays: (() => {
+                              const daysData = monthData.filter(d => d.avgDays > 0);
+                              return daysData.length > 0 
+                                ? daysData.reduce((sum, d) => sum + d.avgDays, 0) / daysData.length 
+                                : 0;
+                            })(),
+                            conversion: (() => {
+                              const convData = monthData.filter(d => d.conversionPercent > 0);
+                              return convData.length > 0 
+                                ? convData.reduce((sum, d) => sum + d.conversionPercent, 0) / convData.length 
+                                : 0;
+                            })(),
+                            complexity: (() => {
+                              const compData = monthData.filter(d => d.loanComplexityScore > 0);
+                              return compData.length > 0 
+                                ? compData.reduce((sum, d) => sum + d.loanComplexityScore, 0) / compData.length 
+                                : 0;
+                            })(),
+                          };
 
                           return (
                             <React.Fragment key={month}>
@@ -695,14 +712,14 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                               }`}>
                                 {formatFinancialNumber(monthTotals.vsTarget)}
                               </td>
-                              <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                -
+                              <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                {monthTotals.avgDays > 0 ? monthTotals.avgDays.toFixed(1) : '-'}
                               </td>
-                              <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                -
+                              <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                {monthTotals.conversion > 0 ? formatPercent(monthTotals.conversion) : '-'}
                               </td>
-                              <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                -
+                              <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                {monthTotals.complexity > 0 ? monthTotals.complexity.toFixed(1) : '-'}
                               </td>
                             </React.Fragment>
                           );
@@ -825,8 +842,8 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                                     <span>{hasData ? formatFinancialNumber(data.outputVsTarget) : '-'}</span>
                                   </div>
                                 </td>
-                                <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                  -
+                                <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {hasData && data.avgDays > 0 ? data.avgDays.toFixed(1) : '-'}
                                 </td>
                                 <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
                                   {hasData && data.conversionPercent > 0 ? formatPercent(data.conversionPercent) : '-'}

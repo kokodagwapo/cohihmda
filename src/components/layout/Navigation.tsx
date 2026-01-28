@@ -25,39 +25,47 @@ const dashboardSectionsConfig = [
   { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3 },
 ];
 
-// Reorganized Top Tiering menu structure with better grouping
+// Reorganized Top Tiering menu structure with better grouping (iconColor matches sidemenu)
 const topTieringMenuGroups = {
   coreAnalytics: {
-    label: 'Core Analytics',
+    label: 'TopTiering',
     items: [
-      { id: 'loanFunnel', label: 'Loan Funnel', icon: Filter },
-      { id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield },
-      { id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList },
+      { id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, iconColor: 'blue' as const },
+      { id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, iconColor: 'blue' as const },
+      { id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, iconColor: 'emerald' as const },
+      { id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, iconColor: 'indigo' as const },
     ]
   },
   performance: {
-    label: 'Performance',
+    label: 'Financial Modeling',
     items: [
-      { id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight },
-      { id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator },
+      { id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, iconColor: 'blue' as const },
     ]
   },
   sales: {
     label: 'Sales',
     icon: Users,
     items: [
-      { id: 'salesScorecard', label: 'Scorecard', icon: Target },
-      { id: 'salesTrends', label: 'Trends', icon: TrendingUp },
+      { id: 'salesScorecard', label: 'Scorecard', icon: Target, iconColor: 'blue' as const },
+      { id: 'salesTrends', label: 'Trends', icon: TrendingUp, iconColor: 'emerald' as const },
     ]
   },
   operations: {
     label: 'Operations',
     icon: Settings,
     items: [
-      { id: 'operationsScorecard', label: 'Scorecard', icon: Target },
-      { id: 'operationsTrends', label: 'Trends', icon: LineChart },
+      { id: 'operationsScorecard', label: 'Scorecard', icon: Target, iconColor: 'blue' as const },
+      { id: 'operationsTrends', label: 'Trends', icon: LineChart, iconColor: 'indigo' as const },
     ]
   },
+};
+
+// Icon colors matching sidemenu – bg tint + icon color
+const iconStyleMap: Record<string, { bg: string; icon: string }> = {
+  amber: { bg: 'bg-amber-500/10 dark:bg-amber-500/20', icon: 'text-amber-500 dark:text-amber-400' },
+  blue: { bg: 'bg-blue-500/10 dark:bg-blue-500/20', icon: 'text-blue-500 dark:text-blue-400' },
+  indigo: { bg: 'bg-indigo-500/10 dark:bg-indigo-500/20', icon: 'text-indigo-500 dark:text-indigo-400' },
+  emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', icon: 'text-emerald-500 dark:text-emerald-400' },
 };
 
 // Route mapping for navigation
@@ -80,6 +88,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   const [displayName, setDisplayName] = useState<string | null>(null);
   
   const isDashboard = location.pathname === '/insights';
+  const isWorkbench = location.pathname === '/my-dashboard' || location.pathname.startsWith('/workbench');
   const isAdminPage = location.pathname.startsWith('/admin');
 
   // Dropdown state
@@ -236,11 +245,11 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
     setFocusedIndex(-1);
   };
 
-  const handleTopTieringClick = (itemId: string) => {
+  const handleTopTieringClick = (itemId: string, customRoute?: string) => {
     setTopTieringOpen(false);
     setFocusedIndex(-1);
     
-    const route = routeMap[itemId];
+    const route = customRoute || routeMap[itemId];
     if (route) {
       navigate(route);
     }
@@ -659,27 +668,27 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   onKeyDown={(e) => handleKeyDown(e, 'toptiering')}
                   aria-haspopup="true"
                   aria-expanded={topTieringOpen}
-                  aria-label="Top Tiering menu"
+                  aria-label="Dashboard menu"
                   className={cn(
                     "relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 group",
                     (topTieringOpen || isTopTieringPage)
-                      ? "bg-gradient-to-r from-purple-500 to-pink-600 text-white shadow-lg shadow-purple-500/30 dark:shadow-purple-500/20 scale-105"
-                      : "text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-950/30 dark:hover:to-pink-950/30 hover:text-purple-700 dark:hover:text-purple-400 hover:shadow-md hover:shadow-purple-500/10 dark:hover:shadow-purple-500/5"
+                      ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 dark:shadow-emerald-500/20 scale-105"
+                      : "text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 dark:hover:from-emerald-950/30 dark:hover:to-teal-950/30 hover:text-emerald-700 dark:hover:text-emerald-400 hover:shadow-md hover:shadow-emerald-500/10 dark:hover:shadow-emerald-500/5"
                   )}
                 >
                   <TrendingUp className={cn(
                     "w-4 h-4 transition-all duration-300",
                     (topTieringOpen || isTopTieringPage) 
                       ? "text-white" 
-                      : "text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 group-hover:scale-110"
+                      : "text-slate-500 dark:text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 group-hover:scale-110"
                   )} />
-                  <span>Top Tiering</span>
+                  <span>Dashboard</span>
                   <ChevronDown className={cn(
                     "w-3.5 h-3.5 transition-all duration-300",
                     topTieringOpen && "rotate-180",
                     (topTieringOpen || isTopTieringPage) 
                       ? "text-white" 
-                      : "text-slate-400 dark:text-slate-500 group-hover:text-purple-600 dark:group-hover:text-purple-400"
+                      : "text-slate-400 dark:text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
                   )} />
                   {(topTieringOpen || isTopTieringPage) && (
                     <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-white/80 shadow-lg" />
@@ -694,56 +703,69 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 8, scale: 0.95 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute top-full left-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 min-w-[480px] backdrop-blur-sm"
+                      className="absolute top-full left-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 min-w-[280px] sm:min-w-[360px] lg:min-w-[480px] backdrop-blur-sm"
                       role="menu"
-                      aria-label="Top Tiering submenu"
+                      aria-label="Dashboard submenu"
                     >
                       <div className="p-5 space-y-5">
-                        {/* Core Analytics */}
+                        {/* Dashboard Section - Links to Insights page sections */}
                         <div>
                           <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
-                            Core Analytics
+                            <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
+                            Dashboard
                           </div>
-                          <div className="grid grid-cols-3 gap-3">
-                            {topTieringMenuGroups.coreAnalytics.items.map((item) => {
+                          <div className="grid grid-cols-2 gap-3">
+                            {[
+                              { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, hash: '#section-leaderboard', iconColor: 'amber' as const },
+                              { id: 'executiveDashboard', label: 'Business Overview', icon: Target, hash: '#section-executiveDashboard', iconColor: 'blue' as const },
+                              { id: 'topTieringLink', label: 'Top Tiering', icon: ArrowLeftRight, iconColor: 'blue' as const, route: '/loan-funnel' },
+                              { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3, hash: '#section-closingFalloutForecast', iconColor: 'indigo' as const },
+                            ].map((item) => {
                               const Icon = item.icon;
-                              const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
+                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                              const itemRoute = (item as { route?: string }).route ?? (item.hash ? `/insights${item.hash}` : routeMap[item.id]);
+                              const isItemActive = itemRoute
+                                ? location.pathname === itemRoute.split('#')[0] &&
+                                  (itemRoute.includes('#') ? location.hash === `#section-${item.id}` : true)
+                                : false;
                               return (
                                 <button
                                   key={item.id}
-                                  onClick={() => handleTopTieringClick(item.id)}
+                                  onClick={() => {
+                                    if (item.hash) {
+                                      scrollToSection(item.id);
+                                    } else {
+                                      handleTopTieringClick(item.id, (item as { route?: string }).route);
+                                    }
+                                  }}
                                   className={cn(
-                                    "flex flex-col items-center gap-2.5 px-4 py-3.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
+                                    "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
                                     isItemActive
-                                      ? "text-purple-700 dark:text-purple-300 bg-gradient-to-br from-purple-50 via-pink-50 to-purple-50 dark:from-purple-950/40 dark:via-pink-950/40 dark:to-purple-950/40 border-purple-300 dark:border-purple-700 shadow-lg shadow-purple-500/20 dark:shadow-purple-500/10 scale-105"
-                                      : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-br hover:from-purple-50 hover:via-pink-50 hover:to-purple-50 dark:hover:from-purple-950/30 dark:hover:via-pink-950/30 dark:hover:to-purple-950/30 hover:text-purple-700 dark:hover:text-purple-300 hover:border-purple-200 dark:hover:border-purple-800 hover:shadow-lg hover:shadow-purple-500/10 dark:hover:shadow-purple-500/5 hover:scale-105 border-transparent"
+                                      ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
+                                      : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
                                   )}
                                   role="menuitem"
                                 >
-                                  <Icon className={cn(
-                                    "w-5 h-5 flex-shrink-0 transition-all duration-300",
-                                    isItemActive 
-                                      ? "text-purple-600 dark:text-purple-400 scale-110" 
-                                      : "text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 group-hover:scale-110"
-                                  )} />
-                                  <span className="text-xs text-center leading-tight font-medium">{item.label}</span>
+                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                    <Icon className={cn("w-4 h-4", style.icon, isItemActive && "scale-110")} />
+                                  </div>
+                                  <span className="whitespace-nowrap text-left">{item.label}</span>
                                 </button>
                               );
                             })}
                           </div>
                         </div>
 
-                        {/* Performance */}
+                        {/* Top Tiering Section */}
                         <div>
                           <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <div className="w-1 h-4 bg-gradient-to-b from-purple-500 to-pink-500 rounded-full" />
-                            Performance
+                            <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
+                            Top Tiering
                           </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            {topTieringMenuGroups.performance.items.map((item) => {
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {topTieringMenuGroups.coreAnalytics.items.map((item) => {
                               const Icon = item.icon;
+                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                               const itemRoute = routeMap[item.id];
                               const isItemActive = itemRoute && location.pathname === itemRoute;
                               return (
@@ -753,75 +775,107 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                                   className={cn(
                                     "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
                                     isItemActive
-                                      ? "text-purple-700 dark:text-purple-300 bg-gradient-to-r from-purple-50 via-pink-50 to-purple-50 dark:from-purple-950/40 dark:via-pink-950/40 dark:to-purple-950/40 border-purple-300 dark:border-purple-700 shadow-md shadow-purple-500/20 dark:shadow-purple-500/10 scale-[1.02]"
-                                      : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-purple-50 hover:via-pink-50 hover:to-purple-50 dark:hover:from-purple-950/30 dark:hover:via-pink-950/30 dark:hover:to-purple-950/30 hover:text-purple-700 dark:hover:text-purple-300 hover:border-purple-200 dark:hover:border-purple-800 hover:shadow-md hover:shadow-purple-500/10 dark:hover:shadow-purple-500/5 hover:scale-[1.01] border-transparent"
+                                      ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
+                                      : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
                                   )}
                                   role="menuitem"
                                 >
-                                  <Icon className={cn(
-                                    "w-4 h-4 flex-shrink-0 transition-all duration-300",
-                                    isItemActive 
-                                      ? "text-purple-600 dark:text-purple-400 scale-110" 
-                                      : "text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 group-hover:scale-110"
-                                  )} />
+                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                    <Icon className={cn("w-4 h-4", style.icon, isItemActive && "scale-110")} />
+                                  </div>
                                   <span className="whitespace-nowrap text-left">{item.label}</span>
                                 </button>
                               );
                             })}
                           </div>
-                        </div>
 
-                        {/* Sales & Operations */}
-                        <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/80">
-                          {/* Sales */}
-                          <div>
-                            <div className="flex items-center gap-2 mb-3 px-2">
-                              <Users className="w-4 h-4 text-slate-400" />
-                              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                Sales
+                          {/* Sales & Operations */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 mt-3 border-t border-slate-200/80 dark:border-slate-700/80">
+                            {/* Sales */}
+                            <div>
+                              <div className="flex items-center gap-2 mb-3 px-2">
+                                <Users className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                  Sales
+                                </div>
+                              </div>
+                              <div className="space-y-1.5">
+                                {topTieringMenuGroups.sales.items.map((item) => {
+                                  const Icon = item.icon;
+                                  const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                  const itemRoute = routeMap[item.id];
+                                  const isItemActive = itemRoute && location.pathname === itemRoute;
+                                  return (
+                                    <button
+                                      key={item.id}
+                                      onClick={() => handleTopTieringClick(item.id)}
+                                      className={cn(
+                                        "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
+                                        isItemActive
+                                          ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
+                                          : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
+                                      )}
+                                      role="menuitem"
+                                    >
+                                      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                        <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                      </div>
+                                      <span className="whitespace-nowrap">{item.label}</span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
-                            <div className="space-y-1.5">
-                              {topTieringMenuGroups.sales.items.map((item) => {
-                                const Icon = item.icon;
-                                const itemRoute = routeMap[item.id];
-                                const isItemActive = itemRoute && location.pathname === itemRoute;
-                                return (
-                                  <button
-                                    key={item.id}
-                                    onClick={() => handleTopTieringClick(item.id)}
-                                    className={cn(
-                                      "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
-                                      isItemActive
-                                        ? "text-purple-700 dark:text-purple-300 bg-gradient-to-r from-purple-50 via-pink-50 to-purple-50 dark:from-purple-950/40 dark:via-pink-950/40 dark:to-purple-950/40 border-purple-300 dark:border-purple-700 shadow-md shadow-purple-500/20 dark:shadow-purple-500/10 scale-[1.02]"
-                                        : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-purple-50 hover:via-pink-50 hover:to-purple-50 dark:hover:from-purple-950/30 dark:hover:via-pink-950/30 dark:hover:to-purple-950/30 hover:text-purple-700 dark:hover:text-purple-300 hover:border-purple-200 dark:hover:border-purple-800 hover:shadow-md hover:shadow-purple-500/10 dark:hover:shadow-purple-500/5 hover:scale-[1.01] border-transparent"
-                                    )}
-                                    role="menuitem"
-                                  >
-                                    <Icon className={cn(
-                                      "w-4 h-4 flex-shrink-0 transition-all duration-300",
-                                      isItemActive 
-                                        ? "text-purple-600 dark:text-purple-400 scale-110" 
-                                        : "text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 group-hover:scale-110"
-                                    )} />
-                                    <span className="whitespace-nowrap">{item.label}</span>
-                                  </button>
-                                );
-                              })}
+
+                            {/* Operations */}
+                            <div>
+                              <div className="flex items-center gap-2 mb-3 px-2">
+                                <Settings className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                  Operations
+                                </div>
+                              </div>
+                              <div className="space-y-1.5">
+                                {topTieringMenuGroups.operations.items.map((item) => {
+                                  const Icon = item.icon;
+                                  const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                  const itemRoute = routeMap[item.id];
+                                  const isItemActive = itemRoute && location.pathname === itemRoute;
+                                  return (
+                                    <button
+                                      key={item.id}
+                                      onClick={() => handleTopTieringClick(item.id)}
+                                      className={cn(
+                                        "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
+                                        isItemActive
+                                          ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
+                                          : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
+                                      )}
+                                      role="menuitem"
+                                    >
+                                      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                        <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                      </div>
+                                      <span className="whitespace-nowrap">{item.label}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           </div>
 
-                          {/* Operations */}
-                          <div>
+                          {/* Financial Modeling */}
+                          <div className="pt-3 mt-3 border-t border-slate-200/80 dark:border-slate-700/80">
                             <div className="flex items-center gap-2 mb-3 px-2">
-                              <Settings className="w-4 h-4 text-slate-400" />
+                              <Calculator className="w-4 h-4 text-blue-500 dark:text-blue-400" />
                               <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                Operations
+                                Financial Modeling
                               </div>
                             </div>
                             <div className="space-y-1.5">
-                              {topTieringMenuGroups.operations.items.map((item) => {
+                              {topTieringMenuGroups.performance.items.map((item) => {
                                 const Icon = item.icon;
+                                const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
                                 const itemRoute = routeMap[item.id];
                                 const isItemActive = itemRoute && location.pathname === itemRoute;
                                 return (
@@ -831,17 +885,14 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                                     className={cn(
                                       "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
                                       isItemActive
-                                        ? "text-purple-700 dark:text-purple-300 bg-gradient-to-r from-purple-50 via-pink-50 to-purple-50 dark:from-purple-950/40 dark:via-pink-950/40 dark:to-purple-950/40 border-purple-300 dark:border-purple-700 shadow-md shadow-purple-500/20 dark:shadow-purple-500/10 scale-[1.02]"
-                                        : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-purple-50 hover:via-pink-50 hover:to-purple-50 dark:hover:from-purple-950/30 dark:hover:via-pink-950/30 dark:hover:to-purple-950/30 hover:text-purple-700 dark:hover:text-purple-300 hover:border-purple-200 dark:hover:border-purple-800 hover:shadow-md hover:shadow-purple-500/10 dark:hover:shadow-purple-500/5 hover:scale-[1.01] border-transparent"
+                                        ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
+                                        : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
                                     )}
                                     role="menuitem"
                                   >
-                                    <Icon className={cn(
-                                      "w-4 h-4 flex-shrink-0 transition-all duration-300",
-                                      isItemActive 
-                                        ? "text-purple-600 dark:text-purple-400 scale-110" 
-                                        : "text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 group-hover:scale-110"
-                                    )} />
+                                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                      <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                    </div>
                                     <span className="whitespace-nowrap">{item.label}</span>
                                   </button>
                                 );

@@ -17,6 +17,7 @@ import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Loans from "./pages/Loans";
 import MyDashboard from "./pages/MyDashboard";
+import MyDashboardLegacy from "./pages/MyDashboardLegacy";
 import DataChat from "./pages/DataChat";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
@@ -32,6 +33,10 @@ import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
+// Workbench pages
+import SharedWithMe from "./pages/workbench/SharedWithMe";
+import TeamFolders from "./pages/workbench/TeamFolders";
+import Favorites from "./pages/workbench/Favorites";
 
 const queryClient = new QueryClient();
 
@@ -95,6 +100,26 @@ const App = () => (
               <Route path="/my-dashboard" element={
                 <ProtectedRoute>
                   <MyDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-dashboard-legacy" element={
+                <ProtectedRoute>
+                  <MyDashboardLegacy />
+                </ProtectedRoute>
+              } />
+              <Route path="/workbench/shared" element={
+                <ProtectedRoute>
+                  <SharedWithMe />
+                </ProtectedRoute>
+              } />
+              <Route path="/workbench/team-folders" element={
+                <ProtectedRoute>
+                  <TeamFolders />
+                </ProtectedRoute>
+              } />
+              <Route path="/workbench/favorites" element={
+                <ProtectedRoute>
+                  <Favorites />
                 </ProtectedRoute>
               } />
               <Route path="/data-chat" element={

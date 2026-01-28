@@ -16,6 +16,8 @@ interface DashboardLayoutProps {
   onReportClick: (report: ReportData) => void;
   onSectionClick?: (sectionId: string) => void;
   headerContent?: React.ReactNode;
+  /** Visitor's first name for personalized sidebar greeting */
+  visitorFirstName?: string | null;
 }
 
 export function DashboardLayout({
@@ -27,7 +29,8 @@ export function DashboardLayout({
   onVisibilityChange,
   onReportClick,
   onSectionClick,
-  headerContent
+  headerContent,
+  visitorFirstName
 }: DashboardLayoutProps) {
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950">
@@ -56,6 +59,7 @@ export function DashboardLayout({
             mobileMenuOpen={mobileMenuOpen}
             onMobileMenuToggle={onMobileMenuToggle}
             onSectionClick={onSectionClick}
+            visitorFirstName={visitorFirstName}
           />
         )}
         

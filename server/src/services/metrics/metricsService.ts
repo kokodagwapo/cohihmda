@@ -1701,3 +1701,324 @@ export async function queryCreditRiskStory(
     governmentQualifiedPercent
   };
 }
+
+// ============================================================================
+// Scorecard Actor-Grouped Queries
+// ============================================================================
+// These functions provide optimized SQL-based aggregation for scorecard endpoints,
+// replacing the pattern of fetching all loans and filtering in JavaScript.
+
+import {
+  buildChannelWhereClause,
+  buildActorNotMissingClause,
+  REVENUE_SQL_EXPRESSION,
+  type ActorConfig,
+} from '../../utils/scorecard-utils';
+
+/**
+ * Actor metrics result from grouped query.
+ */
+export interface ActorMetricsResult {
+  actorName: string;
+  units: number;
+  volume: number;
+  revenue: number;
+  avgTurnTime: number | null;
+  waFico: number | null;
+  waLtv: number | null;
+  waDti: number | null;
+  governmentCount: number;
+  purchaseCount: number;
+  approvedCount: number;
+  deniedCount: number;
+}
+
+/**
+ * Options for actor metrics query.
+ */
+export interface ActorMetricsQueryOptions {
+  dateRange: DateRange;
+  channelGroup?: string;
+  actorMissingMode?: 'strict' | 'extended';
+}
+
+/**
+ * Query actor metrics with SQL-level aggregation.
+ * This replaces the pattern of fetching all loans and filtering in JavaScript.
+ * 
+ * @param tenantPool - Tenant database connection pool
+ * @param actorConfig - Configuration for the actor type
+ * @param options - Query options including date range and channel filter
+ * @returns Array of actor metrics, one per actor
+ */
+export async function queryActorMetrics(
+  tenantPool: pg.Pool,
+  actorConfig: ActorConfig,
+  options: ActorMetricsQueryOptions
+): Promise<ActorMetricsResult[]> {
+  const { actorColumn, outputDateField, turnTimeStartField, turnTimeEndField } = actorConfig;
+  const { dateRange, channelGroup, actorMissingMode = 'extended' } = options;
+
+  const channelClause = buildChannelWhereClause(channelGroup);
+  const actorNotMissingClause = buildActorNotMissingClause(actorColumn, actorMissingMode);
+
+  // Build date range clause
+  const dateClause = dateRange.start && dateRange.end
+    ? `AND ${outputDateField} >= $1 AND ${outputDateField} < $2`
+    : dateRange.start
+    ? `AND ${outputDateField} >= $1`
+    : dateRange.end
+    ? `AND ${outputDateField} < $1`
+    : '';
+
+  const params: any[] = [];
+  if (dateRange.start) params.push(dateRange.start);
+  if (dateRange.end) params.push(dateRange.end);
+
+  const query = `
+    SELECT 
+      ${actorColumn} as actor_name,
+      COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) as units,
+      COALESCE(SUM(loan_amount), 0) as volume,
+      COALESCE(SUM(${REVENUE_SQL_EXPRESSION}), 0) as revenue,
+      AVG(
+        CASE 
+          WHEN ${turnTimeEndField} IS NOT NULL AND ${turnTimeStartField} IS NOT NULL 
+               AND DATE(${turnTimeEndField}) > DATE(${turnTimeStartField})
+          THEN DATE(${turnTimeEndField}) - DATE(${turnTimeStartField})
+          ELSE NULL
+        END
+      ) as avg_turn_time,
+      -- Weighted averages (exclude out-of-range values)
+      ROUND(
+        SUM(CASE WHEN fico_score >= 350 AND fico_score <= 900 THEN fico_score * loan_amount ELSE 0 END) / 
+        NULLIF(SUM(CASE WHEN fico_score >= 350 AND fico_score <= 900 THEN loan_amount ELSE 0 END), 0)
+      , 0) as wa_fico,
+      ROUND(
+        SUM(CASE WHEN ltv_ratio >= 0 AND ltv_ratio <= 110 THEN ltv_ratio * loan_amount ELSE 0 END) / 
+        NULLIF(SUM(CASE WHEN ltv_ratio >= 0 AND ltv_ratio <= 110 THEN loan_amount ELSE 0 END), 0)
+      , 1) as wa_ltv,
+      ROUND(
+        SUM(CASE WHEN be_dti_ratio >= 0 AND be_dti_ratio <= 70 THEN be_dti_ratio * loan_amount ELSE 0 END) / 
+        NULLIF(SUM(CASE WHEN be_dti_ratio >= 0 AND be_dti_ratio <= 70 THEN loan_amount ELSE 0 END), 0)
+      , 1) as wa_dti,
+      -- Loan type counts
+      COUNT(CASE WHEN UPPER(loan_type) IN ('FHA', 'VA', 'USDA', 'FARMERSHOMEA') THEN 1 END) as government_count,
+      COUNT(CASE WHEN UPPER(loan_purpose) = 'PURCHASE' THEN 1 END) as purchase_count,
+      -- Status counts (for underwriter metrics)
+      COUNT(CASE WHEN UPPER(current_loan_status) LIKE '%APPROVED%' OR UPPER(current_loan_status) LIKE '%ORIGINATED%' THEN 1 END) as approved_count,
+      COUNT(CASE WHEN UPPER(current_loan_status) LIKE '%DENIED%' THEN 1 END) as denied_count
+    FROM public.loans
+    WHERE ${actorNotMissingClause}
+      ${dateClause}
+      ${channelClause}
+    GROUP BY ${actorColumn}
+    ORDER BY units DESC
+  `;
+
+  const result = await tenantPool.query(query, params);
+
+  return result.rows.map(row => ({
+    actorName: row.actor_name,
+    units: parseInt(row.units) || 0,
+    volume: parseFloat(row.volume) || 0,
+    revenue: parseFloat(row.revenue) || 0,
+    avgTurnTime: row.avg_turn_time ? parseFloat(row.avg_turn_time) : null,
+    waFico: row.wa_fico ? parseInt(row.wa_fico) : null,
+    waLtv: row.wa_ltv ? parseFloat(row.wa_ltv) : null,
+    waDti: row.wa_dti ? parseFloat(row.wa_dti) : null,
+    governmentCount: parseInt(row.government_count) || 0,
+    purchaseCount: parseInt(row.purchase_count) || 0,
+    approvedCount: parseInt(row.approved_count) || 0,
+    deniedCount: parseInt(row.denied_count) || 0,
+  }));
+}
+
+/**
+ * Query total metrics for all actors (not grouped).
+ * Useful for calculating company averages and totals.
+ */
+export interface TotalMetricsResult {
+  totalUnits: number;
+  totalVolume: number;
+  totalRevenue: number;
+  avgTurnTime: number | null;
+  waFico: number | null;
+  waLtv: number | null;
+  waDti: number | null;
+  governmentPercent: number;
+  purchasePercent: number;
+}
+
+export async function queryTotalMetrics(
+  tenantPool: pg.Pool,
+  outputDateField: string,
+  turnTimeStartField: string,
+  turnTimeEndField: string,
+  options: ActorMetricsQueryOptions
+): Promise<TotalMetricsResult> {
+  const { dateRange, channelGroup } = options;
+
+  const channelClause = buildChannelWhereClause(channelGroup);
+
+  // Build date range clause
+  const dateClause = dateRange.start && dateRange.end
+    ? `AND ${outputDateField} >= $1 AND ${outputDateField} < $2`
+    : dateRange.start
+    ? `AND ${outputDateField} >= $1`
+    : dateRange.end
+    ? `AND ${outputDateField} < $1`
+    : '';
+
+  const params: any[] = [];
+  if (dateRange.start) params.push(dateRange.start);
+  if (dateRange.end) params.push(dateRange.end);
+
+  const query = `
+    SELECT 
+      COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) as total_units,
+      COALESCE(SUM(loan_amount), 0) as total_volume,
+      COALESCE(SUM(${REVENUE_SQL_EXPRESSION}), 0) as total_revenue,
+      AVG(
+        CASE 
+          WHEN ${turnTimeEndField} IS NOT NULL AND ${turnTimeStartField} IS NOT NULL 
+               AND DATE(${turnTimeEndField}) > DATE(${turnTimeStartField})
+          THEN DATE(${turnTimeEndField}) - DATE(${turnTimeStartField})
+          ELSE NULL
+        END
+      ) as avg_turn_time,
+      -- Weighted averages
+      ROUND(
+        SUM(CASE WHEN fico_score >= 350 AND fico_score <= 900 THEN fico_score * loan_amount ELSE 0 END) / 
+        NULLIF(SUM(CASE WHEN fico_score >= 350 AND fico_score <= 900 THEN loan_amount ELSE 0 END), 0)
+      , 0) as wa_fico,
+      ROUND(
+        SUM(CASE WHEN ltv_ratio >= 0 AND ltv_ratio <= 110 THEN ltv_ratio * loan_amount ELSE 0 END) / 
+        NULLIF(SUM(CASE WHEN ltv_ratio >= 0 AND ltv_ratio <= 110 THEN loan_amount ELSE 0 END), 0)
+      , 1) as wa_ltv,
+      ROUND(
+        SUM(CASE WHEN be_dti_ratio >= 0 AND be_dti_ratio <= 70 THEN be_dti_ratio * loan_amount ELSE 0 END) / 
+        NULLIF(SUM(CASE WHEN be_dti_ratio >= 0 AND be_dti_ratio <= 70 THEN loan_amount ELSE 0 END), 0)
+      , 1) as wa_dti,
+      -- Percentages
+      ROUND(
+        COUNT(CASE WHEN UPPER(loan_type) IN ('FHA', 'VA', 'USDA', 'FARMERSHOMEA') THEN 1 END) * 100.0 / 
+        NULLIF(COUNT(*), 0)
+      , 1) as government_percent,
+      ROUND(
+        COUNT(CASE WHEN UPPER(loan_purpose) = 'PURCHASE' THEN 1 END) * 100.0 / 
+        NULLIF(COUNT(*), 0)
+      , 1) as purchase_percent
+    FROM public.loans
+    WHERE ${outputDateField} IS NOT NULL
+      ${dateClause}
+      ${channelClause}
+  `;
+
+  const result = await tenantPool.query(query, params);
+  const row = result.rows[0] || {};
+
+  return {
+    totalUnits: parseInt(row.total_units) || 0,
+    totalVolume: parseFloat(row.total_volume) || 0,
+    totalRevenue: parseFloat(row.total_revenue) || 0,
+    avgTurnTime: row.avg_turn_time ? parseFloat(row.avg_turn_time) : null,
+    waFico: row.wa_fico ? parseInt(row.wa_fico) : null,
+    waLtv: row.wa_ltv ? parseFloat(row.wa_ltv) : null,
+    waDti: row.wa_dti ? parseFloat(row.wa_dti) : null,
+    governmentPercent: parseFloat(row.government_percent) || 0,
+    purchasePercent: parseFloat(row.purchase_percent) || 0,
+  };
+}
+
+/**
+ * Query monthly metrics for trends charts.
+ */
+export interface MonthlyMetricsResult {
+  month: string; // YYYY-MM format
+  units: number;
+  volume: number;
+  avgTurnTime: number | null;
+}
+
+export async function queryMonthlyMetrics(
+  tenantPool: pg.Pool,
+  actorColumn: string,
+  outputDateField: string,
+  turnTimeStartField: string,
+  turnTimeEndField: string,
+  options: ActorMetricsQueryOptions
+): Promise<Map<string, MonthlyMetricsResult[]>> {
+  const { dateRange, channelGroup, actorMissingMode = 'extended' } = options;
+
+  const channelClause = buildChannelWhereClause(channelGroup);
+  const actorNotMissingClause = buildActorNotMissingClause(actorColumn, actorMissingMode);
+
+  const dateClause = dateRange.start && dateRange.end
+    ? `AND ${outputDateField} >= $1 AND ${outputDateField} < $2`
+    : '';
+
+  const params: any[] = [];
+  if (dateRange.start) params.push(dateRange.start);
+  if (dateRange.end) params.push(dateRange.end);
+
+  const query = `
+    SELECT 
+      ${actorColumn} as actor_name,
+      TO_CHAR(${outputDateField}, 'YYYY-MM') as month,
+      COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) as units,
+      COALESCE(SUM(loan_amount), 0) as volume,
+      AVG(
+        CASE 
+          WHEN ${turnTimeEndField} IS NOT NULL AND ${turnTimeStartField} IS NOT NULL 
+               AND DATE(${turnTimeEndField}) > DATE(${turnTimeStartField})
+          THEN DATE(${turnTimeEndField}) - DATE(${turnTimeStartField})
+          ELSE NULL
+        END
+      ) as avg_turn_time
+    FROM public.loans
+    WHERE ${actorNotMissingClause}
+      ${dateClause}
+      ${channelClause}
+    GROUP BY ${actorColumn}, TO_CHAR(${outputDateField}, 'YYYY-MM')
+    ORDER BY ${actorColumn}, month
+  `;
+
+  const result = await tenantPool.query(query, params);
+
+  // Group results by actor
+  const actorMonthlyData = new Map<string, MonthlyMetricsResult[]>();
+
+  for (const row of result.rows) {
+    const actorName = row.actor_name;
+    if (!actorMonthlyData.has(actorName)) {
+      actorMonthlyData.set(actorName, []);
+    }
+    actorMonthlyData.get(actorName)!.push({
+      month: row.month,
+      units: parseInt(row.units) || 0,
+      volume: parseFloat(row.volume) || 0,
+      avgTurnTime: row.avg_turn_time ? parseFloat(row.avg_turn_time) : null,
+    });
+  }
+
+  return actorMonthlyData;
+}
+
+/**
+ * Get vMaxDate (maximum date in loan data) for rolling date calculations.
+ * Matches Qlik's Max("Last Modified Date") logic.
+ */
+export async function getVMaxDate(tenantPool: pg.Pool): Promise<Date> {
+  const result = await tenantPool.query(`
+    SELECT COALESCE(
+      MAX(last_modified_date),
+      MAX(funding_date),
+      MAX(application_date),
+      CURRENT_DATE
+    ) as max_date
+    FROM public.loans
+    WHERE funding_date IS NOT NULL OR last_modified_date IS NOT NULL
+  `);
+  return result.rows[0]?.max_date ? new Date(result.rows[0].max_date) : new Date();
+}

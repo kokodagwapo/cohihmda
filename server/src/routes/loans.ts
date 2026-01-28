@@ -10,6 +10,23 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { logError, logWarn, logInfo, logDebug } from '../services/logger.js';
+import {
+  isActorMissing,
+  filterByChannel,
+  buildChannelWhereClause,
+  buildActorNotMissingClause,
+  calcLoanRevenue,
+  calcLoanComplexity,
+  getVMaxDate,
+  formatDateForSQL,
+  formatMonthKey,
+  assignTTSTier,
+  OPERATIONS_ACTOR_CONFIGS,
+  SALES_ACTOR_CONFIGS,
+  REVENUE_SQL_EXPRESSION,
+  type ActorConfig,
+  type ActorMissingMode,
+} from '../utils/scorecard-utils.js';
 
 // Helper function to calculate days between dates
 function daysBetween(date1: Date | string | null, date2: Date | string | null): number | null {
@@ -1057,25 +1074,9 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
     const effectiveStartDate = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
     const effectiveEndDate = endDate ? new Date(endDate) : now;
     
-    // Build WHERE clause for channel filtering
-    const conditions: string[] = ['tenant_id = $1'];
-    const params: any[] = [tenantId];
-    let paramIndex = 2;
-    
-    // Channel Group filter - consolidated channel (Retail, TPO, etc.)
-    if (channelGroup && channelGroup !== 'All') {
-      if (channelGroup === 'Retail') {
-        conditions.push(`(channel ILIKE '%retail%' OR channel ILIKE '%brok%')`);
-      } else if (channelGroup === 'TPO') {
-        conditions.push(`(channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`);
-      } else if (channelGroup === '99-Missing') {
-        conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
-      } else if (channelGroup === 'Other') {
-        conditions.push(`(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`);
-      }
-    }
-    
-    const whereClause = conditions.join(' AND ');
+    // Use shared utility for channel filtering
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const whereClause = `tenant_id = $1 ${channelClause}`;
 
     logInfo('[CompanyOverview] Query params', {
       tenantId,
@@ -1084,7 +1085,11 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
       channelGroup
     });
 
-    // Get all loans with channel filter applied
+    // OPTIMIZED: Add date filtering at SQL level to reduce data volume
+    // Filter to loans that have any date within the relevant period (plus some buffer for active loans)
+    const startDateStr = formatDateForSQL(effectiveStartDate);
+    const endDateStr = formatDateForSQL(effectiveEndDate);
+    
     const allLoansResult = await retryQuery(
       () => pool.query(
         `SELECT 
@@ -1092,8 +1097,14 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
           application_date, closing_date, lock_date, funding_date, interest_rate, raw_data
          FROM public.loans 
          WHERE ${whereClause}
+           AND (
+             application_date >= $2 OR 
+             funding_date >= $2 OR 
+             closing_date >= $2 OR
+             (funding_date IS NULL AND closing_date IS NULL)  -- Include active loans
+           )
          ORDER BY application_date DESC`,
-        params
+        [tenantId, startDateStr]
       ),
       2, 500
     );
@@ -1646,111 +1657,105 @@ router.get('/toptiering', authenticateToken, apiLimiter, async (req: AuthRequest
       channelGroup
     });
 
-    // PHASE 1: Fetch ALL loans for tenant with minimal filtering
-    // This approach matches the working /company-overview endpoint
-    const allLoansResult = await retryQuery(
+    // OPTIMIZED: Use SQL filtering for date and channel instead of JavaScript
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const startDateStr = formatDateForSQL(effectiveStartDate);
+    const endDateStr = formatDateForSQL(effectiveEndDate);
+
+    // PHASE 1: Fetch FUNDED loans with SQL filtering (main data)
+    const fundedLoansResult = await retryQuery(
       () => pool.query(
         `SELECT 
           loan_id, loan_amount, loan_type, current_loan_status, channel,
           funding_date, closing_date, application_date, started_date,
           branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
-          origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits
+          origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
+          rate_lock_buy_side_base_price_rate
          FROM public.loans 
-         WHERE tenant_id = $1`,
-        [tenantId]
+         WHERE tenant_id = $1
+           AND COALESCE(funding_date, closing_date) >= $2
+           AND COALESCE(funding_date, closing_date) <= $3
+           ${channelClause}`,
+        [tenantId, startDateStr, endDateStr]
       ),
       2, 500
     );
+    const fundedLoans = fundedLoansResult.rows;
 
-    const allLoans = allLoansResult.rows;
+    // PHASE 2: Fetch LOST OPPORTUNITY loans with SQL filtering
+    const lostOpportunityResult = await retryQuery(
+      () => pool.query(
+        `SELECT 
+          loan_id, loan_amount, current_loan_status, channel,
+          application_date, branch, loan_officer,
+          origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
+          rate_lock_buy_side_base_price_rate
+         FROM public.loans 
+         WHERE tenant_id = $1
+           AND application_date >= $2
+           AND application_date <= $3
+           AND (
+             current_loan_status ILIKE '%withdraw%' OR
+             current_loan_status ILIKE '%cancelled%' OR
+             current_loan_status ILIKE '%not accepted%' OR
+             current_loan_status ILIKE '%incomplete%'
+           )
+           ${channelClause}`,
+        [tenantId, startDateStr, endDateStr]
+      ),
+      2, 500
+    );
+    const lostOpportunityLoans = lostOpportunityResult.rows;
+
+    // PHASE 3: Fetch DENIED loans with SQL filtering
+    const deniedResult = await retryQuery(
+      () => pool.query(
+        `SELECT 
+          loan_id, application_date, branch, loan_officer
+         FROM public.loans 
+         WHERE tenant_id = $1
+           AND application_date >= $2
+           AND application_date <= $3
+           AND (current_loan_status ILIKE '%denied%' OR current_loan_status ILIKE '%declined%')
+           ${channelClause}`,
+        [tenantId, startDateStr, endDateStr]
+      ),
+      2, 500
+    );
+    const deniedLoans = deniedResult.rows;
+
+    // PHASE 4: Fetch STARTED loans for pull-through calculation
+    const startedResult = await retryQuery(
+      () => pool.query(
+        `SELECT 
+          loan_id, branch, loan_officer
+         FROM public.loans 
+         WHERE tenant_id = $1
+           AND COALESCE(started_date, application_date) >= $2
+           AND COALESCE(started_date, application_date) <= $3
+           ${channelClause}`,
+        [tenantId, startDateStr, endDateStr]
+      ),
+      2, 500
+    );
+    const startedLoans = startedResult.rows;
     
-    logInfo('[TopTiering] Fetched all loans', {
-      totalLoans: allLoans.length,
-      sampleStatuses: allLoans.slice(0, 5).map(l => l.current_loan_status)
+    logInfo('[TopTiering] Fetched loans with SQL filtering', {
+      fundedInRange: fundedLoans.length,
+      lostOpportunity: lostOpportunityLoans.length,
+      denied: deniedLoans.length,
+      started: startedLoans.length
     });
 
-    // PHASE 2: Apply channel filter in JavaScript
-    const channelFilteredLoans = allLoans.filter((l: any) => {
-      if (!channelGroup || channelGroup === 'All') return true;
-      
-      const channel = (l.channel || '').toLowerCase();
-      if (channelGroup === 'Retail') {
-        return channel.includes('retail') || channel.includes('brok');
-      } else if (channelGroup === 'TPO') {
-        return channel.includes('whole') || channel.includes('corresp');
-      } else if (channelGroup === '99-Missing') {
-        return !channel || channel.trim() === '';
-      } else if (channelGroup === 'Other') {
-        return channel && channel.trim() !== '' 
-          && !channel.includes('retail') && !channel.includes('brok')
-          && !channel.includes('whole') && !channel.includes('corresp');
-      }
-      return true;
-    });
-
-    // PHASE 3: Filter for FUNDED loans in date range
-    // A loan is "funded" if it has funding_date or closing_date
-    const fundedLoans = channelFilteredLoans.filter((l: any) => {
-      const fundDate = l.funding_date || l.closing_date;
-      if (!fundDate) return false;
-      const fd = new Date(fundDate);
-      return fd >= effectiveStartDate && fd <= effectiveEndDate;
-    });
-
-    logInfo('[TopTiering] After filtering', {
-      channelFiltered: channelFilteredLoans.length,
-      fundedInRange: fundedLoans.length
-    });
-
-    // PHASE 4: Filter for LOST OPPORTUNITY loans (withdrawn/cancelled - NOT denied) in date range
-    // Qlik: [Current Loan Status]*={"*withdraw*","*not accepted*","*incomp*"}
-    const lostOpportunityLoans = channelFilteredLoans.filter((l: any) => {
-      const status = (l.current_loan_status || '').toUpperCase();
-      // Lost Opportunity = withdrawn, not accepted, incomplete, cancelled (but NOT denied)
-      const isLostOpportunity = status.includes('WITHDRAWN') || status.includes('CANCELLED') ||
-                                status.includes('NOT ACCEPTED') || status.includes('INCOMPLETE');
-      if (!isLostOpportunity) return false;
-      
-      // Use application_date for lost opportunities
-      const appDate = l.application_date;
-      if (!appDate) return false;
-      const ad = new Date(appDate);
-      return ad >= effectiveStartDate && ad <= effectiveEndDate;
-    });
-
-    // Denied loans - separate from lost opportunity per Qlik
-    const deniedLoans = channelFilteredLoans.filter((l: any) => {
-      const status = (l.current_loan_status || '').toUpperCase();
-      if (!status.includes('DENIED') && !status.includes('DECLINED')) return false;
-      
-      const appDate = l.application_date;
-      if (!appDate) return false;
-      const ad = new Date(appDate);
-      return ad >= effectiveStartDate && ad <= effectiveEndDate;
-    });
-
-    // PHASE 5: Count STARTED loans in date range (for pull-through calculation)
-    const startedLoans = channelFilteredLoans.filter((l: any) => {
-      const startedDate = l.started_date || l.application_date;
-      if (!startedDate) return false;
-      const sd = new Date(startedDate);
-      return sd >= effectiveStartDate && sd <= effectiveEndDate;
-    });
-
-    // Helper to calculate revenue for a loan
-    const calcLoanRevenue = (l: any): number => {
-      const origPoints = parseFloat(l.origination_points) || 0;
-      const origFeeBorr = parseFloat(l.orig_fee_borr_pd) || 0;
-      const origFeeSeller = parseFloat(l.orig_fees_seller) || 0;
-      const cdCredits = parseFloat(l.cd_lender_credits) || 0;
-      
-      // If revenue fields are populated, use them
-      if (origPoints + origFeeBorr + origFeeSeller > 0) {
-        return origPoints + origFeeBorr + origFeeSeller - cdCredits;
-      }
-      // Fallback: estimate revenue as 1% of loan amount
-      const loanAmount = parseFloat(l.loan_amount) || 0;
-      return loanAmount * 0.01;
+    // Helper to calculate revenue for a loan (use shared utility)
+    const calcRevenue = (l: any): number => {
+      return calcLoanRevenue({
+        rate_lock_buy_side_base_price_rate: l.rate_lock_buy_side_base_price_rate,
+        loan_amount: l.loan_amount,
+        orig_fee_borr_pd: l.orig_fee_borr_pd,
+        orig_fees_seller: l.orig_fees_seller,
+        cd_lender_credits: l.cd_lender_credits
+      });
     };
 
     // Helper to calculate turn time for a loan
@@ -1776,7 +1781,7 @@ router.get('/toptiering', authenticateToken, apiLimiter, async (req: AuthRequest
 
     fundedLoans.forEach((l: any) => {
       const actorName = l[actorColumn];
-      if (!actorName || actorName.trim() === '') return;
+      if (isActorMissing(actorName)) return; // Use shared utility
 
       if (!actorMap.has(actorName)) {
         actorMap.set(actorName, {
@@ -1793,7 +1798,7 @@ router.get('/toptiering', authenticateToken, apiLimiter, async (req: AuthRequest
 
       const actor = actorMap.get(actorName)!;
       const loanAmount = parseFloat(l.loan_amount) || 0;
-      const revenue = calcLoanRevenue(l);
+      const revenue = calcRevenue(l);
       const turnTime = calcTurnTime(l);
 
       actor.loans.push(l);
@@ -1877,19 +1882,19 @@ router.get('/toptiering', authenticateToken, apiLimiter, async (req: AuthRequest
 
     lostOpportunityLoans.forEach((l: any) => {
       const actorName = l[actorColumn];
-      if (!actorName || actorName.trim() === '') return;
+      if (isActorMissing(actorName)) return; // Use shared utility
 
       if (!lostOpportunityByActor.has(actorName)) {
         lostOpportunityByActor.set(actorName, { units: 0, revenue: 0 });
       }
       const lo = lostOpportunityByActor.get(actorName)!;
       lo.units += 1;
-      lo.revenue += calcLoanRevenue(l);
+      lo.revenue += calcRevenue(l);
     });
 
     deniedLoans.forEach((l: any) => {
       const actorName = l[actorColumn];
-      if (!actorName || actorName.trim() === '') return;
+      if (isActorMissing(actorName)) return; // Use shared utility
       deniedByActor.set(actorName, (deniedByActor.get(actorName) || 0) + 1);
     });
 
@@ -1963,7 +1968,7 @@ router.get('/toptiering', authenticateToken, apiLimiter, async (req: AuthRequest
 
     // Overall totals including lost opportunity metrics
     const totalLostOpportunityUnits = lostOpportunityLoans.length;
-    const totalLostOpportunityRevenue = lostOpportunityLoans.reduce((sum: number, l: any) => sum + calcLoanRevenue(l), 0);
+    const totalLostOpportunityRevenue = lostOpportunityLoans.reduce((sum: number, l: any) => sum + calcRevenue(l), 0);
     const totalDeniedUnits = deniedLoans.length;
     const totalPullThrough = startedLoans.length > 0 ? (fundedLoans.length / startedLoans.length) * 100 : 0;
 
@@ -2076,20 +2081,7 @@ router.get('/sales-scorecard', authenticateToken, attachTenantContext, apiLimite
 
     const actorColumn = actor === 'branch' ? 'branch' : 'loan_officer';
 
-    // Helper function to check if actor name is a placeholder/missing value
-    // Qlik uses vCCA_ScorecardMissingLevel = [Loan Officer Missing]*={0} to filter these out
-    // [Loan Officer Missing] = If([Loan Officer] = '99-Missing' OR IsNull([Loan Officer]) Or [Loan Officer]='No LO Found',1,0)
-    const isActorMissing = (name: string | null | undefined): boolean => {
-      if (!name || name.trim() === '') return true;
-      const normalizedName = name.toUpperCase().trim();
-      return normalizedName === '99-MISSING' || 
-             normalizedName === 'MISSING' ||
-             normalizedName === 'NO LO FOUND' ||
-             normalizedName === 'NO LOAN OFFICER' ||
-             normalizedName === 'NO BRANCH FOUND' ||
-             normalizedName === 'UNKNOWN' ||
-             normalizedName.startsWith('99-');
-    };
+    // isActorMissing is now imported from shared utilities
 
     // CRITICAL: TTS Score uses Rolling13MonthFlag, NOT [Date Interval]={'Last 12 Months'}
     // 
@@ -2230,15 +2222,16 @@ router.get('/sales-scorecard', authenticateToken, attachTenantContext, apiLimite
     // Starting log simplified
     logInfo('[SalesScorecard] Start', { actor, channel: channelGroup });
 
-    // PHASE 1: Fetch ALL loans from tenant database (no tenant_id filter needed - pool is tenant-specific)
+    // OPTIMIZED: Use SQL filtering for date, channel, and actor instead of JavaScript
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const startDateStr = formatDateForSQL(effectiveStartDate);
+    const endDateStr = formatDateForSQL(effectiveEndDate);
+
+    // PHASE 1: Fetch FUNDED loans with SQL filtering (main data for scorecard)
     // Note: DateType={'Funding'} in Qlik - we filter by funding_date
     // Branch Concession from Qlik: "Branch Price Concession" (Fields.3375) - stored as percentage
-    // Qlik only uses Branch Concession for TTS (Corporate Concession is loaded but not used)
-    // Added occupancy_type and borr_self_employed for Loan Complexity Score calculation
-    // Added rate_lock_buy_side_base_price_rate for Revenue calculation per Qlik Transform.qvs line 549:
-    //   Revenue = [Base Buy ($)] + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
-    //   [Base Buy ($)] = ((Base Buy - 100) / 100) * Loan Amount
-    const allLoansResult = await retryQuery(
+    // Added rate_lock_buy_side_base_price_rate for Revenue calculation per Qlik Transform.qvs
+    const fundedLoansResult = await retryQuery(
       () => tenantPool.query(
         `SELECT 
           loan_id, loan_amount, loan_type, loan_purpose, current_loan_status, channel,
@@ -2248,52 +2241,43 @@ router.get('/sales-scorecard', authenticateToken, attachTenantContext, apiLimite
           branch_price_concession, occupancy_type, borr_self_employed,
           rate_lock_buy_side_base_price_rate,
           number_of_conditions, date_warehoused, investor_status, investor_purchase_date
-         FROM loans`
+         FROM loans
+         WHERE funding_date IS NOT NULL
+           AND funding_date >= $1
+           AND funding_date <= $2
+           AND ${actorColumn} IS NOT NULL
+           AND TRIM(${actorColumn}) != ''
+           AND UPPER(TRIM(${actorColumn})) NOT IN ('99-MISSING', 'MISSING', 'NO LO FOUND', 'NO LOAN OFFICER', 'NO BRANCH FOUND', 'UNKNOWN')
+           AND UPPER(TRIM(${actorColumn})) NOT LIKE '99-%'
+           ${channelClause}`,
+        [startDateStr, endDateStr]
       ),
       2, 500
     );
+    const fundedLoans = fundedLoansResult.rows;
 
-    const allLoans = allLoansResult.rows;
+    // PHASE 2: Fetch supporting data for pull-through, lost opportunity, etc.
+    // These need application_date range, not funding_date
+    const supportingLoansResult = await retryQuery(
+      () => tenantPool.query(
+        `SELECT 
+          loan_id, loan_amount, loan_type, loan_purpose, current_loan_status, channel,
+          funding_date, closing_date, application_date, started_date,
+          branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
+          origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
+          rate_lock_buy_side_base_price_rate
+         FROM loans
+         WHERE COALESCE(started_date, application_date) >= $1
+           AND COALESCE(started_date, application_date) <= $2
+           ${channelClause}`,
+        [startDateStr, endDateStr]
+      ),
+      2, 500
+    );
+    const channelFilteredLoans = supportingLoansResult.rows;
 
     // Data count (simplified)
-    logInfo('[SalesScorecard] Data', { total: allLoans.length });
-
-    // PHASE 2: Apply channel filter
-    const channelFilteredLoans = allLoans.filter((l: any) => {
-      if (!channelGroup || channelGroup === 'All') return true;
-      
-      const channel = (l.channel || '').toLowerCase();
-      if (channelGroup === 'Retail') {
-        return channel.includes('retail') || channel.includes('brok');
-      } else if (channelGroup === 'TPO') {
-        return channel.includes('whole') || channel.includes('corresp');
-      } else if (channelGroup === '99-Missing') {
-        return !channel || channel.trim() === '';
-      } else if (channelGroup === 'Other') {
-        return channel && channel.trim() !== '' 
-          && !channel.includes('retail') && !channel.includes('brok')
-          && !channel.includes('whole') && !channel.includes('corresp');
-      }
-      return true;
-    });
-
-    // PHASE 3: Filter for FUNDED loans in date range
-    // Qlik uses DateType*={'Funding'} which ONLY includes loans with funding_date in the date range
-    // Also applies vCCA_ScorecardMissingLevel = [Loan Officer Missing]*={0} to exclude missing LOs
-    // DO NOT use closing_date fallback here - that inflates company averages
-    // Turn time calculation will separately check for closing_date (Qlik's [App-Close] field)
-    const fundedLoans = channelFilteredLoans.filter((l: any) => {
-      if (!l.funding_date) return false; // MUST have funding_date to match Qlik's DateType={'Funding'}
-      const fd = new Date(l.funding_date);
-      if (fd < effectiveStartDate || fd > effectiveEndDate) return false;
-      
-      // Apply [Loan Officer Missing]*={0} filter - exclude loans with missing loan officer
-      // Qlik: [Loan Officer Missing] = If([Loan Officer] = '99-Missing' OR IsNull([Loan Officer]) Or [Loan Officer]='No LO Found',1,0)
-      const actorValue = l[actorColumn];
-      if (isActorMissing(actorValue)) return false;
-      
-      return true;
-    });
+    logInfo('[SalesScorecard] Data', { funded: fundedLoans.length, supporting: channelFilteredLoans.length });
 
     // PHASE 4: Filter for STARTED loans in date range (for pull-through)
     const startedLoans = channelFilteredLoans.filter((l: any) => {
@@ -3526,53 +3510,10 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
     const monthsMap: Record<string, number> = { '3-months': 3, '6-months': 6, '12-months': 12 };
     const monthsBack = monthsMap[dateRange] || 3;
     
-    // Actor configuration for date fields
-    interface ActorConfig {
-      actorColumn: string;
-      outputDateField: string;
-      turnTimeStartField: string;
-      turnTimeEndField: string;
-    }
+    // Use shared actor configuration
+    const config = OPERATIONS_ACTOR_CONFIGS[actorType];
     
-    // Actor configuration - Qlik field mappings per Homestead CoheusConfig.xml
-    // From <OperationalScorecards> TriggerDateField:
-    // - Processor: "Sent to Underwriting" (Log.MS.Date.Approval) → approval_date
-    // - Underwriter: "Sent to Closing" (Fields.748) → closing_date  
-    // - Closer: "End Date to indicate Loan Closed/Funded" (Fields.1997) → disbursement_date
-    const actorConfigs: Record<string, ActorConfig> = {
-      processor: {
-        actorColumn: 'processor',
-        outputDateField: 'approval_date',  // Qlik: [Sent To Underwriting] = Log.MS.Date.Approval
-        turnTimeStartField: 'submitted_to_processing_date',
-        turnTimeEndField: 'approval_date'
-      },
-      underwriter: {
-        actorColumn: 'underwriter',
-        outputDateField: 'closing_date',   // Qlik: [Sent To Closing] = Fields.748 = Closing Date
-        turnTimeStartField: 'approval_date',
-        turnTimeEndField: 'closing_date'
-      },
-      closer: {
-        actorColumn: 'closer',
-        outputDateField: 'disbursement_date', // Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997
-        turnTimeStartField: 'closing_date',
-        turnTimeEndField: 'disbursement_date'
-      }
-    };
-    
-    const config = actorConfigs[actorType];
-    
-    // Helper: Check if actor name is missing/invalid
-    // CRITICAL: Match Qlik's EXACT logic from Script.csv:
-    //   If([Processor] = '99-Missing',1,0) as [Processor Missing]
-    //   If([Underwriter] = '99-Missing',1,0) as [Underwriter Missing]
-    //   If([Closer] = '99-Missing',1,0) as [Closer Missing]
-    // Only exclude EXACT match '99-Missing', not other variations
-    const isActorMissing = (name: string | null | undefined): boolean => {
-      if (!name || name.trim() === '') return true;
-      // Qlik ONLY checks for exact '99-Missing' (case-insensitive comparison)
-      return name.trim().toLowerCase() === '99-missing';
-    };
+    // isActorMissing is now imported from shared utilities (uses 'strict' mode for operations)
     
     // Get vMaxDate from data - using same logic as SalesScorecard for consistency
     // CRITICAL: Qlik uses Max("Last Modified Date"), NOT max funding_date!
@@ -3634,62 +3575,43 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
       complexity: 0.15
     };
     
-    // Fetch all loans with required columns
-    // Use actual column names from tenantDatabaseSchema.ts
-    // CRITICAL: Include loan_number for DISTINCT counting (Qlik uses COUNT(DISTINCT [Loan Number]))
-    const allLoansResult = await tenantPool.query(`
+    // OPTIMIZED: Use SQL filtering for date, channel, and actor
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const startDateStr = formatDateForSQL(effectiveStartDate);
+    const endDateStr = formatDateForSQL(effectiveEndDate);
+    
+    // Fetch loans with SQL filtering
+    // CRITICAL: Match Qlik's EXACT date filter syntax: >= start AND < end (EXCLUSIVE end date)
+    const outputLoansResult = await tenantPool.query(`
       SELECT 
         loan_id,
-        COALESCE(loan_number, loan_id) as loan_number,  -- Use loan_number for distinct counting
+        COALESCE(loan_number, loan_id::text) as loan_number,
         loan_amount, loan_type, loan_purpose, current_loan_status, channel,
         processor, underwriter, closer,
-        -- Date columns per Homestead CoheusConfig.xml TriggerDateFields
         submitted_to_processing_date,
         processing_date,
         approval_date,
         closing_date,
-        disbursement_date,  -- Fields.1997: "End Date to indicate Loan Closed/Funded" for Closer
+        disbursement_date,
         funding_date,
         application_date,
-        -- Metrics columns
         fico_score, ltv_ratio, be_dti_ratio,
         occupancy_type, borr_self_employed
       FROM loans
-    `);
+      WHERE ${config.outputDateField} IS NOT NULL
+        AND ${config.outputDateField} >= $1
+        AND ${config.outputDateField} < $2
+        AND ${config.actorColumn} IS NOT NULL
+        AND TRIM(${config.actorColumn}) != ''
+        AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
+        ${channelClause}
+    `, [startDateStr, endDateStr]);
     
-    const allLoans = allLoansResult.rows;
-    logInfo('[OpsScorecard] Total loans loaded', { count: allLoans.length });
-    
-    // Apply channel filter
-    const channelFilteredLoans = allLoans.filter((l: any) => {
-      if (!channelGroup || channelGroup === 'All') return true;
-      
-      const channel = (l.channel || '').toLowerCase();
-      if (channelGroup === 'Retail') {
-        return channel.includes('retail') || channel.includes('brok');
-      } else if (channelGroup === 'TPO') {
-        return channel.includes('whole') || channel.includes('corresp');
-      }
-      return true;
-    });
-    
-    // Filter loans with valid output date in range
-    // CRITICAL: Match Qlik's EXACT date filter syntax:
-    //   [Sent To Closing] *= {">=MonthStart(...)< vCurrentDateAsDate"}
-    // This means: >= start AND < end (EXCLUSIVE end date)
-    const outputLoans = channelFilteredLoans.filter((l: any) => {
-      const outputDate = l[config.outputDateField];
-      if (!outputDate) return false;
-      const od = new Date(outputDate);
-      if (isNaN(od.getTime())) return false;
-      // >= start AND < end (EXCLUSIVE end date, matching Qlik's "<vCurrentDateAsDate")
-      if (od < effectiveStartDate || od >= effectiveEndDate) return false;
-      
-      // Check actor is not missing
-      const actorName = l[config.actorColumn];
-      if (isActorMissing(actorName)) return false;
-      
-      return true;
+    const outputLoans = outputLoansResult.rows;
+    logInfo('[OpsScorecard] Loans in range (SQL filtered)', { 
+      outputLoans: outputLoans.length,
+      actorColumn: config.actorColumn,
+      outputDateField: config.outputDateField
     });
     
     logInfo('[OpsScorecard] Loans in range', { 
@@ -4045,9 +3967,7 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
         monthsBack
       },
       filterPipeline: {
-        totalLoansInDb: allLoans.length,
-        loansAfterChannelFilter: channelFilteredLoans.length,
-        loansAfterDateAndActorFilter: outputLoans.length,
+        loansMatchingFilters: outputLoans.length,  // Now filtered at SQL level
         distinctLoanNumbers: totalUnits,
         actorColumn: config.actorColumn,
         outputDateField: config.outputDateField
@@ -4134,52 +4054,10 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       return res.status(400).json({ error: 'Invalid actor_type. Must be "processor", "underwriter", or "closer"' });
     }
     
-    // Actor configuration - Qlik field mappings per Homestead CoheusConfig.xml
-    // From <OperationalScorecards> TriggerDateField:
-    // - Processor: "Sent to Underwriting" (Log.MS.Date.Approval) → approval_date
-    // - Underwriter: "Sent to Closing" (Fields.748) → closing_date  
-    // - Closer: "End Date to indicate Loan Closed/Funded" (Fields.1997) → disbursement_date
-    interface ActorConfig {
-      actorColumn: string;
-      outputDateField: string;
-      turnTimeStartField: string;
-      turnTimeEndField: string;
-    }
+    // Use shared actor configuration
+    const config = OPERATIONS_ACTOR_CONFIGS[actorType];
     
-    const actorConfigs: Record<string, ActorConfig> = {
-      processor: {
-        actorColumn: 'processor',
-        outputDateField: 'approval_date',  // Qlik: [Sent To Underwriting] = Log.MS.Date.Approval
-        turnTimeStartField: 'submitted_to_processing_date',
-        turnTimeEndField: 'approval_date'
-      },
-      underwriter: {
-        actorColumn: 'underwriter',
-        outputDateField: 'closing_date',   // Qlik: [Sent To Closing] = Fields.748 = Closing Date
-        turnTimeStartField: 'approval_date',
-        turnTimeEndField: 'closing_date'
-      },
-      closer: {
-        actorColumn: 'closer',
-        outputDateField: 'disbursement_date', // Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997
-        turnTimeStartField: 'closing_date',
-        turnTimeEndField: 'disbursement_date'
-      }
-    };
-    
-    const config = actorConfigs[actorType];
-    
-    // Helper: Check if actor name is missing/invalid
-    // CRITICAL: Match Qlik's EXACT logic from Script.csv:
-    //   If([Processor] = '99-Missing',1,0) as [Processor Missing]
-    //   If([Underwriter] = '99-Missing',1,0) as [Underwriter Missing]
-    //   If([Closer] = '99-Missing',1,0) as [Closer Missing]
-    // Only exclude EXACT match '99-Missing', not other variations
-    const isActorMissing = (name: string | null | undefined): boolean => {
-      if (!name || name.trim() === '') return true;
-      // Qlik ONLY checks for exact '99-Missing' (case-insensitive comparison)
-      return name.trim().toLowerCase() === '99-missing';
-    };
+    // isActorMissing is now imported from shared utilities (uses 'strict' mode for operations)
     
     // Get vMaxDate from data - using same logic as SalesScorecard for consistency
     // CRITICAL: Qlik uses Max("Last Modified Date"), NOT max funding_date!
@@ -4244,73 +4122,72 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       complexity: 0.15
     };
     
-    // Fetch all loans with required columns
-    // CRITICAL: Use EXACT field names - NO COALESCE fallbacks (match Qlik exactly)
-    const allLoansResult = await tenantPool.query(`
+    // OPTIMIZED: Use SQL filtering for date, channel, and actor
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const startDateStr = formatDateForSQL(effectiveStartDate);
+    const endDateStr = formatDateForSQL(effectiveEndDate);
+    
+    // Fetch loans with SQL filtering
+    // CRITICAL: Match Qlik's EXACT date filter syntax: >= start AND < end (EXCLUSIVE end date)
+    const outputLoansResult = await tenantPool.query(`
       SELECT 
         loan_id, 
-        COALESCE(loan_number, loan_id) as loan_number,  -- loan_number for distinct counting
+        COALESCE(loan_number, loan_id::text) as loan_number,
         loan_amount, loan_type, loan_purpose, current_loan_status, channel,
         processor, underwriter, closer,
-        -- Date columns per Homestead CoheusConfig.xml TriggerDateFields
         submitted_to_processing_date,
         processing_date,
         approval_date,
         closing_date,
-        disbursement_date,  -- Fields.1997: "End Date to indicate Loan Closed/Funded" for Closer
+        disbursement_date,
         funding_date,
         application_date,
         fico_score, ltv_ratio, be_dti_ratio,
         occupancy_type, borr_self_employed
       FROM loans
-    `);
+      WHERE ${config.outputDateField} IS NOT NULL
+        AND ${config.outputDateField} >= $1
+        AND ${config.outputDateField} < $2
+        AND ${config.actorColumn} IS NOT NULL
+        AND TRIM(${config.actorColumn}) != ''
+        AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
+        ${channelClause}
+    `, [startDateStr, endDateStr]);
     
-    const allLoans = allLoansResult.rows;
-    logInfo('[OpsScorecardTrends] Total loans loaded', { count: allLoans.length });
+    const outputLoans = outputLoansResult.rows;
+    logInfo('[OpsScorecardTrends] Loans in range (SQL filtered)', { outputLoans: outputLoans.length });
     
-    // Apply channel filter
-    const channelFilteredLoans = allLoans.filter((l: any) => {
-      if (!channelGroup || channelGroup === 'All') return true;
-      
-      const channel = (l.channel || '').toLowerCase();
-      if (channelGroup === 'Retail') {
-        return channel.includes('retail') || channel.includes('brok');
-      } else if (channelGroup === 'TPO') {
-        return channel.includes('whole') || channel.includes('corresp');
-      }
-      return true;
-    });
-    
-    // Filter loans with valid output date in range
-    // CRITICAL: Match Qlik's EXACT date filter syntax:
-    //   [Sent To Closing] *= {">=MonthStart(...)< vCurrentDateAsDate"}
-    // This means: >= start AND < end (EXCLUSIVE end date)
-    const outputLoans = channelFilteredLoans.filter((l: any) => {
-      const outputDate = l[config.outputDateField];
-      if (!outputDate) return false;
-      const od = new Date(outputDate);
-      if (isNaN(od.getTime())) return false;
-      // >= start AND < end (EXCLUSIVE end date, matching Qlik's "<vCurrentDateAsDate")
-      if (od < effectiveStartDate || od >= effectiveEndDate) return false;
-      
-      const actorName = l[config.actorColumn];
-      if (isActorMissing(actorName)) return false;
-      
-      return true;
-    });
-    
-    logInfo('[OpsScorecardTrends] Loans in range', { outputLoans: outputLoans.length });
+    // Debug: Check turn time fields availability
+    let turnTimeFieldsMissing = 0;
+    let turnTimeValid = 0;
+    if (outputLoans.length > 0) {
+      const sampleLoan = outputLoans[0];
+      logInfo('[OpsScorecardTrends] Turn time fields debug', {
+        turnTimeStartField: config.turnTimeStartField,
+        turnTimeEndField: config.turnTimeEndField,
+        sampleStartValue: sampleLoan[config.turnTimeStartField],
+        sampleEndValue: sampleLoan[config.turnTimeEndField],
+        availableFields: Object.keys(sampleLoan)
+      });
+    }
     
     // Helper: Calculate turn time in days
     const calcTurnTime = (l: any): number | null => {
       const startDate = l[config.turnTimeStartField];
       const endDate = l[config.turnTimeEndField];
-      if (!startDate || !endDate) return null;
+      if (!startDate || !endDate) {
+        turnTimeFieldsMissing++;
+        return null;
+      }
       const start = new Date(startDate);
       const end = new Date(endDate);
       if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
       const days = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-      return days > 0 ? days : null;
+      if (days > 0) {
+        turnTimeValid++;
+        return days;
+      }
+      return null;
     };
     
     // Helper: Calculate loan complexity score
@@ -4483,7 +4360,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     const totalVolume = actors.reduce((sum, a) => sum + a.totalVolume, 0);
     const avgUnitsPerActor = totalUnits / actorCount;
     
-    // Turn time average (inverse formula)
+    // Turn time average (inverse formula for TTS rating)
     let totalInverseTurnTime = 0;
     let turnTimeActorCount = 0;
     actors.forEach(a => {
@@ -4496,7 +4373,16 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       }
     });
     const avgInverseTurnTime = turnTimeActorCount > 0 ? totalInverseTurnTime / turnTimeActorCount : 0;
-    const avgTurnTime = actors.reduce((sum, a) => {
+    
+    // SIMPLE average of ALL turn times for KPI display (matches Qlik's Avg([Sent To Closing] - [Sent To Underwriting]))
+    // NOT "average of per-actor averages" - Qlik calculates a simple average of all loan turn times
+    const allTurnTimes = actors.flatMap(a => a.allTurnTimes);
+    const avgTurnTimeForKPI = allTurnTimes.length > 0 
+      ? allTurnTimes.reduce((sum, t) => sum + t, 0) / allTurnTimes.length 
+      : 0;
+    
+    // Per-actor average (for TTS calculations only)
+    const avgTurnTimePerActor = actors.reduce((sum, a) => {
       if (a.allTurnTimes.length === 0) return sum;
       return sum + a.allTurnTimes.reduce((s, t) => s + t, 0) / a.allTurnTimes.length;
     }, 0) / Math.max(1, actors.filter(a => a.allTurnTimes.length > 0).length);
@@ -4506,6 +4392,12 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       if (a.allComplexityScores.length === 0) return sum;
       return sum + a.allComplexityScores.reduce((s, c) => s + c, 0) / a.allComplexityScores.length;
     }, 0) / actorCount;
+    
+    // Volume average - only count actors with volume > 0 (matches Qlik's If(Sum=0, Null()) pattern)
+    const actorsWithVolume = actors.filter(a => a.totalVolume > 0);
+    const avgVolumePerActor = actorsWithVolume.length > 0 
+      ? totalVolume / actorsWithVolume.length 
+      : 0;
     
     // Calculate TTS and metrics for each actor
     const actorsWithMetrics = actors.map(a => {
@@ -4550,7 +4442,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
           monthsData[monthKey] = {
             unitsOutput: md.unitsOutput,
             outputVsTarget: md.unitsOutput - targetUnits,
-            averageDays: Math.round(monthAvgDays * 10) / 10,
+            avgDays: Math.round(monthAvgDays * 10) / 10,
             conversionPercent: Math.round(conversionPercent * 10) / 10,
             loanComplexityScore: Math.round(monthAvgComplexity * 10) / 10,
             volumeOutput: Math.round(md.volumeOutput)
@@ -4560,7 +4452,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
           monthsData[monthKey] = {
             unitsOutput: 0,
             outputVsTarget: -targetUnits,
-            averageDays: 0,
+            avgDays: 0,
             conversionPercent: 0,
             loanComplexityScore: 0,
             volumeOutput: 0
@@ -4651,38 +4543,35 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
       bottom: { ...createTierSummary(bottomActors), tier: 'bottom' as const }
     };
     
-    // KPIs
+    // KPIs - "Total Monthly Output" = Average Monthly Output
+    // This is the average output PER MONTH (total divided by months), NOT per actor
+    const avgMonthlyUnits = Math.round(totalUnits / monthsCount);
+    const avgMonthlyVolume = Math.round(totalVolume / monthsCount);
+    
     const kpis = {
       targetUnitsPerMonth: targetUnits,
-      avgUnitsOutput: Math.round(totalUnits / actorCount),
-      avgVolumeOutput: Math.round(totalVolume / actorCount),
+      avgUnitsOutput: avgMonthlyUnits,  // Average units per month
+      avgVolumeOutput: avgMonthlyVolume,  // Average volume per month
       avgLoanComplexityScore: Math.round(avgComplexity * 10) / 10,
-      avgDays: Math.round(avgTurnTime * 10) / 10
+      avgDays: Math.round(avgTurnTimeForKPI * 10) / 10
     };
     
     logInfo('[OpsScorecardTrends] Results', {
       actorType,
       actorCount,
       totalUnits,
+      totalVolume,
       monthsCount,
-      tiers: { top: topActors.length, second: secondActors.length, bottom: bottomActors.length }
+      tiers: { top: topActors.length, second: secondActors.length, bottom: bottomActors.length },
+      kpiDebug: {
+        avgUnitsOutput: kpis.avgUnitsOutput,
+        avgVolumeOutput: kpis.avgVolumeOutput,
+        avgDays: kpis.avgDays,
+        allTurnTimesCount: allTurnTimes.length,
+        turnTimeFieldsMissing,
+        turnTimeValid
+      }
     });
-    
-    // Count loans filtered out at each step for debugging
-    const loansWithNullOutputDate = channelFilteredLoans.filter((l: any) => !l[config.outputDateField]).length;
-    const loansOutsideDateRange = channelFilteredLoans.filter((l: any) => {
-      const outputDate = l[config.outputDateField];
-      if (!outputDate) return false;
-      const od = new Date(outputDate);
-      return od < effectiveStartDate || od >= effectiveEndDate;
-    }).length;
-    const loansWithMissingActor = channelFilteredLoans.filter((l: any) => {
-      const outputDate = l[config.outputDateField];
-      if (!outputDate) return false;
-      const od = new Date(outputDate);
-      if (od < effectiveStartDate || od >= effectiveEndDate) return false;
-      return isActorMissing(l[config.actorColumn]);
-    }).length;
     
     res.json({
       actors: actorsWithTTS,
@@ -4695,15 +4584,10 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
         end: effectiveEndDate.toISOString(),
         monthsIncluded: monthsCount
       },
-      // DEBUG INFO - shows filter pipeline to identify issues
+      // DEBUG INFO - SQL filtering now handles most of this
       _debug: {
         filterPipeline: {
-          totalLoansInDB: allLoans.length,
-          afterChannelFilter: channelFilteredLoans.length,
-          afterAllFilters: outputLoans.length,
-          loansWithNullOutputDate,
-          loansOutsideDateRange,
-          loansWithMissingActor,
+          loansAfterSQLFilter: outputLoans.length,
         },
         dateRangeDetails: {
           vMaxDate: vMaxDate.toISOString(),
@@ -4821,31 +4705,7 @@ router.get('/sales-trends', authenticateToken, attachTenantContext, apiLimiter, 
       return true;
     });
     
-    // Helper: Check if LO is missing/invalid
-    function isActorMissing(name: string | null): boolean {
-      if (!name) return true;
-      const normalized = name.trim().toLowerCase();
-      return normalized === '' ||
-             normalized === '99-missing' ||
-             normalized === 'missing' ||
-             normalized === 'no lo found' ||
-             normalized === 'no loan officer' ||
-             normalized.startsWith('99-');
-    }
-    
-    // Helper: Calculate revenue per loan
-    function calcLoanRevenue(loan: any): number {
-      const basePriceRate = parseFloat(loan.rate_lock_buy_side_base_price_rate || 0);
-      const loanAmount = parseFloat(loan.loan_amount || 0);
-      const origFeeBorrPd = parseFloat(loan.orig_fee_borr_pd || 0);
-      const origFeesSeller = parseFloat(loan.orig_fees_seller || 0);
-      const cdLenderCredits = parseFloat(loan.cd_lender_credits || 0);
-      
-      if (basePriceRate <= 0 || loanAmount <= 0) return 0;
-      
-      const baseBuyDollars = ((basePriceRate - 100) / 100) * loanAmount;
-      return baseBuyDollars + origFeeBorrPd + origFeesSeller - cdLenderCredits;
-    }
+    // isActorMissing and calcLoanRevenue are imported from shared utilities at file top
     
     // Helper: Calculate turn time in days
     function calcTurnTime(loan: any): number | null {
@@ -5343,18 +5203,7 @@ router.get('/toptiering-comparison', authenticateToken, attachTenantContext, api
     const actorColumn = actorType === 'branch' ? 'branch' : 'loan_officer';
     const actorIdColumn = actorType === 'branch' ? 'branch' : 'loan_officer_id';
     
-    // Helper function to check if actor name is a placeholder/missing value
-    const isActorMissing = (name: string | null | undefined): boolean => {
-      if (!name || name.trim() === '') return true;
-      const normalizedName = name.toUpperCase().trim();
-      return normalizedName === '99-MISSING' || 
-             normalizedName === 'MISSING' ||
-             normalizedName === 'NO LO FOUND' ||
-             normalizedName === 'NO LOAN OFFICER' ||
-             normalizedName === 'NO BRANCH FOUND' ||
-             normalizedName === 'UNKNOWN' ||
-             normalizedName.startsWith('99-');
-    };
+    // isActorMissing is now imported from shared utilities
     
     // Get vMaxDate from data (like Qlik's Max("Last Modified Date"))
     const maxDateResult = await tenantPool.query(`

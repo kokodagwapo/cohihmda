@@ -11,7 +11,7 @@ export type TTSTier = 'top' | 'second' | 'bottom';
 export interface MonthlyMetrics {
   unitsOutput: number;
   outputVsTarget: number;
-  averageDays: number;
+  avgDays: number;
   conversionPercent: number;
   loanComplexityScore: number;
   volumeOutput: number;
@@ -218,7 +218,7 @@ function applyComparisonView(
         transformedMonths[month] = {
           unitsOutput: 0,
           outputVsTarget: 0,
-          averageDays: 0,
+          avgDays: 0,
           conversionPercent: 0,
           loanComplexityScore: 0,
           volumeOutput: 0

@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Button } from '@/components/ui/button';
 import { useSalesTrendsData, type LoanOfficer as APILoanOfficer, type DrilldownData as APIDrilldownData, type DateRangeOption } from '@/hooks/useSalesTrendsData';
+import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
 type DateRange = '3-months' | '6-months';
 type ViewMode = 'cards' | 'tabular';
@@ -199,6 +201,8 @@ const SalesTrends = () => {
   const [isDrilldownOpen, setIsDrilldownOpen] = useState(false);
   const [drilldownData, setDrilldownData] = useState<DrilldownData | null>(null);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch data from API
   const { data: apiData, loading, error, refetch, fetchDrilldown } = useSalesTrendsData(dateRange as DateRangeOption, 'Retail');
@@ -337,7 +341,17 @@ const SalesTrends = () => {
 
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none" />
 
-      <main className="relative mx-auto px-6 pt-24 pb-12 max-w-[1800px]">
+      <div className="flex pt-14 sm:pt-16 min-h-screen relative">
+        <TopTieringSidebar
+          sidebarOpen={sidebarOpen}
+          onSidebarOpenChange={setSidebarOpen}
+          sidebarCollapsed={sidebarCollapsed}
+          onSidebarCollapsedChange={setSidebarCollapsed}
+        />
+        <div className="flex-1 flex flex-col min-w-0">
+          <TopTieringTopBar title="Sales Trends" onOpenSidebar={() => setSidebarOpen(true)} />
+
+      <main className="relative flex-1 overflow-y-auto px-6 py-4 max-w-[1800px] mx-auto">
         {/* Loading State */}
         {loading && (
           <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -639,6 +653,8 @@ const SalesTrends = () => {
         </div>
         )}
       </main>
+        </div>
+      </div>
 
       {/* Drilldown Modal */}
       <Dialog open={isDrilldownOpen} onOpenChange={setIsDrilldownOpen}>

@@ -130,6 +130,53 @@ The Qlik TriggerDateField mappings are **client-specific**. Different clients ma
 
 ---
 
+## UI Views
+
+The Operations Scorecard page has three view tabs:
+
+### Summary Tab (Tier Aggregation)
+Displays metrics aggregated by tier (Top, Second, Bottom) in a pivot table format. Shows:
+- Totals column for all actors
+- Top Tier, Second Tier, Bottom Tier columns
+- Rows for each metric (Actor Count, Units, Volume, etc.)
+
+### Details Tab (Individual Actors)
+
+**Qlik Reference**: Object ID `a50b485b-0cc4-4ffa-8a40-6e2e3edea613` - "Output Scorecard" table
+
+Displays individual actor performance data in a sortable/filterable table. Each row represents one actor with their metrics.
+
+| Column | Description | Sort Default |
+|--------|-------------|--------------|
+| **Actor Name** | Processor/Underwriter/Closer name | A-Z |
+| **Tier** | Badge showing Top/Second/Bottom tier | Top first |
+| **TTS Score** | TopTiering Score (color-coded) | Descending |
+| **Units** | Count of loans processed | Descending |
+| **Volume** | Total loan amount (formatted currency) | Descending |
+| **Avg/Mo** | Average units per month | Descending |
+| **Days** | Average turn time in days | Ascending (lower is better) |
+| **Complexity** | Loan complexity score (base 100) | Descending |
+| **Approved** | Approval percentage | Descending |
+| **Govt %** | Government loan percentage | Descending |
+| **Purch %** | Purchase transaction percentage | Descending |
+| **FICO** | Weighted average FICO score | Descending |
+| **LTV** | Weighted average LTV ratio | Ascending (lower is better) |
+
+#### Features:
+- **Sortable columns**: Click any column header to sort
+- **Search filter**: Filter actors by name
+- **TTS Score color coding**:
+  - >= 120: Top tier color (dark blue)
+  - >= 100: Green
+  - >= 80: Amber/Yellow
+  - < 80: Red
+- **Tier badges**: Color-coded badges matching tier colors
+
+### Charts Tab
+Visual representations of tier distributions and performance metrics.
+
+---
+
 ## Loan Complexity Score
 
 From Qlik (Transform.qvs), Loan Complexity Score is pre-calculated and stored in the data. The formula considers:
@@ -367,6 +414,7 @@ const actorConfigs: Record<string, ActorConfig> = {
 | 2026-01-26 | Added disbursement_date column to tenantDatabaseSchema.ts for Fields.1997 mapping | AI Assistant |
 | 2026-01-26 | Fixed tier assignment thresholds: >=120 Top, >=80 Second, <80 Bottom (from Qlik Dimensions.csv) | AI Assistant |
 | 2026-01-27 | Verified unit counts match Qlik: Processor 2,087, Underwriter 2,171, Closer 1,305 | AI Assistant |
+| 2026-01-28 | Implemented Details tab with individual actor table, sorting, filtering, and tier badges (Qlik object a50b485b-0cc4-4ffa-8a40-6e2e3edea613) | AI Assistant |
 
 ## Qlik Reference Files
 
@@ -380,3 +428,11 @@ The following Qlik files were analyzed to determine the correct logic:
 | `L1 Aliasing.qvs` | Field alias mappings for TriggerDateFields |
 | `CoheusConfig.xml` (Homestead) | Client-specific TriggerDateField mappings (Fields.1997, etc.) |
 | `CoheusDataDictionary.xml` | Encompass field ID to alias mappings |
+
+## Qlik Object References
+
+| Object ID | Type | Name | Sheet |
+|-----------|------|------|-------|
+| `a50b485b-0cc4-4ffa-8a40-6e2e3edea613` | table | Output Scorecard | Operation Scorecard |
+| `f70ad8f0-fc9e-4fe8-8a76-c2af0175041e` | pivot-table | Output Scorecard Summary | Operation Scorecard |
+| `fbauUhG` | container | Chart Container | Operation Scorecard |

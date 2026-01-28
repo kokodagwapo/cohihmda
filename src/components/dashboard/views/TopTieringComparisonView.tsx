@@ -419,26 +419,26 @@ export function TopTieringComparisonView({
     return sortAndAddCumulative(filteredData, bpsChartSorting, metric);
   }, [filteredData, bpsChartSorting, selectedRevenueTab]);
 
-  // Get tier color
+  // Get tier color - Updated to match new tier colors
   const getTierColor = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return isDarkMode ? '#14b8a6' : '#0d9488'; // teal-500/teal-600
+        return '#00008F'; // Dark blue
       case 'second':
-        return isDarkMode ? '#10b981' : '#059669'; // emerald-500/emerald-600
+        return '#52B852'; // Green
       case 'bottom':
-        return isDarkMode ? '#84cc16' : '#65a30d'; // lime-500/lime-600
+        return '#B2DCB2'; // Light green
     }
   };
 
   const getTierLightColor = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return isDarkMode ? 'rgba(20, 184, 166, 0.3)' : 'rgba(20, 184, 166, 0.2)';
+        return isDarkMode ? 'rgba(0, 0, 143, 0.3)' : 'rgba(0, 0, 143, 0.2)';
       case 'second':
-        return isDarkMode ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.2)';
+        return isDarkMode ? 'rgba(82, 184, 82, 0.3)' : 'rgba(82, 184, 82, 0.2)';
       case 'bottom':
-        return isDarkMode ? 'rgba(132, 204, 22, 0.3)' : 'rgba(132, 204, 22, 0.2)';
+        return isDarkMode ? 'rgba(178, 220, 178, 0.3)' : 'rgba(178, 220, 178, 0.2)';
     }
   };
 
@@ -617,28 +617,28 @@ export function TopTieringComparisonView({
                     // Define tier-specific styles
                     const tierStyles = {
                       top: {
-                        bg: isDarkMode ? 'bg-gradient-to-br from-teal-500/20 via-teal-500/10 to-transparent' : 'bg-gradient-to-br from-teal-100 via-teal-50 to-teal-50/80',
-                        border: isDarkMode ? 'border-teal-500/40' : 'border-teal-300',
-                        dot: 'bg-teal-500',
-                        text: isDarkMode ? 'text-teal-400' : 'text-teal-600',
-                        iconBg: isDarkMode ? 'bg-teal-500/20' : 'bg-teal-100',
-                        badge: 'bg-teal-500'
+                        bg: isDarkMode ? 'bg-tier-top-dark' : 'bg-tier-top-light',
+                        border: isDarkMode ? 'border-tier-top/40' : 'border-tier-top/30',
+                        dot: 'bg-tier-top',
+                        text: isDarkMode ? 'text-white' : 'text-tier-top',
+                        iconBg: isDarkMode ? 'bg-tier-top/20' : 'bg-tier-top-light',
+                        badge: 'bg-tier-top'
                       },
                       second: {
-                        bg: isDarkMode ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent' : 'bg-gradient-to-br from-emerald-50 via-emerald-25 to-white',
-                        border: isDarkMode ? 'border-emerald-500/30' : 'border-emerald-200',
-                        dot: 'bg-emerald-500',
-                        text: isDarkMode ? 'text-emerald-400' : 'text-emerald-600',
-                        iconBg: isDarkMode ? 'bg-emerald-500/20' : 'bg-emerald-100',
-                        badge: 'bg-emerald-500'
+                        bg: isDarkMode ? 'bg-tier-second-dark' : 'bg-tier-second-light',
+                        border: isDarkMode ? 'border-tier-second/40' : 'border-tier-second/30',
+                        dot: 'bg-tier-second',
+                        text: isDarkMode ? 'text-white' : 'text-tier-second',
+                        iconBg: isDarkMode ? 'bg-tier-second/20' : 'bg-tier-second-light',
+                        badge: 'bg-tier-second'
                       },
                       bottom: {
-                        bg: isDarkMode ? 'bg-gradient-to-br from-lime-500/10 via-lime-500/5 to-transparent' : 'bg-gradient-to-br from-lime-50 via-lime-25 to-white',
-                        border: isDarkMode ? 'border-lime-500/30' : 'border-lime-200',
-                        dot: 'bg-lime-500',
-                        text: isDarkMode ? 'text-lime-400' : 'text-lime-600',
-                        iconBg: isDarkMode ? 'bg-lime-500/20' : 'bg-lime-100',
-                        badge: 'bg-lime-500'
+                        bg: isDarkMode ? 'bg-tier-bottom-dark' : 'bg-tier-bottom-light',
+                        border: isDarkMode ? 'border-tier-bottom/60' : 'border-tier-bottom',
+                        dot: 'bg-tier-bottom',
+                        text: isDarkMode ? 'text-tier-bottom' : 'text-slate-600',
+                        iconBg: isDarkMode ? 'bg-tier-bottom/30' : 'bg-tier-bottom-light',
+                        badge: 'bg-tier-bottom text-slate-800'
                       }
                     }[tierData.tier as 'top' | 'second' | 'bottom'];
                     
@@ -714,9 +714,9 @@ export function TopTieringComparisonView({
                           <div className={`h-1.5 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
                             <div 
                               className={`h-full rounded-full shadow-lg transition-all duration-1000 ease-out ${
-                                tierData.tier === 'top' ? 'bg-gradient-to-r from-teal-600 to-teal-400 shadow-teal-500/30' :
-                                tierData.tier === 'second' ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 shadow-emerald-500/30' :
-                                'bg-gradient-to-r from-lime-600 to-lime-400 shadow-lime-500/30'
+                                tierData.tier === 'top' ? 'bg-tier-top shadow-tier-top/30' :
+                                tierData.tier === 'second' ? 'bg-tier-second shadow-tier-second/30' :
+                                'bg-tier-bottom shadow-tier-bottom/30'
                               }`}
                               style={{ width: `${tierData.percent}%` }}
                             />

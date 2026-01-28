@@ -15,13 +15,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
-import { Search, Download, TrendingUp, TrendingDown, Minus, Info, BarChart3, Filter, Maximize2, Minimize2, Loader2 } from 'lucide-react';
+import { Search, Download, TrendingUp, TrendingDown, Minus, Info, BarChart3, Filter, Maximize2, Minimize2, Loader2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { 
   useOperationsScorecardData, 
   OperationsActorType, 
+  OperationsActor,
   DateRangeType,
   convertToViewFormat,
-  getActorTypeDisplayName
+  getActorTypeDisplayName,
+  getTierColorClass,
+  getTierDisplayName
 } from '@/hooks/useOperationsScorecardData';
 
 type ScorecardActor = OperationsActorType;
@@ -331,6 +334,11 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Details tab sorting state
+  const [detailsSortColumn, setDetailsSortColumn] = useState<string>('ttsScore');
+  const [detailsSortDirection, setDetailsSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [detailsSearchQuery, setDetailsSearchQuery] = useState('');
 
   // Fetch real data from API
   const { data: apiData, loading, error } = useOperationsScorecardData(
@@ -425,11 +433,11 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
   const getTierData = (tier: 'top' | 'second' | 'bottom') => {
     switch (tier) {
       case 'top':
-        return { name: 'Top Tier', data: displayData.topTier, color: 'teal' };
+        return { name: 'Top Tier', data: displayData.topTier, color: 'tier-top' };
       case 'second':
-        return { name: 'Second Tier', data: displayData.secondTier, color: 'emerald' };
+        return { name: 'Second Tier', data: displayData.secondTier, color: 'tier-second' };
       case 'bottom':
-        return { name: 'Bottom Tier', data: displayData.bottomTier, color: 'lime' };
+        return { name: 'Bottom Tier', data: displayData.bottomTier, color: 'tier-bottom' };
     }
   };
 
@@ -536,7 +544,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                   </div>
                   <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
                     <div 
-                      className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full shadow-lg shadow-emerald-500/30 transition-all duration-1000 ease-out animate-in slide-in-from-left" 
+                      className="h-full bg-tier-second rounded-full shadow-lg shadow-tier-second/30 transition-all duration-1000 ease-out animate-in slide-in-from-left" 
                       style={{ width: '70%' }} 
                     />
                   </div>
@@ -649,11 +657,11 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
               </CardHeader>
                <CardContent className="pt-5 space-y-4">
                  {/* Insight 1: Top Tier Performance */}
-                 <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-teal-500/10 via-teal-500/5 to-transparent border-white/10 shadow-[0_3px_10px_rgba(20,184,166,0.2)]' : 'bg-gradient-to-br from-teal-50 via-teal-25 to-white border-white shadow-[0_3px_10px_rgba(20,184,166,0.3)]'}`}>
+                 <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-tier-top-dark border-tier-top/30 shadow-[0_3px_10px_rgba(0,0,143,0.2)]' : 'bg-tier-top-light border-tier-top/20 shadow-[0_3px_10px_rgba(0,0,143,0.3)]'}`}>
                    <div className="flex items-center justify-between mb-3">
                      <div className="flex items-center gap-2">
-                       <div className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></div>
-                       <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-teal-400/90' : 'text-teal-600/90'}`}>
+                       <div className="w-1.5 h-1.5 rounded-full bg-tier-top animate-pulse"></div>
+                       <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-white/90' : 'text-tier-top/90'}`}>
                          Top Tier Output
                        </p>
                      </div>
@@ -695,7 +703,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                  </div>
 
                  {/* Insight 3: Approval Rate */}
-                 <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-white/10 shadow-[0_3px_10px_rgba(16,185,129,0.2)]' : 'bg-gradient-to-br from-emerald-50 via-emerald-25 to-white border-white shadow-[0_3px_10px_rgba(16,185,129,0.3)]'}`}>
+                 <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-tier-second-dark border-tier-second/30 shadow-[0_3px_10px_rgba(82,184,82,0.2)]' : 'bg-tier-second-light border-tier-second/20 shadow-[0_3px_10px_rgba(82,184,82,0.3)]'}`}>
                    <div className="flex items-center justify-between mb-3">
                      <div className="flex items-center gap-2">
                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -977,8 +985,8 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                   </div>
                 )}
 
-                {/* Table View */}
-                {(scorecardView === 'summary' || scorecardView === 'detail') && (
+                {/* Summary Table View */}
+                {scorecardView === 'summary' && (
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse">
                     <thead>
@@ -989,13 +997,13 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                         <th className={`text-right py-3 px-4 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                           Totals
                         </th>
-                        <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-teal-500 via-teal-600 to-teal-700 text-white shadow-[0_2px_8px_rgba(20,184,166,0.3)]`}>
+                        <th className={`text-right py-3 px-4 text-sm font-bold bg-tier-top text-white shadow-[0_2px_8px_rgba(0,0,143,0.3)]`}>
                           Top Tier
                         </th>
-                        <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 text-white shadow-[0_2px_8px_rgba(16,185,129,0.3)]`}>
+                        <th className={`text-right py-3 px-4 text-sm font-bold bg-tier-second text-white shadow-[0_2px_8px_rgba(82,184,82,0.3)]`}>
                           Second Tier
                         </th>
-                        <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-lime-400 via-lime-500 to-lime-600 text-white shadow-[0_2px_8px_rgba(132,204,22,0.3)]`}>
+                        <th className={`text-right py-3 px-4 text-sm font-bold bg-tier-bottom text-slate-800 shadow-[0_2px_8px_rgba(178,220,178,0.3)]`}>
                           Bottom Tier
                         </th>
                       </tr>
@@ -1359,6 +1367,443 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                 </div>
                 )}
 
+                {/* Details Table View - Individual Actors */}
+                {scorecardView === 'detail' && (
+                <div className="space-y-4">
+                  {/* Search and Controls for Details */}
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="relative flex-1 max-w-sm">
+                      <Search className={`absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                      <input
+                        type="text"
+                        placeholder={`Search ${getActorTypeDisplayName(selectedActor)}s...`}
+                        value={detailsSearchQuery}
+                        onChange={(e) => setDetailsSearchQuery(e.target.value)}
+                        className={`w-full pl-9 pr-4 py-2 text-sm rounded-lg border ${isDarkMode ? 'bg-slate-800/60 border-slate-700 text-slate-200 placeholder-slate-500' : 'bg-white border-slate-200 text-slate-900 placeholder-slate-400'} focus:outline-none focus:ring-2 focus:ring-blue-500/50`}
+                      />
+                    </div>
+                    <span className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                      {apiData?.actors?.length || 0} {getActorTypeDisplayName(selectedActor)}s
+                    </span>
+                  </div>
+
+                  {/* Details Table */}
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className={`${isDarkMode ? 'bg-slate-800/80' : 'bg-slate-50'}`}>
+                          {/* Actor Name */}
+                          <th 
+                            className={`text-left py-3 px-4 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors sticky left-0 z-10 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50 text-slate-700 border-r border-slate-200'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'name') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('name');
+                                setDetailsSortDirection('asc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              {getActorTypeDisplayName(selectedActor)}
+                              {detailsSortColumn === 'name' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Tier */}
+                          <th 
+                            className={`text-center py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'tier') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('tier');
+                                setDetailsSortDirection('asc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-center gap-1.5">
+                              Tier
+                              {detailsSortColumn === 'tier' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* TTS Score */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'ttsScore') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('ttsScore');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              TTS Score
+                              {detailsSortColumn === 'ttsScore' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Units */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'units') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('units');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Units
+                              {detailsSortColumn === 'units' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Volume */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'volume') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('volume');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Volume
+                              {detailsSortColumn === 'volume' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Avg Units/Mo */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'avgUnitsPerMonth') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('avgUnitsPerMonth');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Avg/Mo
+                              {detailsSortColumn === 'avgUnitsPerMonth' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Turn Time */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'avgDays') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('avgDays');
+                                setDetailsSortDirection('asc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Days
+                              {detailsSortColumn === 'avgDays' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Complexity */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'loanComplexityScore') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('loanComplexityScore');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Complexity
+                              {detailsSortColumn === 'loanComplexityScore' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* % Approved */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'approvedPercent') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('approvedPercent');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Approved
+                              {detailsSortColumn === 'approvedPercent' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Govt % */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'governmentPercent') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('governmentPercent');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Govt %
+                              {detailsSortColumn === 'governmentPercent' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* Purchase % */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'purchasePercent') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('purchasePercent');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              Purch %
+                              {detailsSortColumn === 'purchasePercent' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* WA FICO */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'waFico') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('waFico');
+                                setDetailsSortDirection('desc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              FICO
+                              {detailsSortColumn === 'waFico' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                          {/* WA LTV */}
+                          <th 
+                            className={`text-right py-3 px-3 text-sm font-semibold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}
+                            onClick={() => {
+                              if (detailsSortColumn === 'waLtv') {
+                                setDetailsSortDirection(detailsSortDirection === 'asc' ? 'desc' : 'asc');
+                              } else {
+                                setDetailsSortColumn('waLtv');
+                                setDetailsSortDirection('asc');
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              LTV
+                              {detailsSortColumn === 'waLtv' ? (
+                                detailsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          // Get actors from API data
+                          const actors = apiData?.actors || [];
+                          
+                          // Filter by search query
+                          const filteredActors = actors.filter((actor: OperationsActor) => 
+                            actor.name.toLowerCase().includes(detailsSearchQuery.toLowerCase())
+                          );
+                          
+                          // Sort actors
+                          const sortedActors = [...filteredActors].sort((a: OperationsActor, b: OperationsActor) => {
+                            let aVal: any = a[detailsSortColumn as keyof OperationsActor];
+                            let bVal: any = b[detailsSortColumn as keyof OperationsActor];
+                            
+                            // Handle tier sorting specially (top < second < bottom in asc)
+                            if (detailsSortColumn === 'tier') {
+                              const tierOrder = { top: 1, second: 2, bottom: 3 };
+                              aVal = tierOrder[a.tier];
+                              bVal = tierOrder[b.tier];
+                            }
+                            
+                            // Handle string sorting
+                            if (typeof aVal === 'string' && typeof bVal === 'string') {
+                              return detailsSortDirection === 'asc' 
+                                ? aVal.localeCompare(bVal)
+                                : bVal.localeCompare(aVal);
+                            }
+                            
+                            // Handle numeric sorting
+                            if (detailsSortDirection === 'asc') {
+                              return (aVal || 0) - (bVal || 0);
+                            } else {
+                              return (bVal || 0) - (aVal || 0);
+                            }
+                          });
+                          
+                          if (sortedActors.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={13} className={`py-8 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                  {detailsSearchQuery ? 'No actors match your search' : 'No actors found'}
+                                </td>
+                              </tr>
+                            );
+                          }
+                          
+                          return sortedActors.map((actor: OperationsActor, index: number) => {
+                            // TTS Score color based on value
+                            const getTtsScoreColor = (score: number) => {
+                              if (score >= 120) return isDarkMode ? 'text-tier-top font-bold' : 'text-tier-top font-bold';
+                              if (score >= 100) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+                              if (score >= 80) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+                              return isDarkMode ? 'text-red-400' : 'text-red-600';
+                            };
+                            
+                            // Tier badge styles
+                            const getTierBadgeStyles = (tier: 'top' | 'second' | 'bottom') => {
+                              switch (tier) {
+                                case 'top':
+                                  return 'bg-tier-top text-white';
+                                case 'second':
+                                  return 'bg-tier-second text-white';
+                                case 'bottom':
+                                  return 'bg-tier-bottom text-slate-800';
+                              }
+                            };
+                            
+                            return (
+                              <tr 
+                                key={actor.name} 
+                                className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'} ${index % 2 === 0 ? '' : isDarkMode ? 'bg-slate-800/20' : 'bg-slate-50/50'}`}
+                              >
+                                {/* Actor Name */}
+                                <td className={`py-3 px-4 text-sm font-medium sticky left-0 ${isDarkMode ? 'bg-slate-900/95 text-slate-200 border-r border-slate-700' : 'bg-white/95 text-slate-900 border-r border-slate-200'}`}>
+                                  {actor.name}
+                                </td>
+                                {/* Tier Badge */}
+                                <td className="py-3 px-3 text-center">
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${getTierBadgeStyles(actor.tier)}`}>
+                                    {actor.tier === 'top' ? 'Top' : actor.tier === 'second' ? '2nd' : 'Bottom'}
+                                  </span>
+                                </td>
+                                {/* TTS Score */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${getTtsScoreColor(actor.ttsScore)}`}>
+                                  {actor.ttsScore.toFixed(1)}
+                                </td>
+                                {/* Units */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {formatNumber(actor.units)}
+                                </td>
+                                {/* Volume */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {formatCurrency(actor.volume)}
+                                </td>
+                                {/* Avg Units/Mo */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {actor.avgUnitsPerMonth.toFixed(1)}
+                                </td>
+                                {/* Turn Time */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {actor.avgDays.toFixed(1)}
+                                </td>
+                                {/* Complexity */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {actor.loanComplexityScore.toFixed(1)}
+                                </td>
+                                {/* % Approved */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {formatPercent(actor.approvedPercent)}
+                                </td>
+                                {/* Govt % */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {formatPercent(actor.governmentPercent)}
+                                </td>
+                                {/* Purchase % */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {formatPercent(actor.purchasePercent)}
+                                </td>
+                                {/* WA FICO */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {Math.round(actor.waFico)}
+                                </td>
+                                {/* WA LTV */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
+                                  {actor.waLtv.toFixed(1)}%
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                )}
+
                 {/* Charts View */}
                 {scorecardView === 'charts' && (
                   <div className="space-y-6">
@@ -1369,9 +1814,9 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                       </h3>
                       <div className="space-y-3">
                         {[
-                          { name: 'Top Tier', value: displayData.topTier.unitsOutput, percent: displayData.topTier.unitsPercent, color: 'teal', delay: '' },
-                          { name: 'Second Tier', value: displayData.secondTier.unitsOutput, percent: displayData.secondTier.unitsPercent, color: 'emerald', delay: 'delay-150' },
-                          { name: 'Bottom Tier', value: displayData.bottomTier.unitsOutput, percent: displayData.bottomTier.unitsPercent, color: 'lime', delay: 'delay-300' },
+                          { name: 'Top Tier', value: displayData.topTier.unitsOutput, percent: displayData.topTier.unitsPercent, color: 'top', delay: '' },
+                          { name: 'Second Tier', value: displayData.secondTier.unitsOutput, percent: displayData.secondTier.unitsPercent, color: 'second', delay: 'delay-150' },
+                          { name: 'Bottom Tier', value: displayData.bottomTier.unitsOutput, percent: displayData.bottomTier.unitsPercent, color: 'bottom', delay: 'delay-300' },
                         ].map((tier) => (
                           <div key={tier.name}>
                             <div className="flex items-center justify-between mb-1.5">
@@ -1382,17 +1827,17 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                                 <span className={`text-sm font-mono ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                                   {formatNumber(tier.value)} units
                                 </span>
-                                <span className={`text-sm font-bold ${tier.color === 'teal' ? 'text-teal-600' : tier.color === 'emerald' ? 'text-emerald-600' : 'text-lime-600'}`}>
+                                <span className={`text-sm font-bold ${tier.color === 'top' ? 'text-tier-top' : tier.color === 'second' ? 'text-tier-second' : 'text-tier-bottom'}`}>
                                   {tier.percent.toFixed(1)}%
                                 </span>
                               </div>
                             </div>
                             <div className={`h-8 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/60' : 'bg-slate-100'}`}>
                               <div 
-                                className={`h-full flex items-center px-3 text-white text-sm font-medium rounded-full transition-all duration-1000 ease-out animate-in slide-in-from-left ${tier.delay} ${
-                                  tier.color === 'teal' ? 'bg-gradient-to-r from-teal-600 to-teal-500 shadow-lg shadow-teal-500/30' :
-                                  tier.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 shadow-lg shadow-emerald-500/30' :
-                                  'bg-gradient-to-r from-lime-600 to-lime-500 shadow-lg shadow-lime-500/30'
+                                className={`h-full flex items-center px-3 text-sm font-medium rounded-full transition-all duration-1000 ease-out animate-in slide-in-from-left ${tier.delay} ${
+                                  tier.color === 'top' ? 'bg-tier-top text-white shadow-lg shadow-tier-top/30' :
+                                  tier.color === 'second' ? 'bg-tier-second text-white shadow-lg shadow-tier-second/30' :
+                                  'bg-tier-bottom text-slate-800 shadow-lg shadow-tier-bottom/30'
                                 }`}
                                 style={{ width: `${tier.percent}%` }}
                               >
@@ -1413,9 +1858,9 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                         </h4>
                         <div className="space-y-3">
                           {[
-                            { name: 'Top', value: displayData.topTier.avgDays, color: 'teal', delay: '' },
-                            { name: 'Second', value: displayData.secondTier.avgDays, color: 'emerald', delay: 'delay-150' },
-                            { name: 'Bottom', value: displayData.bottomTier.avgDays, color: 'lime', delay: 'delay-300' },
+                            { name: 'Top', value: displayData.topTier.avgDays, color: 'top', delay: '' },
+                            { name: 'Second', value: displayData.secondTier.avgDays, color: 'second', delay: 'delay-150' },
+                            { name: 'Bottom', value: displayData.bottomTier.avgDays, color: 'bottom', delay: 'delay-300' },
                           ].map((tier) => (
                             <div key={tier.name} className="flex items-center gap-3">
                               <div className={`w-20 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -1424,10 +1869,10 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                               <div className="flex-1">
                                 <div className={`h-6 rounded-full ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-200/80'}`}>
                                   <div 
-                                    className={`h-full rounded-full flex items-center justify-end px-2 text-xs font-bold text-white transition-all duration-1000 ease-out animate-in slide-in-from-left ${tier.delay} ${
-                                      tier.color === 'teal' ? 'bg-gradient-to-r from-teal-600 to-teal-500 shadow-md shadow-teal-500/30' :
-                                      tier.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 shadow-md shadow-emerald-500/30' :
-                                      'bg-gradient-to-r from-lime-600 to-lime-500 shadow-md shadow-lime-500/30'
+                                    className={`h-full rounded-full flex items-center justify-end px-2 text-xs font-bold transition-all duration-1000 ease-out animate-in slide-in-from-left ${tier.delay} ${
+                                      tier.color === 'top' ? 'bg-tier-top text-white shadow-md shadow-tier-top/30' :
+                                      tier.color === 'second' ? 'bg-tier-second text-white shadow-md shadow-tier-second/30' :
+                                      'bg-tier-bottom text-slate-800 shadow-md shadow-tier-bottom/30'
                                     }`}
                                     style={{ width: `${(tier.value / 10) * 100}%` }}
                                   >

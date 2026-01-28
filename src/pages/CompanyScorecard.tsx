@@ -11,6 +11,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
 import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
 import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
 const CompanyScorecard = () => {
   const { theme } = useTheme();
@@ -29,6 +31,8 @@ const CompanyScorecard = () => {
   // Channel filter - matches Qlik [Consolidated Channels]={'$(vChannelGroup)'}
   // Default to null (all channels) - ChannelSelector will auto-select most populated
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Date field options matching Qlik DateType values
   const dateFieldOptions = [
@@ -378,7 +382,17 @@ const CompanyScorecard = () => {
       {/* Background pattern */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none" />
 
-      <main className="relative mx-auto px-6 pt-24 pb-12 max-w-[1800px]">
+      <div className="flex pt-14 sm:pt-16 min-h-screen relative">
+        <TopTieringSidebar
+          sidebarOpen={sidebarOpen}
+          onSidebarOpenChange={setSidebarOpen}
+          sidebarCollapsed={sidebarCollapsed}
+          onSidebarCollapsedChange={setSidebarCollapsed}
+        />
+        <div className="flex-1 flex flex-col min-w-0">
+          <TopTieringTopBar title="Company Scorecard" onOpenSidebar={() => setSidebarOpen(true)} />
+
+      <main className="relative flex-1 overflow-y-auto px-6 py-4 max-w-[1800px] mx-auto">
         {/* Header Section */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -613,13 +627,13 @@ const CompanyScorecard = () => {
                             <th className={`text-right py-3 px-4 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                               Totals
                             </th>
-                            <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-teal-500 via-teal-600 to-teal-700 text-white shadow-[0_2px_8px_rgba(20,184,166,0.3)]`}>
+                            <th className={`text-right py-3 px-4 text-sm font-bold bg-tier-top text-white shadow-[0_2px_8px_rgba(0,0,143,0.3)]`}>
                               Top Tier
                             </th>
-                            <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 text-white shadow-[0_2px_8px_rgba(16,185,129,0.3)]`}>
+                            <th className={`text-right py-3 px-4 text-sm font-bold bg-tier-second text-white shadow-[0_2px_8px_rgba(82,184,82,0.3)]`}>
                               Second Tier
                             </th>
-                            <th className={`text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-red-400 via-red-500 to-red-600 text-white shadow-[0_2px_8px_rgba(239,68,68,0.3)]`}>
+                            <th className={`text-right py-3 px-4 text-sm font-bold bg-tier-bottom text-slate-800 shadow-[0_2px_8px_rgba(178,220,178,0.3)]`}>
                               Bottom Tier
                             </th>
                           </tr>
@@ -629,9 +643,9 @@ const CompanyScorecard = () => {
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Branch Count</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.totals}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.topTier}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.secondTier}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.bottomTier}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.topTier}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.secondTier}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.branchCount.bottomTier}</td>
                         </tr>
 
                         {/* Applications Taken */}
@@ -643,23 +657,23 @@ const CompanyScorecard = () => {
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Units</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.applicationsTaken.units.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Volume</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.applicationsTaken.volume.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>WAC</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.totals.toFixed(3)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.topTier.toFixed(3)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.secondTier.toFixed(3)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.bottomTier.toFixed(3)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.topTier.toFixed(3)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.secondTier.toFixed(3)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.applicationsTaken.wac.bottomTier.toFixed(3)}</td>
                         </tr>
 
                         {/* Originated Totals */}
@@ -671,86 +685,86 @@ const CompanyScorecard = () => {
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated Units</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.units.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated Units %</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.totals.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.topTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.secondTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.bottomTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.topTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.secondTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.unitsPercent.bottomTier.toFixed(1)}%</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated Volume $</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.volume.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated Revenue $</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.originatedTotals.revenue.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Gov't Originated Units</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.govtUnits.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Gov't Originated Units %</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.totals.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.topTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.secondTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.bottomTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.topTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.secondTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.govtUnitsPercent.bottomTier.toFixed(1)}%</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Purchase Originated Units</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.originatedTotals.purchaseUnits.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Purchase Originated Units %</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.totals.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.topTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.secondTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.bottomTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.topTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.secondTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.purchaseUnitsPercent.bottomTier.toFixed(1)}%</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated WAC</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.totals.toFixed(3)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.topTier.toFixed(3)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.secondTier.toFixed(3)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.bottomTier.toFixed(3)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.topTier.toFixed(3)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.secondTier.toFixed(3)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.wac.bottomTier.toFixed(3)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated WA FICO</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{Math.round(summaryData.originatedTotals.waFico.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated WA LTV</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.totals.toFixed(1)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.topTier.toFixed(1)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.secondTier.toFixed(1)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.bottomTier.toFixed(1)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.topTier.toFixed(1)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.secondTier.toFixed(1)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waLtv.bottomTier.toFixed(1)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Originated WA DTI</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.totals.toFixed(1)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.topTier.toFixed(1)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.secondTier.toFixed(1)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.bottomTier.toFixed(1)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.topTier.toFixed(1)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.secondTier.toFixed(1)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.originatedTotals.waDti.bottomTier.toFixed(1)}</td>
                         </tr>
 
                         {/* Withdrawn Totals */}
@@ -762,30 +776,30 @@ const CompanyScorecard = () => {
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Withdrawn Units</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.withdrawnTotals.units.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Withdrawn Units %</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.totals.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.topTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.secondTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.bottomTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.topTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.secondTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.withdrawnTotals.unitsPercent.bottomTier.toFixed(1)}%</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Withdrawn $</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.volume.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>W/D ProForma Revenue</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.withdrawnTotals.proformaRevenue.bottomTier)}</td>
                         </tr>
 
                         {/* Denied Units */}
@@ -797,23 +811,23 @@ const CompanyScorecard = () => {
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Denied Units</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatNumber(summaryData.deniedUnits.units.bottomTier)}</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Denied Units %</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.totals.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.topTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.secondTier.toFixed(1)}%</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.bottomTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.topTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.secondTier.toFixed(1)}%</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{summaryData.deniedUnits.unitsPercent.bottomTier.toFixed(1)}%</td>
                         </tr>
                         <tr className={`border-b transition-colors ${isDarkMode ? 'border-slate-800/50 hover:bg-slate-800/30' : 'border-slate-100 hover:bg-slate-50'}`}>
                           <td className={`py-3 px-4 text-sm sticky left-0 ${isDarkMode ? 'bg-slate-800/90 text-slate-300 border-r border-slate-700' : 'bg-slate-50/90 text-slate-700 border-r border-slate-300'}`}>Denied $</td>
                           <td className={`text-right py-3 px-4 text-sm font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.totals)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.topTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.secondTier)}</td>
-                          <td className={`text-right py-3 px-4 text-sm font-mono bg-red-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.bottomTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-top-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.topTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-second-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.secondTier)}</td>
+                          <td className={`text-right py-3 px-4 text-sm font-mono bg-tier-bottom-light ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{formatLargeNumber(summaryData.deniedUnits.volume.bottomTier)}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -892,6 +906,8 @@ const CompanyScorecard = () => {
           </Card>
         </div>
       </main>
+        </div>
+      </div>
     </div>
   );
 };

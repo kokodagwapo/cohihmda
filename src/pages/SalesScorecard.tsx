@@ -20,6 +20,8 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
 import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
 type ScorecardActor = 'branch' | 'loan-officer';
 type ActiveTab = 'summary' | 'detail';
@@ -53,6 +55,8 @@ const SalesScorecard = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // Channel filter state - Qlik TTS scorecard uses Retail by default
   const [selectedChannel, setSelectedChannel] = useState<string | null>(() => {
@@ -381,9 +385,9 @@ const SalesScorecard = () => {
     const baseClasses = "inline-flex px-2 py-0.5 rounded-full text-xs font-medium";
     switch (tier) {
       case 'top':
-        return <span className={`${baseClasses} bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300`}>Top Tier</span>;
+        return <span className={`${baseClasses} bg-tier-top-light text-tier-top dark:bg-tier-top-dark dark:text-white`}>Top Tier</span>;
       case 'second':
-        return <span className={`${baseClasses} bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300`}>2nd Tier</span>;
+        return <span className={`${baseClasses} bg-tier-second-light text-tier-second dark:bg-tier-second-dark dark:text-white`}>2nd Tier</span>;
       case 'bottom':
         return <span className={`${baseClasses} bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300`}>Bottom</span>;
     }
@@ -466,7 +470,17 @@ const SalesScorecard = () => {
       {/* Background pattern */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none" />
 
-      <main className={`relative mx-auto px-6 pt-24 pb-12 transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px]'}`}>
+      <div className="flex pt-14 sm:pt-16 min-h-screen relative">
+        <TopTieringSidebar
+          sidebarOpen={sidebarOpen}
+          onSidebarOpenChange={setSidebarOpen}
+          sidebarCollapsed={sidebarCollapsed}
+          onSidebarCollapsedChange={setSidebarCollapsed}
+        />
+        <div className="flex-1 flex flex-col min-w-0">
+          <TopTieringTopBar title="Sales Scorecard" onOpenSidebar={() => setSidebarOpen(true)} />
+
+      <main className={`relative flex-1 overflow-y-auto px-6 py-4 transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px] mx-auto'}`}>
         <div className={`grid gap-4 sm:gap-5 md:gap-6 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
           {/* Left Sidebar - TTS Weights & Insights */}
           {!isFullscreen && (
@@ -598,9 +612,9 @@ const SalesScorecard = () => {
                           Tier Assignment (Score-Based)
                         </h4>
                         <ul className={`text-[10px] space-y-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                          <li><span className="font-medium text-emerald-500">Top Tier:</span> TTS &gt; 120 (20%+ above avg)</li>
-                          <li><span className="font-medium text-blue-500">Second Tier:</span> TTS 100-120 (above avg)</li>
-                          <li><span className="font-medium text-rose-500">Bottom Tier:</span> TTS &lt; 100 (below avg)</li>
+                          <li><span className="font-medium text-tier-top">Top Tier:</span> TTS &gt; 120 (20%+ above avg)</li>
+                          <li><span className="font-medium text-tier-second">Second Tier:</span> TTS 100-120 (above avg)</li>
+                          <li><span className="font-medium text-tier-bottom">Bottom Tier:</span> TTS &lt; 100 (below avg)</li>
                         </ul>
                       </div>
 
@@ -652,8 +666,8 @@ const SalesScorecard = () => {
                       {/* Top Performers */}
                       <div className={`relative overflow-hidden p-4 rounded-xl border-2 ${isDarkMode ? 'bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-white/10' : 'bg-gradient-to-br from-emerald-50 via-emerald-25 to-white border-white'}`}>
                         <div className="flex items-center gap-2 mb-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                          <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-emerald-400/90' : 'text-emerald-600/90'}`}>
+                          <div className="w-1.5 h-1.5 rounded-full bg-tier-top animate-pulse"></div>
+                          <p className={`text-[10px] uppercase tracking-wider font-bold ${isDarkMode ? 'text-white/90' : 'text-tier-top/90'}`}>
                             Top Tier
                           </p>
                         </div>
@@ -859,13 +873,13 @@ const SalesScorecard = () => {
                               <th className={`text-right py-3 px-4 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                                 Totals
                               </th>
-                              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+                              <th className="text-right py-3 px-4 text-sm font-bold bg-tier-top text-white">
                                 Top Tier
                               </th>
-                              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+                              <th className="text-right py-3 px-4 text-sm font-bold bg-tier-second text-white">
                                 Second Tier
                               </th>
-                              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-rose-500 to-rose-600 text-white">
+                              <th className="text-right py-3 px-4 text-sm font-bold bg-tier-bottom text-slate-800">
                                 Bottom Tier
                               </th>
                             </tr>
@@ -1015,6 +1029,8 @@ const SalesScorecard = () => {
           </div>
         </div>
       </main>
+        </div>
+      </div>
     </div>
   );
 };

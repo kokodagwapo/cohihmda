@@ -185,7 +185,7 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5); // Show all remaining entries (ranks 6-10)
 
-  return <section className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
+  return <section className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white/95 dark:bg-slate-900/80 backdrop-blur-sm border border-slate-200/70 dark:border-slate-700/70 shadow-md shadow-slate-200/40 dark:shadow-none p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">

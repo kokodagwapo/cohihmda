@@ -719,9 +719,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({ open, onClose, report 
                   <CardContent className="px-4 pb-4">
                     <div className="space-y-3">
                       {[
-                        { tier: 'Top Tier', count: 20, revenue: '$15.6M', pct: '65%', avgLoans: 62.5, pullThrough: '89%', color: 'emerald' },
-                        { tier: 'Middle Tier', count: 30, revenue: '$6.3M', pct: '26%', avgLoans: 21, pullThrough: '75%', color: 'amber' },
-                        { tier: 'Bottom Tier', count: 50, revenue: '$2.1M', pct: '9%', avgLoans: 4.2, pullThrough: '58%', color: 'rose' }
+                        { tier: 'Top Tier', count: 20, revenue: '$15.6M', pct: '65%', avgLoans: 62.5, pullThrough: '89%', color: 'tier-top' },
+                        { tier: 'Second Tier', count: 30, revenue: '$6.3M', pct: '26%', avgLoans: 21, pullThrough: '75%', color: 'tier-second' },
+                        { tier: 'Bottom Tier', count: 50, revenue: '$2.1M', pct: '9%', avgLoans: 4.2, pullThrough: '58%', color: 'tier-bottom' }
                       ].map((item, idx) => (
                         <div key={idx} className={`p-3 rounded-lg border ${
                           item.color === 'emerald' ? 'bg-emerald-50/30 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-900/50' :
@@ -873,9 +873,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({ open, onClose, report 
                           <YAxis stroke="#9ca3af" fontSize={10} domain={[50, 95]} />
                           <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', color: '#f1f5f9' }} />
                           <Legend />
-                          <Line type="monotone" dataKey="topTier" stroke="#10b981" strokeWidth={2} name="Top Tier" />
-                          <Line type="monotone" dataKey="middleTier" stroke="#f59e0b" strokeWidth={2} name="Middle Tier" />
-                          <Line type="monotone" dataKey="bottomTier" stroke="#ef4444" strokeWidth={2} name="Bottom Tier" />
+                          <Line type="monotone" dataKey="topTier" stroke="#00008F" strokeWidth={2} name="Top Tier" />
+                          <Line type="monotone" dataKey="middleTier" stroke="#52B852" strokeWidth={2} name="Second Tier" />
+                          <Line type="monotone" dataKey="bottomTier" stroke="#B2DCB2" strokeWidth={2} name="Bottom Tier" />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
