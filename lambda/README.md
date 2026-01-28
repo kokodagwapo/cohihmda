@@ -10,7 +10,7 @@ lambda/
 │   ├── secrets-manager.ts     # AWS Secrets Manager helper
 │   ├── kms-encryption.ts      # AWS KMS encryption helper
 │   └── database.ts            # RDS PostgreSQL connection helper
-├── ailethia-briefing/         # HTTP: Generate briefing scripts
+├── Cohi-briefing/         # HTTP: Generate briefing scripts
 ├── stripe-checkout/           # HTTP: Create Stripe checkout sessions
 ├── stripe-webhook/            # HTTP: Handle Stripe webhooks
 ├── seed-demo-data/            # HTTP: Seed demo data

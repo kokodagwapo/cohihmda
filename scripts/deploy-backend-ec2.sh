@@ -17,7 +17,7 @@ NC='\033[0m'
 EC2_HOST="${EC2_HOST}"
 EC2_USER="${EC2_USER:-ec2-user}"
 SSH_KEY="${EC2_SSH_KEY:-${HOME}/.ssh/id_rsa}"
-REMOTE_DIR="${EC2_REMOTE_DIR:-~/ailethia}"
+REMOTE_DIR="${EC2_REMOTE_DIR:-~/Cohi}"
 
 # Validate required environment variables
 if [ -z "$EC2_HOST" ]; then
@@ -66,13 +66,13 @@ tar -czf "${DEPLOY_PACKAGE}" -C "${TEMP_DIR}" backend
 echo -e "${GREEN}☁️  Deploying to EC2...${NC}"
 
 # Create remote directory if it doesn't exist
-ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "${EC2_USER}@${EC2_HOST}" "mkdir -p ~/ailethia"
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "${EC2_USER}@${EC2_HOST}" "mkdir -p ~/Cohi"
 
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no "${DEPLOY_PACKAGE}" "${EC2_USER}@${EC2_HOST}:${REMOTE_DIR}/backend-deploy.tar.gz"
 
 # SSH and extract
 ssh -i "$SSH_KEY" "${EC2_USER}@${EC2_HOST}" << 'ENDSSH'
-cd ~/ailethia
+cd ~/Cohi
 echo "Extracting deployment package..."
 tar -xzf backend-deploy.tar.gz
 echo "Installing dependencies..."
@@ -81,9 +81,9 @@ npm install
 echo "Restarting backend service..."
 # Use pm2 if available, otherwise try systemd
 if command -v pm2 &> /dev/null; then
-    pm2 restart ailethia-backend || pm2 start "npx tsx src/index.ts" --name ailethia-backend
+    pm2 restart Cohi-backend || pm2 start "npx tsx src/index.ts" --name Cohi-backend
 else
-    sudo systemctl restart ailethia-backend || echo "⚠️  Please restart backend service manually"
+    sudo systemctl restart Cohi-backend || echo "⚠️  Please restart backend service manually"
 fi
 echo "✅ Backend deployed and restarted"
 ENDSSH

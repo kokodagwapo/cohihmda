@@ -99,24 +99,25 @@ export interface ActorConfig {
 
 /**
  * Operations Scorecard actor configurations.
- * Based on Qlik Homestead CoheusConfig.xml TriggerDateField mappings.
  */
 export const OPERATIONS_ACTOR_CONFIGS: Record<string, ActorConfig> = {
   processor: {
     actorColumn: 'processor',
-    outputDateField: 'approval_date', // Qlik: [Sent To Underwriting] = Log.MS.Date.Approval
-    turnTimeStartField: 'submitted_to_processing_date',
+    outputDateField: 'approval_date',
+    // Turn Time: Try processing_date → approval_date (if submitted_to_processing_date is empty)
+    turnTimeStartField: 'processing_date',
     turnTimeEndField: 'approval_date',
   },
   underwriter: {
     actorColumn: 'underwriter',
-    outputDateField: 'closing_date', // Qlik: [Sent To Closing] = Fields.748 = Closing Date
+    outputDateField: 'closing_date',
+    // ORIGINAL CONFIG - was working before
     turnTimeStartField: 'approval_date',
     turnTimeEndField: 'closing_date',
   },
   closer: {
     actorColumn: 'closer',
-    outputDateField: 'disbursement_date', // Qlik: [End Date to indicate Loan Closed/Funded] = Fields.1997
+    outputDateField: 'disbursement_date',
     turnTimeStartField: 'closing_date',
     turnTimeEndField: 'disbursement_date',
   },

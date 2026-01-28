@@ -109,7 +109,7 @@ export const AletheiaPromptsCard = ({
             </div>
             <div>
               <h3 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-extralight text-slate-900 dark:text-white mb-0.5 sm:mb-1 tracking-[-0.02em] leading-[1.05]">
-                Ailethia Insights
+                Cohi Insights
               </h3>
               <p className="text-[10px] sm:text-xs md:text-sm lg:text-base text-slate-600 dark:text-slate-400 font-light tracking-tight">
                 Executive Briefing

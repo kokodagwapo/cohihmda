@@ -25,8 +25,8 @@ if (!process.env.DB_HOST || !process.env.DB_PASSWORD) {
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'ailethia',
-  user: process.env.DB_USER || 'ailethiaadmin',
+  database: process.env.DB_NAME || 'Cohi',
+  user: process.env.DB_USER || 'Cohiadmin',
   password: process.env.DB_PASSWORD, // Required - no fallback
   ssl: {
     rejectUnauthorized: false
@@ -49,12 +49,12 @@ async function clearFailedLogins(email = null) {
       console.log(`✅ Cleared ${result.rowCount} old failed login attempts`);
     }
     
-    // Also clear all recent ones for admin@ailethia.com
+    // Also clear all recent ones for admin@Cohi.com
     const adminResult = await pool.query(
       'DELETE FROM public.failed_login_attempts WHERE email = $1',
-      ['admin@ailethia.com']
+      ['admin@Cohi.com']
     );
-    console.log(`✅ Cleared ${adminResult.rowCount} failed login attempts for admin@ailethia.com`);
+    console.log(`✅ Cleared ${adminResult.rowCount} failed login attempts for admin@Cohi.com`);
     
     process.exit(0);
   } catch (error) {

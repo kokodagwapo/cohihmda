@@ -1,5 +1,5 @@
 /**
- * Ailethia Briefing Lambda Function
+ * Cohi Briefing Lambda Function
  * Generates executive briefing scripts via AI Gateway
  * Migrated from Supabase Edge Function
  */
@@ -33,7 +33,7 @@ export const handler = async (
     const body = event.body ? JSON.parse(event.body) : {};
     const { businessContext, type = 'briefing' } = body;
     
-    console.log('Generating Ailethia briefing:', { type, hasContext: !!businessContext });
+    console.log('Generating Cohi briefing:', { type, hasContext: !!businessContext });
 
     // Build context from business data
     let contextPrompt = '';
@@ -103,7 +103,7 @@ export const handler = async (
       }
     }
 
-    const systemPrompt = `You are Ailethia, the executive intelligence voice of the Coheus platform for mortgage industry leaders. 
+    const systemPrompt = `You are Cohi, the executive intelligence voice of the Coheus platform for mortgage industry leaders. 
     
 Your role: Deliver concise, executive-level briefings that sound natural when read aloud.
 
@@ -198,7 +198,7 @@ CRITICAL INSTRUCTIONS:
       }),
     };
   } catch (error: any) {
-    console.error("Ailethia briefing error:", error);
+    console.error("Cohi briefing error:", error);
     return {
       statusCode: 500,
       headers: corsHeaders,

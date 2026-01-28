@@ -3589,6 +3589,7 @@ router.get('/operations-scorecard', authenticateToken, attachTenantContext, apiL
         loan_amount, loan_type, loan_purpose, current_loan_status, channel,
         processor, underwriter, closer,
         submitted_to_processing_date,
+        submitted_to_underwriting_date,
         processing_date,
         approval_date,
         closing_date,
@@ -4047,7 +4048,15 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
     // CRITICAL: Default to 12 months to match Qlik's vOpsScorecardMonthRange = 12
     const monthsCount = parseInt(req.query.months as string) || 12;
     const channelGroup = req.query.channel_group as string | undefined;
-    const targetUnits = parseInt(req.query.target_units as string) || 25;
+    
+    // Target units per actor type (from Qlik Variables.csv - StaffingUnits)
+    // These are the monthly targets for each actor type
+    const ACTOR_TARGETS: Record<string, number> = {
+      processor: 25,      // ProcessorStaffingUnits
+      underwriter: 45,    // UnderwriterStaffingUnits
+      closer: 85          // CloserStaffingUnits
+    };
+    const targetUnits = ACTOR_TARGETS[actorType] || 25;
     
     // Validate actor type
     if (!['processor', 'underwriter', 'closer'].includes(actorType)) {
@@ -4136,6 +4145,7 @@ router.get('/operations-scorecard-trends', authenticateToken, attachTenantContex
         loan_amount, loan_type, loan_purpose, current_loan_status, channel,
         processor, underwriter, closer,
         submitted_to_processing_date,
+        submitted_to_underwriting_date,
         processing_date,
         approval_date,
         closing_date,
@@ -5542,37 +5552,36 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     // Get request body
     const { customPrompt, loanIds } = req.body;
 
-    // Build query for active loans (tenant database has no tenant_id column)
-    let query = `
-      SELECT 
-        loan_id, borrower_name, loan_amount, loan_type, status, 
-        application_date, closing_date, lock_date, interest_rate,
-        loan_purpose, branch, credit_pull_date, cycle_time_days,
-        raw_data
-      FROM public.loans 
-      WHERE status NOT IN ('Closed', 'Originated', 'Funded', 'Withdrawn', 'Denied', 'Declined')
-    `;
-    
-    const params: any[] = [];
-    let paramIndex = 1;
+    // Fetch all loans
+    const loansResult = await tenantPool.query(
+      `SELECT * FROM public.loans ORDER BY application_date DESC`
+    );
+    const allLoans = loansResult.rows;
+
+    // Active Loan Flag from Qlik: if("Current Loan Status" = 'Active Loan' AND Len([Application Date])>0, 'Yes', 'No')
+    // This is the EXACT same logic used in /api/loans/funnel for "Still Active" count
+    let activeLoans = allLoans.filter(l => {
+      const currentStatus = (l.current_loan_status || '').toString().toLowerCase().trim();
+      const hasApplicationDate = l.application_date !== null && l.application_date !== undefined && String(l.application_date).trim() !== '';
+      return currentStatus === 'active loan' && hasApplicationDate;
+    });
     
     // If specific loan IDs provided, filter to those
     if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
-      query += ` AND loan_id = ANY($${paramIndex})`;
-      params.push(loanIds);
-      paramIndex++;
+      const loanIdSet = new Set(loanIds);
+      activeLoans = activeLoans.filter(l => loanIdSet.has(l.loan_id));
     }
 
-    query += ` ORDER BY application_date DESC LIMIT 10000`;
-
-    const loansResult = await tenantPool.query(query, params);
-
-    const activeLoans = loansResult.rows;
+    logInfo('Prediction active loans (Qlik Active Loan Flag)', { 
+      totalLoans: allLoans.length,
+      activeLoans: activeLoans.length
+    });
 
     if (activeLoans.length === 0) {
       return res.json({
         predictions: [],
         bucketedLoans: [],
+        bucketSummary: { high: 0, medium: 0, low: 0 },
         summary: {
           totalAnalyzed: 0,
           predictedWithdraw: 0,
@@ -5587,18 +5596,22 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
       });
     }
 
-    // Fetch all loans for pullthrough calculation (needs historical data)
-    const allLoansResult = await tenantPool.query(
-      `SELECT 
-        loan_id, borrower_name, loan_amount, loan_type, status, 
-        application_date, closing_date, lock_date, interest_rate,
-        loan_purpose, branch, credit_pull_date, cycle_time_days,
-        raw_data
-      FROM public.loans 
-      ORDER BY application_date DESC`
-    );
+    // allLoans already fetched above - use for historical data in prediction service
 
-    const allLoans = allLoansResult.rows;
+    // Fetch OpenAI API key from tenant's rag_settings table
+    let tenantApiKey: string | undefined;
+    try {
+      const { decryptAPIKeys } = await import('../services/encryption.js');
+      const apiKeyResult = await tenantPool.query(
+        `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
+      );
+      if (apiKeyResult.rows[0]?.openai_api_key) {
+        const decrypted = await decryptAPIKeys({ openai_api_key: apiKeyResult.rows[0].openai_api_key });
+        tenantApiKey = decrypted.openai_api_key || undefined;
+      }
+    } catch (apiKeyError: any) {
+      logInfo('Could not fetch tenant API key, will use environment variable', { error: apiKeyError.message });
+    }
 
     // Import and call prediction service
     const { predictLoanOutcomes } = await import('../services/dashboard/predictionService.js');
@@ -5607,16 +5620,66 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
       loans: activeLoans,
       allLoans,
       customPrompt,
-      tenantId
-    });
+      tenantId,
+      tenantPool // Pass tenant pool for isolated tenant database queries
+    }, tenantApiKey);
+
+    // DRASTICALLY reduce response size - frontend only needs summary + limited loan data
+    // Don't send full bucketed loans - send counts by bucket and only top N loans per bucket
+    const LOANS_PER_BUCKET = 50; // Limit loans returned per bucket
+    
+    // Extract bucket summary (count per bucket)
+    const bucketSummary: Record<string, number> = {};
+    if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
+      result.bucketedLoans.forEach((loan: any) => {
+        const bucket = loan.bucket || 'unknown';
+        bucketSummary[bucket] = (bucketSummary[bucket] || 0) + 1;
+      });
+    }
+    
+    // Only send essential loan fields and limit per bucket
+    const essentialFields = ['loan_id', 'borrower_name', 'loan_amount', 'interest_rate', 'loan_type', 
+      'bucket', 'signal_strength', 'inferred_status', 'application_date', 'lock_date', 
+      'closing_date', 'funding_date', 'current_loan_status', 'status', 'branch', 'loan_officer'];
+    
+    // Group by bucket and take top N from each
+    const bucketGroups: Record<string, any[]> = {};
+    if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
+      result.bucketedLoans.forEach((loan: any) => {
+        const bucket = loan.bucket || 'unknown';
+        if (!bucketGroups[bucket]) bucketGroups[bucket] = [];
+        if (bucketGroups[bucket].length < LOANS_PER_BUCKET) {
+          // Strip to essential fields only
+          const stripped: Record<string, any> = {};
+          essentialFields.forEach(f => {
+            if (loan[f] !== undefined) stripped[f] = loan[f];
+          });
+          bucketGroups[bucket].push(stripped);
+        }
+      });
+    }
+    
+    // Flatten back to array (limited loans)
+    const limitedLoans = Object.values(bucketGroups).flat();
+    
+    // Build slim response
+    const slimResult = {
+      predictions: result.predictions || [],
+      bucketedLoans: limitedLoans,
+      bucketSummary, // { high: 500, medium: 300, low: 200 }
+      totalBucketedLoans: result.bucketedLoans?.length || 0,
+      summary: result.summary,
+      metadata: result.metadata
+    };
 
     // Log response structure for debugging
-    const responseSize = JSON.stringify(result).length;
+    const responseSize = JSON.stringify(slimResult).length;
     logInfo('Sending prediction response', {
-      predictionsCount: result.predictions?.length || 0,
-      bucketedLoansCount: result.bucketedLoans?.length || 0,
-      hasBucketedLoans: !!result.bucketedLoans,
-      summary: result.summary,
+      predictionsCount: slimResult.predictions?.length || 0,
+      bucketedLoansCount: slimResult.bucketedLoans?.length || 0,
+      totalBucketedLoans: slimResult.totalBucketedLoans,
+      bucketSummary,
+      summary: slimResult.summary,
       responseSizeBytes: responseSize,
       responseSizeMB: (responseSize / 1024 / 1024).toFixed(2)
     });
@@ -5624,7 +5687,7 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Length', responseSize.toString());
     
-    res.json(result);
+    res.json(slimResult);
 
   } catch (error: any) {
     logError('Error predicting loan outcomes', error, { userId: req.userId });

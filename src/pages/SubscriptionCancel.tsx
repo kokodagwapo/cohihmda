@@ -50,7 +50,7 @@ export const SubscriptionCancel = () => {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => window.location.href = 'mailto:support@ailethia.com'}
+                onClick={() => window.location.href = 'mailto:support@Cohi.com'}
               >
                 <MessageSquare className="mr-2 h-4 w-4" />
                 Contact Support

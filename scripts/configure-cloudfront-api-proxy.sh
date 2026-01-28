@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Configuration
 DISTRIBUTION_ID="E2X6I83M2HKMVB"
 BACKEND_ORIGIN_DOMAIN="awseb-e-c-AWSEBLoa-1WULU3BR4EZJV-923689480.us-east-1.elb.amazonaws.com"
-BACKEND_ORIGIN_ID="ailethia-backend-alb"
+BACKEND_ORIGIN_ID="Cohi-backend-alb"
 REGION="us-east-1"
 
 echo -e "${BLUE}🔧 Configuring CloudFront API Proxy${NC}"

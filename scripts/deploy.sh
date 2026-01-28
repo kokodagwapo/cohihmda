@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# AILETHIA / COHEUS - Deployment Script
+# Cohi / COHEUS - Deployment Script
 # ============================================================================
 # This script handles deployment for both cloud and on-premise instances
 
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 ENV=${1:-production}
 COMPOSE_FILE="docker-compose.prod.yml"
 
-echo -e "${GREEN}🚀 Starting Ailethia/Coheus Deployment${NC}"
+echo -e "${GREEN}🚀 Starting Cohi/Coheus Deployment${NC}"
 echo -e "Environment: ${YELLOW}${ENV}${NC}"
 
 # Check if .env file exists

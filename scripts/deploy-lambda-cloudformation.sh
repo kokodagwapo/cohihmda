@@ -111,7 +111,7 @@ echo "Packaging Lambda Functions"
 echo "========================================="
 
 LAMBDA_DIRS=(
-  "ailethia-briefing"
+  "Cohi-briefing"
   "stripe-checkout"
   "stripe-webhook"
   "seed-demo-data"

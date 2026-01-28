@@ -34,7 +34,7 @@ Parameters:
   IAMUser1ForKMSAccess:
     Type: String
     Default: ''
-    Description: Optional IAM user name to automatically attach KMS access policy to (e.g., 'Ailethia'). Leave empty to attach manually via script.
+    Description: Optional IAM user name to automatically attach KMS access policy to (e.g., 'Cohi'). Leave empty to attach manually via script.
   
   IAMUser2ForKMSAccess:
     Type: String

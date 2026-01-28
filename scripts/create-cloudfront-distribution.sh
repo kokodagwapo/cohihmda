@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-S3_BUCKET="ailethia-frontend-1767135651"
+S3_BUCKET="Cohi-frontend-1767135651"
 REGION="us-east-1"
 
 echo -e "${GREEN}☁️  Creating CloudFront Distribution${NC}"
@@ -25,7 +25,7 @@ if ! command -v aws &> /dev/null; then
 fi
 
 # Get inputs
-read -p "Enter your domain (e.g., ailethia.com): " DOMAIN
+read -p "Enter your domain (e.g., Cohi.com): " DOMAIN
 read -p "Enter ACM Certificate ARN (us-east-1): " CERT_ARN
 
 if [ -z "$DOMAIN" ] || [ -z "$CERT_ARN" ]; then
@@ -34,7 +34,7 @@ if [ -z "$DOMAIN" ] || [ -z "$CERT_ARN" ]; then
 fi
 
 # Generate unique caller reference
-CALLER_REF="ailethia-$(date +%s)"
+CALLER_REF="Cohi-$(date +%s)"
 
 # Create CloudFront config
 CONFIG_FILE="/tmp/cloudfront-${CALLER_REF}.json"
@@ -42,7 +42,7 @@ CONFIG_FILE="/tmp/cloudfront-${CALLER_REF}.json"
 cat > "$CONFIG_FILE" <<EOF
 {
   "CallerReference": "${CALLER_REF}",
-  "Comment": "Ailethia Frontend Distribution",
+  "Comment": "Cohi Frontend Distribution",
   "DefaultCacheBehavior": {
     "TargetOriginId": "S3-${S3_BUCKET}",
     "ViewerProtocolPolicy": "redirect-to-https",

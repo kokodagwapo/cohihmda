@@ -10,8 +10,8 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-ARCHIVE_NAME="ailethia-production-$(date +%Y%m%d-%H%M%S).zip"
-TEMP_DIR="ailethia-archive-temp"
+ARCHIVE_NAME="Cohi-production-$(date +%Y%m%d-%H%M%S).zip"
+TEMP_DIR="Cohi-archive-temp"
 
 echo -e "${GREEN}📦 Creating clean production archive...${NC}"
 echo ""
@@ -76,9 +76,9 @@ fi
 
 # Create comprehensive README for the archive
 cat > "$TEMP_DIR/ARCHIVE_README.md" << 'EOF'
-# Ailethia / Coheus - Production Archive
+# Cohi / Coheus - Production Archive
 
-This archive contains a clean, production-ready version of the Ailethia application for software architect review.
+This archive contains a clean, production-ready version of the Cohi application for software architect review.
 
 ## 📁 Archive Contents
 

@@ -108,15 +108,13 @@ export interface OperationsScorecardTrendsData {
  * @param selectedTenantId - Optional tenant ID for multi-tenant support
  * @param selectedChannel - Optional channel filter
  * @param monthsToShow - Number of months to display (default: 13)
- * @param targetUnits - Monthly target for vs-target calculation (default: 25)
  */
 export const useOperationsScorecardTrendsData = (
   actorType: ScorecardActorType = 'underwriter',
   comparisonView: ComparisonViewType = 'vs-target',
   selectedTenantId?: string | null,
   selectedChannel?: string | null,
-  monthsToShow: number = 13,
-  targetUnits: number = 25
+  monthsToShow: number = 13
 ) => {
   const [data, setData] = useState<OperationsScorecardTrendsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,10 +135,11 @@ export const useOperationsScorecardTrendsData = (
       
       try {
         // Build query parameters
+        // Note: target_units is now determined by backend based on actor_type
+        // Processor=25, Underwriter=45, Closer=85 (from Qlik StaffingUnits)
         const params = new URLSearchParams();
         params.append('actor_type', actorType);
         params.append('months', monthsToShow.toString());
-        params.append('target_units', targetUnits.toString());
         if (selectedTenantId) params.append('tenant_id', selectedTenantId);
         if (selectedChannel) params.append('channel_group', selectedChannel);
         
@@ -164,7 +163,9 @@ export const useOperationsScorecardTrendsData = (
         
         if (responseData && responseData.actors) {
           // Apply comparison view transformations if needed
-          const transformedData = applyComparisonView(responseData, comparisonView, targetUnits);
+          // Use targetUnitsPerMonth from API response (actor-specific target)
+          const targetFromApi = responseData.kpis?.targetUnitsPerMonth || 25;
+          const transformedData = applyComparisonView(responseData, comparisonView, targetFromApi);
           setData(transformedData);
         } else {
           console.warn('[OpsScorecardTrends] API returned data but it appears empty or invalid:', responseData);
@@ -185,7 +186,7 @@ export const useOperationsScorecardTrendsData = (
     };
     
     fetchOperationsScorecardTrendsData();
-  }, [actorType, comparisonView, selectedTenantId, selectedChannel, monthsToShow, targetUnits]);
+  }, [actorType, comparisonView, selectedTenantId, selectedChannel, monthsToShow]);
 
   return { data, loading, error };
 };

@@ -344,7 +344,7 @@ export const LoanFunnelView = ({
         <div className="bg-white dark:bg-slate-800 rounded-xl p-3 sm:p-4 md:p-6 border border-slate-200 dark:border-slate-700 overflow-hidden">
           {/* Header Inside Card */}
           <div className="mb-4 sm:mb-6 space-y-3 sm:space-y-4 pb-3 sm:pb-4 border-b border-slate-200 dark:border-slate-700">
-            {/* TopTier Title with Icon - Matching Ailethia Dialogues */}
+            {/* TopTier Title with Icon - Matching Cohi Dialogues */}
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
               {/* Icon and Title Section */}
               <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">

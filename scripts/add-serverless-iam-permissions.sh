@@ -8,7 +8,7 @@
 
 set -e
 
-IAM_USER_NAME="${1:-Ailethia}"
+IAM_USER_NAME="${1:-Cohi}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 POLICY_NAME="ServerlessFrameworkDeploymentPolicy"
 

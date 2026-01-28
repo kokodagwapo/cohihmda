@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-S3_BUCKET="ailethia-frontend-1767135651"
+S3_BUCKET="Cohi-frontend-1767135651"
 REGION="us-east-1"
 
 echo -e "${GREEN}🚀 Deploying Frontend to S3${NC}"

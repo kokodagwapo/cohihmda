@@ -62,7 +62,7 @@ export const generatePDF = (data: DashboardData) => {
   
   doc.setFontSize(14);
   doc.setFont('helvetica', 'italic');
-  doc.text('Powered by Ailethia', pageWidth / 2, pageHeight / 2 + 25, { align: 'center' });
+  doc.text('Powered by Cohi', pageWidth / 2, pageHeight / 2 + 25, { align: 'center' });
 
   // Page 2: Top Performers
   doc.addPage();

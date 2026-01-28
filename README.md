@@ -1,4 +1,4 @@
-# Ailethia / Coheus
+# Cohi / Coheus
 
 AI-powered loan origination system with voice AI, RAG (Retrieval-Augmented Generation), real-time cost tracking, and comprehensive SOC 2 Type II compliance features.
 
@@ -39,7 +39,7 @@ AI-powered loan origination system with voice AI, RAG (Retrieval-Augmented Gener
 ```bash
 # Clone repository
 git clone <repository-url>
-cd ailethia
+cd Cohi
 
 # Install dependencies
 npm run install:all
@@ -94,7 +94,7 @@ See [README.DEPLOYMENT.md](./README.DEPLOYMENT.md) for detailed AWS deployment i
 ## 📁 Project Structure
 
 ```
-ailethia/
+Cohi/
 ├── src/                    # Frontend React application
 │   ├── components/         # React components
 │   │   ├── admin/         # Admin panel components
@@ -112,7 +112,7 @@ ailethia/
 │   │   └── config/         # Configuration
 │   └── package.json
 ├── lambda/                 # AWS Lambda functions
-│   ├── ailethia-briefing/  # Executive briefing generation
+│   ├── Cohi-briefing/  # Executive briefing generation
 │   ├── gemini-live-voice/  # Gemini Live API proxy
 │   ├── stripe-checkout/    # Stripe checkout sessions
 │   └── shared/             # Shared utilities
@@ -186,7 +186,7 @@ VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...
 # Database
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=ailethia
+DB_NAME=Cohi
 DB_USER=postgres
 DB_PASSWORD=your_password
 

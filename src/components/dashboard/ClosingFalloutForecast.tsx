@@ -611,25 +611,98 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   }, [period]);
 
   // Fetch stored predictions from DB (used on load and after predict pipeline completes)
-  // DISABLED: Prediction API temporarily disabled - using default empty values
   const fetchStoredPredictions = useCallback(async () => {
-    // API disabled - use empty predictions
-    setFullPredictions([]);
+    try {
+      const response = await api.request<{
+        predictions: Array<{
+          loanId: string;
+          predictedOutcome: 'withdraw' | 'deny' | 'originate';
+          confidence: number;
+          reasoning?: string;
+          riskFactors?: string[];
+        }>;
+        count: number;
+        summary: { withdraw: number; deny: number; originate: number };
+      }>('/api/loans/predictions', { method: 'GET' });
+      if (response.predictions && Array.isArray(response.predictions)) {
+        setFullPredictions(response.predictions);
+      } else {
+        setFullPredictions([]);
+      }
+    } catch (error) {
+      console.error('[Predictions] Failed to fetch stored predictions:', error);
+      setFullPredictions([]);
+    }
   }, []);
 
   // Manual prediction trigger: runs full prediction (bucketing, embeddings, RAG). Button stays disabled until backend is 100% done.
-  // DISABLED: Prediction API temporarily disabled
   const runPrediction = useCallback(async () => {
-    // API disabled - just log and use default values
-    console.log('[Predict] Prediction API temporarily disabled');
-    setPredictions({
-      likelyWithdraw: 0,
-      likelyDecline: 0,
-      predictedFalloutTotal: 0
-    });
-    setLoanPredictions({});
-    setBucketedLoans([]);
-  }, []);
+    setPredictionsLoading(true);
+    try {
+      const body: { loanIds?: string[] } = {};
+      if (loansRaw && loansRaw.length > 0 && !loansError) {
+        const activeLoans = loansRaw.filter((l: any) => mapForecastStatus(l) === 'Active');
+        const loanIds = activeLoans.map((l: any) => l.loan_id || l.id).filter(Boolean) as string[];
+        if (loanIds.length > 0) body.loanIds = loanIds;
+      }
+
+      const response = await api.request<{
+        predictions: Array<{ predictedOutcome: string; loanId: string }>;
+        bucketedLoans?: any[];
+        summary: { predictedWithdraw: number; predictedDeny: number; predictedOriginate: number };
+        metadata?: { predictionsInProgress?: boolean };
+      }>('/api/loans/predict', {
+        method: 'POST',
+        body: JSON.stringify(body)
+      });
+
+      setPredictions({
+        likelyWithdraw: response.summary.predictedWithdraw,
+        likelyDecline: response.summary.predictedDeny,
+        predictedFalloutTotal: response.summary.predictedWithdraw + response.summary.predictedDeny
+      });
+
+      if (response.predictions && Array.isArray(response.predictions)) {
+        const predictionsMap: Record<string, string> = {};
+        response.predictions.forEach((pred: { loanId: string; predictedOutcome: string }) => {
+          if (pred.loanId && pred.predictedOutcome) predictionsMap[pred.loanId] = pred.predictedOutcome;
+        });
+        setLoanPredictions(predictionsMap);
+      }
+
+      if (response.bucketedLoans && Array.isArray(response.bucketedLoans) && response.bucketedLoans.length > 0) {
+        setBucketedLoans(response.bucketedLoans);
+      } else {
+        setBucketedLoans([]);
+      }
+
+      // Keep button disabled until background (embeddings + RAG) is fully done; poll status until then
+      if (response.metadata?.predictionsInProgress) {
+        const id = setInterval(async () => {
+          try {
+            const status = await api.request<{ inProgress: boolean }>('/api/loans/predict/status', { method: 'GET' });
+            if (!status.inProgress) {
+              if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+              setPredictionsLoading(false);
+              fetchStoredPredictions();
+            }
+          } catch (_) {
+            // ignore poll errors; will retry next tick
+          }
+        }, 6000);
+        pollIntervalRef.current = id;
+      } else {
+        setPredictionsLoading(false);
+      }
+    } catch (error) {
+      console.error('[Predict] Failed to run prediction:', error);
+      setPredictions(null);
+      setLoanPredictions({});
+      setBucketedLoans([]);
+      setPredictionsLoading(false);
+    }
+  }, [loansRaw, loansError, fetchStoredPredictions]);
 
   // Fetch stored predictions from database when loans are loaded
   useEffect(() => {

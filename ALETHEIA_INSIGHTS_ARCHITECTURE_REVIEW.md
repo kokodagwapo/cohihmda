@@ -1,7 +1,7 @@
-# Ailethia Insights Architecture Review
+# Cohi Insights Architecture Review
 
 ## Overview
-Ailethia Insights is an executive intelligence system that provides AI-powered insights and voice briefings for mortgage executives. It integrates with RAG (Retrieval-Augmented Generation) and supports both OpenAI and Gemini Live API for voice generation.
+Cohi Insights is an executive intelligence system that provides AI-powered insights and voice briefings for mortgage executives. It integrates with RAG (Retrieval-Augmented Generation) and supports both OpenAI and Gemini Live API for voice generation.
 
 ## Architecture Components
 
@@ -155,7 +155,7 @@ The system prompt is built from:
 
 #### Example System Prompt Structure
 ```
-You are Ailethia, an executive-intelligent AI assistant...
+You are Cohi, an executive-intelligent AI assistant...
 
 [Base Identity & Rules]
 
@@ -315,7 +315,7 @@ for (let i = 0; i < int16Data.length; i++) {
 
 ## Summary
 
-Ailethia Insights is a sophisticated executive intelligence system that:
+Cohi Insights is a sophisticated executive intelligence system that:
 1. **Generates Insights**: From loan data using Qlik-derived formulas
 2. **Displays Insights**: In a rotating, interactive card interface
 3. **Provides Voice Briefings**: Via WebSocket to OpenAI/Gemini Live APIs

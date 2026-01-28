@@ -89,8 +89,8 @@ const capabilities = [
   },
 ];
 
-// Sample dialogues from Ailethia
-const ailethiaDialogues = [
+// Sample dialogues from Cohi
+const CohiDialogues = [
   {
     type: 'growth',
     message: "Revenue at $158.2M—up 18.6% YTD. Positioned for a record year.",
@@ -407,7 +407,7 @@ const Index = () => {
         </div>
       </section>
 
-      {/* Ailethia Section */}
+      {/* Cohi Section */}
       <section className="px-6 py-32 sm:py-40 bg-slate-50 dark:bg-slate-900/50">
         <div className="mx-auto max-w-4xl">
           <motion.div
@@ -422,7 +422,7 @@ const Index = () => {
                 <Zap className="w-4 h-4 text-white" />
               </div>
               <p className="text-xs font-medium tracking-[0.2em] text-violet-600 dark:text-violet-400 uppercase">
-                Ailethia AI
+                Cohi AI
               </p>
             </div>
             <h2 className="text-3xl sm:text-4xl font-extralight text-slate-900 dark:text-white tracking-tight leading-tight mb-4">
@@ -434,7 +434,7 @@ const Index = () => {
           </motion.div>
 
           <div className="space-y-4">
-            {ailethiaDialogues.map((dialogue, idx) => (
+            {CohiDialogues.map((dialogue, idx) => (
               <motion.div
                 key={idx}
                 initial={{ opacity: 0, y: 20 }}

@@ -1845,7 +1845,7 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
             'SELECT email FROM public.users WHERE id = $1',
             [req.userId]
           );
-          const userEmail = userResult.rows[0]?.email || 'demo@ailethia.com';
+          const userEmail = userResult.rows[0]?.email || 'demo@Cohi.com';
           logDebug('User email', { userId: req.userId, userEmail });
 
           // Create a default tenant for the user

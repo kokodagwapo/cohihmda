@@ -191,7 +191,7 @@ const ragSettingsSchema = z.object({
   // API Keys
   openai_api_key: z.string().nullable().optional(),
   gemini_api_key: z.string().nullable().optional(),
-  // Ailethia Voice Agentic specific settings
+  // Cohi Voice Agentic specific settings
   voice_agentic_enabled: z.boolean().optional(),
   voice_name: z.string().optional(),
   voice_top_k: z.number().int().min(1).max(20).optional(),
@@ -822,7 +822,7 @@ router.get('/embeddings/stats', authenticateToken, async (req: AuthRequest, res)
 
 /**
  * GET /api/rag/voice
- * Get RAG voice agentic settings (Ailethia voice configuration) from tenant database
+ * Get RAG voice agentic settings (Cohi voice configuration) from tenant database
  */
 router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
   try {
@@ -928,7 +928,7 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
 
 /**
  * PUT /api/rag/voice
- * Update RAG voice agentic settings (Ailethia voice configuration) in tenant database
+ * Update RAG voice agentic settings (Cohi voice configuration) in tenant database
  */
 router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
   try {

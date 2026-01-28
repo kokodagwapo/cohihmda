@@ -672,7 +672,7 @@ export const IndustryNewsCard = () => {
                   {selectedNewsItem.source.summary}
                 </p>
 
-                {/* Enhanced Ailethia Executive Insights */}
+                {/* Enhanced Cohi Executive Insights */}
                 <div
                   className="
                     rounded-xl sm:rounded-2xl 
@@ -705,7 +705,7 @@ export const IndustryNewsCard = () => {
                         tracking-tight
                       "
                     >
-                      Ailethia Insights
+                      Cohi Insights
                     </span>
                   </div>
 

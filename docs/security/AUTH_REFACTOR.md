@@ -28,7 +28,7 @@ This document outlines the plan to refactor Cohi authentication and authorizatio
 
 1. App.tsx AutoAuthenticator
    │
-   ├── Hardcoded auto-login: api.signIn('admin@ailethia.com', 'admin123')
+   ├── Hardcoded auto-login: api.signIn('admin@Cohi.com', 'admin123')
    │                         ▲▲▲ CRITICAL SECURITY ISSUE ▲▲▲
    │
    └── Token stored in localStorage
@@ -72,7 +72,7 @@ This document outlines the plan to refactor Cohi authentication and authorizatio
 
 ```typescript
 // SECURITY VULNERABILITY - Remove immediately
-await api.signIn('admin@ailethia.com', 'admin123');
+await api.signIn('admin@Cohi.com', 'admin123');
 ```
 
 **Impact:** 

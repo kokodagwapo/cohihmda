@@ -1512,7 +1512,7 @@ async function runMigrations() {
       const adminResult = await pool.query(`
         INSERT INTO public.users (email, encrypted_password, full_name, role, is_active)
         VALUES (
-          'admin@ailethia.com',
+          'admin@Cohi.com',
           '$2a$10$vbbt8TWzAGU1Nf5QPom4bu9rxKx.8QqK/COn1HScKq3TysCmYJFlK',
           'Admin User',
           'admin',

@@ -23,7 +23,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Area, AreaChart } from 'recharts';
 import { Copy, Code2, Sparkles } from 'lucide-react';
 import { AletheiaVoiceAssistant } from '@/components/aletheia/AletheiaVoiceAssistant';
-import { AilethiaPodcast } from '@/components/aletheia/AilethiaPodcast';
+import { CohiPodcast } from '@/components/aletheia/CohiPodcast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePDF } from '@/utils/pdfExport';
 import { ReportsSidebar, DashboardVisibility } from '@/components/dashboard/ReportsSidebar';
@@ -1101,7 +1101,7 @@ const Dashboard = () => {
               </div>
             )}
             
-            {/* Ailethia Insights - First */}
+            {/* Cohi Insights - First */}
             {dashboardVisibility.aletheiaInsights && (
               <div id="aletheiaInsights" className="section-aletheia-insights mb-8 md:mb-12">
                 <AletheiaPromptsCard 
@@ -1204,7 +1204,7 @@ const Dashboard = () => {
         onClose={() => setFalloutModal({ open: false, category: null, data: [] })}
       />
 
-      {/* Hidden for now - Ailethia Avatar
+      {/* Hidden for now - Cohi Avatar
        <AletheiaVoiceAssistant dashboardContext={{
         stats,
         riskCases,

@@ -307,6 +307,51 @@ export async function initManagementDatabase(): Promise<void> {
       WHERE is_primary = true
     `).catch(() => {});
 
+    // =========================================================================
+    // Market Rates Table (global, not tenant-specific)
+    // Stores daily mortgage market rates from FRED API for fallout prediction
+    // =========================================================================
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.market_rates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        rate_date DATE NOT NULL UNIQUE,
+        rate DECIMAL(10, 4) NOT NULL,
+        series_id TEXT NOT NULL DEFAULT 'OBMMIC30YF',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_market_rates_date ON public.market_rates(rate_date)
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_market_rates_series ON public.market_rates(series_id)
+    `).catch(() => {});
+
+    // Trigger for auto-updating updated_at on market_rates
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION update_market_rates_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `).catch(() => {});
+
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trigger_market_rates_updated_at ON public.market_rates
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TRIGGER trigger_market_rates_updated_at
+        BEFORE UPDATE ON public.market_rates
+        FOR EACH ROW
+        EXECUTE FUNCTION update_market_rates_updated_at()
+    `).catch(() => {});
+
     console.log('✅ Management database schema initialized');
   } catch (error: any) {
     console.error('❌ Error initializing management database:', error);

@@ -19,7 +19,7 @@ echo ""
 
 # Configuration
 CLOUDFRONT_URL="https://d2wvs4i87rs881.cloudfront.net"
-EB_ENV_NAME="${EB_ENV_NAME:-ailethia-backend-production}"
+EB_ENV_NAME="${EB_ENV_NAME:-Cohi-backend-production}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
 # Check if AWS CLI is installed

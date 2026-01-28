@@ -64,14 +64,14 @@ uploads/
 *.rar
 server/backend*.zip
 server/deployment*.zip
-ailethia-backend*.zip
+Cohi-backend*.zip
 backend-deploy*.zip
 backend-fix*.zip
 backend-latest*.zip
 
 # Docker volumes and keys
 postgres_data/
-ailethia-key.pem
+Cohi-key.pem
 *.pem
 *.key
 
@@ -156,7 +156,7 @@ ailethia-key.pem
 !AGILEPLAN_DATABASE_SETUP.md
 !MIGRATION_SUMMARY.md
 !SAAS_SETUP.md
-!AILETHIA_VOICE_AWS_CONSOLE_DEPLOYMENT_GUIDE.md
+!Cohi_VOICE_AWS_CONSOLE_DEPLOYMENT_GUIDE.md
 !docs/**/*.md
 !public/**/*.md
 

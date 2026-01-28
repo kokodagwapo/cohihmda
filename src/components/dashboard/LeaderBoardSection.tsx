@@ -1,154 +1,95 @@
 import { useState, useMemo } from 'react';
-import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X, CalendarDays, ChevronDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLeaderboardData, LeaderboardLeader } from '@/hooks/useLeaderboardData';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
-import { Button } from '@/components/ui/button';
-import { format } from 'date-fns';
-
-// Extended timeframe types
-type TimeframeType = 'WTD' | 'MTD' | 'QTD' | 'LM' | 'LQ' | 'LY' | 'custom';
+import { useLeaderboardData, LeaderboardLeader, LeaderboardTimeframe } from '@/hooks/useLeaderboardData';
+import { cn } from '@/lib/utils';
 
 interface LeaderBoardSectionProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
   selectedTenantId?: string | null;
 }
 
-// Display labels for timeframes
-const timeframeLabels: Record<TimeframeType, string> = {
-  'WTD': 'Week-to-Date',
-  'MTD': 'Month-to-Date',
-  'QTD': 'Quarter-to-Date',
-  'LM': 'Last Month',
-  'LQ': 'Last Quarter',
-  'LY': 'Last Year',
-  'custom': 'Custom Range'
-};
-
-// Short labels for buttons
-const timeframeShortLabels: Record<TimeframeType, string> = {
-  'WTD': 'WTD',
-  'MTD': 'MTD',
-  'QTD': 'QTD',
-  'LM': 'Last Mo',
-  'LQ': 'Last Qtr',
-  'LY': 'Last Yr',
-  'custom': 'Custom'
-};
-
 export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoardSectionProps) => {
-  const [timeframe, setTimeframe] = useState<TimeframeType>('MTD');
+  const [timeframe, setTimeframe] = useState<'WTD' | 'MTD' | 'QTD'>('MTD');
   const [scope, setScope] = useState<'All' | 'Branch' | 'Team'>('All');
   const [selectedLeader, setSelectedLeader] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ 
-    start: null, 
-    end: null 
-  });
-  const [calendarOpen, setCalendarOpen] = useState(false);
   
-  // Pass scope filter to API
-  const scopeMap: Record<'All' | 'Branch' | 'Team', 'all' | 'branch' | 'team'> = {
-    'All': 'all',
-    'Branch': 'branch', 
-    'Team': 'team'
-  };
-  
-  // Calculate date range based on timeframe
-  const dateRangeFilter = useMemo(() => {
-    if (timeframe === 'custom' && customDateRange.start && customDateRange.end) {
-      return {
-        startDate: customDateRange.start.toISOString().split('T')[0],
-        endDate: customDateRange.end.toISOString().split('T')[0]
-      };
-    }
-    return undefined;
-  }, [timeframe, customDateRange]);
-  
-  // Map timeframe to API format
-  const apiTimeframe = useMemo((): 'wtd' | 'mtd' | 'qtd' | 'lm' | 'lq' | 'ly' | 'custom' => {
-    if (timeframe === 'custom') return 'custom';
-    return timeframe.toLowerCase() as 'wtd' | 'mtd' | 'qtd' | 'lm' | 'lq' | 'ly';
+  // Map UI timeframe to API timeframe (lowercase)
+  const apiTimeframe = useMemo((): LeaderboardTimeframe => {
+    return timeframe.toLowerCase() as LeaderboardTimeframe;
   }, [timeframe]);
+  
+  // Map scope filter for API
+  const scopeFilter = useMemo(() => {
+    return scope === 'All' ? 'all' : scope === 'Branch' ? 'branch' : 'team';
+  }, [scope]);
   
   const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(
     apiTimeframe, 
     selectedTenantId,
-    { 
-      scope: scopeMap[scope],
-      startDate: dateRangeFilter?.startDate,
-      endDate: dateRangeFilter?.endDate
-    }
+    { scope: scopeFilter as 'all' | 'branch' | 'team' }
   );
-  
-  // Get display label for current timeframe
-  const getTimeframeDisplayLabel = () => {
-    if (timeframe === 'custom' && customDateRange.start && customDateRange.end) {
-      return `${format(customDateRange.start, 'MMM d')} - ${format(customDateRange.end, 'MMM d, yyyy')}`;
-    }
-    return timeframeLabels[timeframe];
-  };
 
-  // Base leader data with different timeframes (fallback)
+  // Base leader data with sample values (fallback when API doesn't return data)
   const baseLeadersData: LeaderboardLeader[] = [{
     id: '1',
     name: 'Sarah Chen',
     role: 'Senior LO',
     branch: 'Downtown',
     avatarUrl: undefined,
-    points: 0,
+    points: 47,
     rank: 1,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 12,
+    loans: 28,
+    pullThru: 94,
+    cycleTime: 28,
+    revenue: '$8.2M',
+    badges: ['Top Performer', 'Pull-Through Pro'],
+    streakDays: 14
   }, {
     id: '2',
     name: 'Michael Rodriguez',
     role: 'Branch Manager',
     branch: 'Westside',
     avatarUrl: undefined,
-    points: 0,
+    points: 42,
     rank: 2,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 8,
+    loans: 24,
+    pullThru: 91,
+    cycleTime: 31,
+    revenue: '$7.1M',
+    badges: ['Volume Champion'],
+    streakDays: 7
   }, {
     id: '3',
     name: 'Emily Johnson',
     role: 'Senior LO',
     branch: 'North Branch',
     avatarUrl: undefined,
-    points: 0,
+    points: 38,
     rank: 3,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 5,
+    loans: 21,
+    pullThru: 88,
+    cycleTime: 33,
+    revenue: '$6.4M',
+    badges: ['Fast Closer'],
+    streakDays: 5
   }, {
     id: '4',
     name: 'David Kim',
     role: 'Loan Officer',
     branch: 'East Valley',
     avatarUrl: undefined,
-    points: 0,
+    points: 31,
     rank: 4,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
+    delta: -2,
+    loans: 18,
+    pullThru: 85,
+    cycleTime: 35,
+    revenue: '$5.2M',
     badges: [],
     streakDays: 0
   }, {
@@ -157,19 +98,18 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
     role: 'Senior LO',
     branch: 'Downtown',
     avatarUrl: undefined,
-    points: 0,
+    points: 28,
     rank: 5,
-    delta: 0,
-    loans: 0,
-    pullThru: 0,
-    cycleTime: 0,
-    revenue: '$0M',
-    badges: [],
-    streakDays: 0
+    delta: 3,
+    loans: 16,
+    pullThru: 82,
+    cycleTime: 36,
+    revenue: '$4.8M',
+    badges: ['Rising Star'],
+    streakDays: 3
   }];
 
-  // Get leader data from API or fallback
-  // API now handles filtering by scope and timeframe
+  // Get leader data - API already handles filtering by scope and timeframe
   const getLeadersData = (): LeaderboardLeader[] => {
     // Use API data if available, otherwise fallback to baseLeadersData
     if (leaderboardData.length > 0) {
@@ -199,113 +139,16 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
               Leaderboard
             </h3>
             <p className="text-[10px] sm:text-sm text-slate-600 dark:text-slate-300 font-light truncate">
-              {getTimeframeDisplayLabel()} · {scope === 'All' ? 'All branches' : scope === 'Branch' ? 'By branch' : 'By team'}
+              {timeframe === 'WTD' ? 'Week-to-Date' : timeframe === 'MTD' ? 'Month-to-Date' : 'Quarter-to-Date'} · {scope === 'All' ? 'All branches' : scope === 'Branch' ? 'By branch' : 'By team'}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Primary timeframe buttons - To-Date options */}
+        <div className="flex items-center gap-2">
           <div className="flex gap-1 p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
-            {(['WTD', 'MTD', 'QTD'] as const).map(tf => (
-              <button 
-                key={tf} 
-                onClick={() => setTimeframe(tf)} 
-                className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-md text-[11px] sm:text-xs font-medium transition-all ${
-                  timeframe === tf 
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
+            {(['WTD', 'MTD', 'QTD'] as const).map(tf => <button key={tf} onClick={() => setTimeframe(tf)} className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${timeframe === tf ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
                 {tf}
-              </button>
-            ))}
+              </button>)}
           </div>
-          
-          {/* Secondary timeframe buttons - Last period options */}
-          <div className="flex gap-1 p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
-            {(['LM', 'LQ', 'LY'] as const).map(tf => (
-              <button 
-                key={tf} 
-                onClick={() => setTimeframe(tf)} 
-                className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-md text-[11px] sm:text-xs font-medium transition-all ${
-                  timeframe === tf 
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-                title={timeframeLabels[tf]}
-              >
-                {timeframeShortLabels[tf]}
-              </button>
-            ))}
-          </div>
-          
-          {/* Custom date range picker */}
-          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-            <PopoverTrigger asChild>
-              <Button 
-                variant="outline" 
-                size="sm"
-                className={`gap-1.5 text-[11px] sm:text-xs h-8 sm:h-9 ${
-                  timeframe === 'custom' 
-                    ? 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600' 
-                    : ''
-                }`}
-              >
-                <CalendarDays className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">
-                  {timeframe === 'custom' && customDateRange.start && customDateRange.end 
-                    ? `${format(customDateRange.start, 'MMM d')} - ${format(customDateRange.end, 'MMM d')}`
-                    : 'Custom'
-                  }
-                </span>
-                <span className="sm:hidden">Custom</span>
-                <ChevronDown className="w-3 h-3 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-              <div className="p-3 border-b border-slate-200 dark:border-slate-700">
-                <p className="text-sm font-medium text-slate-900 dark:text-white">Select Date Range</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Choose start and end dates</p>
-              </div>
-              <Calendar
-                mode="range"
-                selected={{ 
-                  from: customDateRange.start || undefined, 
-                  to: customDateRange.end || undefined 
-                }}
-                onSelect={(range) => {
-                  setCustomDateRange({ 
-                    start: range?.from || null, 
-                    end: range?.to || null 
-                  });
-                  if (range?.from && range?.to) {
-                    setTimeframe('custom');
-                    setCalendarOpen(false);
-                  }
-                }}
-                numberOfMonths={2}
-                className="rounded-md"
-              />
-              <div className="p-3 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => {
-                    setCustomDateRange({ start: null, end: null });
-                    setTimeframe('MTD');
-                    setCalendarOpen(false);
-                  }}
-                >
-                  Clear
-                </Button>
-                {customDateRange.start && customDateRange.end && (
-                  <span className="text-xs text-slate-600 dark:text-slate-400">
-                    {format(customDateRange.start, 'MMM d, yyyy')} - {format(customDateRange.end, 'MMM d, yyyy')}
-                  </span>
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
         </div>
       </div>
 
@@ -330,11 +173,11 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
                 <p className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">{leader.role}</p>
               </div>
 
-              {/* Points */}
+              {/* Units - actual loan count */}
               <div className="flex items-end justify-between">
                 <div>
-                  <p className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">{leader.points.toLocaleString()}</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">points</p>
+                  <p className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">{leader.loans.toLocaleString()}</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">units</p>
                 </div>
                 <div className={`flex items-center gap-0.5 text-[11px] sm:text-xs font-medium ${leader.delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
                   {leader.delta >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
@@ -346,17 +189,22 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
               <div className="flex items-center justify-between pt-2 sm:pt-3 border-t border-white/40 dark:border-slate-700/50">
                 <div className="text-center flex-1 min-w-0">
                   <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.loans}</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Loans</p>
-                </div>
-                <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
-                <div className="text-center flex-1 min-w-0">
-                  <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.pullThru}%</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Pull-thru</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Volume</p>
                 </div>
                 <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
                 <div className="text-center flex-1 min-w-0">
                   <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.cycleTime} days</p>
-                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Cycle</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Turn-Time</p>
+                </div>
+                <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
+                <div className="text-center flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{leader.pullThru}%</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Pull-through</p>
+                </div>
+                <div className="w-px h-5 sm:h-6 bg-white/50 dark:bg-slate-700/50 flex-shrink-0" />
+                <div className="text-center flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-emerald-600 dark:text-emerald-400 truncate">{leader.revenue}</p>
+                  <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 truncate">Revenue</p>
                 </div>
               </div>
 
@@ -385,7 +233,7 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
               <p className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">{leader.branch}</p>
             </div>
             <div className="text-right flex-shrink-0">
-              <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">{leader.points.toLocaleString()}</p>
+              <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300">{leader.loans.toLocaleString()} units</p>
               <p className={`text-[9px] sm:text-[10px] font-medium flex items-center justify-end gap-0.5 ${leader.delta >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
                 {leader.delta >= 0 ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
                 {Math.abs(leader.delta)}%
@@ -403,25 +251,25 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
       <div className="pt-2 sm:pt-3 border-t border-slate-100 dark:border-slate-800">
         <div className="flex items-center justify-center gap-3 sm:gap-4 md:gap-6 lg:gap-8 flex-wrap">
           {[{
-          name: 'Pipeline',
+          name: 'Units',
           Icon: Rocket,
-          tooltip: 'Top 10% in loan volume'
+          tooltip: 'Top unit production'
         }, {
-          name: 'Fast Funder',
+          name: 'Volume',
+          Icon: Zap,
+          tooltip: 'Top volume performance'
+        }, {
+          name: 'Turn-Time',
           Icon: Timer,
-          tooltip: 'Average cycle time 20% faster'
+          tooltip: 'Fastest cycle times'
         }, {
-          name: 'Pull-Through',
+          name: 'Pull-through',
           Icon: Gauge,
-          tooltip: '90%+ pull-through rate'
+          tooltip: 'Highest pull-through rate'
         }, {
-          name: 'Rate Lock',
+          name: 'Revenue',
           Icon: ShieldCheck,
-          tooltip: 'Best-in-class rate lock timing'
-        }, {
-          name: 'On-Time',
-          Icon: CircleCheck,
-          tooltip: '100% on-time delivery'
+          tooltip: 'Top revenue contributor'
         }].map(badge => <div key={badge.name} className="relative group cursor-pointer touch-manipulation">
               <div className="flex flex-col items-center gap-1 sm:gap-1.5">
                 <div className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center group-hover:bg-slate-900 dark:group-hover:bg-slate-700 transition-colors duration-200">
@@ -479,15 +327,29 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
                         <p className="text-xs text-slate-500 dark:text-slate-400">{leader.role} · {leader.branch}</p>
                       </div>
                     </div>
-                    <button onClick={() => setSelectedLeader(null)} className="w-8 h-8 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 backdrop-blur-sm flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1">
-                      <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.5} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "px-2 py-1 rounded-full text-[10px] font-semibold text-white shadow-sm",
+                        leader.rank === 1
+                          ? "bg-amber-500"
+                          : leader.rank === 2
+                            ? "bg-slate-400"
+                            : leader.rank === 3
+                              ? "bg-orange-400"
+                              : "bg-slate-300"
+                      )}>
+                        Rank #{leader.rank}
+                      </span>
+                      <button onClick={() => setSelectedLeader(null)} className="w-8 h-8 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 backdrop-blur-sm flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1">
+                        <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.5} />
+                      </button>
+                    </div>
                   </div>
                   
-                  {/* Points & Delta */}
+                  {/* Units & Delta */}
                   <div className="flex items-center gap-2 mt-3">
-                    <span className="text-2xl font-light text-slate-900 dark:text-white tracking-tight">{leader.points.toLocaleString()}</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">pts</span>
+                    <span className="text-2xl font-light text-slate-900 dark:text-white tracking-tight">{leader.loans.toLocaleString()}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">units</span>
                     <span className={`ml-auto text-xs font-light px-2 py-0.5 rounded-full ${leader.delta >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'}`}>
                       {leader.delta >= 0 ? '↑' : '↓'} {Math.abs(leader.delta)}%
                     </span>
@@ -507,15 +369,15 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
                   <div className="grid grid-cols-4 gap-2">
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-slate-900 dark:text-white tracking-tight">{leader.loans}</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Loans</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Volume</p>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-slate-900 dark:text-white tracking-tight">{leader.pullThru}%</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Pull-thru</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Pull-through</p>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-slate-900 dark:text-white tracking-tight">{leader.cycleTime} days</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Cycle</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Turn-Time</p>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
                       <p className="text-lg font-light text-emerald-600 dark:text-emerald-400 tracking-tight">{leader.revenue}</p>
@@ -546,4 +408,3 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
       </AnimatePresence>
     </section>;
 };
-

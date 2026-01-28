@@ -30,11 +30,11 @@ provider:
     role: ${env:LAMBDA_EXECUTION_ROLE_ARN}
 
 functions:
-  ailethiaBriefing:
-    handler: ailethia-briefing/index.handler
+  CohiBriefing:
+    handler: Cohi-briefing/index.handler
     events:
       - http:
-          path: ailethia-briefing
+          path: Cohi-briefing
           method: post
           cors: true
     timeout: 30

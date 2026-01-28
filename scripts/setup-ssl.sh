@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}🔒 SSL Setup for Ailethia/Coheus Deployment${NC}"
+echo -e "${GREEN}🔒 SSL Setup for Cohi/Coheus Deployment${NC}"
 echo ""
 
 # Check if running on EC2
@@ -24,7 +24,7 @@ if [ ! -f /sys/class/dmi/id/product_uuid ] || [ "$(curl -s http://169.254.169.25
 fi
 
 # Get domain name
-read -p "Enter your domain name (e.g., ailethia.com): " DOMAIN
+read -p "Enter your domain name (e.g., Cohi.com): " DOMAIN
 if [ -z "$DOMAIN" ]; then
     echo -e "${RED}❌ Domain name is required${NC}"
     exit 1
@@ -50,7 +50,7 @@ fi
 
 # Update Nginx config to use domain
 echo -e "${GREEN}📝 Updating Nginx configuration...${NC}"
-sudo tee /etc/nginx/sites-available/ailethia > /dev/null <<EOF
+sudo tee /etc/nginx/sites-available/Cohi > /dev/null <<EOF
 server {
     listen 80;
     server_name ${DOMAIN} www.${DOMAIN};
@@ -121,7 +121,7 @@ server {
 EOF
 
 # Enable site
-sudo ln -sf /etc/nginx/sites-available/ailethia /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/Cohi /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test Nginx configuration

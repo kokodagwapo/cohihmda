@@ -652,7 +652,9 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                               Units Output
                             </th>
                             <th className={`text-center py-2 px-2 text-xs font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                              Output vs Target
+                              {comparisonView === 'vs-target' ? 'vs Target' : 
+                               comparisonView === 'monthly' ? 'vs Prev Month' : 
+                               'vs Last Year'}
                             </th>
                             <th className={`text-center py-2 px-2 text-xs font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                               Average Days

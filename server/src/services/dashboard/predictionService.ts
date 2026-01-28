@@ -27,6 +27,7 @@
  * ⚠️  Milestone data for Time in Motion (extracted but needs milestone logic implementation) - Fields: Fields.Log.MS.CurrentMilestone, Active days (Application Date -> Current Status Date/Closing date OR Today's date for active loans)
  */
 
+import pg from 'pg';
 import { logInfo, logError } from '../logger.js';
 import { getMarketRateForDate, getMarketRatesForRange, getMostRecentMarketRate, initializeMarketRateCache } from './marketRateService.js';
 import { pool } from '../../config/database.js';
@@ -59,6 +60,8 @@ export interface PredictionRequest {
   customPrompt?: string; // Optional custom prompt override
   /** Tenant ID = organization/company. From profiles.tenant_id or Default Tenant for super_admin. Required for persisting pattern learnings to DB so they show in per-tenant debug. */
   tenantId?: string | null;
+  /** Tenant database pool. For isolated tenant databases, pass the tenant-specific pool instead of using the global pool. */
+  tenantPool?: pg.Pool;
 }
 
 export interface PredictionResponse {
@@ -157,6 +160,7 @@ function getBucketSignature(loan: any): string {
 async function getOrCreatePatternLearnings(
   tenantId: string | null,
   historicalLoansData: any[],
+  dbPool: pg.Pool,
   options?: { forceRefresh?: boolean }
 ): Promise<string> {
   if (historicalLoansData.length === 0) {
@@ -171,16 +175,14 @@ async function getOrCreatePatternLearnings(
 
   try {
     if (!options?.forceRefresh) {
-      // Check for existing active learnings
-      const existingResult = await pool.query(
+      // Check for existing active learnings (no tenant_id column in isolated tenant DBs)
+      const existingResult = await dbPool.query(
         `SELECT pattern_summary, expires_at, historical_loan_count, updated_at
          FROM public.ai_pattern_learnings
-         WHERE tenant_id = $1
-           AND learning_type = 'historical_patterns'
+         WHERE learning_type = 'historical_patterns'
            AND is_active = true
          ORDER BY updated_at DESC
-         LIMIT 1`,
-        [tenantId]
+         LIMIT 1`
       );
 
       if (existingResult.rows.length > 0) {
@@ -349,13 +351,13 @@ Historical Loans (batch ${batchIndex + 1} of ${batches.length}, `;
 
       // Learnings do not expire - set expires_at to NULL so they persist indefinitely
       // They can be manually refreshed later when new historical loans are available
+      // Note: Isolated tenant DBs don't have tenant_id column
 
-      await pool.query(
+      await dbPool.query(
         `INSERT INTO public.ai_pattern_learnings 
-         (tenant_id, learning_type, pattern_summary, historical_loan_count, date_range_start, date_range_end, model_version, expires_at, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         (learning_type, pattern_summary, historical_loan_count, date_range_start, date_range_end, model_version, expires_at, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
-          tenantId,
           'historical_patterns',
           combinedSummary,
           historicalLoansData.length,
@@ -772,12 +774,30 @@ export function prepareLoanData(loans: any[]): any[] {
           })();
         return parseNumeric(interestRateValue);
       })(),
-      ficoScore: parseNumeric(loan.fico_score || rawData.fico_score || rawData.fico || rawData['FICO Score']),
-      ltv: parseNumeric(loan.ltv || rawData.ltv || rawData.loan_to_value || rawData['LTV Ratio']),
+      // FICO Score - check Encompass field IDs and aliases from CoheusDataDictionary
+      ficoScore: parseNumeric(
+        loan.fico_score || 
+        rawData.fico_score || 
+        rawData.fico || 
+        rawData['FICO Score'] ||
+        rawData['Fields.VASUMM.X23'] ||           // Encompass: FICO Score
+        rawData['Fields.ULDD.X101'] ||            // Encompass: Freddie Loan Level Credit Score Value
+        loan.credit_score
+      ),
+      // LTV - check Encompass field IDs and aliases
+      ltv: parseNumeric(
+        loan.ltv || 
+        loan.ltv_ratio ||
+        rawData.ltv || 
+        rawData.loan_to_value || 
+        rawData['LTV Ratio'] ||
+        rawData['Fields.353']                     // Encompass: LTV Ratio
+      ),
       dti: (() => {
-        // Try all possible DTI field name variations
+        // Try all possible DTI field name variations including Encompass field IDs
         const dtiValue = 
           loan.dti || 
+          loan.be_dti_ratio ||                    // Tenant schema column
           metadata.dti ||
           metadata.dti_ratio ||
           rawData.dti || 
@@ -787,6 +807,7 @@ export function prepareLoanData(loans: any[]): any[] {
           rawData['DTI Ratio'] ||
           rawData['dti ratio'] || // Case-insensitive
           rawData['Debt-to-Income Ratio'] ||
+          rawData['Fields.742'] ||                // Encompass: BE DTI Ratio
           // Try case-insensitive search in raw_data for any field containing "dti"
           (() => {
             if (rawData && typeof rawData === 'object') {
@@ -803,47 +824,67 @@ export function prepareLoanData(loans: any[]): any[] {
           })();
         return parseNumeric(dtiValue);
       })(),
-      cltv: parseNumeric(rawData.cltv || rawData.combined_loan_to_value || rawData.combined_ltv), // Combined Loan-to-Value
-      loanPurpose: String(loan.loan_purpose || rawData.loan_purpose || ''),
+      // CLTV - check Encompass field IDs
+      cltv: parseNumeric(
+        loan.cltv ||
+        rawData.cltv || 
+        rawData.combined_loan_to_value || 
+        rawData.combined_ltv ||
+        rawData['Fields.976']                     // Encompass: CLTV (if available)
+      ), // Combined Loan-to-Value
+      loanPurpose: String(loan.loan_purpose || rawData.loan_purpose || rawData['Fields.19'] || ''),
       branch: String(loan.branch || rawData.branch || ''),
       cycleTimeDays: parseNumeric(loan.cycle_time_days || rawData.cycle_time_days),
-      // Person names for pullthrough calculations (check CSV field names)
+      // Person names for pullthrough calculations - check schema columns, aliases, and Encompass field IDs
       loanOfficerName: String(
         loan.loan_officer_name || 
+        loan.loan_officer ||
         rawData.loan_officer_name || 
         rawData.loan_officer || 
         rawData.officer_name || 
-        rawData['Loan Officer'] || 
+        rawData['Loan Officer'] ||
+        rawData['Fields.317'] ||                      // Encompass: Loan Officer
+        rawData['Fields.LoanTeamMember.Name.Loan Officer'] ||  // Encompass: Loan Officer (team member)
         ''
       ),
       underwriterName: String(
+        loan.underwriter ||
         rawData.underwriter || 
         rawData.underwriter_name || 
-        rawData['Underwriter'] || 
+        rawData['Underwriter'] ||
+        rawData['Fields.LoanTeamMember.Name.Underwriter'] ||   // Encompass: Underwriter
         ''
       ),
       closerName: String(
+        loan.closer ||
         rawData.closer || 
         rawData.closer_name || 
-        rawData['Closer'] || 
+        rawData['Closer'] ||
+        rawData['Fields.LoanTeamMember.Name.Closer'] ||        // Encompass: Closer
         ''
       ),
       processorName: String(
+        loan.processor ||
         rawData.processor || 
         rawData.processor_name || 
-        rawData['Processor'] || 
+        rawData['Processor'] ||
+        rawData['Fields.LoanTeamMember.Name.Loan Processor'] || // Encompass: Processor
         ''
       ),
-      // Loan characteristics (check CSV field names)
+      // Loan characteristics (check CSV field names and Encompass field IDs)
       occupancyType: String(
+        loan.occupancy_type ||
         rawData.occupancy_type || 
         rawData.occupancyType || 
-        rawData['Occupancy Type'] || 
+        rawData['Occupancy Type'] ||
+        rawData['Fields.1811'] ||                     // Encompass: Occupancy Type (if available)
         ''
       ),
       channel: String(
+        loan.channel ||
         rawData.channel || 
-        rawData['Channel'] || 
+        rawData['Channel'] ||
+        rawData['Fields.2626'] ||                     // Encompass: Channel (if available)
         ''
       ),
       // Commission fields (if available in data)
@@ -1201,7 +1242,15 @@ function calculatePullthroughForRole(
     }
     
     for (const candidate of roleColumnCandidates) {
-      // Check exact match in raw_data first (most common case for CSV imports)
+      // Check direct loan property first (database columns from tenant schema)
+      // Use 'in' operator to check if column EXISTS (even if value is null/empty)
+      if (candidate in firstLoan) {
+        roleColumn = candidate;
+        actualRawDataKey = candidate; // Not raw_data, but use same field for consistency
+        break;
+      }
+      
+      // Check exact match in raw_data (for CSV imports)
       if (rawData && typeof rawData === 'object' && rawData[candidate] !== undefined) {
         roleColumn = candidate;
         actualRawDataKey = candidate; // Store actual key
@@ -1468,28 +1517,24 @@ function calculatePullthroughForRole(
     // 3. Raw column names (from database or raw_data) - use actualRawDataKey if available
     let personName: string | null = null;
     
-    // Check prepared field names first (for consistency with active loans)
-    if (roleColumnCandidates.includes('loan_officer_name') || roleColumnCandidates.includes('Loan Officer')) {
-      personName = loan.loanOfficerName || null;
-      // Also check metadata
+    // Check direct database columns first (from tenant schema), then prepared fields
+    if (roleColumnCandidates.includes('loan_officer')) {
+      personName = loan.loan_officer || loan.loanOfficerName || null;
       if (!personName && metadata && typeof metadata === 'object') {
         personName = metadata.loan_officer_name || null;
       }
-    } else if (roleColumnCandidates.includes('underwriter') || roleColumnCandidates.includes('Underwriter')) {
-      personName = loan.underwriterName || null;
-      // Also check metadata
+    } else if (roleColumnCandidates.includes('underwriter')) {
+      personName = loan.underwriter || loan.underwriterName || null;
       if (!personName && metadata && typeof metadata === 'object') {
         personName = metadata.underwriter_name || null;
       }
-    } else if (roleColumnCandidates.includes('closer') || roleColumnCandidates.includes('Closer')) {
-      personName = loan.closerName || null;
-      // Also check metadata
+    } else if (roleColumnCandidates.includes('closer')) {
+      personName = loan.closer || loan.closerName || null;
       if (!personName && metadata && typeof metadata === 'object') {
         personName = metadata.closer || metadata.closer_name || null;
       }
-    } else if (roleColumnCandidates.includes('processor') || roleColumnCandidates.includes('Processor')) {
-      personName = loan.processorName || null;
-      // Also check metadata
+    } else if (roleColumnCandidates.includes('processor')) {
+      personName = loan.processor || loan.processorName || null;
       if (!personName && metadata && typeof metadata === 'object') {
         personName = metadata.processor || metadata.processor_name || null;
       }
@@ -1820,9 +1865,8 @@ export async function bucketLoanData(
 ): Promise<any[]> {
   const logContext = options?.logContext || 'loans';
   // Step 1: Calculate pullthrough rates for all roles (needs all loans)
-  const loPullthrough = calculatePullthroughForRole(allLoans, [
-    'Loan Officer', 'LoanOfficer', 'LO', 'Officer', 'Loan Officer Name', 'loan_officer_name'
-  ]);
+  // Use exact column names from tenant schema (tenantDatabaseSchema.ts)
+  const loPullthrough = calculatePullthroughForRole(allLoans, ['loan_officer']);
   
   // Debug logging for pullthrough calculation
   logInfo('LO Pullthrough calculation completed', {
@@ -1830,15 +1874,9 @@ export async function bucketLoanData(
     pullthroughMapSize: Object.keys(loPullthrough).length,
     samplePullthroughValues: Object.entries(loPullthrough).slice(0, 5).map(([name, pct]) => ({ name, pct }))
   });
-  const uwPullthrough = calculatePullthroughForRole(allLoans, [
-    'Underwriter', 'UW', 'Underwriter Name'
-  ]);
-  const closerPullthrough = calculatePullthroughForRole(allLoans, [
-    'Closer', 'Closing Agent', 'Closer Name'
-  ]);
-  const processorPullthrough = calculatePullthroughForRole(allLoans, [
-    'Processor', 'Loan Processor', 'Processor Name'
-  ]);
+  const uwPullthrough = calculatePullthroughForRole(allLoans, ['underwriter']);
+  const closerPullthrough = calculatePullthroughForRole(allLoans, ['closer']);
+  const processorPullthrough = calculatePullthroughForRole(allLoans, ['processor']);
 
   // Process loans in batches to avoid connection pool exhaustion
   // Even with market rate cache, processing 7,000+ loans in parallel overwhelms the pool
@@ -2316,7 +2354,41 @@ export async function bucketLoanData(
       loPullthroughPercentage: loPullthroughPct,
       uwPullthroughPercentage: uwPct,
       closerPullthroughPercentage: closerPct,
-      processorPullthroughPercentage: processorPct
+      processorPullthroughPercentage: processorPct,
+      
+      // Overall bucket (high/medium/low) based on composite signal strengths
+      // Average of all non-null composite signals, then map to bucket:
+      // 1-2 = low risk, 3-4 = medium risk, 5-6 = high risk
+      bucket: (() => {
+        const compositeSignals = [
+          creditSignal, 
+          loanCharacteristicsSignal, 
+          timeInMotionSignal, 
+          mloAeFalloutProneSignal,
+          interestLockVsMarketSignal
+        ].filter(s => s !== null) as number[];
+        
+        if (compositeSignals.length === 0) return 'unknown';
+        
+        const avgSignal = compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length;
+        if (avgSignal <= 2.5) return 'low';
+        if (avgSignal <= 4) return 'medium';
+        return 'high';
+      })(),
+      
+      // Signal strength for sorting (average of composite signals, higher = more risk)
+      signal_strength: (() => {
+        const compositeSignals = [
+          creditSignal, 
+          loanCharacteristicsSignal, 
+          timeInMotionSignal, 
+          mloAeFalloutProneSignal,
+          interestLockVsMarketSignal
+        ].filter(s => s !== null) as number[];
+        
+        if (compositeSignals.length === 0) return null;
+        return Math.round((compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length) * 10) / 10;
+      })()
     };
     }));
     
@@ -2409,19 +2481,21 @@ function addActualOutcomeToHistorical(bucketedHistorical: any[]): any[] {
 /**
  * Load cached bucket snapshots for historical loans. Only historical loans are cached; active loans are always re-bucketed.
  * Returns map of loan_id -> bucket snapshot (fields to merge onto prepared loan).
+ * Note: Isolated tenant DBs don't have tenant_id column - each tenant has their own DB.
  */
 async function getCachedHistoricalBuckets(
   tenantId: string | null,
-  loanIds: string[]
+  loanIds: string[],
+  dbPool: pg.Pool
 ): Promise<Map<string, Record<string, unknown>>> {
   if (!tenantId || loanIds.length === 0) return new Map();
   const ids = [...new Set(loanIds.map(String).filter(Boolean))];
   if (ids.length === 0) return new Map();
   try {
-    const result = await pool.query(
+    const result = await dbPool.query(
       `SELECT loan_id, bucket_snapshot FROM public.historical_loan_bucket_cache
-       WHERE tenant_id = $1 AND loan_id = ANY($2)`,
-      [tenantId, ids]
+       WHERE loan_id = ANY($1)`,
+      [ids]
     );
     const map = new Map<string, Record<string, unknown>>();
     for (const row of result.rows) {
@@ -2437,12 +2511,11 @@ async function getCachedHistoricalBuckets(
 }
 
 /** Set of loan_ids that exist in historical_loan_bucket_cache for this tenant. */
-async function getCachedHistoricalBucketLoanIds(tenantId: string | null): Promise<Set<string>> {
+async function getCachedHistoricalBucketLoanIds(tenantId: string | null, dbPool: pg.Pool): Promise<Set<string>> {
   if (!tenantId) return new Set();
   try {
-    const result = await pool.query(
-      `SELECT loan_id FROM public.historical_loan_bucket_cache WHERE tenant_id = $1`,
-      [tenantId]
+    const result = await dbPool.query(
+      `SELECT loan_id FROM public.historical_loan_bucket_cache`
     );
     return new Set(result.rows.map((r: any) => String(r.loan_id ?? '')).filter(Boolean));
   } catch (err: any) {
@@ -2452,13 +2525,12 @@ async function getCachedHistoricalBucketLoanIds(tenantId: string | null): Promis
 }
 
 /** True if tenant has at least one active row in ai_pattern_learnings (historical_patterns). */
-async function hasActivePatternLearnings(tenantId: string | null): Promise<boolean> {
+async function hasActivePatternLearnings(tenantId: string | null, dbPool: pg.Pool): Promise<boolean> {
   if (!tenantId) return false;
   try {
-    const result = await pool.query(
+    const result = await dbPool.query(
       `SELECT 1 FROM public.ai_pattern_learnings
-       WHERE tenant_id = $1 AND learning_type = 'historical_patterns' AND is_active = true LIMIT 1`,
-      [tenantId]
+       WHERE learning_type = 'historical_patterns' AND is_active = true LIMIT 1`
     );
     return result.rows.length > 0;
   } catch (err: any) {
@@ -2470,10 +2542,12 @@ async function hasActivePatternLearnings(tenantId: string | null): Promise<boole
 /**
  * Persist bucket snapshots for historical loans. Only call with bucketed historical (finalized) loans.
  * Active loans must not be cached so they are re-bucketed when data changes.
+ * Note: Isolated tenant DBs use loan_id as unique key (no tenant_id column).
  */
 async function saveHistoricalBuckets(
   tenantId: string | null,
-  bucketedLoans: any[]
+  bucketedLoans: any[],
+  dbPool: pg.Pool
 ): Promise<void> {
   if (!tenantId || bucketedLoans.length === 0) return;
   try {
@@ -2487,11 +2561,11 @@ async function saveHistoricalBuckets(
         }
       }
       if (Object.keys(snapshot).length === 0) continue;
-      await pool.query(
-        `INSERT INTO public.historical_loan_bucket_cache (tenant_id, loan_id, bucket_snapshot)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (tenant_id, loan_id) DO UPDATE SET bucket_snapshot = EXCLUDED.bucket_snapshot, created_at = NOW()`,
-        [tenantId, String(loanId), JSON.stringify(snapshot)]
+      await dbPool.query(
+        `INSERT INTO public.historical_loan_bucket_cache (loan_id, bucket_snapshot)
+         VALUES ($1, $2)
+         ON CONFLICT (loan_id) DO UPDATE SET bucket_snapshot = EXCLUDED.bucket_snapshot, created_at = NOW()`,
+        [String(loanId), JSON.stringify(snapshot)]
       );
     }
     logInfo('Saved historical loan bucket cache', { tenantId, count: bucketedLoans.length });
@@ -2532,6 +2606,8 @@ async function runPredictFlow(
   const startTime = Date.now();
   let bucketedLoans: any[] = [];
   const tenantId = request.tenantId ?? null;
+  // Use tenant pool if provided (isolated tenant DB), otherwise fall back to global pool (shared DB)
+  const dbPool = request.tenantPool ?? pool;
   const allLoans = request.allLoans ?? request.loans ?? [];
   const preparedLoans = prepareLoanData(request.loans);
   const historicalLoans = request.allLoans?.length ? filterHistoricalLoans(request.allLoans) : [];
@@ -2561,11 +2637,11 @@ async function runPredictFlow(
   let bucketCacheChanged = false;
 
   // ——— Step 1: If historical bucket cache is empty, bucket and save all historical loans. ———
-  const cachedIds = await getCachedHistoricalBucketLoanIds(tenantId);
+  const cachedIds = await getCachedHistoricalBucketLoanIds(tenantId, dbPool);
   if (cachedIds.size === 0 && historicalLoans.length > 0) {
     logInfo('Step 1/6: Historical bucket cache is empty — bucketing and saving all historical loans', { count: historicalLoans.length });
     const bucketed = await bucketLoanData(prepareLoanData(historicalLoans), allLoansForPullthrough, { logContext: 'historical' });
-    await saveHistoricalBuckets(tenantId, bucketed);
+    await saveHistoricalBuckets(tenantId, bucketed, dbPool);
     allBucketedHistorical = bucketed;
     bucketCacheChanged = true;
     logInfo('Step 1/6: Done — saved all historical buckets', { count: bucketed.length });
@@ -2579,7 +2655,7 @@ async function runPredictFlow(
     if (missed.length > 0) {
       logInfo('Step 2/6: Backfilling historical buckets for loans not in cache', { toAdd: missed.length, cached: cachedIds.size });
       const bucketedMisses = await bucketLoanData(prepareLoanData(missed), allLoansForPullthrough, { logContext: 'historical' });
-      await saveHistoricalBuckets(tenantId, bucketedMisses);
+      await saveHistoricalBuckets(tenantId, bucketedMisses, dbPool);
       bucketCacheChanged = true;
       for (const id of bucketedMisses.map(b => String(b.loan_id ?? b.loanId))) {
         if (id) cachedIds.add(id);
@@ -2590,7 +2666,7 @@ async function runPredictFlow(
     }
     // Build full bucketed historical from cache for steps 3–4 (includes any we just saved in backfill)
     const ids = historicalLoans.map(l => String(l.loan_id ?? l.loanId ?? '')).filter(Boolean);
-    const cached = await getCachedHistoricalBuckets(tenantId, ids);
+    const cached = await getCachedHistoricalBuckets(tenantId, ids, dbPool);
     const prepared = prepareLoanData(historicalLoans);
     allBucketedHistorical = historicalLoans.map((loan, i) => {
       const id = String(loan.loan_id ?? loan.loanId ?? prepared[i]?.loanId ?? '');
@@ -2620,7 +2696,7 @@ async function runPredictFlow(
   };
   let ragPromptTemplate: string;
     try {
-      const kbResult = await pool.query(
+      const kbResult = await dbPool.query(
         `SELECT content, priority FROM public.rag_knowledge_base
          WHERE category = 'Fallout' AND is_active = true ORDER BY priority DESC, created_at DESC`
       );
@@ -2681,6 +2757,7 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
     // Predictions will complete fully without time limits
     const runPredictionsInBackground = async () => {
       const backgroundTenantId = tenantId;
+      const backgroundDbPool = dbPool; // Capture the tenant pool for background operations
       let ragUnavailable = false; // set when pgvector / loan_outcome_embeddings is missing; skip RAG inference
       if (!hasValidApiKey) {
         logInfo('Skipping AI predictions - OPENAI_API_KEY is invalid or not configured', {
@@ -2693,7 +2770,7 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
       // Step 4 (background): Ensure historical loan embeddings before RAG. All bucketing was done and returned to UI.
       if (backgroundTenantId && historicalWithOutcomes.length > 0) {
         try {
-          const existingIds = await getEmbeddedLoanIds(backgroundTenantId);
+          const existingIds = await getEmbeddedLoanIds(backgroundTenantId, backgroundDbPool);
           const incrementalOnly = existingIds.size > 0;
           logInfo('Step 4/6 (background): Ensuring historical loan embeddings (RAG)', {
             loanCount: historicalWithOutcomes.length,
@@ -2704,7 +2781,7 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
             backgroundTenantId,
             historicalWithOutcomes as any[],
             loanRagCanonicalConfig,
-            { incrementalOnly, apiKey: apiKeyToUse }
+            { incrementalOnly, apiKey: apiKeyToUse, pool: backgroundDbPool }
           );
           logInfo('Step 4/6 (background): Historical embeddings ensured');
         } catch (ragErr: any) {
@@ -2724,6 +2801,7 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
       };
       
       // Helper function to save predictions to database
+      // Note: Isolated tenant DBs don't have tenant_id column - each tenant has their own DB
       const savePredictionsToDatabase = async (predictionsToSave: LoanPrediction[]) => {
         if (!predictionsToSave.length || !backgroundTenantId) return;
         
@@ -2731,11 +2809,11 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
           // Use INSERT ... ON CONFLICT to update existing predictions for the same loan
           // This allows updating predictions when they change
           for (const prediction of predictionsToSave) {
-            await pool.query(`
+            await backgroundDbPool.query(`
               INSERT INTO public.loan_predictions 
-              (tenant_id, loan_id, predicted_outcome, confidence, reasoning, risk_factors, model_version, created_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-              ON CONFLICT (tenant_id, loan_id, created_at) 
+              (loan_id, predicted_outcome, confidence, reasoning, risk_factors, model_version, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, NOW())
+              ON CONFLICT (loan_id, created_at) 
               DO UPDATE SET
                 predicted_outcome = EXCLUDED.predicted_outcome,
                 confidence = EXCLUDED.confidence,
@@ -2744,7 +2822,6 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
                 model_version = EXCLUDED.model_version,
                 updated_at = NOW()
             `, [
-              tenantId,
               prediction.loanId,
               prediction.predictedOutcome,
               prediction.confidence,
@@ -2780,7 +2857,7 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
         // If Step 4 was skipped (e.g. no historical loans), probe once so we don't fail later in searchSimilarHistorical
         if (backgroundTenantId) {
           try {
-            await getEmbeddedLoanIds(backgroundTenantId);
+            await getEmbeddedLoanIds(backgroundTenantId, backgroundDbPool);
           } catch (probeErr: any) {
             const msg = String(probeErr?.message ?? '');
             if (/loan_outcome_embeddings|relation.*does not exist|type "vector" does not exist/i.test(msg)) {
@@ -2801,19 +2878,59 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
         // RAG: canonical text per active loan, then batch-embed
         const canonicalTexts = bucketedLoans.map((loan) => toCanonicalLoanText(loan, config));
         const allEmbeddings: number[][] = [];
+        const totalEmbedBatches = Math.ceil(canonicalTexts.length / LOAN_RAG_EMBED_BATCH_SIZE);
+        logInfo('Step 5/6 (background): Starting embedding generation', {
+          totalLoans: canonicalTexts.length,
+          batchSize: LOAN_RAG_EMBED_BATCH_SIZE,
+          totalBatches: totalEmbedBatches,
+          model: LOAN_RAG_EMBEDDING_MODEL,
+          hasApiKey: !!apiKeyToUse,
+          apiKeyLength: apiKeyToUse?.length || 0
+        });
+        
         for (let i = 0; i < canonicalTexts.length; i += LOAN_RAG_EMBED_BATCH_SIZE) {
+          const batchNum = Math.floor(i / LOAN_RAG_EMBED_BATCH_SIZE) + 1;
           const chunk = canonicalTexts.slice(i, i + LOAN_RAG_EMBED_BATCH_SIZE);
-          const results = await generateEmbeddings(chunk, LOAN_RAG_EMBEDDING_MODEL, apiKeyToUse);
-          for (const r of results) allEmbeddings.push(r.embedding);
+          try {
+            logInfo(`Embedding batch ${batchNum}/${totalEmbedBatches} starting`, { chunkSize: chunk.length });
+            const results = await generateEmbeddings(chunk, LOAN_RAG_EMBEDDING_MODEL, apiKeyToUse);
+            for (const r of results) allEmbeddings.push(r.embedding);
+            logInfo(`Embedding batch ${batchNum}/${totalEmbedBatches} completed`, { 
+              embeddingsGenerated: results.length,
+              totalSoFar: allEmbeddings.length 
+            });
+          } catch (embedError: any) {
+            logError(`Embedding batch ${batchNum}/${totalEmbedBatches} FAILED`, embedError, {
+              chunkSize: chunk.length,
+              model: LOAN_RAG_EMBEDDING_MODEL
+            });
+            throw embedError; // Re-throw to stop processing
+          }
         }
+        
+        logInfo('Step 5/6 (background): All embeddings generated, starting similarity search', {
+          totalEmbeddings: allEmbeddings.length,
+          loansToSearch: bucketedLoans.length
+        });
 
         // Per-loan similarity search + aggregation (skip vector search if no tenant)
         const aggregated: AggregatedSimilar[] = [];
+        const searchStartTime = Date.now();
         for (let i = 0; i < bucketedLoans.length; i++) {
           const similar = backgroundTenantId
-            ? await searchSimilarHistorical(backgroundTenantId, allEmbeddings[i] ?? [], LOAN_RAG_TOP_K)
+            ? await searchSimilarHistorical(backgroundTenantId, allEmbeddings[i] ?? [], LOAN_RAG_TOP_K, backgroundDbPool)
             : [];
           aggregated.push(aggregateRetrieved(similar));
+          
+          // Log progress every 100 loans
+          if ((i + 1) % 100 === 0 || i === bucketedLoans.length - 1) {
+            const elapsed = ((Date.now() - searchStartTime) / 1000).toFixed(1);
+            logInfo(`Similarity search progress: ${i + 1}/${bucketedLoans.length}`, { 
+              completed: i + 1,
+              total: bucketedLoans.length,
+              elapsedSeconds: elapsed
+            });
+          }
         }
 
         logInfo('Step 5/6 (background): Similarity done, starting GPT batches', {

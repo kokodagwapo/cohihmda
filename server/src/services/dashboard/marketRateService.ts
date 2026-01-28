@@ -6,7 +6,8 @@
  * API Documentation: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
  */
 
-import { pool } from '../../config/database.js';
+// Use management database pool - market_rates is a global table in the management database
+import { pool } from '../../config/managementDatabase.js';
 import { logInfo, logError } from '../logger.js';
 
 const FRED_API_KEY = process.env.FRED_API_KEY;
@@ -266,8 +267,10 @@ export async function initializeMarketRateCache(): Promise<void> {
     cacheInitialized = true;
     cacheExpiry = Date.now() + CACHE_TTL;
   } catch (error: any) {
-    // If table doesn't exist, silently continue with empty cache
-    if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+    // If table doesn't exist or connection timeout, silently continue with empty cache
+    if (error?.message?.includes('does not exist') || 
+        error?.code === '42P01' ||
+        error?.message?.includes('timeout')) {
       marketRateCache.clear();
       cacheInitialized = true;
       cacheExpiry = Date.now() + CACHE_TTL;
@@ -326,9 +329,11 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
     marketRateCache.set(dateStr, rate);
     return rate;
   } catch (error: any) {
-    // If table doesn't exist, silently return null (don't spam errors)
-    if (error?.message?.includes('does not exist') || error?.code === '42P01') {
-      // Table doesn't exist yet - this is expected in development
+    // If table doesn't exist or connection timeout, silently return null (don't spam errors)
+    if (error?.message?.includes('does not exist') || 
+        error?.code === '42P01' ||
+        error?.message?.includes('timeout')) {
+      // Table doesn't exist or connection issues - this is expected in development
       // Return null silently to allow bucketing to continue
       return null;
     }
@@ -374,9 +379,26 @@ export async function getMarketRatesForRange(
 
 /**
  * Get the most recent market rate from database (for active loans)
+ * Uses cache if initialized, otherwise queries database
  * @returns Most recent market rate or null if not found
  */
 export async function getMostRecentMarketRate(): Promise<number | null> {
+  // If cache is initialized, get the most recent rate from cache
+  if (cacheInitialized && Date.now() < cacheExpiry) {
+    if (marketRateCache.size === 0) {
+      return null; // Empty cache - no market rates available
+    }
+    // Get the most recent date in the cache
+    let mostRecentDate: string | null = null;
+    for (const dateStr of marketRateCache.keys()) {
+      if (!mostRecentDate || dateStr > mostRecentDate) {
+        mostRecentDate = dateStr;
+      }
+    }
+    return mostRecentDate ? marketRateCache.get(mostRecentDate) ?? null : null;
+  }
+
+  // Cache not initialized - query database (but this should rarely happen)
   try {
     const result = await pool.query(
       'SELECT rate FROM public.market_rates ORDER BY rate_date DESC LIMIT 1'
@@ -388,8 +410,10 @@ export async function getMostRecentMarketRate(): Promise<number | null> {
 
     return parseFloat(result.rows[0].rate);
   } catch (error: any) {
-    // If table doesn't exist, silently return null
-    if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+    // If table doesn't exist or timeout, silently return null
+    if (error?.message?.includes('does not exist') || 
+        error?.code === '42P01' ||
+        error?.message?.includes('timeout')) {
       return null;
     }
     logError(`Failed to get most recent market rate: ${error.message}`, error);

@@ -21,7 +21,7 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
 -- Insert default admin user if not exists
 INSERT INTO public.users (email, encrypted_password, full_name, role)
 VALUES (
-  'admin@ailethia.com',
+  'admin@Cohi.com',
   '$2a$10$YourHashedPasswordHere',  -- This will be replaced with actual hash
   'System Administrator',
   'super_admin'
@@ -34,5 +34,5 @@ VALUES ('Default Tenant')
 ON CONFLICT DO NOTHING;
 
 -- Grant permissions
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.users TO ailethia_admin;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ailethia_admin;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.users TO Cohi_admin;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO Cohi_admin;

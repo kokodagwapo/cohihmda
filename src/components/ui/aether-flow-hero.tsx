@@ -395,7 +395,7 @@ const AetherFlowHero = () => {
                 <p className="max-w-2xl mx-auto text-lg md:text-xl text-slate-700 dark:text-slate-300 leading-relaxed font-light mt-6">
                     <EditableText 
                         id="aether-hero-description" 
-                        defaultValue="Real-time insights delivered daily to help lending leaders make faster, smarter decisions. Powered by Ailethia."
+                        defaultValue="Real-time insights delivered daily to help lending leaders make faster, smarter decisions. Powered by Cohi."
                         className=""
                         as="span"
                     />
