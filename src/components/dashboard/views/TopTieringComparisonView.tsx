@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
 import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2, AlertCircle, Maximize2, X } from 'lucide-react';
 import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ComposedChart, Tooltip, Cell, ReferenceLine } from 'recharts';
@@ -146,7 +147,7 @@ export function TopTieringComparisonView({
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
   const isMobile = useIsMobile();
-  const chartHeight = isMobile ? 280 : 350;
+  const chartHeight = isMobile ? 220 : 240;
   
   const [selectedActor, setSelectedActor] = useState<TopTieringActor>(() => {
     const saved = localStorage.getItem('toptiering-comparison-actor');
@@ -490,7 +491,7 @@ export function TopTieringComparisonView({
   }
 
   return (
-    <div className={`relative transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px]'} p-3 sm:p-4 md:p-6`}>
+    <div className={`relative transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px]'} p-1 sm:p-2`}>
         {/* Demo data indicator */}
         {isUsingMockData && (
           <div className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${isDarkMode ? 'bg-amber-900/20 border border-amber-700/30' : 'bg-amber-50 border border-amber-200'}`}>
@@ -501,10 +502,10 @@ export function TopTieringComparisonView({
           </div>
         )}
         
-        <div className={`grid gap-4 sm:gap-5 md:gap-6 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
+        <div className={`grid gap-2 sm:gap-3 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
           {/* Left Sidebar - Filters + TopTiering Story */}
           {!isFullscreen && (
-            <div className="col-span-12 lg:col-span-3 space-y-4 sm:space-y-5 md:space-y-6">
+            <div className="col-span-12 lg:col-span-3 space-y-2 sm:space-y-3">
               {/* Title and Time Filter */}
               <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
                 <CardHeader className={`border-b pb-2 sm:pb-3 ${isDarkMode ? 'border-slate-700/50' : 'border-blue-100/50'}`}>
@@ -769,83 +770,83 @@ export function TopTieringComparisonView({
           )}
 
            {/* Right Panel - Charts */}
-           <div className={`space-y-3 sm:space-y-4 transition-all duration-300 ${isFullscreen ? 'col-span-1' : 'col-span-12 lg:col-span-9'}`}>
+           <div className={`space-y-2 transition-all duration-300 ${isFullscreen ? 'col-span-1' : 'col-span-12 lg:col-span-9'}`}>
             {/* KPI Summary Dashboard */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-                <CardContent className="pt-4 sm:pt-5 md:pt-6 px-4 sm:px-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+                <CardContent className="pt-2 pb-2 px-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] sm:text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total Revenue</p>
-                      <p className={`text-xl sm:text-2xl font-bold mt-1 truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      <p className={`text-[10px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total Revenue</p>
+                      <p className={`text-lg font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                         {formatCurrency(totalRevenue)}
                       </p>
-                      <div className="flex items-center gap-1 mt-1 sm:mt-2">
+                      <div className="flex items-center gap-1">
                         <TrendingUp className={`w-3 h-3 flex-shrink-0 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
-                        <span className={`text-[10px] sm:text-xs font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        <span className={`text-[10px] font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
                           {yoyGrowth > 0 ? '+' : ''}{yoyGrowth.toFixed(1)}% YoY
                         </span>
                       </div>
                     </div>
-                    <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-blue-500/20' : 'bg-blue-100'}`}>
-                      <DollarSign className={`w-5 h-5 sm:w-6 sm:h-6 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+                    <div className={`p-1.5 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-blue-500/20' : 'bg-blue-100'}`}>
+                      <DollarSign className={`w-4 h-4 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-                <CardContent className="pt-4 sm:pt-5 md:pt-6 px-4 sm:px-6">
+              <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+                <CardContent className="pt-2 pb-2 px-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] sm:text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total Units</p>
-                      <p className={`text-xl sm:text-2xl font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      <p className={`text-[10px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total Units</p>
+                      <p className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                         {formatNumber(totalUnits)}
                       </p>
-                      <p className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
+                      <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                         Avg: {formatNumber(Math.round(totalUnits / currentData.length))} per {actorLabelSingular.toLowerCase()}
                       </p>
                     </div>
-                    <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-teal-500/20' : 'bg-teal-100'}`}>
-                      <BarChart3 className={`w-5 h-5 sm:w-6 sm:h-6 ${isDarkMode ? 'text-teal-400' : 'text-teal-600'}`} />
+                    <div className={`p-1.5 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-teal-500/20' : 'bg-teal-100'}`}>
+                      <BarChart3 className={`w-4 h-4 ${isDarkMode ? 'text-teal-400' : 'text-teal-600'}`} />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-                <CardContent className="pt-4 sm:pt-5 md:pt-6 px-4 sm:px-6">
+              <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+                <CardContent className="pt-2 pb-2 px-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] sm:text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Avg Revenue BPS</p>
-                      <p className={`text-xl sm:text-2xl font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      <p className={`text-[10px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Avg Revenue BPS</p>
+                      <p className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                         {totalRevenueBPS.toFixed(0)}
                       </p>
-                      <p className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
+                      <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                         Range: {Math.round(statisticalInsights.revenueBPS.min)}-{Math.round(statisticalInsights.revenueBPS.max)}
                       </p>
                     </div>
-                    <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
-                      <TrendingUp className={`w-5 h-5 sm:w-6 sm:h-6 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`} />
+                    <div className={`p-1.5 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
+                      <TrendingUp className={`w-4 h-4 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`} />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-                <CardContent className="pt-4 sm:pt-5 md:pt-6 px-4 sm:px-6">
+              <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+                <CardContent className="pt-2 pb-2 px-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] sm:text-xs font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total {actorLabelPlural}</p>
-                      <p className={`text-xl sm:text-2xl font-bold mt-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      <p className={`text-[10px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Total {actorLabelPlural}</p>
+                      <p className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                         {currentData.length}
                       </p>
-                      <p className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
+                      <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
                         {topTierItems.length} Top | {secondTierItems.length} Second | {bottomTierItems.length} Bottom
                       </p>
                     </div>
-                    <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-amber-500/20' : 'bg-amber-100'}`}>
-                      <Users className={`w-5 h-5 sm:w-6 sm:h-6 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`} />
+                    <div className={`p-1.5 rounded-lg flex-shrink-0 ${isDarkMode ? 'bg-amber-500/20' : 'bg-amber-100'}`}>
+                      <Users className={`w-4 h-4 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`} />
                     </div>
                   </div>
                 </CardContent>
@@ -875,16 +876,15 @@ export function TopTieringComparisonView({
             ) : (
               <>
             {/* Chart 1: Revenue by Branch (Pareto Chart) */}
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-              <CardHeader className={`border-b pb-2 sm:pb-3 px-4 sm:px-6 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+            <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+              <CardHeader className={`border-b py-1.5 px-3 ${isDarkMode ? 'border-slate-700/50' : 'border-blue-100/50'}`}>
+                <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-sm sm:text-base">Revenue by {actorLabel}</CardTitle>
-                    <CardDescription className="text-[10px] sm:text-xs">Pareto chart showing revenue and accumulated percentage</CardDescription>
+                    <CardTitle className="text-xs font-semibold">Revenue by {actorLabel}</CardTitle>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <Select value={revenueChartSorting} onValueChange={(v) => setRevenueChartSorting(v as ChartSorting)}>
-                      <SelectTrigger className={`w-[120px] h-8 text-xs ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
+                      <SelectTrigger className={`w-[100px] h-6 text-[10px] ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -896,27 +896,27 @@ export function TopTieringComparisonView({
                       variant="ghost"
                       size="sm"
                       onClick={() => setExpandedChart('revenue')}
-                      className={`h-8 w-8 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                      className={`h-6 w-6 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
                       title="Expand chart"
                     >
-                      <Maximize2 className="h-4 w-4" />
+                      <Maximize2 className="h-3 w-3" />
                     </Button>
                   </div>
                 </div>
               </CardHeader>
-               <CardContent className="pt-3 pb-3 px-3 sm:px-6">
+               <CardContent className="pt-1 pb-1 px-2">
                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                    <div style={{ minWidth: getChartMinWidth(revenueChartData.length) }}>
                      <ResponsiveContainer width="100%" height={chartHeight}>
-                       <ComposedChart data={revenueChartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
+                       <ComposedChart data={revenueChartData} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                          <XAxis 
                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                            stroke={isDarkMode ? '#94a3b8' : '#64748b'}
-                           tick={{ fontSize: 11 }}
+                           tick={{ fontSize: 9 }}
                            angle={-45}
                            textAnchor="end"
-                           height={80}
+                           height={60}
                            interval={0}
                          />
                          <YAxis 
@@ -994,25 +994,20 @@ export function TopTieringComparisonView({
             </Card>
 
             {/* Chart 2: Units/Volume/Detail by Actor */}
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-              <CardHeader className={`border-b pb-2 sm:pb-3 px-4 sm:px-6 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
+            <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+              <CardHeader className={`border-b py-1.5 px-3 ${isDarkMode ? 'border-slate-700/50' : 'border-blue-100/50'}`}>
+                <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-sm sm:text-base">
+                    <CardTitle className="text-xs font-semibold">
                       {selectedChartTab === 'units' && `Units by ${actorLabel}`}
                       {selectedChartTab === 'volume' && `Volume by ${actorLabel}`}
                       {selectedChartTab === 'detail' && `Detail by ${actorLabel}`}
                     </CardTitle>
-                    <CardDescription className="text-[10px] sm:text-xs">
-                      {selectedChartTab === 'units' && `Total Units: ${formatNumber(totalUnits)}`}
-                      {selectedChartTab === 'volume' && `Total Volume: ${formatCurrency(totalVolume)}`}
-                      {selectedChartTab === 'detail' && `${formatNumber(filteredData.length)} ${actorLabelPlural}`}
-                    </CardDescription>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     {selectedChartTab !== 'detail' && (
                       <Select value={unitsChartSorting} onValueChange={(v) => setUnitsChartSorting(v as ChartSorting)}>
-                        <SelectTrigger className={`w-[120px] h-8 text-xs ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
+                        <SelectTrigger className={`w-[100px] h-6 text-[10px] ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1022,10 +1017,10 @@ export function TopTieringComparisonView({
                       </Select>
                     )}
                     <Tabs value={selectedChartTab} onValueChange={(v) => setSelectedChartTab(v as 'units' | 'volume' | 'detail')}>
-                      <TabsList className={`h-9 sm:h-8 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                        <TabsTrigger value="units" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Units</TabsTrigger>
-                        <TabsTrigger value="volume" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Volume</TabsTrigger>
-                        <TabsTrigger value="detail" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Detail</TabsTrigger>
+                      <TabsList className={`h-6 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
+                        <TabsTrigger value="units" className="text-[10px] px-2 h-5">Units</TabsTrigger>
+                        <TabsTrigger value="volume" className="text-[10px] px-2 h-5">Volume</TabsTrigger>
+                        <TabsTrigger value="detail" className="text-[10px] px-2 h-5">Detail</TabsTrigger>
                       </TabsList>
                     </Tabs>
                     {selectedChartTab !== 'detail' && (
@@ -1033,29 +1028,29 @@ export function TopTieringComparisonView({
                         variant="ghost"
                         size="sm"
                         onClick={() => setExpandedChart('units')}
-                        className={`h-8 w-8 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                        className={`h-6 w-6 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
                         title="Expand chart"
                       >
-                        <Maximize2 className="h-4 w-4" />
+                        <Maximize2 className="h-3 w-3" />
                       </Button>
                     )}
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="pt-3 pb-3 px-3 sm:px-6">
+              <CardContent className="pt-1 pb-1 px-2">
                 {selectedChartTab === 'detail' ? (
                   /* Detail Table View */
                   <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
-                    <table className={`w-full text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <table className={`w-full text-[10px] ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                       <thead>
                         <tr className={`border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                          <th className={`text-left py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{actorLabelSingular}</th>
-                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Units</th>
-                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Volume</th>
-                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Revenue</th>
-                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Rev BPS</th>
-                          <th className={`text-right py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Rev/Loan</th>
-                          <th className={`text-center py-2 px-3 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Tier</th>
+                          <th className={`text-left py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{actorLabelSingular}</th>
+                          <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Units</th>
+                          <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Volume</th>
+                          <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Revenue</th>
+                          <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Rev BPS</th>
+                          <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Rev/Loan</th>
+                          <th className={`text-center py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Tier</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1094,7 +1089,7 @@ export function TopTieringComparisonView({
                   <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                     <div style={{ minWidth: getChartMinWidth(unitsChartData.length) }}>
                       <ResponsiveContainer width="100%" height={chartHeight}>
-                        <ComposedChart data={unitsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
+                        <ComposedChart data={unitsChartData} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                           <XAxis 
                             dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
@@ -1185,19 +1180,15 @@ export function TopTieringComparisonView({
             </Card>
 
             {/* Chart 3: Revenue BPS / Revenue per Loan */}
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
-              <CardHeader className={`border-b pb-2 sm:pb-3 px-4 sm:px-6 ${isDarkMode ? 'border-slate-700/50 bg-gradient-to-r from-slate-800/50 to-slate-700/30' : 'border-blue-100/50 bg-gradient-to-r from-blue-50/30 to-purple-50/30'}`}>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="text-sm sm:text-base">Revenue BPS / Revenue per Loan ($) by {actorLabel}</CardTitle>
-                    <CardDescription className="text-[10px] sm:text-xs">Total Revenue is {totalRevenueBPS.toFixed(0)} BPS</CardDescription>
-                    <p className={`text-[10px] sm:text-xs mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Bar height indicates Revenue BPS. Bar Color indicates Revenue $ Tier.
-                    </p>
+            <Card className={`rounded-lg backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70' : 'border-blue-200/40 bg-white shadow-sm'}`}>
+              <CardHeader className={`border-b py-1.5 px-3 ${isDarkMode ? 'border-slate-700/50' : 'border-blue-100/50'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-xs font-semibold">{selectedRevenueTab === 'revenue-bps' ? 'Revenue BPS' : 'Revenue per Loan'} by {actorLabel}</CardTitle>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <Select value={bpsChartSorting} onValueChange={(v) => setBpsChartSorting(v as ChartSorting)}>
-                      <SelectTrigger className={`w-[120px] h-8 text-xs ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
+                      <SelectTrigger className={`w-[100px] h-6 text-[10px] ${isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-300'}`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1206,36 +1197,36 @@ export function TopTieringComparisonView({
                       </SelectContent>
                     </Select>
                     <Tabs value={selectedRevenueTab} onValueChange={(v) => setSelectedRevenueTab(v as 'revenue-bps' | 'revenue-per-loan')}>
-                      <TabsList className={`h-9 sm:h-8 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                        <TabsTrigger value="revenue-bps" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Revenue BPS</TabsTrigger>
-                        <TabsTrigger value="revenue-per-loan" className="text-[10px] sm:text-xs px-2 sm:px-3 touch-manipulation">Revenue per Loan ($)</TabsTrigger>
+                      <TabsList className={`h-6 ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
+                        <TabsTrigger value="revenue-bps" className="text-[10px] px-2 h-5">BPS</TabsTrigger>
+                        <TabsTrigger value="revenue-per-loan" className="text-[10px] px-2 h-5">$/Loan</TabsTrigger>
                       </TabsList>
                     </Tabs>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setExpandedChart('bps')}
-                      className={`h-8 w-8 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
+                      className={`h-6 w-6 p-0 ${isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
                       title="Expand chart"
                     >
-                      <Maximize2 className="h-4 w-4" />
+                      <Maximize2 className="h-3 w-3" />
                     </Button>
                   </div>
                 </div>
               </CardHeader>
-               <CardContent className="pt-3 pb-3 px-3 sm:px-6">
+               <CardContent className="pt-1 pb-1 px-2">
                  <div className="w-full overflow-x-auto -webkit-overflow-scrolling-touch">
                    <div style={{ minWidth: getChartMinWidth(bpsChartData.length) }}>
                      <ResponsiveContainer width="100%" height={chartHeight}>
-                       <BarChart data={bpsChartData} margin={{ top: 10, right: 30, left: 20, bottom: 80 }}>
+                       <BarChart data={bpsChartData} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
                          <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
                          <XAxis 
                            dataKey={selectedActor === 'branch' ? 'id' : 'name'} 
                            stroke={isDarkMode ? '#94a3b8' : '#64748b'}
-                           tick={{ fontSize: 11 }}
+                           tick={{ fontSize: 9 }}
                            angle={-45}
                            textAnchor="end"
-                           height={80}
+                           height={60}
                            interval={0}
                          />
                          <YAxis 
@@ -1288,75 +1279,66 @@ export function TopTieringComparisonView({
           </div>
         </div>
 
-        {/* Expanded Chart Modal */}
-        {expandedChart && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className={`w-full max-w-7xl max-h-[90vh] rounded-xl overflow-hidden ${isDarkMode ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'} shadow-2xl`}>
-              {/* Modal Header */}
-              <div className={`flex items-center justify-between px-6 py-4 border-b ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-slate-50'}`}>
-                <div>
-                  <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    {expandedChart === 'revenue' && `Revenue by ${actorLabel}`}
-                    {expandedChart === 'units' && (selectedChartTab === 'units' ? `Units by ${actorLabel}` : `Volume by ${actorLabel}`)}
-                    {expandedChart === 'bps' && `${selectedRevenueTab === 'revenue-bps' ? 'Revenue BPS' : 'Revenue per Loan'} by ${actorLabel}`}
-                  </h2>
-                  <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                    {expandedChart === 'revenue' && 'Pareto chart showing revenue and accumulated percentage'}
-                    {expandedChart === 'units' && (selectedChartTab === 'units' ? `Total Units: ${formatNumber(totalUnits)}` : `Total Volume: ${formatCurrency(totalVolume)}`)}
-                    {expandedChart === 'bps' && `Total Revenue: ${totalRevenueBPS.toFixed(0)} BPS`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  {/* Sorting dropdown in modal */}
-                  <Select 
-                    value={expandedChart === 'revenue' ? revenueChartSorting : expandedChart === 'units' ? unitsChartSorting : bpsChartSorting} 
-                    onValueChange={(v) => {
-                      if (expandedChart === 'revenue') setRevenueChartSorting(v as ChartSorting);
-                      else if (expandedChart === 'units') setUnitsChartSorting(v as ChartSorting);
-                      else setBpsChartSorting(v as ChartSorting);
-                    }}
-                  >
-                    <SelectTrigger className={`w-[130px] h-9 ${isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="desc">High to Low</SelectItem>
-                      <SelectItem value="asc">Low to High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {/* Units/Volume chart tab selector */}
-                  {expandedChart === 'units' && (
-                    <Tabs value={selectedChartTab} onValueChange={(v) => setSelectedChartTab(v as 'units' | 'volume' | 'detail')}>
-                      <TabsList className={`h-9 ${isDarkMode ? 'bg-slate-800 border border-slate-600' : 'bg-slate-100 border border-slate-300'}`}>
-                        <TabsTrigger value="units" className="text-xs px-3">Units</TabsTrigger>
-                        <TabsTrigger value="volume" className="text-xs px-3">Volume</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  )}
-                  {/* BPS chart tab selector */}
-                  {expandedChart === 'bps' && (
-                    <Tabs value={selectedRevenueTab} onValueChange={(v) => setSelectedRevenueTab(v as 'revenue-bps' | 'revenue-per-loan')}>
-                      <TabsList className={`h-9 ${isDarkMode ? 'bg-slate-800 border border-slate-600' : 'bg-slate-100 border border-slate-300'}`}>
-                        <TabsTrigger value="revenue-bps" className="text-xs px-3">Revenue BPS</TabsTrigger>
-                        <TabsTrigger value="revenue-per-loan" className="text-xs px-3">Revenue per Loan</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setExpandedChart(null)}
-                    className={`h-9 w-9 p-0 ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
-                  >
-                    <X className="h-5 w-5" />
-                  </Button>
-                </div>
+        {/* Expanded Chart Modal - Using Dialog for proper portal and accessibility */}
+        <Dialog open={!!expandedChart} onOpenChange={(open) => !open && setExpandedChart(null)}>
+          <DialogContent className="max-w-7xl w-full p-0 gap-0 max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <DialogHeader className={`flex flex-row items-center justify-between px-6 py-4 border-b ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex-1">
+                <DialogTitle className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  {expandedChart === 'revenue' && `Revenue by ${actorLabel}`}
+                  {expandedChart === 'units' && (selectedChartTab === 'units' ? `Units by ${actorLabel}` : `Volume by ${actorLabel}`)}
+                  {expandedChart === 'bps' && `${selectedRevenueTab === 'revenue-bps' ? 'Revenue BPS' : 'Revenue per Loan'} by ${actorLabel}`}
+                </DialogTitle>
+                <DialogDescription className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {expandedChart === 'revenue' && 'Pareto chart showing revenue and accumulated percentage'}
+                  {expandedChart === 'units' && (selectedChartTab === 'units' ? `Total Units: ${formatNumber(totalUnits)}` : `Total Volume: ${formatCurrency(totalVolume)}`)}
+                  {expandedChart === 'bps' && `Total Revenue: ${totalRevenueBPS.toFixed(0)} BPS`}
+                </DialogDescription>
               </div>
-              
-              {/* Modal Chart Content */}
-              <div className="p-6 overflow-auto" style={{ maxHeight: 'calc(90vh - 80px)' }}>
-                <div className="w-full">
-                  <ResponsiveContainer width="100%" height={550}>
+              <div className="flex items-center gap-3 mr-8">
+                {/* Sorting dropdown in modal */}
+                <Select 
+                  value={expandedChart === 'revenue' ? revenueChartSorting : expandedChart === 'units' ? unitsChartSorting : bpsChartSorting} 
+                  onValueChange={(v) => {
+                    if (expandedChart === 'revenue') setRevenueChartSorting(v as ChartSorting);
+                    else if (expandedChart === 'units') setUnitsChartSorting(v as ChartSorting);
+                    else setBpsChartSorting(v as ChartSorting);
+                  }}
+                >
+                  <SelectTrigger className={`w-[130px] h-9 ${isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-slate-300'}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="desc">High to Low</SelectItem>
+                    <SelectItem value="asc">Low to High</SelectItem>
+                  </SelectContent>
+                </Select>
+                {/* Units/Volume chart tab selector */}
+                {expandedChart === 'units' && (
+                  <Tabs value={selectedChartTab} onValueChange={(v) => setSelectedChartTab(v as 'units' | 'volume' | 'detail')}>
+                    <TabsList className={`h-9 ${isDarkMode ? 'bg-slate-800 border border-slate-600' : 'bg-slate-100 border border-slate-300'}`}>
+                      <TabsTrigger value="units" className="text-xs px-3">Units</TabsTrigger>
+                      <TabsTrigger value="volume" className="text-xs px-3">Volume</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                )}
+                {/* BPS chart tab selector */}
+                {expandedChart === 'bps' && (
+                  <Tabs value={selectedRevenueTab} onValueChange={(v) => setSelectedRevenueTab(v as 'revenue-bps' | 'revenue-per-loan')}>
+                    <TabsList className={`h-9 ${isDarkMode ? 'bg-slate-800 border border-slate-600' : 'bg-slate-100 border border-slate-300'}`}>
+                      <TabsTrigger value="revenue-bps" className="text-xs px-3">Revenue BPS</TabsTrigger>
+                      <TabsTrigger value="revenue-per-loan" className="text-xs px-3">Revenue per Loan</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                )}
+              </div>
+            </DialogHeader>
+            
+            {/* Modal Chart Content */}
+            <div className="p-6 overflow-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+              <div className="w-full">
+                <ResponsiveContainer width="100%" height={550}>
                     {expandedChart === 'revenue' ? (
                       <ComposedChart data={revenueChartData} margin={{ top: 20, right: 40, left: 30, bottom: 100 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
@@ -1563,9 +1545,8 @@ export function TopTieringComparisonView({
                   </ResponsiveContainer>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            </DialogContent>
+          </Dialog>
     </div>
   );
 }

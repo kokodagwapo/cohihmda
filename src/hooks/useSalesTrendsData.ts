@@ -146,6 +146,7 @@ export function useSalesTrendsData(
     setError(null);
 
     try {
+      // NOTE: Using original endpoint until /api/scorecard/sales-trends is fully tested
       const url = `/api/loans/sales-trends?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
       console.log('[SalesTrends] Fetching data from', url);
       
@@ -174,6 +175,7 @@ export function useSalesTrendsData(
    */
   const fetchDrilldown = useCallback(async (loName: string): Promise<DrilldownData | null> => {
     try {
+      // NOTE: Using original endpoint until /api/scorecard/sales-trends is fully tested
       const url = `/api/loans/sales-trends/drilldown/${encodeURIComponent(loName)}?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
       console.log('[SalesTrends] Fetching drilldown from', url);
       

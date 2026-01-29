@@ -1,14 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
-import { CheckCircle2, Info, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Info, AlertTriangle, AlertCircle } from 'lucide-react';
 
 export interface AletheiaInsight {
-  type: 'success' | 'info' | 'warning' | 'error';
+  type: 'success' | 'info' | 'warning' | 'error' | 'critical';
   icon: any;
   message: string;
-  priority: 'high' | 'medium' | 'standard';
+  priority: 'critical' | 'high' | 'medium' | 'low' | 'standard';
   reasoning?: string;
   source?: string;
+}
+
+export interface InsightsMetadata {
+  usedLLM: boolean;
+  generatedAt: string;
+  summaryForPodcast?: string;
 }
 
 // Map API insight type to icon
@@ -18,6 +24,7 @@ const getIconForType = (type: string) => {
     case 'info': return Info;
     case 'warning': return AlertTriangle;
     case 'error': return AlertTriangle;
+    case 'critical': return AlertCircle;
     default: return Info;
   }
 };
@@ -39,6 +46,14 @@ const getDemoInsights = (): AletheiaInsight[] => [
     priority: 'high' as const,
     reasoning: 'Pipeline volume indicates healthy demand. Monitor conversion rates to optimize throughput.',
     source: 'loan_funnel'
+  },
+  {
+    type: 'success' as const,
+    icon: CheckCircle2,
+    message: 'Pull-through rate: 72.5% (Rolling 90D, excludes active loans) — above industry average.',
+    priority: 'high' as const,
+    reasoning: 'Pull-through uses rolling 90 days and excludes active loans for accuracy. Industry average is 60-70%.',
+    source: 'business_overview'
   }
 ];
 
@@ -51,8 +66,15 @@ export const useAletheiaData = (
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [funnelData, setFunnelData] = useState<any>(null);
+  const [metadata, setMetadata] = useState<InsightsMetadata | null>(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
-  // Fetch dynamic insights from API
+  // Function to force refresh insights (bypasses cache)
+  const refreshInsights = useCallback(() => {
+    setRefreshCounter(prev => prev + 1);
+  }, []);
+
+  // Fetch dynamic insights from API (with LLM support)
   // Note: onDataAvailabilityChange is intentionally NOT in the dependency array
   // because it's a callback for reporting state, not for triggering fetches.
   // Including it would cause infinite re-renders if the parent doesn't memoize it.
@@ -67,6 +89,7 @@ export const useAletheiaData = (
         // No token - use demo data directly without making API call
         const demoInsights = getDemoInsights();
         setAllInsights(demoInsights);
+        setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
         setInsightsError(null);
         setInsightsLoading(false);
         return;
@@ -74,7 +97,18 @@ export const useAletheiaData = (
       
       try {
         const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
-        const data = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
+        const forceRefreshParam = refreshCounter > 0 ? '&forceRefresh=true' : '';
+        // Using useLLM=false to use rule-based insights (faster, no API key required)
+        const data = await api.request<any>(
+          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=false${tenantParam}${forceRefreshParam}`
+        );
+        
+        // Store metadata about the response
+        setMetadata({
+          usedLLM: data.usedLLM ?? false,
+          generatedAt: data.generatedAt || new Date().toISOString(),
+          summaryForPodcast: data.summaryForPodcast
+        });
         
         if (data.insights && Array.isArray(data.insights) && data.insights.length > 0) {
           // Map API insights to component format with icons, preserving source information
@@ -99,12 +133,14 @@ export const useAletheiaData = (
           // User not authenticated - use demo data without logging error
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
+          setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
           setInsightsError(null);
         } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
           // For timeout errors, log as warning since we have demo data fallback
           console.warn('Insights request timed out, using demo data fallback:', error.message);
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
+          setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
           setInsightsError(null);
         } else {
           // Other errors - log but still use demo data
@@ -112,6 +148,7 @@ export const useAletheiaData = (
           setInsightsError(error.message || 'Failed to fetch insights');
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
+          setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
         }
       } finally {
         setInsightsLoading(false);
@@ -119,7 +156,7 @@ export const useAletheiaData = (
     };
 
     fetchInsights();
-  }, [dateFilter, selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dateFilter, selectedTenantId, refreshCounter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch funnel data for briefing context
   useEffect(() => {
@@ -174,7 +211,9 @@ export const useAletheiaData = (
     allInsights,
     insightsLoading,
     insightsError,
-    funnelData
+    funnelData,
+    metadata,
+    refreshInsights
   };
 };
 

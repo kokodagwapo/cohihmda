@@ -61,7 +61,7 @@ import { ShareModal } from '@/components/dashboard/modals/ShareModal';
 import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
 import { TenantSelector } from '@/components/dashboard/TenantSelector';
-import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { useChannelStore } from '@/stores/channelStore';
 
 
 
@@ -129,8 +129,8 @@ const Dashboard = () => {
     }
   }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
   
-  // Channel filter state - uses consolidated channel groups (Retail, TPO, etc.)
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  // Channel filter state - uses global store (shared with Navigation header)
+  const { selectedChannel, setSelectedChannel } = useChannelStore();
   
   // Briefing context state
   const [briefingContext, setBriefingContext] = useState<{
@@ -971,26 +971,16 @@ const Dashboard = () => {
         onSectionClick={scrollToSection}
         visitorFirstName={displayName}
         headerContent={
-          <div className="flex items-center gap-4 flex-wrap">
-            {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
-            {isPlatformAdmin && (
-              <>
-                <TenantSelector
-                  selectedTenantId={selectedTenantId}
-                  onTenantChange={setSelectedTenantId}
-                  compact={true}
-                />
-                <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
-              </>
-            )}
-            <ChannelSelector
-              selectedChannel={selectedChannel}
-              onChannelChange={setSelectedChannel}
-              selectedTenantId={selectedTenantId}
-              compact={true}
-              useChannelGroups={true}
-            />
-          </div>
+          isPlatformAdmin ? (
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
+              <TenantSelector
+                selectedTenantId={selectedTenantId}
+                onTenantChange={setSelectedTenantId}
+                compact={true}
+              />
+            </div>
+          ) : undefined
         }
       >
         {/* Report Modal */}
@@ -1177,13 +1167,13 @@ const Dashboard = () => {
        */}
 
       {/* Floating Data Chat Button - Links to full page */}
-      <Link
+      {/* <Link
         to="/data-chat"
         className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all hover:scale-105 group"
       >
         <Sparkles className="w-5 h-5" />
         <span className="font-medium">Ask about your data</span>
-      </Link>
+      </Link> */}
       </DashboardLayout>
     </DashboardContainer>
   );

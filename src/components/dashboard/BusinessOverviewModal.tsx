@@ -338,9 +338,16 @@ export const BusinessOverviewModal: React.FC<BusinessOverviewModalProps> = ({
               </span>
             </div>
 
+            {/* Methodology Note */}
+            <div className="mb-3 px-2 py-1.5 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/40 dark:border-blue-900/20">
+              <p className="text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 font-light">
+                Pull-through uses Rolling 90 Days and excludes active loans for accurate historical analysis.
+              </p>
+            </div>
+
             {/* Pull-Through By Type */}
             <div className="mb-4 sm:mb-5 p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-50/80 to-indigo-50/60 dark:from-blue-950/20 dark:to-indigo-950/15 border border-blue-100/60 dark:border-blue-900/30">
-              <h4 className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 mb-3 tracking-tight">Pull-Through By Loan Type</h4>
+              <h4 className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 mb-3 tracking-tight">Pull-Through By Loan Type (Rolling 90D)</h4>
               <div className="overflow-x-auto -mx-3 sm:mx-0 px-3 sm:px-0">
                 <table className="w-full text-xs sm:text-sm min-w-[300px]">
                   <thead>
@@ -447,4 +454,4 @@ export const BusinessOverviewModal: React.FC<BusinessOverviewModalProps> = ({
       </DialogContent>
     </Dialog>
   );
-};
+});

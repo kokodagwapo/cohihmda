@@ -1,5 +1,7 @@
 import pg from 'pg';
 import { queryMetrics, DateRange } from '../metrics/metricsService.js';
+import { collectInsightMetrics, generateLLMInsights, clearCache as clearInsightsCache } from '../insights/index.js';
+import type { GeneratedInsight } from '../insights/index.js';
 
 /**
  * Analytics Service
@@ -961,16 +963,28 @@ export async function getClosingFalloutForecast(
 
 /**
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
- * Uses the centralized Metrics Catalog for all metric calculations
+ * Uses LLM-based dynamic insights with fallback to rule-based system
+ * 
+ * @param tenantPool - Tenant database connection pool
+ * @param dateFilter - Date filter ('today', 'mtd', 'ytd', 'rolling_90_days', 'rolling_13_months')
+ * @param authHeader - Optional auth header for external API calls
+ * @param options - Additional options for insights generation
  */
 export async function getInsights(
   tenantPool: pg.Pool,
   dateFilter: string = 'ytd',
-  authHeader?: string
+  authHeader?: string,
+  options: {
+    useLLM?: boolean;
+    tenantId?: string;
+    forceRefresh?: boolean;
+  } = {}
 ): Promise<{
   insights: Insight[];
   generatedAt: string;
   dateFilter: string;
+  usedLLM?: boolean;
+  summaryForPodcast?: string;
   summary: {
     totalLoans: number;
     revenue: number;
@@ -982,9 +996,73 @@ export async function getInsights(
       leaderboard: number;
       industry_news: number;
       loan_funnel: number;
+      predictions?: number;
     };
   };
 }> {
+  const { useLLM = true, tenantId, forceRefresh = false } = options;
+  
+  // Try LLM-based insights first if enabled
+  if (useLLM) {
+    try {
+      console.log(`[Insights] Attempting LLM-based insight generation (dateFilter: ${dateFilter}, tenantId: ${tenantId || 'default'})`);
+      
+      // Clear cache if force refresh
+      if (forceRefresh) {
+        clearInsightsCache(tenantId);
+      }
+      
+      // Collect metrics from all sources
+      const metricsPayload = await collectInsightMetrics(tenantPool, dateFilter);
+      
+      // Generate insights via LLM
+      const llmResult = await generateLLMInsights(metricsPayload, tenantId, {
+        useCache: !forceRefresh,
+        cacheTtlSeconds: 3600 // 1 hour cache
+      });
+      
+      // Convert LLM insights to the expected Insight format
+      const insights: Insight[] = llmResult.insights.map((insight: GeneratedInsight) => ({
+        type: insight.type,
+        message: insight.message,
+        priority: insight.priority,
+        reasoning: insight.reasoning,
+        source: insight.source as Insight['source'],
+        forPodcast: insight.forPodcast
+      }));
+      
+      console.log(`[Insights] LLM generated ${insights.length} insights successfully`);
+      
+      return {
+        insights,
+        generatedAt: new Date().toISOString(),
+        dateFilter,
+        usedLLM: true,
+        summaryForPodcast: llmResult.summaryForPodcast,
+        summary: {
+          totalLoans: metricsPayload.pipeline.activeLoans + metricsPayload.pipeline.closedLoans,
+          revenue: metricsPayload.performance.revenueYTD,
+          pullThroughRate: metricsPayload.performance.pullThroughRolling90D.toFixed(1),
+          avgCycleTime: Math.round(metricsPayload.performance.avgCycleTime),
+          totalInsights: insights.length,
+          bySource: {
+            business_overview: insights.filter(i => ['performance', 'pipeline'].includes(i.source)).length,
+            leaderboard: 0,
+            industry_news: 0,
+            loan_funnel: insights.filter(i => i.source === 'lost_opportunity').length,
+            predictions: insights.filter(i => i.source === 'predictions').length
+          }
+        }
+      };
+    } catch (llmError) {
+      console.error('[Insights] LLM insight generation failed, falling back to rule-based:', llmError);
+      // Continue to rule-based fallback below
+    }
+  }
+  
+  // FALLBACK: Rule-based insight generation (existing logic)
+  console.log(`[Insights] Using rule-based insight generation (dateFilter: ${dateFilter})`);
+  
   // Calculate date range for metrics
   let startDate: Date | null = null;
   const endDate = new Date();
@@ -1000,6 +1078,15 @@ export async function getInsights(
       break;
     case 'ytd':
       startDate = new Date(endDate.getFullYear(), 0, 1);
+      break;
+    // Rolling 90 days: appropriate for pull-through metrics where loans take 30-45+ days to close
+    case 'rolling_90_days':
+      startDate = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
+      break;
+    // Rolling 13 months: matches Qlik TTS scorecard timeframe (MonthEnd - 13 months)
+    case 'rolling_13_months':
+      const monthEnd = new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0);
+      startDate = new Date(monthEnd.getFullYear(), monthEnd.getMonth() - 12, 1);
       break;
     default:
       startDate = null;
@@ -1024,10 +1111,30 @@ export async function getInsights(
   const closedLoansCount = Number(metricsResult.closed_loans?.value || 0);
   const lockedLoansCount = Number(metricsResult.locked_loans?.value || 0);
   const avgCycleTime = Number(metricsResult.avg_cycle_time?.value || 0);
-  const pullThroughRate = Number(metricsResult.pull_through_rate?.value || 0);
   const totalVolume = Number(metricsResult.total_volume?.value || 0);
   const fundedVolume = Number(metricsResult.funded_volume?.value || 0);
   const activeVolume = Number(metricsResult.active_volume?.value || 0);
+
+  // Calculate Rolling 90-Day Pull-Through Rate for insights
+  // This is the industry-standard methodology - MTD/YTD is inappropriate since loans take 30-45+ days to close
+  const rolling90DaysStart = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
+  const rolling90DayPullThroughResult = await tenantPool.query(`
+    SELECT 
+      COUNT(CASE 
+        WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+        AND (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
+        THEN 1 
+      END)::float / 
+      NULLIF(COUNT(CASE 
+        WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+        THEN 1 
+      END), 0) * 100 as pull_through_rate
+    FROM public.loans l
+    WHERE l.application_date >= $1
+      AND l.application_date <= $2
+  `, [rolling90DaysStart, endDate]);
+  
+  const pullThroughRateRolling90D = parseFloat(rolling90DayPullThroughResult.rows[0]?.pull_through_rate) || 0;
 
   // Get loan count for summary
   const countResult = await tenantPool.query('SELECT COUNT(*) as total FROM public.loans');
@@ -1094,9 +1201,9 @@ export async function getInsights(
       },
       {
         type: 'success',
-        message: 'Top performer: Sarah Chen with $4.2M YTD — 42 loans closed, 87.5% pull-through — retention priority.',
+        message: 'Top performer: Sarah Chen with $4.2M YTD — 42 loans closed, 87.5% pull-through (R90D, excludes active) — retention priority.',
         priority: 'high',
-        reasoning: 'Top performers drive disproportionate value. Retention focus on top tier is critical.',
+        reasoning: 'Top performers drive disproportionate value. Pull-through uses rolling 90 days and excludes active loans for accuracy.',
         source: 'leaderboard',
         forPodcast: true
       },
@@ -1142,9 +1249,9 @@ export async function getInsights(
       },
       {
         type: 'success',
-        message: 'Loan funnel: 350 loans started, 185 still active, 165 originated — 47% pull-through rate, above industry average.',
+        message: 'Loan funnel: 350 loans started, 185 still active, 165 originated — 47% pull-through (R90D, excludes active), above industry average.',
         priority: 'high',
-        reasoning: 'Strong pull-through indicates effective pipeline management. Focus on maintaining quality while scaling volume.',
+        reasoning: 'Pull-through uses rolling 90 days and excludes active loans for accuracy. Strong rate indicates effective pipeline management.',
         source: 'loan_funnel',
         forPodcast: true
       },
@@ -1221,6 +1328,9 @@ export async function getInsights(
     
     let leaderboardResult;
     if (tableCheck.rows[0]?.exists) {
+      // Pull-through calculation: excludes active loans from both numerator and denominator
+      // This aligns with industry standard - only count completed loan journeys
+      // Active loans haven't had a chance to close yet, so including them deflates the rate
       leaderboardResult = await tenantPool.query(
         `SELECT 
           e.id,
@@ -1232,7 +1342,16 @@ export async function getInsights(
           SUM(l.loan_amount) as total_volume,
           AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
             THEN DATE(l.closing_date) - DATE(l.application_date) ELSE NULL END) as avg_cycle_time,
-          COUNT(CASE WHEN l.current_loan_status IN ('funded', 'closed', 'originated') THEN 1 END)::float / NULLIF(COUNT(l.id), 0) * 100 as pull_through_rate
+          -- Pull-through: funded loans / total non-active loans (excludes active from denominator)
+          COUNT(CASE 
+            WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+            AND (l.funding_date IS NOT NULL OR l.current_loan_status IN ('funded', 'closed', 'originated'))
+            THEN 1 
+          END)::float / 
+          NULLIF(COUNT(CASE 
+            WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+            THEN 1 
+          END), 0) * 100 as pull_through_rate
          FROM public.employees e
          LEFT JOIN public.loans l ON e.id::TEXT = l.loan_officer_id
            ${startDate ? 'AND l.application_date >= $1' : ''}
@@ -1374,23 +1493,24 @@ export async function getInsights(
       
       businessOverviewInsights.push({
         type: 'info',
-        message: `Active pipeline: ${businessOverviewData.active} loans, ${activeVolumeFormatted} in process — ${businessOverviewData.active >= 50 ? 'strong' : 'moderate'} pipeline depth.`,
+        message: `Active pipeline (current): ${businessOverviewData.active} loans, ${activeVolumeFormatted} in process — ${businessOverviewData.active >= 50 ? 'strong' : 'moderate'} pipeline depth.`,
         priority: 'medium',
-        reasoning: `Pipeline health indicates future revenue potential. Monitor conversion rates closely.`,
+        reasoning: `Shows current snapshot of all active loans. Pipeline health indicates future revenue potential.`,
         source: 'business_overview',
         forPodcast: businessOverviewInsights.length < 2
       });
     }
     
     // 3. Cycle Time Performance (App-Close)
+    // Updated thresholds: ≤28 days excellent, 29-35 days good, >35 days needs improvement
     const cycleTimeToUse = avgCycleTime > 0 ? avgCycleTime : businessOverviewData.avgCycleTime;
     if (cycleTimeToUse) {
-      const cycleStatus = cycleTimeToUse <= 30 ? 'excellent' : cycleTimeToUse <= 35 ? 'good' : 'needs improvement';
-      const cycleType = cycleTimeToUse <= 30 ? 'success' : cycleTimeToUse <= 35 ? 'info' : 'warning';
+      const cycleStatus = cycleTimeToUse <= 28 ? 'excellent' : cycleTimeToUse <= 35 ? 'good' : 'needs improvement';
+      const cycleType = cycleTimeToUse <= 28 ? 'success' : cycleTimeToUse <= 35 ? 'info' : 'warning';
       
       businessOverviewInsights.push({
         type: cycleType,
-        message: `Average cycle time: ${Math.round(cycleTimeToUse)} days — ${cycleStatus} performance${cycleTimeToUse <= 30 ? ', industry-leading' : ''}.`,
+        message: `Average cycle time: ${Math.round(cycleTimeToUse)} days — ${cycleStatus} performance${cycleTimeToUse <= 28 ? ', industry-leading' : ''}.`,
         priority: 'medium',
         reasoning: `Each day saved in cycle time recovers approximately $180 in carry cost per loan. At your volume, improvements compound significantly.`,
         source: 'business_overview',
@@ -1398,16 +1518,18 @@ export async function getInsights(
       });
     }
     
-    // 4. Pull-through Rate (excludes active loans)
-    if (pullThroughRate > 0) {
-      const pullThroughStatus = pullThroughRate >= 75 ? 'excellent' : pullThroughRate >= 65 ? 'good' : pullThroughRate >= 50 ? 'moderate' : 'needs attention';
-      const pullThroughType = pullThroughRate >= 75 ? 'success' : pullThroughRate >= 65 ? 'info' : 'warning';
+    // 4. Pull-through Rate (Rolling 90 Days, excludes active loans)
+    // Using rolling 90 days because MTD/YTD is inappropriate for loans that take 30-45+ days to close
+    // Updated thresholds: 72%+ excellent, 60-71% good, <60% needs attention (industry benchmarks)
+    if (pullThroughRateRolling90D > 0) {
+      const pullThroughStatus = pullThroughRateRolling90D >= 72 ? 'excellent' : pullThroughRateRolling90D >= 60 ? 'good' : pullThroughRateRolling90D >= 55 ? 'moderate' : 'needs attention';
+      const pullThroughType = pullThroughRateRolling90D >= 72 ? 'success' : pullThroughRateRolling90D >= 60 ? 'info' : 'warning';
       
       businessOverviewInsights.push({
         type: pullThroughType,
-        message: `Pull-through rate: ${pullThroughRate.toFixed(1)}% — ${pullThroughStatus} conversion${pullThroughRate >= 75 ? ', above industry average' : ''}.`,
+        message: `Pull-through rate: ${pullThroughRateRolling90D.toFixed(1)}% (Rolling 90D) — ${pullThroughStatus} conversion${pullThroughRateRolling90D >= 72 ? ', above industry average' : ''}.`,
         priority: 'high',
-        reasoning: `Pull-through calculation excludes active loans for accurate historical analysis. Focus on maintaining quality while scaling volume.`,
+        reasoning: `Uses rolling 90 days and excludes active loans (industry standard). Average is 60-70%; top performers achieve 72%+.`,
         source: 'business_overview',
         forPodcast: businessOverviewInsights.length < 2
       });
@@ -1429,9 +1551,10 @@ export async function getInsights(
         ? `$${(topPerformer.totalVolume / 1000000).toFixed(2)}M`
         : `$${(topPerformer.totalVolume / 1000).toFixed(0)}K`;
       
+      const periodLabel = dateFilter === 'ytd' ? 'YTD' : dateFilter === 'mtd' ? 'MTD' : dateFilter === 'rolling_90_days' ? 'R90D' : 'period';
       leaderboardInsights.push({
         type: 'success',
-        message: `Top performer: ${topPerformer.name} with ${topVolumeFormatted} ${dateFilter === 'ytd' ? 'YTD' : dateFilter === 'mtd' ? 'MTD' : 'today'} — ${topPerformer.loansClosed} loans closed, ${topPerformer.pullThroughRate?.toFixed(1) || 'N/A'}% pull-through — retention priority.`,
+        message: `Top performer: ${topPerformer.name} with ${topVolumeFormatted} ${periodLabel} — ${topPerformer.loansClosed} loans closed — retention priority.`,
         priority: 'high',
         reasoning: `Top performers drive disproportionate value. Retention focus on top tier is critical.`,
         source: 'leaderboard',
@@ -1543,31 +1666,17 @@ export async function getInsights(
   const funnelInsights: Insight[] = [];
   
   if (funnelData) {
-    // 1. Conversion Rate Analysis (Pull-through from metrics catalog)
-    const funnelConversionRate = pullThroughRate > 0 ? pullThroughRate : 
-      (funnelData.originated?.units && funnelData.loansStarted?.units 
-        ? (funnelData.originated.units / funnelData.loansStarted.units) * 100 
-        : 0);
+    // Note: Removed the funnel summary insight because the query logic is flawed:
+    // - "loansStarted" only counts loans with status 'inquiry'/'started', not all loans that entered pipeline
+    // - Funded loans have different status so aren't counted in "loansStarted"
+    // - This made the funnel percentages meaningless
+    // Pull-through (Rolling 90D) in Business Overview is the proper conversion metric.
     
-    if (funnelConversionRate > 0) {
-      const industryAvg = 65;
-      const status = funnelConversionRate >= industryAvg ? 'above' : 'below';
-      const diff = Math.abs(funnelConversionRate - industryAvg).toFixed(1);
-      
-      funnelInsights.push({
-        type: funnelConversionRate >= industryAvg ? 'success' : 'warning',
-        message: `Funnel pull-through: ${funnelConversionRate.toFixed(1)}% (excludes active loans) — ${status} industry average of ${industryAvg}%, ${status === 'above' ? 'strong conversion efficiency' : 'needs attention'}.`,
-        priority: 'high',
-        reasoning: `Pull-through calculation excludes active loans for accurate historical analysis. Your ${diff}% ${status === 'above' ? 'advantage' : 'gap'} translates to approximately $${Math.round(Math.abs(funnelConversionRate - industryAvg) * (funnelData.loansStarted.volume || 0) * 0.01 / 100).toLocaleString()} in ${status === 'above' ? 'recovered' : 'lost'} revenue.`,
-        source: 'loan_funnel',
-        forPodcast: funnelInsights.length < 2
-      });
-    }
+    // Fallout Analysis - only show if there's actual fallout to report
+    const totalFallout = (funnelData.falloutWithdrawn?.units || 0) + (funnelData.falloutDenied?.units || 0);
+    const totalFalloutVolume = (funnelData.falloutWithdrawn?.volume || 0) + (funnelData.falloutDenied?.volume || 0);
     
-    // 2. Fallout Analysis
-    if (funnelData.falloutWithdrawn || funnelData.falloutDenied) {
-      const totalFallout = (funnelData.falloutWithdrawn?.units || 0) + (funnelData.falloutDenied?.units || 0);
-      const totalFalloutVolume = (funnelData.falloutWithdrawn?.volume || 0) + (funnelData.falloutDenied?.volume || 0);
+    if (totalFallout > 0) {
       const lostRevenue = totalFalloutVolume * 0.01;
       const lostRevenueFormatted = lostRevenue >= 1000000
         ? `$${(lostRevenue / 1000000).toFixed(2)}M`
@@ -1583,20 +1692,9 @@ export async function getInsights(
       });
     }
     
-    // 3. Pipeline Velocity
-    if (funnelData.stillActive?.units && funnelData.originated?.units) {
-      const pipelineRatio = funnelData.stillActive.units / (funnelData.originated.units || 1);
-      const velocityStatus = pipelineRatio >= 0.6 ? 'strong' : pipelineRatio >= 0.4 ? 'moderate' : 'low';
-      
-      funnelInsights.push({
-        type: pipelineRatio >= 0.6 ? 'success' : pipelineRatio >= 0.4 ? 'info' : 'warning',
-        message: `Pipeline velocity: ${funnelData.stillActive.units} active loans vs ${funnelData.originated.units} originated — ${velocityStatus} pipeline-to-closed ratio.`,
-        priority: 'medium',
-        reasoning: `Pipeline velocity indicates future revenue potential. ${pipelineRatio >= 0.6 ? 'Strong pipeline supports continued growth.' : 'Monitor conversion rates to optimize velocity.'}`,
-        source: 'loan_funnel',
-        forPodcast: false
-      });
-    }
+    // Note: Pipeline conversion removed - it's redundant with Pull-through (Rolling 90D) which uses
+    // the proper methodology. The funnel data filters by application_date, so "originated" only counts
+    // loans that started AND funded within the period - misleadingly low due to 30-45 day loan cycles.
   }
   
   insights.push(...funnelInsights);
@@ -1612,12 +1710,13 @@ export async function getInsights(
     insights: shuffled,
     generatedAt: new Date().toISOString(),
     dateFilter,
-      summary: {
-        totalLoans: loans.length,
-        revenue: calculatedRevenue,
-        pullThroughRate: pullThroughRate.toFixed(1),
-        avgCycleTime: Math.round(avgCycleTime),
-        totalInsights: insights.length,
+    usedLLM: false, // Rule-based fallback was used
+    summary: {
+      totalLoans: loans.length,
+      revenue: calculatedRevenue,
+      pullThroughRate: pullThroughRateRolling90D.toFixed(1),
+      avgCycleTime: Math.round(avgCycleTime),
+      totalInsights: insights.length,
       bySource: {
         business_overview: insights.filter(i => i.source === 'business_overview').length,
         leaderboard: insights.filter(i => i.source === 'leaderboard').length,
@@ -1899,4 +1998,3 @@ export async function getDashboardOverview(
     throw dbError;
   }
 }
-

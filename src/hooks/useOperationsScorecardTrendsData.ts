@@ -144,6 +144,7 @@ export const useOperationsScorecardTrendsData = (
         if (selectedChannel) params.append('channel_group', selectedChannel);
         
         const queryString = params.toString();
+        // NOTE: Using original endpoint until /api/scorecard/operations-trends is updated to match expected format
         const url = `/api/loans/operations-scorecard-trends${queryString ? `?${queryString}` : ''}`;
         
         console.log('[OpsScorecardTrends] Fetching data from', url);

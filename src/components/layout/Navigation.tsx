@@ -9,6 +9,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { ChannelSelector } from "@/components/dashboard/ChannelSelector";
+import { useChannelStore } from "@/stores/channelStore";
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -86,6 +88,9 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   const location = useLocation();
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const [displayName, setDisplayName] = useState<string | null>(null);
+  
+  // Global channel selection from store
+  const { selectedChannel, setSelectedChannel } = useChannelStore();
   
   const isDashboard = location.pathname === '/insights';
   const isWorkbench = location.pathname === '/my-dashboard' || location.pathname.startsWith('/workbench');
@@ -1261,6 +1266,18 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-[120px]">
                   {getCurrentPageLabel()}
                 </span>
+              </div>
+            )}
+
+            {/* Channel Selector - Compact in header */}
+            {isAuthenticated && (
+              <div className="hidden sm:flex items-center">
+                <ChannelSelector
+                  selectedChannel={selectedChannel}
+                  onChannelChange={setSelectedChannel}
+                  compact={true}
+                  useChannelGroups={true}
+                />
               </div>
             )}
 

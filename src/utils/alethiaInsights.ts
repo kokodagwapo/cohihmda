@@ -40,14 +40,45 @@ function asIso(v: any): string | null {
   return null;
 }
 
-function computePullThroughPct(loans: any[], period: PeriodValue, now: Date): number | null {
-  const started = loans.filter((l) => isDateInPeriod(asIso(l?.application_date ?? l?.applicationDate), period, now));
+/**
+ * Compute pull-through percentage using industry-standard methodology:
+ * - Uses rolling 90 days (not MTD/YTD) since loans take 30-45+ days to close on average
+ * - Excludes active/locked loans from calculation (only counts completed loan journeys)
+ * - Pull-through = Funded / Total Applications (for completed loans only)
+ * 
+ * This aligns with Qlik TTS scorecard approach that uses Rolling13MonthFlag and excludes Active Loan Flag=Yes
+ */
+function computePullThroughPct(loans: any[], _period: PeriodValue, now: Date): number | null {
+  // Use rolling 90 days for pull-through calculation (appropriate for 30-45 day loan cycles)
+  const pullThroughPeriod: PeriodValue = 'rolling_90_days';
+  
+  // Filter to only inactive loans (completed loan journeys)
+  // Active and Locked loans should not be in denominator - they haven't had a chance to close yet
+  const inactiveLoans = loans.filter(l => {
+    const status = inferLoanStatus(l);
+    return status !== 'Active' && status !== 'Locked';
+  });
+  
+  // Filter to loans that started (had application) within the rolling period
+  const started = inactiveLoans.filter((l) => 
+    isDateInPeriod(asIso(l?.application_date ?? l?.applicationDate), pullThroughPeriod, now)
+  );
   if (started.length === 0) return null;
-  const funded = started.filter((l) => isFundedInPeriod(l, period, now));
+  
+  // Count loans that successfully funded (have closing_date or funding_date)
+  const funded = started.filter((l) => l?.closing_date || l?.funding_date);
   return (funded.length / started.length) * 100;
 }
 
-function officerStats(loans: any[], period: PeriodValue, now: Date) {
+/**
+ * Calculate per-officer statistics including pull-through.
+ * Pull-through uses rolling 90 days and excludes active loans (like the main pull-through calculation).
+ * Active count/volume uses current state (all active loans regardless of period).
+ */
+function officerStats(loans: any[], _period: PeriodValue, now: Date) {
+  // Use rolling 90 days for pull-through metrics (same as main calculation)
+  const pullThroughPeriod: PeriodValue = 'rolling_90_days';
+  
   const map = new Map<
     string,
     { name: string; activeCount: number; activeVolume: number; startedCount: number; fundedCount: number; criticalRiskCount: number }
@@ -62,14 +93,26 @@ function officerStats(loans: any[], period: PeriodValue, now: Date) {
     const row = map.get(name)!;
 
     const status = inferLoanStatus(l);
+    
+    // Active count/volume: current pipeline state
     if (status === 'Active' || status === 'Locked') {
       row.activeCount += 1;
       row.activeVolume += getLoanAmountNumber(l);
     }
 
-    const started = isDateInPeriod(asIso(l?.application_date ?? l?.applicationDate), period, now);
-    if (started) row.startedCount += 1;
-    if (isFundedInPeriod(l, period, now)) row.fundedCount += 1;
+    // Pull-through metrics: only count inactive loans (completed journeys) within rolling period
+    // This matches the industry-standard methodology
+    const isInactive = status !== 'Active' && status !== 'Locked';
+    if (isInactive) {
+      const startedInPeriod = isDateInPeriod(asIso(l?.application_date ?? l?.applicationDate), pullThroughPeriod, now);
+      if (startedInPeriod) {
+        row.startedCount += 1;
+        // Check if funded (has closing_date or funding_date)
+        if (l?.closing_date || l?.funding_date) {
+          row.fundedCount += 1;
+        }
+      }
+    }
 
     const card = transformLoanToCard(l);
     if (card.riskLevel === 'Very High') row.criticalRiskCount += 1;
@@ -160,11 +203,12 @@ export function generateAlethiaInsightsForMetric(args: {
   const critical: string[] = [];
 
   // Generic signals (used across tiles)
-  if (pullThrough !== null && pullThrough >= 70) success.push(`Pull-through at ${pullThrough}% supports predictable closings.`);
+  // Pull-through thresholds (industry benchmarks: 60-70% average, 72%+ excellent)
+  if (pullThrough !== null && pullThrough >= 72) success.push(`Pull-through at ${pullThrough}% (rolling 90 days) supports predictable closings.`);
   if (criticalRiskCount === 0 && activeCount > 0) success.push('No critical-risk loans detected in the active/locked pipeline.');
   if (mediumRiskCount > 0) warning.push(`${mediumRiskCount} medium-risk loans require proactive monitoring to protect pull-through.`);
-  if (pullThrough !== null && pullThrough < 70 && pullThrough >= 50) warning.push(`Pull-through at ${pullThrough}% indicates optimization opportunity (docs, underwriting, and borrower engagement).`);
-  if (pullThrough !== null && pullThrough < 50) critical.push(`Pull-through at ${pullThrough}% is below target and will pressure closings without intervention.`);
+  if (pullThrough !== null && pullThrough < 72 && pullThrough >= 60) warning.push(`Pull-through at ${pullThrough}% (rolling 90 days) indicates optimization opportunity (docs, underwriting, and borrower engagement).`);
+  if (pullThrough !== null && pullThrough < 60) critical.push(`Pull-through at ${pullThrough}% (rolling 90 days) is below target and will pressure closings without intervention.`);
   if (criticalRiskCount > 0) critical.push(`${criticalRiskCount} critical-risk loans need immediate attention to prevent fallout.`);
   if (highLtvCount > 0) critical.push(`${highLtvCount} loans with LTV > 95% face elevated PMI/decline friction—tighten borrower readiness.`);
   if (lowFicoCount > 0) critical.push(`${lowFicoCount} loans with high-risk FICO (<620) increase denial probability—validate compensating factors early.`);
@@ -173,23 +217,25 @@ export function generateAlethiaInsightsForMetric(args: {
   // Metric-specific emphasis
   if (metricKey === 'Funded Loans') {
     if (fundedCount > 0) success.push(`${fundedCount} loans funded in the selected period—realized production is tracking.`);
-    if (pullThrough !== null && pullThrough < 70) warning.push('Improve lock-to-close execution and borrower responsiveness to lift funded volume.');
+    if (pullThrough !== null && pullThrough < 72) warning.push('Improve lock-to-close execution and borrower responsiveness to lift funded volume.');
   }
 
   if (metricKey === 'Predicted Closing') {
     if (headlineValue !== undefined) success.push(`Forecast indicates ${headlineValue} expected closings—prioritize bottleneck removal to hit target.`);
-    if (falloutRate >= 15) warning.push(`Fallout rate at ${falloutRate}% could reduce forecasted closings if unaddressed.`);
+    // Fallout rate thresholds (industry benchmarks: 15-20% average, ≤12% excellent)
+    if (falloutRate > 18) warning.push(`Fallout rate at ${falloutRate}% could reduce forecasted closings if unaddressed.`);
   }
 
   if (metricKey === 'Predicted Fallout') {
     if (falloutCount === 0) success.push('No withdraw/deny fallout detected in the current dataset.');
-    if (falloutRate >= 10) warning.push(`Fallout rate at ${falloutRate}% warrants borrower coaching and underwriting pre-work.`);
-    if (falloutRate >= 20) critical.push(`Fallout rate at ${falloutRate}% is critical—triage highest-risk files immediately.`);
+    // Fallout thresholds: Warning 13-18%, Critical >18%
+    if (falloutRate >= 13 && falloutRate <= 18) warning.push(`Fallout rate at ${falloutRate}% warrants borrower coaching and underwriting pre-work.`);
+    if (falloutRate > 18) critical.push(`Fallout rate at ${falloutRate}% is critical—triage highest-risk files immediately.`);
   }
 
   if (metricKey === 'Active Loans Today') {
     if (activeCount > 0) success.push(`${activeCount} active/locked loans—pipeline is live and actionable.`);
-    if (falloutRate >= 15) warning.push(`Model-implied fallout exposure at ${falloutRate}%—intervene early on high-LTV/high-DTI borrowers.`);
+    if (falloutRate > 18) warning.push(`Model-implied fallout exposure at ${falloutRate}%—intervene early on high-LTV/high-DTI borrowers.`);
   }
 
   const officers = officerStats(loans, dateFilter, now);
@@ -202,7 +248,7 @@ export function generateAlethiaInsightsForMetric(args: {
     topTiering.push(
       `Top producer: ${topOfficer.name} with ${topOfficer.activeCount} active loans (${Math.round(topOfficer.activeVolume / 1_000_000 * 10) / 10}M pipeline).`
     );
-    if (pt !== null) topTiering.push(`${topOfficer.name} pull-through is ${pt}%—replicate their workflow across the team where possible.`);
+    if (pt !== null) topTiering.push(`${topOfficer.name} pull-through is ${pt}% (rolling 90 days)—replicate their workflow across the team where possible.`);
   }
   if (riskOfficer && riskOfficer.criticalRiskCount > 0) {
     topTiering.push(`Coaching focus: ${riskOfficer.name} has ${riskOfficer.criticalRiskCount} critical-risk loans—prioritize daily borrower touchpoints.`);

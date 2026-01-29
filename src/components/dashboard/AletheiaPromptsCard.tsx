@@ -1,15 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Pin } from 'lucide-react';
+import { Zap, Pin, RefreshCw, Sparkles, ChevronRight } from 'lucide-react';
 import { useAletheiaData, AletheiaInsight } from '@/hooks/useAletheiaData';
 import { AletheiaBriefingControls } from '@/components/aletheia/AletheiaBriefingControls';
+import { InsightDetailModal } from './InsightDetailModal';
 
-export const AletheiaPromptsCard = ({
-  dateFilter,
-  onDataAvailabilityChange,
-  briefingContext,
-  selectedTenantId
-}: {
+interface AletheiaPromptsCardProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
   onDataAvailabilityChange?: (hasData: boolean) => void;
   briefingContext?: {
@@ -22,18 +18,55 @@ export const AletheiaPromptsCard = ({
     userName?: string;
   };
   selectedTenantId?: string | null;
-}) => {
+}
+
+export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
+  dateFilter,
+  onDataAvailabilityChange,
+  briefingContext,
+  selectedTenantId
+}: AletheiaPromptsCardProps) {
   const [currentSet, setCurrentSet] = useState(0);
   const [expandedInsight, setExpandedInsight] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [pinnedInsights, setPinnedInsights] = useState<Set<string>>(new Set());
   
+  // Modal state for insight details
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<AletheiaInsight | null>(null);
+  
   // Use custom hook for data fetching
-  const { allInsights, insightsLoading, insightsError, funnelData } = useAletheiaData(
+  const { allInsights, insightsLoading, insightsError, funnelData, metadata, refreshInsights } = useAletheiaData(
     dateFilter,
     onDataAvailabilityChange,
     selectedTenantId
   );
+  
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Handle refresh with loading state
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    refreshInsights();
+    // Reset after a short delay to show the animation
+    setTimeout(() => setIsRefreshing(false), 1500);
+  }, [refreshInsights]);
+  
+  // Handle insight click to show detail modal
+  const handleInsightClick = useCallback((insight: AletheiaInsight) => {
+    // Only show modal for insights with drillable sources
+    const drillableSources = ['predictions', 'credit_risk', 'lost_opportunity', 'pipeline', 'performance', 'comparisons'];
+    if (insight.source && drillableSources.includes(insight.source)) {
+      setSelectedInsight(insight);
+      setIsModalOpen(true);
+    }
+  }, []);
+  
+  // Check if an insight is drillable
+  const isDrillable = useCallback((insight: AletheiaInsight) => {
+    const drillableSources = ['predictions', 'credit_risk', 'lost_opportunity', 'pipeline', 'performance', 'comparisons'];
+    return insight.source && drillableSources.includes(insight.source);
+  }, []);
 
   // Create unique ID for each insight based on message content (must be defined before useMemo)
   const getInsightId = useCallback((insight: AletheiaInsight, index: number) => {
@@ -69,12 +102,12 @@ export const AletheiaPromptsCard = ({
     return insightSets[currentSet] || [];
   }, [insightSets, currentSet]);
 
-  // Rotate through sets every 6 seconds - pause when user is interacting
+  // Rotate through sets every 15 seconds - pause when user is interacting
   useEffect(() => {
     if (isPaused || insightSets.length === 0) return;
     const interval = setInterval(() => {
       setCurrentSet((prev) => (prev + 1) % insightSets.length);
-    }, 6000);
+    }, 15000); // 15 seconds per set for comfortable reading
     return () => clearInterval(interval);
   }, [isPaused, insightSets.length]);
 
@@ -111,13 +144,31 @@ export const AletheiaPromptsCard = ({
               <h3 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-extralight text-slate-900 dark:text-white mb-0.5 sm:mb-1 tracking-[-0.02em] leading-[1.05]">
                 Cohi Insights
               </h3>
-              <p className="text-[10px] sm:text-xs md:text-sm lg:text-base text-slate-600 dark:text-slate-400 font-light tracking-tight">
-                Executive Briefing
+              <p className="text-[10px] sm:text-xs md:text-sm lg:text-base text-slate-600 dark:text-slate-400 font-light tracking-tight flex items-center gap-2">
+                <span>Executive Briefing</span>
+                {metadata?.usedLLM && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-violet-100 to-purple-100 dark:from-violet-900/30 dark:to-purple-900/30 text-violet-700 dark:text-violet-300 text-[9px] sm:text-[10px]">
+                    <Sparkles className="w-2.5 h-2.5" />
+                    AI Generated
+                  </span>
+                )}
+                <span className="text-slate-400 dark:text-slate-500">• {allInsights.length} insights</span>
               </p>
             </div>
           </div>
-          {/* Briefing Controls - Right side of header */}
-          <div className="flex items-center">
+          {/* Briefing Controls and Refresh - Right side of header */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={insightsLoading || isRefreshing}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+              title="Refresh insights"
+            >
+              <RefreshCw 
+                className={`w-4 h-4 text-slate-500 dark:text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`} 
+                strokeWidth={1.5} 
+              />
+            </button>
             <AletheiaBriefingControls 
               briefingContext={briefingContext}
             />
@@ -192,26 +243,35 @@ export const AletheiaPromptsCard = ({
               const globalIdx = unpinnedInsights.findIndex(i => i === insight) + (currentSet * 3);
               const insightId = getInsightId(insight, globalIdx);
               const InsightIcon = insight.icon;
+              const canDrill = isDrillable(insight);
               return (
                 <motion.div
                   key={insightId}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: idx * 0.1 }}
-                  className="p-3 sm:p-4 rounded-lg sm:rounded-xl bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => setExpandedInsight(expandedInsight === globalIdx ? null : globalIdx)}
+                  className={`p-3 sm:p-4 rounded-lg sm:rounded-xl bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 hover:shadow-md transition-all ${canDrill ? 'cursor-pointer hover:border-blue-300 dark:hover:border-blue-600' : 'cursor-default'}`}
+                  onClick={() => {
+                    if (canDrill) {
+                      handleInsightClick(insight);
+                    } else {
+                      setExpandedInsight(expandedInsight === globalIdx ? null : globalIdx);
+                    }
+                  }}
                 >
                   <div className="flex items-start gap-3">
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
                       insight.type === 'success' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
                       insight.type === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
                       insight.type === 'error' ? 'bg-rose-100 dark:bg-rose-900/30' :
+                      insight.type === 'critical' ? 'bg-rose-100 dark:bg-rose-900/30' :
                       'bg-blue-100 dark:bg-blue-900/30'
                     }`}>
                       <InsightIcon className={`w-4 h-4 ${
                         insight.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' :
                         insight.type === 'warning' ? 'text-amber-600 dark:text-amber-400' :
                         insight.type === 'error' ? 'text-rose-600 dark:text-rose-400' :
+                        insight.type === 'critical' ? 'text-rose-600 dark:text-rose-400' :
                         'text-blue-600 dark:text-blue-400'
                       }`} strokeWidth={1.5} />
                     </div>
@@ -230,16 +290,23 @@ export const AletheiaPromptsCard = ({
                         </motion.p>
                       )}
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        togglePin(insight, globalIdx);
-                      }}
-                      className="ml-2 p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
-                      aria-label="Pin insight"
-                    >
-                      <Pin className="w-4 h-4 text-slate-400 dark:text-slate-500" strokeWidth={1.5} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {canDrill && (
+                        <div className="p-1.5 rounded-lg text-blue-500 dark:text-blue-400" title="Click to view details">
+                          <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
+                        </div>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(insight, globalIdx);
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
+                        aria-label="Pin insight"
+                      >
+                        <Pin className="w-4 h-4 text-slate-400 dark:text-slate-500" strokeWidth={1.5} />
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               );
@@ -265,6 +332,18 @@ export const AletheiaPromptsCard = ({
           </div>
         )}
       </motion.div>
+      
+      {/* Insight Detail Modal */}
+      <InsightDetailModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedInsight(null);
+        }}
+        insightSource={selectedInsight?.source || ''}
+        insightMessage={selectedInsight?.message || ''}
+        dateFilter={dateFilter}
+      />
     </div>
   );
-};
+});

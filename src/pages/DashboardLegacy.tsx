@@ -61,7 +61,7 @@ import { ShareModal } from '@/components/dashboard/modals/ShareModal';
 import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
 import { TenantSelector } from '@/components/dashboard/TenantSelector';
-import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { useChannelStore } from '@/stores/channelStore';
 
 
 
@@ -123,8 +123,8 @@ const DashboardLegacy = () => {
     }
   }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
   
-  // Channel filter state - uses consolidated channel groups (Retail, TPO, etc.)
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  // Channel filter from global store (synced with header)
+  const { selectedChannel } = useChannelStore();
   
   // Briefing context state
   const [briefingContext, setBriefingContext] = useState<{
@@ -960,26 +960,15 @@ const DashboardLegacy = () => {
         onVisibilityChange={handleVisibilityChange}
         onReportClick={handleReportClick}
         headerContent={
-          <div className="flex items-center gap-4 flex-wrap">
-            {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
-            {isPlatformAdmin && (
-              <>
-                <TenantSelector
-                  selectedTenantId={selectedTenantId}
-                  onTenantChange={setSelectedTenantId}
-                  compact={true}
-                />
-                <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
-              </>
-            )}
-            <ChannelSelector
-              selectedChannel={selectedChannel}
-              onChannelChange={setSelectedChannel}
-              selectedTenantId={selectedTenantId}
-              compact={true}
-              useChannelGroups={true}
-            />
-          </div>
+          isPlatformAdmin ? (
+            <div className="flex items-center gap-4 flex-wrap">
+              <TenantSelector
+                selectedTenantId={selectedTenantId}
+                onTenantChange={setSelectedTenantId}
+                compact={true}
+              />
+            </div>
+          ) : undefined
         }
       >
         {/* Report Modal */}

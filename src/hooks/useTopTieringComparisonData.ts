@@ -134,6 +134,7 @@ export const useTopTieringComparisonData = (
         if (selectedChannel) params.append('channel_group', selectedChannel);
         
         const queryString = params.toString();
+        // NOTE: Using original endpoint until /api/toptiering/comparison is fully tested
         const url = `/api/loans/toptiering-comparison${queryString ? `?${queryString}` : ''}`;
         
         console.log('[TopTieringComparison] Fetching data from', url);

@@ -19,7 +19,7 @@ import {
 } from '@/hooks/useSalesScorecardData';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
-import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { useChannelStore } from '@/stores/channelStore';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
@@ -58,11 +58,8 @@ const SalesScorecard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
-  // Channel filter state - Qlik TTS scorecard uses Retail by default
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(() => {
-    const saved = localStorage.getItem('sales-scorecard-channel');
-    return saved || 'Retail'; // Default to Retail to match Qlik
-  });
+  // Channel filter from global store (synced with header)
+  const { selectedChannel } = useChannelStore();
 
   // Get tenant_id from auth context
   const tenantId = user?.tenant_id || null;
@@ -79,13 +76,6 @@ const SalesScorecard = () => {
     localStorage.setItem('sales-scorecard-tab', activeTab);
   }, [activeTab]);
 
-  useEffect(() => {
-    if (selectedChannel) {
-      localStorage.setItem('sales-scorecard-channel', selectedChannel);
-    } else {
-      localStorage.removeItem('sales-scorecard-channel');
-    }
-  }, [selectedChannel]);
 
   // Helper function to safely format numbers
   const safeFixed = (value: number | undefined | null, decimals: number = 1): string => {
@@ -480,11 +470,11 @@ const SalesScorecard = () => {
         <div className="flex-1 flex flex-col min-w-0">
           <TopTieringTopBar title="Sales Scorecard" onOpenSidebar={() => setSidebarOpen(true)} />
 
-      <main className={`relative flex-1 overflow-y-auto px-6 py-4 transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px] mx-auto'}`}>
-        <div className={`grid gap-4 sm:gap-5 md:gap-6 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
+      <main className={`relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3 transition-all duration-300 ${isFullscreen ? 'max-w-full' : 'max-w-[1800px] mx-auto'}`}>
+        <div className={`grid gap-3 sm:gap-4 transition-all duration-300 ${isFullscreen ? 'grid-cols-1' : 'grid-cols-12'}`}>
           {/* Left Sidebar - TTS Weights & Insights */}
           {!isFullscreen && (
-            <div className="col-span-12 lg:col-span-3 space-y-4 sm:space-y-5 md:space-y-6">
+            <div className="col-span-12 lg:col-span-3 space-y-3">
               {/* TTS Weights & Story Card */}
               <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
                 <Tabs defaultValue="weights" className="w-full">
@@ -718,7 +708,7 @@ const SalesScorecard = () => {
           )}
 
           {/* Main Content */}
-          <div className={`space-y-4 sm:space-y-6 transition-all duration-300 ${isFullscreen ? 'col-span-1' : 'col-span-12 lg:col-span-9'}`}>
+          <div className={`space-y-3 transition-all duration-300 ${isFullscreen ? 'col-span-1' : 'col-span-12 lg:col-span-9'}`}>
             {/* Filter Controls Row */}
             {!isFullscreen && (
             <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
@@ -762,19 +752,6 @@ const SalesScorecard = () => {
                     />
                   </div>
 
-                  {/* Channel Filter */}
-                  <div>
-                    <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Channel
-                    </label>
-                    <ChannelSelector
-                      selectedChannel={selectedChannel}
-                      onChannelChange={setSelectedChannel}
-                      selectedTenantId={tenantId}
-                      compact={true}
-                      useChannelGroups={true}
-                    />
-                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -1,6 +1,32 @@
 /**
  * Loans API Routes
  * Provides endpoints for querying loan data from the database
+ * 
+ * =============================================================================
+ * BACKEND ROUTES CONSOLIDATION NOTICE
+ * =============================================================================
+ * Several endpoints have been migrated to dedicated route files:
+ * 
+ * SCORECARD ENDPOINTS (use /api/scorecard/* instead):
+ *   /api/loans/sales-scorecard -> /api/scorecard/sales
+ *   /api/loans/operations-scorecard -> /api/scorecard/operations
+ *   /api/loans/operations-scorecard-trends -> /api/scorecard/operations-trends
+ *   /api/loans/sales-trends -> /api/scorecard/sales-trends
+ *   /api/loans/sales-trends/drilldown/:loName -> /api/scorecard/sales-trends/drilldown/:loName
+ * 
+ * TOPTIERING ENDPOINTS (use /api/toptiering/* instead):
+ *   /api/loans/toptiering -> /api/toptiering
+ *   /api/loans/toptiering-comparison -> /api/toptiering/comparison
+ * 
+ * PREDICTIONS ENDPOINTS (use /api/predictions/* instead):
+ *   /api/loans/predict -> /api/predictions (POST)
+ *   /api/loans/predict/status -> /api/predictions/status
+ *   /api/loans/predictions -> /api/predictions (GET)
+ *   /api/loans/:loanId/recommendations -> /api/predictions/:loanId/recommendations
+ * 
+ * The old endpoints below are kept for backward compatibility but should be
+ * considered DEPRECATED. Frontend hooks have been updated to use the new routes.
+ * =============================================================================
  */
 
 import { Router } from 'express';
@@ -388,128 +414,124 @@ router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (
     const tenantPool = tenantContext.tenantPool;
     const tenantId = tenantContext.tenantId;
 
-    // Get all loans for tenant using tenant database (no tenant_id column needed)
-    // Select only columns that exist in tenantDatabaseSchema.ts
-    const loansResult = await tenantPool.query(`
+    // REFACTORED: Use metricsService for efficient SQL-based metrics computation
+    // instead of fetching all loans and computing in JavaScript
+    const { queryMetrics, queryMetricGroupedBy } = await import('../services/metrics/metricsService.js');
+
+    // Fetch core metrics in parallel using metricsService
+    const [metrics, byLoanTypeData, byStatusData, volumeMetrics] = await Promise.all([
+      // Core counts
+      queryMetrics(tenantPool, [
+        'active_loans',
+        'closed_loans',
+        'locked_loans',
+        'total_units',
+        'avg_cycle_time',
+        'pull_through_rate',
+      ]),
+      // Group by loan type
+      queryMetricGroupedBy(tenantPool, 'total_units', 'loan_type'),
+      // Group by status (use custom query for current_loan_status)
+      tenantPool.query(`
+        SELECT 
+          COALESCE(current_loan_status, 'Unknown') as status,
+          COUNT(*) as count,
+          SUM(loan_amount) as volume
+        FROM public.loans
+        GROUP BY current_loan_status
+        ORDER BY COUNT(*) DESC
+      `),
+      // Volume metrics - use single efficient query
+      tenantPool.query(`
+        SELECT 
+          SUM(loan_amount) as total_volume,
+          AVG(loan_amount) as avg_loan_amount,
+          AVG(CASE WHEN interest_rate > 0 THEN interest_rate END) as avg_interest_rate,
+          COUNT(CASE WHEN credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls,
+          SUM(CASE 
+            WHEN current_loan_status = 'Active Loan' 
+            AND application_date IS NOT NULL 
+            AND application_date::text != ''
+            THEN loan_amount ELSE 0 END) as active_volume,
+          SUM(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as closed_volume,
+          SUM(CASE WHEN lock_date IS NOT NULL THEN loan_amount ELSE 0 END) as locked_volume
+        FROM public.loans
+      `)
+    ]);
+
+    // Extract metric values
+    const activeLoans = Number(metrics.active_loans?.value || 0);
+    const closedLoans = Number(metrics.closed_loans?.value || 0);
+    const lockedLoans = Number(metrics.locked_loans?.value || 0);
+    const totalLoans = Number(metrics.total_units?.value || 0);
+    const avgCycleTime = Math.round(Number(metrics.avg_cycle_time?.value || 0));
+    const pullThroughRate = parseFloat(Number(metrics.pull_through_rate?.value || 0).toFixed(1));
+
+    // Build byLoanType from grouped metrics
+    const byLoanType: Record<string, { count: number; volume: number }> = {};
+    
+    // Get volume by loan type with separate query
+    const volumeByTypeResult = await tenantPool.query(`
       SELECT 
-        loan_id, loan_number, loan_amount, loan_type, current_loan_status,
-        application_date, closing_date, lock_date, funding_date, interest_rate,
-        loan_purpose, branch, loan_officer, credit_pull_date,
-        fico_score, ltv_ratio, be_dti_ratio
-      FROM public.loans 
-      ORDER BY application_date DESC NULLS LAST
+        COALESCE(loan_type, 'Other') as loan_type,
+        COUNT(*) as count,
+        SUM(loan_amount) as volume
+      FROM public.loans
+      GROUP BY loan_type
     `);
-
-    const loans = loansResult.rows;
-
-    logDebug('Stats API request', { tenantId, loanCount: loans.length });
-
-    // Active Loans: Use EXACT same definition as metricsService.ts active_loans metric
-    // current_loan_status = 'Active Loan' AND application_date IS NOT NULL
-    const activeLoans = loans.filter(l => 
-      l.current_loan_status === 'Active Loan' && 
-      l.application_date !== null && 
-      l.application_date !== ''
-    );
     
-    // Closed Loans: Has funding_date (matches metricsService closed_loans metric)
-    const closedLoans = loans.filter(l => l.funding_date !== null);
-    
-    // Locked Loans: Has lock_date (matches metricsService locked_loans metric)
-    const lockedLoans = loans.filter(l => l.lock_date !== null);
-
-
-    // Group by loan type
-    const byLoanType = loans.reduce((acc: any, loan: any) => {
-      const type = loan.loan_type || 'Other';
-      if (!acc[type]) {
-        acc[type] = { count: 0, volume: 0, loans: [] };
-      }
-      acc[type].count++;
-      acc[type].volume += parseFloat(loan.loan_amount || 0);
-      acc[type].loans.push(loan);
-      return acc;
-    }, {});
-
-    // Group by status (using current_loan_status column)
-    const byStatus = loans.reduce((acc: any, loan: any) => {
-      const status = loan.current_loan_status || 'Unknown';
-      if (!acc[status]) {
-        acc[status] = { count: 0, volume: 0 };
-      }
-      acc[status].count++;
-      acc[status].volume += parseFloat(loan.loan_amount || 0);
-      return acc;
-    }, {});
-
-    // Calculate averages
-    const avgLoanAmount = loans.length > 0
-      ? loans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0) / loans.length
-      : 0;
-    const avgInterestRate = loans.filter(l => l.interest_rate).length > 0
-      ? loans
-          .filter(l => l.interest_rate)
-          .reduce((sum, l) => sum + parseFloat(l.interest_rate || 0), 0) / loans.filter(l => l.interest_rate).length
-      : 0;
-
-    // Calculate cycle time (average days from application to closing)
-    const loansWithCycleTime = loans.filter(l => l.application_date && l.closing_date);
-    const avgCycleTime = loansWithCycleTime.length > 0
-      ? loansWithCycleTime.reduce((sum, l) => {
-          const days = daysBetween(l.application_date, l.closing_date);
-          return sum + (days || 0);
-        }, 0) / loansWithCycleTime.length
-      : 0;
-
-    // Calculate pull-through rate (originated / loansStarted)
-    // Formula: (Closed/Originated Loans) / (Total Loans Started) * 100
-    // This matches the frontend calculation: originated / loansStarted * 100
-    const pullThroughRate = loans.length > 0
-      ? (closedLoans.length / loans.length) * 100
-      : 0;
-
-    // Calculate credit pulls - count loans that have a credit_pull_date
-    const creditPulls = loans.filter(l => l.credit_pull_date !== null && l.credit_pull_date !== undefined).length;
-
-    // Debug logging for calculated stats
-    logDebug('Calculated stats', {
-      tenantId,
-      total: loans.length,
-      active: activeLoans.length,
-      closed: closedLoans.length,
-      locked: lockedLoans.length,
-      avgCycleTime: Math.round(avgCycleTime),
-      pullThroughRate: parseFloat(pullThroughRate.toFixed(1)),
-      creditPulls
+    volumeByTypeResult.rows.forEach((row: any) => {
+      byLoanType[row.loan_type || 'Other'] = {
+        count: parseInt(row.count || 0),
+        volume: parseFloat(row.volume || 0)
+      };
     });
-    
-    // Additional debug: Show status breakdown by current_loan_status
-    if (loans.length > 0) {
-      const statusBreakdown = loans.reduce((acc: any, loan: any) => {
-        const status = loan.current_loan_status || 'Unknown';
-        acc[status] = (acc[status] || 0) + 1;
-        return acc;
-      }, {});
-      logDebug('Status breakdown', { tenantId, statusBreakdown });
-      logDebug('Loans with credit_pull_date', { tenantId, count: loans.filter(l => l.credit_pull_date).length });
-    }
+
+    // Build byStatus from query results
+    const byStatus: Record<string, { count: number; volume: number }> = {};
+    byStatusData.rows.forEach((row: any) => {
+      byStatus[row.status] = {
+        count: parseInt(row.count || 0),
+        volume: parseFloat(row.volume || 0)
+      };
+    });
+
+    // Extract volume metrics
+    const volumeRow = volumeMetrics.rows[0] || {};
+    const totalVolume = parseFloat(volumeRow.total_volume || 0);
+    const avgLoanAmount = parseFloat(volumeRow.avg_loan_amount || 0);
+    const avgInterestRate = parseFloat(volumeRow.avg_interest_rate || 0);
+    const creditPulls = parseInt(volumeRow.credit_pulls || 0);
+    const activeVolume = parseFloat(volumeRow.active_volume || 0);
+    const closedVolume = parseFloat(volumeRow.closed_volume || 0);
+    const lockedVolume = parseFloat(volumeRow.locked_volume || 0);
+
+    logDebug('Stats API (metricsService)', {
+      tenantId,
+      total: totalLoans,
+      active: activeLoans,
+      closed: closedLoans,
+      locked: lockedLoans,
+      avgCycleTime,
+      pullThroughRate
+    });
 
     res.json({
-      total: loans.length,
-      active: activeLoans.length,
-      closed: closedLoans.length,
-      locked: lockedLoans.length,
+      total: totalLoans,
+      active: activeLoans,
+      closed: closedLoans,
+      locked: lockedLoans,
       byLoanType,
       byStatus,
       avgLoanAmount,
       avgInterestRate,
-      totalVolume: loans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0),
-      avgCycleTime: Math.round(avgCycleTime),
-      pullThroughRate: parseFloat(pullThroughRate.toFixed(1)),
+      totalVolume,
+      avgCycleTime,
+      pullThroughRate,
       creditPulls,
-      activeVolume: activeLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0),
-      closedVolume: closedLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0),
-      lockedVolume: lockedLoans.reduce((sum, l) => sum + parseFloat(l.loan_amount || 0), 0),
+      activeVolume,
+      closedVolume,
+      lockedVolume,
     });
   } catch (error: any) {
     logError('Error fetching loan statistics', error, { userId: req.userId });
@@ -5683,6 +5705,7 @@ router.get('/predictions', authenticateToken, attachTenantContext, apiLimiter, a
     const limit = parseInt(req.query.limit as string) || 10000;
 
     // Build query to get most recent prediction for each loan (no tenant_id in tenant DB)
+    // Includes bucket and loan_data for full signal strength data on reload
     let query = `
       SELECT DISTINCT ON (loan_id)
         loan_id,
@@ -5690,6 +5713,8 @@ router.get('/predictions', authenticateToken, attachTenantContext, apiLimiter, a
         confidence,
         reasoning,
         risk_factors,
+        bucket,
+        loan_data,
         model_version,
         created_at,
         updated_at
@@ -5723,6 +5748,8 @@ router.get('/predictions', authenticateToken, attachTenantContext, apiLimiter, a
       confidence: row.confidence,
       reasoning: row.reasoning,
       riskFactors: row.risk_factors || [],
+      bucket: row.bucket || 'medium',
+      loanData: row.loan_data || null,
       modelVersion: row.model_version,
       createdAt: row.created_at,
       updatedAt: row.updated_at

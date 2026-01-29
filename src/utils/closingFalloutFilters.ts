@@ -94,6 +94,21 @@ export function getPeriodRange(period: PeriodValue, now: Date = new Date(), year
     return { start, end };
   }
 
+  // Rolling 90 days: for operational pull-through metrics
+  // More appropriate than MTD for metrics where loans take 30-45+ days to close
+  if (period === 'rolling_90_days') {
+    const start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    return { start, end: now };
+  }
+
+  // Rolling 13 months: matches Qlik TTS scorecard timeframe
+  // Formula from Qlik: MonthEnd(maxDate) - 13 months (inclusive of current month)
+  if (period === 'rolling_13_months') {
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+    const start = new Date(monthEnd.getFullYear(), monthEnd.getMonth() - 12, 1); // First day of month 13 months ago
+    return { start, end: monthEnd };
+  }
+
   // Unknown period string: default to all-time.
   return { start: null, end: null };
 }
@@ -110,8 +125,40 @@ export function isDateInPeriod(dateIso: string | null | undefined, period: Perio
   return true;
 }
 
+/**
+ * Helper to get funded/closing date from multiple possible field names
+ */
+export function getFundedDate(loan: any): string | null | undefined {
+  return loan?.closing_date ?? loan?.funding_date ?? loan?.fund_date ?? 
+    loan?.['Closing Date'] ?? loan?.['Fund Date'] ?? loan?.['Funding Date'];
+}
+
+/**
+ * Check if loan is funded (has status "Loan Originated" OR has a closing/funding date)
+ */
+export function isFundedLoan(loan: any): boolean {
+  // Check status first
+  const status = safeUpper(loan?.current_loan_status ?? loan?.['Current Loan Status'] ?? loan?.status);
+  if (status === 'LOAN ORIGINATED') return true;
+  
+  // Also check if closing/funding date exists
+  const fundedDate = getFundedDate(loan);
+  return !!fundedDate && fundedDate.toString().trim().length > 0;
+}
+
 export function isFundedInPeriod(loan: any, period: PeriodValue, now: Date = new Date()): boolean {
-  const closeDateIso = loan?.closing_date;
+  // First check if loan is actually funded
+  if (!isFundedLoan(loan)) return false;
+  
+  // For 'all' period, if the loan is funded, include it
+  if (period === 'all') return true;
+  
+  // For other periods, check if closing/funding date is within the period
+  const closeDateIso = getFundedDate(loan);
+  
+  // If no date but loan is funded, we can't filter by date - include in 'all' only
+  if (!closeDateIso) return false;
+  
   return isDateInPeriod(closeDateIso, period, now);
 }
 

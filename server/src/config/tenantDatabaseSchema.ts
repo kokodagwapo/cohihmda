@@ -1386,11 +1386,20 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         confidence INTEGER NOT NULL CHECK (confidence >= 0 AND confidence <= 100),
         reasoning TEXT,
         risk_factors TEXT[],
+        bucket TEXT DEFAULT 'medium',
+        loan_data JSONB,
         model_version TEXT DEFAULT 'gpt-4o',
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(loan_id, created_at)
       )
+    `).catch(() => {});
+    
+    // Add loan_data column if it doesn't exist (migration for existing tables)
+    await pool.query(`
+      ALTER TABLE public.loan_predictions 
+      ADD COLUMN IF NOT EXISTS loan_data JSONB,
+      ADD COLUMN IF NOT EXISTS bucket TEXT DEFAULT 'medium'
     `).catch(() => {});
 
     await pool.query(`

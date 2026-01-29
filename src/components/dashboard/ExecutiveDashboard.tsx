@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Target, ArrowUp, ArrowDown, X, ChevronDown, Calendar as CalendarIcon } from 'lucide-react';
 import { LOSFunnelData } from '@/lib/losSchema';
@@ -7,6 +7,7 @@ import { useMetrics } from '@/hooks/useMetrics';
 import { PeriodValue, getPeriodRange } from '@/utils/closingFalloutFilters';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -31,15 +32,17 @@ const KPI_METRICS: Record<string, { primary: string; volume?: string }> = {
 };
 
 // Executive Dashboard - Business Overview Component (6 Cards with Modals)
-export const ExecutiveDashboard = ({
-  dateFilter,
-  year = new Date().getFullYear(),
-  selectedTenantId
-}: {
+interface ExecutiveDashboardProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
   year?: number;
   selectedTenantId?: string | null;
-}) => {
+}
+
+export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
+  dateFilter,
+  year = new Date().getFullYear(),
+  selectedTenantId
+}: ExecutiveDashboardProps) {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>({});
   const [isAnimating, setIsAnimating] = useState(false);
@@ -49,7 +52,7 @@ export const ExecutiveDashboard = ({
     closedLoans: 'mtd',
     lockedLoans: 'mtd', // Locked loans can be filtered by lock date
     cycleTime: 'mtd',
-    pullThrough: 'ytd', // Pull-through typically measured YTD
+    pullThrough: 'rolling_90_days', // Pull-through uses rolling 90 days (industry standard for 30-45 day loan cycles)
     creditPulls: 'mtd',
   });
 
@@ -318,7 +321,7 @@ export const ExecutiveDashboard = ({
     },
     { 
       id: 'pullThrough', 
-      label: 'Pull-Through', 
+      label: 'Pull-Through (R90D)', 
       value: metrics.pullThrough.value, 
       change: metrics.pullThrough.change, 
       trend: metrics.pullThrough.trend,
@@ -1094,14 +1097,18 @@ export const ExecutiveDashboard = ({
                     <span className="text-[10px] sm:text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">
                       {card.label}
                     </span>
-                    <span className={`inline-flex items-center gap-0.5 text-[10px] sm:text-xs font-medium ${card.trend === 'up' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                      {card.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                      {card.change}
-                    </span>
+                    {isLoading || card.value.includes('--') ? (
+                      <Skeleton className="h-4 w-12" />
+                    ) : (
+                      <span className={`inline-flex items-center gap-0.5 text-[10px] sm:text-xs font-medium ${card.trend === 'up' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {card.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                        {card.change}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
-                    {isLoading ? (
-                      <span className="animate-pulse">...</span>
+                    {isLoading || card.value.includes('--') ? (
+                      <Skeleton className="h-7 w-20 mx-auto" />
                     ) : isAnimating && animatedValues[card.id] !== undefined
                       ? formatAnimatedValue(card.id, animatedValues[card.id], card.value)
                       : (animatedValues[card.id] !== undefined 
@@ -1210,5 +1217,4 @@ export const ExecutiveDashboard = ({
       </AnimatePresence>
     </div>
   );
-};
-
+});
