@@ -11,6 +11,7 @@ import {
   getBusinessOverviewMetrics,
   getInsights,
   getClosingFalloutForecast,
+  getDashboardOverview,
 } from '../../services/dashboard/analyticsService.js';
 
 const router = Router();
@@ -205,6 +206,31 @@ router.get('/closing-fallout-forecast', authenticateToken, attachTenantContext, 
     }
     
     res.status(500).json({ error: 'Failed to fetch closing and fallout forecast', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
+  }
+});
+
+/**
+ * GET /api/dashboard/overview
+ * PERFORMANCE: Consolidated endpoint that returns stats, funnel, critical loans, and predictions in one call.
+ * This reduces frontend API calls from 4 to 1, improving initial page load and reducing network waterfall.
+ * Query params: period (optional: 'all' | 'mtd' | 'ytd' | 'last_month' | 'last_year' | year string)
+ */
+router.get('/overview', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  try {
+    const tenantContext = getTenantContext(req);
+    const { period = 'all' } = req.query;
+    
+    const result = await getDashboardOverview(tenantContext.tenantPool, period as string);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error fetching dashboard overview:', error);
+    
+    // Handle database connection errors
+    if (handleDatabaseError(error, res, 'Failed to fetch dashboard overview')) {
+      return;
+    }
+    
+    res.status(500).json({ error: 'Failed to fetch dashboard overview', details: process.env.NODE_ENV === 'development' ? error.message : undefined });
   }
 });
 

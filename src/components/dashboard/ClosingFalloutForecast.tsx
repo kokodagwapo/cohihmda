@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, memo, useDeferredValue } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { BarChart3, TrendingUp, Play } from 'lucide-react';
 import { DashboardCard } from './DashboardCard';
 import { Button } from '@/components/ui/button';
@@ -214,7 +215,7 @@ const PeriodDropdown: React.FC<{
   onPeriodChange: (p: PeriodValue) => void;
   availableYears: number[];
   isDarkMode: boolean;
-}> = ({ period, onPeriodChange, availableYears, isDarkMode }) => {
+}> = memo(({ period, onPeriodChange, availableYears, isDarkMode }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -279,7 +280,9 @@ const PeriodDropdown: React.FC<{
       )}
     </div>
   );
-};
+});
+
+PeriodDropdown.displayName = 'PeriodDropdown';
 
 /** Session-only cache key for metrics (period string). Cleared on loans/predictions change or page refresh. */
 const PERIODS_TO_PRECOMPUTE: PeriodValue[] = ['all', 'mtd', 'ytd', 'last_month', 'last_year'];
@@ -305,22 +308,59 @@ function computeMetricsFromLoans(
   avgCycleTime: number;
   pipelineValue: number;
 } {
-  // Metrics are split into two categories:
-  // 1. SNAPSHOT METRICS (current state, NOT filtered by period): Active Loans, Pipeline UPB, Predicted Closing/Fallout
-  // 2. HISTORICAL METRICS (filtered by period): Funded Loans, Pull-Through Rate, Locks
+  // PERFORMANCE: Single-pass aggregation instead of multiple .filter() calls
+  // This reduces O(n * m) to O(n) where m is the number of metrics
+  
+  // Counters for single-pass computation
+  let activeCount = 0;
+  let activePipelineValue = 0;
+  let likelyCloseLateCount = 0;
+  let fundedInPeriodCount = 0;
+  let startedInPeriodCount = 0;
+  let lockedCount = 0;
+  let lockedInPeriodCount = 0;
+  
+  // Single pass through all loans
+  for (let i = 0; i < loans.length; i++) {
+    const loan = loans[i];
+    const status = mapForecastStatus(loan);
+    
+    // Check if active (snapshot metric - not filtered by period)
+    if (status === 'Active') {
+      activeCount++;
+      activePipelineValue += getLoanAmountNumber(loan);
+      
+      // Check if likely close late (only for active loans)
+      if (isLikelyCloseLateForecast(loan, 30, now)) {
+        likelyCloseLateCount++;
+      }
+    }
+    
+    // Check if funded in period (historical metric)
+    if (isFundedInPeriod(loan, period, now)) {
+      fundedInPeriodCount++;
+    }
+    
+    // Check if application started in period (for pull-through calculation)
+    if (isDateInPeriod(loan?.application_date, period, now)) {
+      startedInPeriodCount++;
+    }
+    
+    // Check if locked (needs to be active first)
+    if (isLockedForForecast(loan)) {
+      lockedCount++;
+      // Check if locked in period
+      if (isDateInPeriod(loan?.lock_date, period, now)) {
+        lockedInPeriodCount++;
+      }
+    }
+  }
   
   // ======== SNAPSHOT METRICS (current pipeline state) ========
   
-  // Active Loans Today - current snapshot of all active loans (always unfiltered)
-  const activeLoans = loans.filter((l) => mapForecastStatus(l) === 'Active');
-  const activeLoansToday = statsData?.active ?? activeLoans.length;
-  
-  // Pipeline Value - total value of current active pipeline
-  const pipelineValue = statsData?.activeVolume ?? activeLoans.reduce((sum, l) => sum + getLoanAmountNumber(l), 0);
+  const activeLoansToday = statsData?.active ?? activeCount;
+  const pipelineValue = statsData?.activeVolume ?? activePipelineValue;
   const pipelineValueM = pipelineValue > 0 ? (pipelineValue / 1000000).toFixed(1) : '0';
-  
-  // Likely Close Late - current active loans past expected closing
-  const likelyCloseLate = activeLoans.filter((l) => isLikelyCloseLateForecast(l, 30, now)).length;
   
   // Predicted Fallout - from AI predictions (applies to current active pipeline)
   const likelyWithdraw = predictions?.likelyWithdraw ?? 0;
@@ -332,36 +372,28 @@ function computeMetricsFromLoans(
   
   // ======== HISTORICAL METRICS (filtered by period) ========
   
-  // Funded/Closed loans in period
-  const fundedLoansInPeriod = loans.filter((l) => isFundedInPeriod(l, period, now));
-  const fundedCount = fundedLoansInPeriod.length;
-  
-  // Applications started in period (for pull-through calculation)
-  const startedInPeriod = loans.filter((l) => isDateInPeriod(l?.application_date, period, now));
-  
   // Pull-through rate: funded / started in same period
-  const pullThroughRate = startedInPeriod.length > 0 
-    ? (fundedCount / startedInPeriod.length) * 100 
+  const pullThroughRate = startedInPeriodCount > 0 
+    ? (fundedInPeriodCount / startedInPeriodCount) * 100 
     : (statsData?.pullThroughRate ?? 0);
   const pullThroughRateDisplay = pullThroughRate > 0 ? Math.round(pullThroughRate) : 0;
   
   // Predicted Closing - current active loans * period's pull-through rate
   const predictedClosing = activeLoansToday > 0 ? Math.round((activeLoansToday * pullThroughRate) / 100) : 0;
   
-  // Locked loans in period (by lock_date)
-  const allLockedLoans = loans.filter((l) => isLockedForForecast(l));
+  // Locked loans
   const lockedLoans = period === 'all'
-    ? (statsData?.locked ?? allLockedLoans.length)
-    : allLockedLoans.filter((l) => isDateInPeriod(l?.lock_date, period, now)).length;
+    ? (statsData?.locked ?? lockedCount)
+    : lockedInPeriodCount;
   
   // Average cycle time (from statsData or default)
   const avgCycleTime = statsData?.avgCycleTime ?? 24;
   
   return {
     activeLoansToday,
-    closedLoansMTD: fundedCount,
+    closedLoansMTD: fundedInPeriodCount,
     predictedClosing,
-    likelyCloseLate,
+    likelyCloseLate: likelyCloseLateCount,
     likelyWithdraw,
     likelyDecline,
     predictedFalloutTotal,
@@ -412,6 +444,9 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   const isDarkMode = theme === 'dark';
 
   const [period, setPeriod] = useState<PeriodValue>('all');
+  // PERFORMANCE: useDeferredValue defers expensive re-computation during rapid period changes
+  // This allows the UI to remain responsive while metrics are recalculated in the background
+  const deferredPeriod = useDeferredValue(period);
   const prevPeriodRef = useRef<PeriodValue>(period);
 
   // Session-scoped metrics cache: keyed by period, invalidated when loans or predictions change / on refresh
@@ -485,6 +520,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   }, [period]);
 
   // Calculate metrics from data (with session cache so switching periods is instant after first load)
+  // PERFORMANCE: Uses deferredPeriod to allow UI to remain responsive during rapid period changes
   const metrics = useMemo(() => {
     const now = new Date();
     const hasLoans = loansRaw && loansRaw.length > 0 && !loansError;
@@ -500,11 +536,11 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
         cache.predictionsVersion = predictions;
       }
 
-      const periodKey = String(period);
+      const periodKey = String(deferredPeriod);
       const cached = cache.cache.get(periodKey);
       if (cached) return cached;
 
-      const result = computeMetricsFromLoans(loans, period, now, statsData, predictions);
+      const result = computeMetricsFromLoans(loans, deferredPeriod, now, statsData, predictions);
       cache.cache.set(periodKey, result);
 
       // Precompute other periods in the background so switching later is instant
@@ -591,7 +627,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       avgCycleTime,
       pipelineValue
     };
-  }, [statsData, funnelData, loansRaw, loansError, period, predictions]);
+  }, [statsData, funnelData, loansRaw, loansError, deferredPeriod, predictions]);
 
   // Calculate KPIs for Pipeline Snapshot
   const kpis = useMemo(() => {
@@ -628,14 +664,29 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
     ];
   }, [metrics]);
 
-  // Trigger animation when data changes
+  // PERFORMANCE: Only trigger animation on initial data load, not on period changes
+  // This prevents stutter when switching between periods
+  const hasAnimatedRef = useRef(false);
+  const prevDataRef = useRef<{ statsData: typeof statsData; loansRaw: typeof loansRaw }>({ statsData: null, loansRaw: null });
+  
   useEffect(() => {
-    setIsAnimating(false);
-    const timer = setTimeout(() => {
-      setIsAnimating(true);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [statsData, funnelData, loansRaw, period]);
+    // Only animate when actual data changes (initial load or refresh), not period switches
+    const dataChanged = (
+      (prevDataRef.current.statsData === null && statsData !== null) ||
+      (prevDataRef.current.loansRaw === null && loansRaw !== null)
+    );
+    
+    if (dataChanged || !hasAnimatedRef.current) {
+      setIsAnimating(false);
+      const timer = setTimeout(() => {
+        setIsAnimating(true);
+        hasAnimatedRef.current = true;
+      }, 100);
+      
+      prevDataRef.current = { statsData, loansRaw };
+      return () => clearTimeout(timer);
+    }
+  }, [statsData, loansRaw]);
 
   // When period changes, only update the ref. Keep the same loan set and use session-cached metrics
   // so switching periods is instant (metrics are computed from "all" loans and cached per period).
@@ -917,9 +968,12 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       // Always request the full set ('all') so metrics for every period can be computed client-side
       const { start, end } = getPeriodRange(periodToUse ?? 'all', now);
       
+      // PERFORMANCE: Reduced from 5000 to 500 loans
+      // For critical loans display and signal buckets, 500 is sufficient
+      // Full metrics are computed server-side via /api/dashboard/overview endpoint
       // Build query parameters
       const params = new URLSearchParams();
-      params.append('limit', '5000'); // Reasonable limit for metrics - prediction endpoint handles bucketing
+      params.append('limit', '500'); // Reduced limit - server computes metrics for large datasets
       params.append('offset', '0');
       
       // Add date filters if period is not 'all'

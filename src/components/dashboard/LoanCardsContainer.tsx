@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, memo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { LoanDrilldownModal } from './LoanDrilldownModal';
@@ -72,8 +73,104 @@ type TabType = 'all' | 'likely-withdraw' | 'likely-decline';
 type SortType = 'risk' | 'amount' | 'loan' | 'officer';
 
 const ITEMS_PER_PAGE = 6;
+// PERFORMANCE: Threshold for switching to virtualized rendering
+const VIRTUALIZATION_THRESHOLD = 20;
 
-export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
+// PERFORMANCE: Memoized loan card component to prevent unnecessary re-renders
+const LoanCardItem = memo(({ 
+  loan, 
+  isDarkMode, 
+  onSelectLoan, 
+  onSelectOfficer 
+}: { 
+  loan: LoanCard; 
+  isDarkMode: boolean; 
+  onSelectLoan: (loan: LoanCard) => void;
+  onSelectOfficer: (officer: string) => void;
+}) => (
+  <div
+    onClick={() => onSelectLoan(loan)}
+    className={`group p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl overflow-hidden active:scale-[0.99] transition-all cursor-pointer ${isDarkMode ? 'bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]' : 'bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}
+  >
+    <div className="flex items-start justify-between gap-3 mb-2 sm:mb-3">
+      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
+          <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className={`font-medium text-[13px] sm:text-sm tracking-tight truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+            Loan #{loan.id.length > 12 ? loan.id.substring(0, 12) + '...' : loan.id}
+          </p>
+          <button
+            onClick={(e) => { e.stopPropagation(); onSelectOfficer(loan.officer); }}
+            className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1 hover:underline ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
+          >
+            <svg className="w-3 h-3 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span className="truncate max-w-[100px] sm:max-w-none">{loan.officer || 'Unknown LO'}</span>
+          </button>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className={`font-semibold text-sm sm:text-base tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{loan.amount}</p>
+        <div className="flex flex-col items-end gap-0.5 mt-0.5">
+          {loan.riskSummary?.predictedOutcome && loan.riskSummary.predictedOutcome !== 'originate' && (
+            <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+              loan.riskSummary.predictedOutcome === 'deny'
+                ? (isDarkMode ? 'bg-red-600/30 text-red-300' : 'bg-red-100 text-red-700')
+                : loan.riskSummary.predictedOutcome === 'withdraw'
+                  ? (isDarkMode ? 'bg-orange-500/30 text-orange-300' : 'bg-orange-100 text-orange-700')
+                  : (isDarkMode ? 'bg-amber-500/30 text-amber-300' : 'bg-amber-100 text-amber-700')
+            }`}>
+              {loan.riskSummary.predictedOutcome === 'deny' ? '⚠ Likely Decline' : 
+               loan.riskSummary.predictedOutcome === 'withdraw' ? '↩ Likely Withdraw' : 
+               '⚡ At Risk'}
+            </span>
+          )}
+          <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
+            loan.riskLevel === 'Very High' 
+              ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
+              : loan.riskLevel === 'Medium' 
+                ? (isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-50 text-amber-600')
+                : (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
+          }`}>
+            {loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW'}
+          </span>
+        </div>
+      </div>
+    </div>
+    <div className="flex items-center justify-between text-[11px] sm:text-[12px] mb-2">
+      <div className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${
+          loan.riskLevel === 'Very High' ? 'bg-rose-500' : loan.riskLevel === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'
+        }`}></span>
+        <span className="font-medium">Risk Score: {loan.riskScore}/100</span>
+      </div>
+    </div>
+    <p className={`text-[11px] sm:text-[12px] leading-relaxed line-clamp-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{loan.reason}</p>
+    <LoanRiskDistribution
+      ficoScore={loan.ficoScore}
+      ltvRatio={loan.ltvRatio}
+      dtiRatio={loan.dtiRatio}
+      isDarkMode={isDarkMode}
+    />
+    <div className={`mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t flex items-center justify-between ${isDarkMode ? 'border-slate-700/50' : 'border-slate-100'}`}>
+      <span className={`text-[9px] sm:text-[10px] ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
+        Tap for details
+      </span>
+      <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+      </svg>
+    </div>
+  </div>
+));
+
+LoanCardItem.displayName = 'LoanCardItem';
+
+export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
   loans,
   predictions = [],
   isDarkMode = false
@@ -85,9 +182,14 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
   const [selectedLoan, setSelectedLoan] = useState<LoanCard | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
+  
+  // PERFORMANCE: Ref for virtualized scrolling container
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setCurrentPage(1);
+    setShowAll(false); // Reset to paginated view when filters change
   }, [activeTab, searchTerm, sortBy, sortOrder]);
 
   // Create prediction map for filtering
@@ -165,9 +267,24 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
 
   const totalPages = Math.ceil(filteredLoans.length / ITEMS_PER_PAGE);
   const paginatedLoans = useMemo(() => {
+    if (showAll) return filteredLoans; // Return all when showing all
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredLoans.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredLoans, currentPage]);
+  }, [filteredLoans, currentPage, showAll]);
+
+  // PERFORMANCE: Use virtualization when showing all items and count exceeds threshold
+  const useVirtualization = showAll && filteredLoans.length > VIRTUALIZATION_THRESHOLD;
+  
+  // Virtualizer for grid layout (2 columns on lg, 1 on smaller)
+  // Each row contains 2 cards on desktop, 1 on mobile
+  const rowCount = useVirtualization ? Math.ceil(filteredLoans.length / 2) : 0;
+  const rowVirtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 220, // Estimated height of a loan card row
+    overscan: 3, // Render 3 extra rows above/below viewport
+    enabled: useVirtualization,
+  });
 
   const tabCounts = useMemo(() => {
     // Use riskSummary.predictedOutcome on each loan (primary source)
@@ -311,99 +428,63 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
             </svg>
             <p className="text-sm font-medium">No loans found</p>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
-            {paginatedLoans.map((loan, index) => (
-              <div
-                key={loan.id}
-                onClick={() => setSelectedLoan(loan)}
-                className={`group p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl overflow-hidden active:scale-[0.99] transition-all cursor-pointer ${isDarkMode ? 'bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]' : 'bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}
-              >
-                <div className="flex items-start justify-between gap-3 mb-2 sm:mb-3">
-                  <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-                    <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
-                      <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`font-medium text-[13px] sm:text-sm tracking-tight truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                        Loan #{loan.id.length > 12 ? loan.id.substring(0, 12) + '...' : loan.id}
-                      </p>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedOfficer(loan.officer); }}
-                        className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1 hover:underline ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
-                      >
-                        <svg className="w-3 h-3 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        <span className="truncate max-w-[100px] sm:max-w-none">{loan.officer || 'Unknown LO'}</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className={`font-semibold text-sm sm:text-base tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{loan.amount}</p>
-                    <div className="flex flex-col items-end gap-0.5 mt-0.5">
-                      {/* Predicted outcome badge - withdraw/deny/originate */}
-                      {loan.riskSummary?.predictedOutcome && loan.riskSummary.predictedOutcome !== 'originate' && (
-                        <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
-                          loan.riskSummary.predictedOutcome === 'deny'
-                            ? (isDarkMode ? 'bg-red-600/30 text-red-300' : 'bg-red-100 text-red-700')
-                            : loan.riskSummary.predictedOutcome === 'withdraw'
-                              ? (isDarkMode ? 'bg-orange-500/30 text-orange-300' : 'bg-orange-100 text-orange-700')
-                              : (isDarkMode ? 'bg-amber-500/30 text-amber-300' : 'bg-amber-100 text-amber-700')
-                        }`}>
-                          {loan.riskSummary.predictedOutcome === 'deny' ? '⚠ Likely Decline' : 
-                           loan.riskSummary.predictedOutcome === 'withdraw' ? '↩ Likely Withdraw' : 
-                           '⚡ At Risk'}
-                        </span>
-                      )}
-                      <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
-                        loan.riskLevel === 'Very High' 
-                          ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
-                          : loan.riskLevel === 'Medium' 
-                            ? (isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-50 text-amber-600')
-                            : (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
-                      }`}>
-                        {loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] sm:text-[12px] mb-2">
-                  <div className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${
-                      loan.riskLevel === 'Very High' ? 'bg-rose-500' : loan.riskLevel === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'
-                    }`}></span>
-                    <span className="font-medium">Risk Score: {loan.riskScore}/100</span>
-                  </div>
-                </div>
+        ) : useVirtualization ? (
+          // PERFORMANCE: Virtualized rendering for large lists
+          <div 
+            ref={scrollContainerRef}
+            className="max-h-[600px] overflow-y-auto"
+            style={{ contain: 'strict' }}
+          >
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const rowIndex = virtualRow.index;
+                const loan1 = filteredLoans[rowIndex * 2];
+                const loan2 = filteredLoans[rowIndex * 2 + 1];
                 
-                <p className={`text-[11px] sm:text-[12px] leading-relaxed line-clamp-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{loan.reason}</p>
-
-                <LoanRiskDistribution
-                  ficoScore={loan.ficoScore}
-                  ltvRatio={loan.ltvRatio}
-                  dtiRatio={loan.dtiRatio}
-                  isDarkMode={isDarkMode}
-                />
-
-                <div className={`mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t flex items-center justify-between ${isDarkMode ? 'border-slate-700/50' : 'border-slate-100'}`}>
-                  <span className={`text-[9px] sm:text-[10px] ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-                    Tap for details
-                  </span>
-                  <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </div>
+                return (
+                  <div
+                    key={virtualRow.key}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4 pb-2 sm:pb-3 lg:pb-4"
+                  >
+                    {loan1 && <LoanCardItem loan={loan1} isDarkMode={isDarkMode} onSelectLoan={setSelectedLoan} onSelectOfficer={setSelectedOfficer} />}
+                    {loan2 && <LoanCardItem loan={loan2} isDarkMode={isDarkMode} onSelectLoan={setSelectedLoan} onSelectOfficer={setSelectedOfficer} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          // Standard paginated rendering with memoized cards
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
+            {paginatedLoans.map((loan) => (
+              <LoanCardItem 
+                key={loan.id}
+                loan={loan} 
+                isDarkMode={isDarkMode} 
+                onSelectLoan={setSelectedLoan} 
+                onSelectOfficer={setSelectedOfficer} 
+              />
             ))}
           </div>
         )}
       </div>
 
-      {totalPages > 1 && (
+      {/* Pagination controls - only show when not showing all */}
+      {!showAll && totalPages > 1 && (
         <div className={`flex items-center justify-between py-3 md:px-4 md:border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
           <p className={`text-[10px] sm:text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
             {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredLoans.length)} of {filteredLoans.length}
@@ -453,7 +534,36 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
             >
               ›
             </button>
+            
+            {/* Show All toggle - only show when there are more items than one page */}
+            {filteredLoans.length > ITEMS_PER_PAGE && (
+              <button
+                onClick={() => setShowAll(true)}
+                className={`ml-2 px-2 py-1 text-[10px] sm:text-xs rounded-md transition-colors ${
+                  isDarkMode ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-slate-100'
+                }`}
+              >
+                Show All
+              </button>
+            )}
           </div>
+        </div>
+      )}
+      
+      {/* Show paginated view toggle when showing all */}
+      {showAll && (
+        <div className={`flex items-center justify-between py-3 md:px-4 md:border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
+          <p className={`text-[10px] sm:text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+            Showing all {filteredLoans.length} loans {useVirtualization && '(virtualized)'}
+          </p>
+          <button
+            onClick={() => setShowAll(false)}
+            className={`px-2 py-1 text-[10px] sm:text-xs rounded-md transition-colors ${
+              isDarkMode ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-slate-100'
+            }`}
+          >
+            Show Paginated
+          </button>
         </div>
       )}
 
@@ -476,4 +586,6 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = ({
       )}
     </div>
   );
-};
+});
+
+LoanCardsContainer.displayName = 'LoanCardsContainer';

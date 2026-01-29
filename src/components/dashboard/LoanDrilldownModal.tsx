@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
@@ -65,7 +65,7 @@ interface LoanDrilldownModalProps {
   isDarkMode?: boolean;
 }
 
-export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = ({
+export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
   loan,
   isOpen,
   onClose,
@@ -587,4 +587,6 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = ({
       </DialogPrimitive.Portal>
     </Dialog>
   );
-};
+});
+
+LoanDrilldownModal.displayName = 'LoanDrilldownModal';
