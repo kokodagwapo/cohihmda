@@ -1,11 +1,11 @@
 import { useState, useMemo, useCallback } from 'react';
-import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X, CalendarDays, ChevronDown } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, Zap, CalendarDays, ChevronDown } from 'lucide-react';
 import { format, subQuarters, subMonths, subYears, startOfQuarter, startOfMonth, startOfYear, endOfQuarter, endOfMonth, endOfYear, startOfWeek, subWeeks } from 'date-fns';
 import { useLeaderboardData, LeaderboardLeader, LeaderboardTimeframe } from '@/hooks/useLeaderboardData';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 // Period types for the leaderboard
@@ -505,60 +505,41 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
         </div>
       </div>
 
-      {/* Leader Drill-Down Modal - Modern Minimalist */}
-      <AnimatePresence>
-        {selectedLeader && (() => {
-        const leader = leadersData.find(l => l.id === selectedLeader);
-        if (!leader) return null;
-        return <motion.div initial={{
-          opacity: 0
-        }} animate={{
-          opacity: 1
-        }} exit={{
-          opacity: 0
-        }} className="fixed inset-0 bg-white/40 backdrop-blur-md z-50 flex items-center justify-center p-4" onClick={() => setSelectedLeader(null)}>
-              <motion.div initial={{
-            scale: 0.9,
-            opacity: 0
-          }} animate={{
-            scale: 1,
-            opacity: 1
-          }} exit={{
-            scale: 0.9,
-            opacity: 0
-          }} transition={{
-            type: "spring",
-            damping: 25,
-            stiffness: 300
-          }} onClick={e => e.stopPropagation()} className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200/50 dark:border-slate-700/50">
+      {/* Leader Drill-Down Modal - Using Dialog for proper portal and accessibility */}
+      <Dialog open={!!selectedLeader} onOpenChange={(open) => !open && setSelectedLeader(null)}>
+        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          {(() => {
+            const leader = leadersData.find(l => l.id === selectedLeader);
+            if (!leader) return null;
+            return (
+              <>
                 {/* Compact Header */}
-                <div className="p-4 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-bold text-sm shadow-lg">
-                        {leader.name.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <h2 className="text-lg sm:text-xl font-extralight text-slate-900 dark:text-white tracking-tight leading-[1.05]">{leader.name}</h2>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{leader.role} · {leader.branch}</p>
-                      </div>
+                <DialogHeader className="p-4 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-bold text-sm shadow-lg">
+                      {leader.name.split(' ').map(n => n[0]).join('')}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "px-2 py-1 rounded-full text-[10px] font-semibold text-white shadow-sm",
-                        leader.rank === 1
-                          ? "bg-amber-500"
-                          : leader.rank === 2
-                            ? "bg-slate-400"
-                            : leader.rank === 3
-                              ? "bg-orange-400"
-                              : "bg-slate-300"
-                      )}>
-                        Rank #{leader.rank}
-                      </span>
-                      <button onClick={() => setSelectedLeader(null)} className="w-8 h-8 rounded-full bg-white/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 backdrop-blur-sm flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1">
-                        <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.5} />
-                      </button>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <DialogTitle className="text-lg sm:text-xl font-extralight text-slate-900 dark:text-white tracking-tight leading-[1.05]">
+                          {leader.name}
+                        </DialogTitle>
+                        <span className={cn(
+                          "px-2 py-1 rounded-full text-[10px] font-semibold text-white shadow-sm mr-8",
+                          leader.rank === 1
+                            ? "bg-amber-500"
+                            : leader.rank === 2
+                              ? "bg-slate-400"
+                              : leader.rank === 3
+                                ? "bg-orange-400"
+                                : "bg-slate-300"
+                        )}>
+                          Rank #{leader.rank}
+                        </span>
+                      </div>
+                      <DialogDescription className="text-xs text-slate-500 dark:text-slate-400">
+                        {leader.role} · {leader.branch}
+                      </DialogDescription>
                     </div>
                   </div>
                   
@@ -570,16 +551,20 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
                       {leader.delta >= 0 ? '↑' : '↓'} {Math.abs(leader.delta)}%
                     </span>
                   </div>
-                </div>
+                </DialogHeader>
 
                 {/* Compact Content */}
                 <div className="p-4 space-y-4">
                   {/* Badges Row */}
-                  {leader.badges.length > 0 && <div className="flex flex-wrap gap-1.5">
-                      {leader.badges.map(badge => <span key={badge} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {leader.badges.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {leader.badges.map(badge => (
+                        <span key={badge} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {badge}
-                        </span>)}
-                    </div>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Metrics Grid - Compact */}
                   <div className="grid grid-cols-4 gap-2">
@@ -613,14 +598,19 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
                     <div className="flex items-start gap-2">
                       <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
                       <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
-                        {leader.rank === 1 ? `Top performer with ${leader.delta}% improvement. Strong momentum across all metrics.` : leader.rank <= 3 ? `Strong ${leader.pullThru}% pull-through and ${leader.cycleTime} days cycle. Consider for mentorship.` : `${leader.loans} loans closed. Opportunity to improve pull-through rate.`}
+                        {leader.rank === 1 
+                          ? `Top performer with ${leader.delta}% improvement. Strong momentum across all metrics.` 
+                          : leader.rank <= 3 
+                            ? `Strong ${leader.pullThru}% pull-through and ${leader.cycleTime} days cycle. Consider for mentorship.` 
+                            : `${leader.loans} loans closed. Opportunity to improve pull-through rate.`}
                       </p>
                     </div>
                   </div>
                 </div>
-              </motion.div>
-            </motion.div>;
-      })()}
-      </AnimatePresence>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </section>;
 };

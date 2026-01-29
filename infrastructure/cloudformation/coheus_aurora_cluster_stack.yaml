@@ -1,0 +1,551 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Coheus Aurora Serverless v2 Cluster Stack
+  
+  This stack creates an Aurora Serverless v2 PostgreSQL cluster for multi-tenant SaaS.
+  
+  Supports two cluster types:
+  - Management Cluster: Stores tenant registry, user mappings, subscriptions
+  - Tenant Cluster: Hosts multiple tenant databases (database-per-tenant isolation)
+  
+  Features:
+  - Aurora Serverless v2 with auto-scaling ACUs
+  - Encryption at rest with KMS
+  - Multi-AZ deployment
+  - Automated backups
+  - CloudWatch monitoring
+  - Secrets Manager integration
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: coheus
+    Description: Project name for resource naming
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  ClusterType:
+    Type: String
+    Default: tenant
+    AllowedValues:
+      - management
+      - tenant
+    Description: |
+      Cluster type:
+      - management: For tenant registry and shared data (coheus_management database)
+      - tenant: For tenant databases (up to 25 tenants per cluster)
+
+  ClusterIdentifier:
+    Type: String
+    Default: ''
+    Description: Cluster identifier suffix (e.g., '001' for tenant-001). Leave empty for management cluster.
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the cluster
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet for the cluster
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet for the cluster
+
+  AllowedSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID that is allowed to connect (e.g., ECS tasks, EB instances)
+
+  MinACU:
+    Type: Number
+    Default: 0.5
+    MinValue: 0.5
+    MaxValue: 128
+    Description: Minimum Aurora Capacity Units (0.5 = ~1GB RAM, scales down during idle)
+
+  MaxACU:
+    Type: Number
+    Default: 8
+    MinValue: 0.5
+    MaxValue: 128
+    Description: Maximum Aurora Capacity Units (8 = ~16GB RAM, scales up under load)
+
+  DatabaseName:
+    Type: String
+    Default: coheus
+    Description: Default database name (coheus_management for management cluster)
+
+  MasterUsername:
+    Type: String
+    Default: coheusadmin
+    Description: Master username for the cluster
+
+  MasterPassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Master password (leave empty to auto-generate via Secrets Manager)
+
+  BackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: Number of days to retain automated backups
+
+  EnablePerformanceInsights:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable Performance Insights for query analysis
+
+  KMSKeyArn:
+    Type: String
+    Default: ''
+    Description: KMS key ARN for encryption (leave empty to create new key)
+
+  AlertsTopicArn:
+    Type: String
+    Default: ''
+    Description: SNS topic ARN for alerts (optional)
+
+Conditions:
+  IsManagementCluster: !Equals [!Ref ClusterType, 'management']
+  IsTenantCluster: !Equals [!Ref ClusterType, 'tenant']
+  HasClusterIdentifier: !Not [!Equals [!Ref ClusterIdentifier, '']]
+  UseGeneratedPassword: !Equals [!Ref MasterPassword, '']
+  UseProvidedPassword: !Not [!Equals [!Ref MasterPassword, '']]
+  CreateKMSKey: !Equals [!Ref KMSKeyArn, '']
+  HasAlertsTopic: !Not [!Equals [!Ref AlertsTopicArn, '']]
+  EnablePerfInsights: !Equals [!Ref EnablePerformanceInsights, 'true']
+
+Resources:
+  # ============================================================================
+  # KMS Key for Encryption (conditional)
+  # ============================================================================
+  EncryptionKey:
+    Type: AWS::KMS::Key
+    Condition: CreateKMSKey
+    Properties:
+      Description: !Sub 'KMS key for ${ProjectName} Aurora cluster encryption'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow RDS use of the key
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:ListGrants'
+              - 'kms:RevokeGrant'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Ref AWS::AccountId
+          - Sid: Allow CloudWatch Logs
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-aurora-key'
+
+  EncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: CreateKMSKey
+    Properties:
+      AliasName: !Sub 'alias/${ProjectName}-${Environment}-aurora'
+      TargetKeyId: !Ref EncryptionKey
+
+  # ============================================================================
+  # Secrets Manager - Database Credentials
+  # ============================================================================
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}/${Environment}/aurora/management'
+        - !Sub '${ProjectName}/${Environment}/aurora/tenant-${ClusterIdentifier}'
+      Description: !Sub 'Aurora cluster credentials for ${ProjectName}'
+      KmsKeyId: !If [CreateKMSKey, !Ref EncryptionKey, !Ref KMSKeyArn]
+      GenerateSecretString: !If
+        - UseGeneratedPassword
+        - SecretStringTemplate: !Sub '{"username":"${MasterUsername}"}'
+          GenerateStringKey: password
+          PasswordLength: 32
+          ExcludePunctuation: true
+        - !Ref AWS::NoValue
+      SecretString: !If
+        - UseProvidedPassword
+        - !Sub '{"username":"${MasterUsername}","password":"${MasterPassword}"}'
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-aurora-secret'
+        - Key: ClusterType
+          Value: !Ref ClusterType
+
+  # ============================================================================
+  # Security Group
+  # ============================================================================
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'Security group for ${ProjectName} Aurora cluster'
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AllowedSecurityGroupId
+          Description: Allow PostgreSQL from application layer
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !If
+            - IsManagementCluster
+            - !Sub '${ProjectName}-${Environment}-aurora-management-sg'
+            - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-sg'
+
+  # ============================================================================
+  # DB Subnet Group
+  # ============================================================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub 'Subnet group for ${ProjectName} Aurora cluster'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !If
+            - IsManagementCluster
+            - !Sub '${ProjectName}-${Environment}-aurora-management-subnet-group'
+            - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-subnet-group'
+
+  # ============================================================================
+  # DB Cluster Parameter Group
+  # ============================================================================
+  ClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: !Sub 'Parameter group for ${ProjectName} Aurora Serverless v2'
+      Family: aurora-postgresql17
+      Parameters:
+        # Connection settings
+        max_connections: '1000'
+        # Performance settings
+        shared_preload_libraries: 'pg_stat_statements'
+        track_activity_query_size: '4096'
+        # Logging
+        log_statement: 'ddl'
+        log_min_duration_statement: '1000'  # Log queries > 1 second
+        # SSL
+        rds.force_ssl: '1'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-aurora-params'
+
+  # ============================================================================
+  # Aurora Serverless v2 Cluster
+  # ============================================================================
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBClusterIdentifier: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}'
+      Engine: aurora-postgresql
+      EngineVersion: '17.7'
+      EngineMode: provisioned
+      DatabaseName: !If
+        - IsManagementCluster
+        - coheus_management
+        - !Ref DatabaseName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref ClusterSecurityGroup
+      DBClusterParameterGroupName: !Ref ClusterParameterGroup
+      StorageEncrypted: true
+      KmsKeyId: !If [CreateKMSKey, !Ref EncryptionKey, !Ref KMSKeyArn]
+      BackupRetentionPeriod: !Ref BackupRetentionDays
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      DeletionProtection: !If [IsManagementCluster, true, false]
+      CopyTagsToSnapshot: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref MinACU
+        MaxCapacity: !Ref MaxACU
+      Tags:
+        - Key: Name
+          Value: !If
+            - IsManagementCluster
+            - !Sub '${ProjectName}-${Environment}-aurora-management'
+            - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}'
+        - Key: ClusterType
+          Value: !Ref ClusterType
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================================================
+  # Aurora Serverless v2 Instance (Writer)
+  # ============================================================================
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management-instance'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}-instance'
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      EnablePerformanceInsights: !If [EnablePerfInsights, true, false]
+      PerformanceInsightsKMSKeyId: !If
+        - EnablePerfInsights
+        - !If [CreateKMSKey, !Ref EncryptionKey, !Ref KMSKeyArn]
+        - !Ref AWS::NoValue
+      PerformanceInsightsRetentionPeriod: !If [EnablePerfInsights, 7, !Ref AWS::NoValue]
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !If
+            - IsManagementCluster
+            - !Sub '${ProjectName}-${Environment}-aurora-management-instance'
+            - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-instance'
+
+  # ============================================================================
+  # CloudWatch Alarms
+  # ============================================================================
+  
+  # ACU Utilization Alarm
+  ACUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management-acu-high'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}-acu-high'
+      AlarmDescription: 'Aurora cluster approaching maximum ACU capacity'
+      MetricName: ServerlessDatabaseCapacity
+      Namespace: AWS/RDS
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: !Sub '${MaxACU}'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: DBClusterIdentifier
+          Value: !Ref AuroraCluster
+      AlarmActions: !If
+        - HasAlertsTopic
+        - - !Ref AlertsTopicArn
+        - !Ref AWS::NoValue
+      TreatMissingData: notBreaching
+
+  # CPU Utilization Alarm
+  CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management-cpu-high'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}-cpu-high'
+      AlarmDescription: 'Aurora cluster CPU utilization is high'
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBClusterIdentifier
+          Value: !Ref AuroraCluster
+      AlarmActions: !If
+        - HasAlertsTopic
+        - - !Ref AlertsTopicArn
+        - !Ref AWS::NoValue
+      TreatMissingData: notBreaching
+
+  # Database Connections Alarm
+  ConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management-connections-high'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}-connections-high'
+      AlarmDescription: 'Aurora cluster connections approaching limit'
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 800  # Out of max_connections=1000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBClusterIdentifier
+          Value: !Ref AuroraCluster
+      AlarmActions: !If
+        - HasAlertsTopic
+        - - !Ref AlertsTopicArn
+        - !Ref AWS::NoValue
+      TreatMissingData: notBreaching
+
+  # Freeable Memory Alarm
+  FreeableMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-management-memory-low'
+        - !Sub '${ProjectName}-${Environment}-tenant-${ClusterIdentifier}-memory-low'
+      AlarmDescription: 'Aurora cluster freeable memory is low'
+      MetricName: FreeableMemory
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 500000000  # 500 MB
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBClusterIdentifier
+          Value: !Ref AuroraCluster
+      AlarmActions: !If
+        - HasAlertsTopic
+        - - !Ref AlertsTopicArn
+        - !Ref AWS::NoValue
+      TreatMissingData: notBreaching
+
+  # ============================================================================
+  # Secrets Manager - Attach Secret to RDS
+  # ============================================================================
+  SecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DatabaseSecret
+      TargetId: !Ref AuroraCluster
+      TargetType: AWS::RDS::DBCluster
+
+Outputs:
+  ClusterIdentifier:
+    Description: Aurora cluster identifier
+    Value: !Ref AuroraCluster
+    Export:
+      Name: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-aurora-management-cluster'
+        - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-cluster'
+
+  ClusterEndpoint:
+    Description: Aurora cluster writer endpoint
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-aurora-management-endpoint'
+        - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-endpoint'
+
+  ClusterReaderEndpoint:
+    Description: Aurora cluster reader endpoint
+    Value: !GetAtt AuroraCluster.ReadEndpoint.Address
+    Export:
+      Name: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-aurora-management-reader'
+        - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-reader'
+
+  ClusterPort:
+    Description: Aurora cluster port
+    Value: !GetAtt AuroraCluster.Endpoint.Port
+
+  DatabaseName:
+    Description: Default database name
+    Value: !If
+      - IsManagementCluster
+      - coheus_management
+      - !Ref DatabaseName
+
+  SecretArn:
+    Description: Secrets Manager secret ARN for database credentials
+    Value: !Ref DatabaseSecret
+    Export:
+      Name: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-aurora-management-secret'
+        - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-secret'
+
+  SecurityGroupId:
+    Description: Cluster security group ID
+    Value: !Ref ClusterSecurityGroup
+    Export:
+      Name: !If
+        - IsManagementCluster
+        - !Sub '${ProjectName}-${Environment}-aurora-management-sg'
+        - !Sub '${ProjectName}-${Environment}-aurora-tenant-${ClusterIdentifier}-sg'
+
+  KMSKeyArn:
+    Description: KMS key ARN used for encryption
+    Value: !If [CreateKMSKey, !GetAtt EncryptionKey.Arn, !Ref KMSKeyArn]
+
+  ClusterType:
+    Description: Cluster type (management or tenant)
+    Value: !Ref ClusterType
+
+  MinACU:
+    Description: Minimum ACU configuration
+    Value: !Ref MinACU
+
+  MaxACU:
+    Description: Maximum ACU configuration
+    Value: !Ref MaxACU
+
+  ConnectionString:
+    Description: PostgreSQL connection string format
+    Value: !Sub
+      - 'postgresql://${Username}:PASSWORD@${Endpoint}:${Port}/${DBName}?sslmode=require'
+      - Username: !Ref MasterUsername
+        Endpoint: !GetAtt AuroraCluster.Endpoint.Address
+        Port: !GetAtt AuroraCluster.Endpoint.Port
+        DBName: !If [IsManagementCluster, 'coheus_management', !Ref DatabaseName]

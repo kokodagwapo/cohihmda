@@ -10,7 +10,7 @@ import { TrendingUp, TrendingDown, Download, BarChart3, Building2, FileText, Use
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
 import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
-import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { useChannelStore } from '@/stores/channelStore';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
@@ -28,9 +28,8 @@ const CompanyScorecard = () => {
   // Date field selector - which date to filter all metrics on
   // Default to 'application_date' to match Qlik Company Scorecard behavior (DateType={'Application'})
   const [selectedDateField, setSelectedDateField] = useState<string>('application_date');
-  // Channel filter - matches Qlik [Consolidated Channels]={'$(vChannelGroup)'}
-  // Default to null (all channels) - ChannelSelector will auto-select most populated
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  // Channel filter from global store (synced with header)
+  const { selectedChannel } = useChannelStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -392,9 +391,9 @@ const CompanyScorecard = () => {
         <div className="flex-1 flex flex-col min-w-0">
           <TopTieringTopBar title="Company Scorecard" onOpenSidebar={() => setSidebarOpen(true)} />
 
-      <main className="relative flex-1 overflow-y-auto px-6 py-4 max-w-[1800px] mx-auto">
+      <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3 max-w-[1800px] mx-auto">
         {/* Header Section */}
-        <div className="mb-8">
+        <div className="mb-4">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">Company Scorecard</h1>
@@ -421,16 +420,6 @@ const CompanyScorecard = () => {
                   ))}
                 </SelectContent>
               </Select>
-              
-              <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
-              
-              {/* Channel Selector - matches Qlik [Consolidated Channels] filter */}
-              <ChannelSelector
-                selectedChannel={selectedChannel}
-                onChannelChange={setSelectedChannel}
-                compact={true}
-                useChannelGroups={true}
-              />
               
               <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
               
@@ -464,7 +453,7 @@ const CompanyScorecard = () => {
           </div>
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
             <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
@@ -544,7 +533,7 @@ const CompanyScorecard = () => {
         </div>
 
         {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
           <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
             <CardHeader>
               <CardTitle className="text-lg">Volume by Branch ($M)</CardTitle>
@@ -847,7 +836,7 @@ const CompanyScorecard = () => {
         )}
 
         {/* Footer Insights */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
             <CardContent className="pt-6">
               <div className="flex items-center gap-2 mb-2">

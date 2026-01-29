@@ -185,7 +185,23 @@ if (overallRisk === 'high') {
 }
 ```
 
-### Step 7: Response Structure
+### Step 7: Save Predictions to Database
+
+After generating risk summaries, predictions are automatically saved to the `loan_predictions` table:
+
+```typescript
+// savePredictionsToDatabase() is called automatically
+// For each bucketed loan with a riskSummary:
+await dbPool.query(`
+  INSERT INTO public.loan_predictions 
+    (loan_id, predicted_outcome, confidence, reasoning, risk_factors, model_version)
+  VALUES ($1, $2, $3, $4, $5, 'rule-based-v1')
+`, [loanId, predictedOutcome, confidence, reasoning, riskFactors]);
+```
+
+**Upsert Logic**: Existing predictions for the same loan are deleted before inserting the new one, ensuring only the latest prediction is stored.
+
+### Step 8: Response Structure
 
 ```typescript
 {

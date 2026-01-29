@@ -3,11 +3,22 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Dialog } from '@/components/ui/dialog';
 import { LoanDrilldownModal } from '@/components/dashboard/LoanDrilldownModal';
 import { transformLoanToCard, type LoanCard } from '@/utils/loanDataTransform';
-import { PeriodValue, inferLoanStatus, isFundedInPeriod, isLikelyCloseLate } from '@/utils/closingFalloutFilters';
+import { PeriodValue, inferLoanStatus, isFundedInPeriod, isLikelyCloseLate, getLoanAmountNumber } from '@/utils/closingFalloutFilters';
 
-export type OutcomeModalType = 'withdraw' | 'decline' | 'delayed';
+export type OutcomeModalType = 'withdraw' | 'decline' | 'delayed' | 'fallout';
 
 const OUTCOME_UI: Record<OutcomeModalType, { title: string; subtitle: string; description: string; color: 'amber' | 'rose' | 'orange'; icon: React.ReactNode }> = {
+  fallout: {
+    title: 'Predicted Fallout',
+    subtitle: 'All At-Risk Loans',
+    description: 'Loans predicted to either withdraw (borrower decision) or decline (lender decision) based on AI analysis.',
+    color: 'rose',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    ),
+  },
   withdraw: {
     title: 'Likely Withdraw',
     subtitle: 'Borrower Says No',
@@ -84,6 +95,10 @@ export interface OutcomeLoansModalProps {
   loansRaw: any[] | null;
   loansLoading?: boolean;
   loansError?: string | null;
+  /** Map of loan_id -> predicted outcome string ('withdraw' | 'deny' | 'originate') */
+  loanPredictions?: Record<string, string>;
+  /** Bucketed loans from predictions (already have riskSummary attached) */
+  bucketedLoans?: any[];
 }
 
 export function OutcomeLoansModal({
@@ -95,49 +110,93 @@ export function OutcomeLoansModal({
   loansRaw,
   loansLoading = false,
   loansError = null,
+  loanPredictions = {},
+  bucketedLoans = [],
 }: OutcomeLoansModalProps) {
   const [selectedLoan, setSelectedLoan] = useState<LoanCard | null>(null);
 
   const config = outcomeType ? OUTCOME_UI[outcomeType] : null;
 
   const filtered = useMemo(() => {
-    if (!outcomeType || !loansRaw) return [];
+    if (!outcomeType) return [];
 
     const now = new Date();
 
-    const matches = loansRaw.filter((l) => {
-      if (outcomeType === 'withdraw') {
-        return inferLoanStatus(l) === 'Withdrawn';
+    // For fallout/withdraw/decline, use PREDICTED outcomes from loanPredictions or bucketedLoans
+    if (outcomeType === 'fallout' || outcomeType === 'withdraw' || outcomeType === 'decline') {
+      // fallout = both withdraw and deny, otherwise specific outcome
+      const targetOutcomes = outcomeType === 'fallout' 
+        ? ['withdraw', 'deny'] 
+        : [outcomeType === 'withdraw' ? 'withdraw' : 'deny'];
+      
+      // First try bucketedLoans (they have full riskSummary data)
+      if (bucketedLoans && bucketedLoans.length > 0) {
+        return bucketedLoans.filter((l) => {
+          // Get predicted outcome from riskSummary or loanPredictions map (which stores just the outcome string)
+          const predicted = l.riskSummary?.predictedOutcome || loanPredictions[l.loan_id];
+          return targetOutcomes.includes(predicted);
+        });
       }
-      if (outcomeType === 'decline') {
-        return inferLoanStatus(l) === 'Denied';
+      
+      // Fall back to loansRaw + loanPredictions map (loanPredictions is loan_id -> outcome string)
+      if (loansRaw && Object.keys(loanPredictions).length > 0) {
+        return loansRaw.filter((l) => {
+          const loanId = l.loan_id || l.loanId || l.id;
+          const predictedOutcome = loanPredictions[loanId]; // This is the outcome string directly
+          return predictedOutcome && targetOutcomes.includes(predictedOutcome);
+        });
       }
-      // delayed
-      return isLikelyCloseLate(l, 30, now);
-    });
-
-    // For context, keep this list focused on active-ish time horizon by excluding already funded loans in the selected period.
-    // (Withdraw/Decline are fallout outcomes and can have closing_date; if they do, keep them anyway.)
-    if (outcomeType === 'delayed') {
-      return matches.filter((l) => !isFundedInPeriod(l, dateFilter));
+      
+      // No predictions available - show empty
+      return [];
     }
 
-    return matches;
-  }, [outcomeType, loansRaw, dateFilter]);
+    // For delayed (Likely Close Late), use heuristic on raw loans
+    if (!loansRaw) return [];
+    
+    const matches = loansRaw.filter((l) => isLikelyCloseLate(l, 30, now));
+    // Exclude already funded loans
+    return matches.filter((l) => !isFundedInPeriod(l, dateFilter));
+  }, [outcomeType, loansRaw, dateFilter, loanPredictions, bucketedLoans]);
 
   const cards = useMemo(() => filtered.map(transformLoanToCard), [filtered]);
+
+  // Calculate summary stats
+  const summaryStats = useMemo(() => {
+    const totalVolume = filtered.reduce((sum, l) => sum + getLoanAmountNumber(l), 0);
+    const withdrawCount = filtered.filter(l => {
+      const predicted = l.riskSummary?.predictedOutcome || loanPredictions[l.loan_id];
+      return predicted === 'withdraw';
+    }).length;
+    const declineCount = filtered.filter(l => {
+      const predicted = l.riskSummary?.predictedOutcome || loanPredictions[l.loan_id];
+      return predicted === 'deny';
+    }).length;
+    
+    return {
+      count: filtered.length,
+      volume: totalVolume,
+      volumeFormatted: totalVolume >= 1_000_000 
+        ? `$${(totalVolume / 1_000_000).toFixed(1)}M` 
+        : totalVolume >= 1_000 
+          ? `$${(totalVolume / 1_000).toFixed(0)}K`
+          : `$${Math.round(totalVolume).toLocaleString()}`,
+      withdrawCount,
+      declineCount,
+    };
+  }, [filtered, loanPredictions]);
 
   return (
     <>
       <Dialog open={open} onOpenChange={(isOpen) => onOpenChange(isOpen)}>
         <DialogPrimitive.Portal>
           <DialogPrimitive.Overlay
-            className={`fixed inset-0 z-[60] backdrop-blur-sm animate-in fade-in duration-300 ${
+            className={`fixed inset-0 z-[80] backdrop-blur-sm animate-in fade-in duration-300 ${
               isDarkMode ? 'bg-black/60' : 'bg-black/20'
             }`}
           />
           <DialogPrimitive.Content
-            className={`fixed left-[50%] z-[70] w-full translate-x-[-50%] animate-in duration-300 data-[state=open]:slide-in-from-bottom sm:data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 h-[90vh] top-auto bottom-0 sm:top-[5vh] sm:bottom-auto sm:translate-y-0 outline-none flex flex-col ${
+            className={`fixed left-[50%] z-[90] w-full translate-x-[-50%] animate-in duration-300 data-[state=open]:slide-in-from-bottom sm:data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 h-[90vh] top-auto bottom-0 sm:top-[5vh] sm:bottom-auto sm:translate-y-0 outline-none flex flex-col ${
               isDarkMode
                 ? 'bg-slate-900 shadow-[0_25px_60px_-15px_rgba(15,23,42,0.4)] border-white/10'
                 : 'bg-white shadow-[0_25px_60px_-15px_rgba(15,23,42,0.12)] border-slate-200'
@@ -185,25 +244,65 @@ export function OutcomeLoansModal({
             </div>
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+              {/* Summary Stats */}
+              {!loansLoading && !loansError && cards.length > 0 && (
+                <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                  <div className={`p-5 rounded-xl text-center overflow-hidden border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <p className={`text-[10px] font-medium uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {outcomeType === 'fallout' ? 'Total Fallout' : outcomeType === 'withdraw' ? 'Likely Withdrawals' : outcomeType === 'decline' ? 'Likely Declines' : 'Delayed Loans'}
+                    </p>
+                    <p className={`text-2xl sm:text-3xl font-extralight tracking-tight tabular-nums ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                      {summaryStats.count.toLocaleString()}
+                    </p>
+                    {outcomeType === 'fallout' && (
+                      <p className={`mt-2 text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {summaryStats.withdrawCount} withdraw · {summaryStats.declineCount} decline
+                      </p>
+                    )}
+                  </div>
+
+                  <div className={`p-5 rounded-xl text-center overflow-hidden border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <p className={`text-[10px] font-medium uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>At-Risk Volume</p>
+                    <p className={`text-2xl sm:text-3xl font-extralight tracking-tight tabular-nums ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                      {summaryStats.volumeFormatted}
+                    </p>
+                    <p className={`mt-2 text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                      Pipeline at risk
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Loan List */}
               {loansError ? (
                 <div className="text-sm text-rose-500 py-10 text-center">{loansError}</div>
               ) : loansLoading ? (
                 <div className={`text-sm py-10 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading loans…</div>
               ) : !outcomeType ? (
                 <div className={`text-sm py-10 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>No category selected.</div>
-              ) : !loansRaw || loansRaw.length === 0 ? (
-                <div className={`text-sm py-10 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>No loans available.</div>
               ) : cards.length === 0 ? (
                 <div className={`text-center py-12 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                   <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <p className="font-medium">No loans in this category</p>
-                  <p className="text-sm mt-1 opacity-70">All loans are performing within expected parameters</p>
+                  <p className="text-sm mt-1 opacity-70">Run predictions to see at-risk loans</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className={`rounded-xl border overflow-hidden ${isDarkMode ? 'bg-slate-800/40 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+                  <div className={`px-5 py-4 border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-[10px] font-semibold uppercase tracking-widest ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>At-Risk Loans</p>
+                        <p className={`text-[11px] font-normal mt-1 truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Click a loan for details</p>
+                      </div>
+                      <span className={`text-[10px] px-2.5 py-1 rounded-md font-medium flex-shrink-0 ${isDarkMode ? 'bg-white/10 text-slate-300' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                        {cards.length} loans
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-3">
                   {cards.map((loan) => {
                     const colors = config ? getColorClasses(config.color, isDarkMode) : null;
                     const badge = getRiskBadgeClass(loan.riskLevel, isDarkMode);
@@ -259,6 +358,7 @@ export function OutcomeLoansModal({
                       </div>
                     );
                   })}
+                  </div>
                 </div>
               )}
             </div>

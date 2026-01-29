@@ -1,0 +1,892 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Coheus Tenant Provisioning Stack
+  
+  This stack creates the infrastructure for automated tenant provisioning:
+  - Lambda functions for database provisioning
+  - Step Functions state machine for orchestration
+  - DynamoDB table for provisioning state tracking
+  - EventBridge rules for scheduling and notifications
+  
+  Workflow:
+  1. API call triggers provisioning
+  2. Step Functions orchestrates the process
+  3. Lambda creates database in Aurora cluster
+  4. Lambda runs schema migrations
+  5. Lambda creates admin user
+  6. Notification sent on completion
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: coheus
+    Description: Project name for resource naming
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for Lambda functions
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet for Lambda
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet for Lambda
+
+  ManagementDBSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for management database credentials
+
+  ManagementDBEndpoint:
+    Type: String
+    Description: Management database endpoint
+
+  ManagementDBSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group ID for management database access
+
+  KMSKeyArn:
+    Type: String
+    Description: KMS key ARN for encryption
+
+  NotificationEmail:
+    Type: String
+    Default: ''
+    Description: Email for provisioning notifications (optional)
+
+  MaxTenantsPerCluster:
+    Type: Number
+    Default: 25
+    Description: Maximum number of tenants per Aurora cluster
+
+Resources:
+  # ============================================================================
+  # DynamoDB Table - Tenant Provisioning State
+  # ============================================================================
+  ProvisioningStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-tenant-provisioning'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-created-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref KMSKeyArn
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-provisioning-state'
+
+  # ============================================================================
+  # Lambda Security Group
+  # ============================================================================
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for tenant provisioning Lambda
+      VpcId: !Ref VPCId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          DestinationSecurityGroupId: !Ref ManagementDBSecurityGroupId
+          Description: Allow PostgreSQL to management database
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS for AWS API calls
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-provisioning-lambda-sg'
+
+  # Add ingress rule to management DB security group
+  ManagementDBIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ManagementDBSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Description: Allow PostgreSQL from provisioning Lambda
+
+  # ============================================================================
+  # IAM Role for Lambda Functions
+  # ============================================================================
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-provisioning-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: ProvisioningLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Secrets Manager access
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:PutSecretValue
+                Resource:
+                  - !Ref ManagementDBSecretArn
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}/*'
+              # KMS access
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref KMSKeyArn
+              # DynamoDB access
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt ProvisioningStateTable.Arn
+                  - !Sub '${ProvisioningStateTable.Arn}/index/*'
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+              # RDS access for cluster management
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBInstances
+                Resource: '*'
+              # CloudFormation for tenant cluster provisioning
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                Resource: !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ProjectName}-${Environment}-tenant-*'
+
+  # ============================================================================
+  # Lambda Functions
+  # ============================================================================
+  
+  # Provision Tenant Database Lambda
+  ProvisionTenantDatabaseFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-provision-tenant-db'
+      Description: Creates a new tenant database in an Aurora cluster
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          MANAGEMENT_DB_SECRET_ARN: !Ref ManagementDBSecretArn
+          MANAGEMENT_DB_ENDPOINT: !Ref ManagementDBEndpoint
+          PROVISIONING_TABLE: !Ref ProvisioningStateTable
+          PROJECT_NAME: !Ref ProjectName
+          ENVIRONMENT: !Ref Environment
+          KMS_KEY_ARN: !Ref KMSKeyArn
+          MAX_TENANTS_PER_CLUSTER: !Ref MaxTenantsPerCluster
+      Code:
+        ZipFile: |
+          const { SecretsManagerClient, GetSecretValueCommand, CreateSecretCommand } = require('@aws-sdk/client-secrets-manager');
+          const { DynamoDBClient, PutItemCommand, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
+          const { Client } = require('pg');
+          
+          const secretsManager = new SecretsManagerClient({});
+          const dynamodb = new DynamoDBClient({});
+          
+          exports.handler = async (event) => {
+            console.log('Provisioning tenant database:', JSON.stringify(event));
+            
+            const { tenantId, tenantName, tenantSlug, clusterId, clusterEndpoint, adminEmail } = event;
+            
+            try {
+              // Update provisioning state
+              await dynamodb.send(new PutItemCommand({
+                TableName: process.env.PROVISIONING_TABLE,
+                Item: {
+                  tenant_id: { S: tenantId },
+                  status: { S: 'provisioning' },
+                  tenant_name: { S: tenantName },
+                  tenant_slug: { S: tenantSlug },
+                  cluster_id: { S: clusterId },
+                  admin_email: { S: adminEmail },
+                  created_at: { S: new Date().toISOString() },
+                  updated_at: { S: new Date().toISOString() }
+                }
+              }));
+              
+              // Get management DB credentials
+              const secretResponse = await secretsManager.send(new GetSecretValueCommand({
+                SecretId: process.env.MANAGEMENT_DB_SECRET_ARN
+              }));
+              const dbCreds = JSON.parse(secretResponse.SecretString);
+              
+              // Connect to the target cluster
+              const client = new Client({
+                host: clusterEndpoint,
+                port: 5432,
+                user: dbCreds.username,
+                password: dbCreds.password,
+                database: 'postgres',
+                ssl: { rejectUnauthorized: false }
+              });
+              
+              await client.connect();
+              
+              // Create tenant database
+              const databaseName = `tenant_${tenantSlug.replace(/-/g, '_')}`;
+              
+              // Check if database exists
+              const checkDb = await client.query(
+                `SELECT 1 FROM pg_database WHERE datname = $1`,
+                [databaseName]
+              );
+              
+              if (checkDb.rows.length === 0) {
+                await client.query(`CREATE DATABASE ${databaseName}`);
+                console.log(`Created database: ${databaseName}`);
+              }
+              
+              // Create tenant user
+              const tenantUsername = `tenant_${tenantSlug.replace(/-/g, '_')}_user`;
+              const tenantPassword = require('crypto').randomBytes(24).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+              
+              // Check if user exists
+              const checkUser = await client.query(
+                `SELECT 1 FROM pg_roles WHERE rolname = $1`,
+                [tenantUsername]
+              );
+              
+              if (checkUser.rows.length === 0) {
+                await client.query(`CREATE USER ${tenantUsername} WITH PASSWORD '${tenantPassword}'`);
+                await client.query(`GRANT ALL PRIVILEGES ON DATABASE ${databaseName} TO ${tenantUsername}`);
+                console.log(`Created user: ${tenantUsername}`);
+              }
+              
+              await client.end();
+              
+              // Store tenant credentials in Secrets Manager
+              await secretsManager.send(new CreateSecretCommand({
+                Name: `${process.env.PROJECT_NAME}/${process.env.ENVIRONMENT}/tenant/${tenantId}`,
+                SecretString: JSON.stringify({
+                  username: tenantUsername,
+                  password: tenantPassword,
+                  host: clusterEndpoint,
+                  port: 5432,
+                  database: databaseName
+                }),
+                KmsKeyId: process.env.KMS_KEY_ARN
+              }));
+              
+              // Update provisioning state
+              await dynamodb.send(new UpdateItemCommand({
+                TableName: process.env.PROVISIONING_TABLE,
+                Key: { tenant_id: { S: tenantId } },
+                UpdateExpression: 'SET #status = :status, database_name = :dbName, database_user = :dbUser, updated_at = :updatedAt',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: {
+                  ':status': { S: 'database_created' },
+                  ':dbName': { S: databaseName },
+                  ':dbUser': { S: tenantUsername },
+                  ':updatedAt': { S: new Date().toISOString() }
+                }
+              }));
+              
+              return {
+                statusCode: 200,
+                tenantId,
+                databaseName,
+                databaseUser: tenantUsername,
+                clusterEndpoint,
+                status: 'database_created'
+              };
+              
+            } catch (error) {
+              console.error('Error provisioning tenant database:', error);
+              
+              // Update provisioning state to failed
+              await dynamodb.send(new UpdateItemCommand({
+                TableName: process.env.PROVISIONING_TABLE,
+                Key: { tenant_id: { S: tenantId } },
+                UpdateExpression: 'SET #status = :status, error_message = :error, updated_at = :updatedAt',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: {
+                  ':status': { S: 'failed' },
+                  ':error': { S: error.message },
+                  ':updatedAt': { S: new Date().toISOString() }
+                }
+              }));
+              
+              throw error;
+            }
+          };
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-provision-tenant-db'
+
+  # Run Schema Migrations Lambda
+  RunMigrationsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-run-migrations'
+      Description: Runs schema migrations on a new tenant database
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          PROVISIONING_TABLE: !Ref ProvisioningStateTable
+          PROJECT_NAME: !Ref ProjectName
+          ENVIRONMENT: !Ref Environment
+      Code:
+        ZipFile: |
+          const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+          const { DynamoDBClient, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
+          const { Client } = require('pg');
+          
+          const secretsManager = new SecretsManagerClient({});
+          const dynamodb = new DynamoDBClient({});
+          
+          // Tenant schema DDL
+          const SCHEMA_DDL = `
+            -- Users table
+            CREATE TABLE IF NOT EXISTS public.users (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              email TEXT NOT NULL UNIQUE,
+              encrypted_password TEXT NOT NULL,
+              full_name TEXT,
+              role TEXT NOT NULL DEFAULT 'user',
+              is_active BOOLEAN NOT NULL DEFAULT true,
+              last_login_at TIMESTAMPTZ,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            
+            -- Loans table (core table with 200+ fields)
+            CREATE TABLE IF NOT EXISTS public.loans (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              loan_id TEXT,
+              loan_number TEXT,
+              guid TEXT,
+              loan_amount DECIMAL(15,2),
+              loan_type TEXT,
+              loan_program TEXT,
+              loan_purpose TEXT,
+              current_loan_status TEXT,
+              started_date DATE,
+              application_date DATE,
+              lock_date DATE,
+              closing_date DATE,
+              funding_date DATE,
+              interest_rate DECIMAL(8,5),
+              ltv_ratio DECIMAL(8,4),
+              loan_officer TEXT,
+              loan_officer_id TEXT,
+              processor TEXT,
+              underwriter TEXT,
+              closer TEXT,
+              branch TEXT,
+              channel TEXT,
+              property_street TEXT,
+              property_city TEXT,
+              property_state TEXT,
+              property_zip TEXT,
+              property_type TEXT,
+              borrower_name TEXT,
+              borrower_email TEXT,
+              fico_score INTEGER,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            
+            -- LOS Connections table
+            CREATE TABLE IF NOT EXISTS public.los_connections (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              name TEXT NOT NULL,
+              los_type TEXT NOT NULL,
+              instance_url TEXT,
+              client_id TEXT,
+              client_secret_encrypted TEXT,
+              api_user TEXT,
+              api_password_encrypted TEXT,
+              is_active BOOLEAN DEFAULT true,
+              last_sync_at TIMESTAMPTZ,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            
+            -- Create indexes
+            CREATE INDEX IF NOT EXISTS idx_loans_status ON public.loans(current_loan_status);
+            CREATE INDEX IF NOT EXISTS idx_loans_officer ON public.loans(loan_officer);
+            CREATE INDEX IF NOT EXISTS idx_loans_started ON public.loans(started_date);
+            CREATE INDEX IF NOT EXISTS idx_loans_branch ON public.loans(branch);
+            CREATE INDEX IF NOT EXISTS idx_loans_channel ON public.loans(channel);
+          `;
+          
+          exports.handler = async (event) => {
+            console.log('Running migrations:', JSON.stringify(event));
+            
+            const { tenantId, databaseName, clusterEndpoint } = event;
+            
+            try {
+              // Get tenant credentials
+              const secretResponse = await secretsManager.send(new GetSecretValueCommand({
+                SecretId: `${process.env.PROJECT_NAME}/${process.env.ENVIRONMENT}/tenant/${tenantId}`
+              }));
+              const dbCreds = JSON.parse(secretResponse.SecretString);
+              
+              // Connect to tenant database
+              const client = new Client({
+                host: clusterEndpoint,
+                port: 5432,
+                user: dbCreds.username,
+                password: dbCreds.password,
+                database: databaseName,
+                ssl: { rejectUnauthorized: false }
+              });
+              
+              await client.connect();
+              
+              // Run schema migrations
+              await client.query(SCHEMA_DDL);
+              console.log('Schema migrations completed');
+              
+              await client.end();
+              
+              // Update provisioning state
+              await dynamodb.send(new UpdateItemCommand({
+                TableName: process.env.PROVISIONING_TABLE,
+                Key: { tenant_id: { S: tenantId } },
+                UpdateExpression: 'SET #status = :status, updated_at = :updatedAt',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: {
+                  ':status': { S: 'migrations_complete' },
+                  ':updatedAt': { S: new Date().toISOString() }
+                }
+              }));
+              
+              return {
+                statusCode: 200,
+                tenantId,
+                databaseName,
+                status: 'migrations_complete'
+              };
+              
+            } catch (error) {
+              console.error('Error running migrations:', error);
+              
+              await dynamodb.send(new UpdateItemCommand({
+                TableName: process.env.PROVISIONING_TABLE,
+                Key: { tenant_id: { S: tenantId } },
+                UpdateExpression: 'SET #status = :status, error_message = :error, updated_at = :updatedAt',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: {
+                  ':status': { S: 'migration_failed' },
+                  ':error': { S: error.message },
+                  ':updatedAt': { S: new Date().toISOString() }
+                }
+              }));
+              
+              throw error;
+            }
+          };
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-run-migrations'
+
+  # Register Tenant in Management DB Lambda
+  RegisterTenantFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-register-tenant'
+      Description: Registers a new tenant in the management database
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          MANAGEMENT_DB_SECRET_ARN: !Ref ManagementDBSecretArn
+          MANAGEMENT_DB_ENDPOINT: !Ref ManagementDBEndpoint
+          PROVISIONING_TABLE: !Ref ProvisioningStateTable
+          KMS_KEY_ARN: !Ref KMSKeyArn
+      Code:
+        ZipFile: |
+          const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+          const { DynamoDBClient, UpdateItemCommand } = require('@aws-sdk/client-dynamodb');
+          const { KMSClient, EncryptCommand } = require('@aws-sdk/client-kms');
+          const { Client } = require('pg');
+          
+          const secretsManager = new SecretsManagerClient({});
+          const dynamodb = new DynamoDBClient({});
+          const kms = new KMSClient({});
+          
+          exports.handler = async (event) => {
+            console.log('Registering tenant:', JSON.stringify(event));
+            
+            const { tenantId, tenantName, tenantSlug, databaseName, databaseUser, clusterEndpoint, clusterId, adminEmail } = event;
+            
+            try {
+              // Get management DB credentials
+              const secretResponse = await secretsManager.send(new GetSecretValueCommand({
+                SecretId: process.env.MANAGEMENT_DB_SECRET_ARN
+              }));
+              const dbCreds = JSON.parse(secretResponse.SecretString);
+              
+              // Get tenant DB password from secret
+              const tenantSecretResponse = await secretsManager.send(new GetSecretValueCommand({
+                SecretId: `coheus/${process.env.ENVIRONMENT}/tenant/${tenantId}`
+              }));
+              const tenantCreds = JSON.parse(tenantSecretResponse.SecretString);
+              
+              // Encrypt tenant password
+              const encryptResponse = await kms.send(new EncryptCommand({
+                KeyId: process.env.KMS_KEY_ARN,
+                Plaintext: Buffer.from(tenantCreds.password)
+              }));
+              const encryptedPassword = Buffer.from(encryptResponse.CiphertextBlob).toString('base64');
+              
+              // Connect to management database
+              const client = new Client({
+                host: process.env.MANAGEMENT_DB_ENDPOINT,
+                port: 5432,
+                user: dbCreds.username,
+                password: dbCreds.password,
+                database: 'coheus_management',
+                ssl: { rejectUnauthorized: false }
+              });
+              
+              await client.connect();
+              
+              // Insert tenant record
+              await client.query(`
+                INSERT INTO coheus_tenants (
+                  id, name, slug, database_name, database_host, database_port,
+                  database_user, database_password_encrypted, cluster_id,
+                  status, deployment_type, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                  name = EXCLUDED.name,
+                  status = 'active',
+                  updated_at = NOW()
+              `, [
+                tenantId, tenantName, tenantSlug, databaseName, clusterEndpoint, 5432,
+                databaseUser, encryptedPassword, clusterId, 'active', 'cloud'
+              ]);
+              
+              await client.end();
+              
+              // Update provisioning state
+              await dynamodb.send(new UpdateItemCommand({
+                TableName: process.env.PROVISIONING_TABLE,
+                Key: { tenant_id: { S: tenantId } },
+                UpdateExpression: 'SET #status = :status, updated_at = :updatedAt',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: {
+                  ':status': { S: 'active' },
+                  ':updatedAt': { S: new Date().toISOString() }
+                }
+              }));
+              
+              return {
+                statusCode: 200,
+                tenantId,
+                tenantName,
+                status: 'active'
+              };
+              
+            } catch (error) {
+              console.error('Error registering tenant:', error);
+              throw error;
+            }
+          };
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-register-tenant'
+
+  # ============================================================================
+  # Step Functions State Machine
+  # ============================================================================
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-provisioning-sfn-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionsLambdaInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ProvisionTenantDatabaseFunction.Arn
+                  - !GetAtt RunMigrationsFunction.Arn
+                  - !GetAtt RegisterTenantFunction.Arn
+
+  TenantProvisioningStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${ProjectName}-${Environment}-tenant-provisioning'
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Tenant provisioning workflow",
+          "StartAt": "ProvisionDatabase",
+          "States": {
+            "ProvisionDatabase": {
+              "Type": "Task",
+              "Resource": "${ProvisionTenantDatabaseFunction.Arn}",
+              "ResultPath": "$.provisionResult",
+              "Next": "WaitForDatabase",
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "ProvisioningFailed",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "WaitForDatabase": {
+              "Type": "Wait",
+              "Seconds": 5,
+              "Next": "RunMigrations"
+            },
+            "RunMigrations": {
+              "Type": "Task",
+              "Resource": "${RunMigrationsFunction.Arn}",
+              "InputPath": "$.provisionResult",
+              "ResultPath": "$.migrationResult",
+              "Next": "RegisterTenant",
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "MigrationFailed",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "RegisterTenant": {
+              "Type": "Task",
+              "Resource": "${RegisterTenantFunction.Arn}",
+              "InputPath": "$",
+              "ResultPath": "$.registerResult",
+              "Next": "ProvisioningComplete",
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "RegistrationFailed",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "ProvisioningComplete": {
+              "Type": "Succeed"
+            },
+            "ProvisioningFailed": {
+              "Type": "Fail",
+              "Error": "DatabaseProvisioningFailed",
+              "Cause": "Failed to provision tenant database"
+            },
+            "MigrationFailed": {
+              "Type": "Fail",
+              "Error": "MigrationFailed",
+              "Cause": "Failed to run schema migrations"
+            },
+            "RegistrationFailed": {
+              "Type": "Fail",
+              "Error": "RegistrationFailed",
+              "Cause": "Failed to register tenant in management database"
+            }
+          }
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-provisioning-workflow'
+
+  # ============================================================================
+  # API Gateway for Triggering Provisioning
+  # ============================================================================
+  ProvisioningAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}-provisioning-api'
+      Description: API for triggering tenant provisioning
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ProvisionTenantResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ProvisioningAPI
+      ParentId: !GetAtt ProvisioningAPI.RootResourceId
+      PathPart: provision-tenant
+
+  ProvisionTenantMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ProvisioningAPI
+      ResourceId: !Ref ProvisionTenantResource
+      HttpMethod: POST
+      AuthorizationType: AWS_IAM
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:states:action/StartExecution'
+        Credentials: !GetAtt APIGatewayStepFunctionsRole.Arn
+        RequestTemplates:
+          application/json: !Sub |
+            {
+              "stateMachineArn": "${TenantProvisioningStateMachine}",
+              "input": "$util.escapeJavaScript($input.body)"
+            }
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                {
+                  "executionArn": "$input.json('executionArn')",
+                  "startDate": "$input.json('startDate')"
+                }
+      MethodResponses:
+        - StatusCode: 200
+
+  APIGatewayStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartStepFunctionsExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref TenantProvisioningStateMachine
+
+  ProvisioningAPIDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ProvisionTenantMethod
+    Properties:
+      RestApiId: !Ref ProvisioningAPI
+      StageName: !Ref Environment
+
+Outputs:
+  ProvisioningStateMachineArn:
+    Description: Step Functions state machine ARN
+    Value: !Ref TenantProvisioningStateMachine
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-provisioning-state-machine'
+
+  ProvisioningAPIEndpoint:
+    Description: API endpoint for triggering provisioning
+    Value: !Sub 'https://${ProvisioningAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/provision-tenant'
+
+  ProvisioningStateTableName:
+    Description: DynamoDB table for provisioning state
+    Value: !Ref ProvisioningStateTable
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-provisioning-table'
+
+  LambdaSecurityGroupId:
+    Description: Security group ID for provisioning Lambda
+    Value: !Ref LambdaSecurityGroup
+
+  ProvisionTenantFunctionArn:
+    Description: Lambda function ARN for database provisioning
+    Value: !GetAtt ProvisionTenantDatabaseFunction.Arn
+
+  RunMigrationsFunctionArn:
+    Description: Lambda function ARN for running migrations
+    Value: !GetAtt RunMigrationsFunction.Arn
+
+  RegisterTenantFunctionArn:
+    Description: Lambda function ARN for tenant registration
+    Value: !GetAtt RegisterTenantFunction.Arn

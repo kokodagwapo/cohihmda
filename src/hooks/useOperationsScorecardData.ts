@@ -137,6 +137,7 @@ export const useOperationsScorecardData = (
         if (selectedChannel) params.append('channel_group', selectedChannel);
         
         const queryString = params.toString();
+        // NOTE: Using original endpoint until /api/scorecard/operations is fully tested
         const url = `/api/loans/operations-scorecard${queryString ? `?${queryString}` : ''}`;
         
         console.log('[OpsScorecard] Fetching data from', url);

@@ -200,6 +200,7 @@ export const useSalesScorecardData = (
         if (selectedChannel) params.append('channel_group', selectedChannel);
         
         const queryString = params.toString();
+        // NOTE: Using original endpoint until /api/scorecard/sales is fully tested
         const url = `/api/loans/sales-scorecard${queryString ? `?${queryString}` : ''}`;
         
         console.log('[SalesScorecard] Fetching data from', url);

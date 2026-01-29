@@ -1,0 +1,34 @@
+# Example terraform.tfvars for SaaS Production Deployment
+# Copy this file to terraform.tfvars and fill in your values
+
+project_name = "coheus"
+environment  = "prod"
+region       = "us-east-1"
+
+# Network
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+enable_flow_logs   = true
+
+# Aurora - Management Cluster
+management_min_acu = 0.5
+management_max_acu = 4
+
+# Aurora - Tenant Clusters
+tenant_min_acu = 0.5
+tenant_max_acu = 8
+
+# ECS
+container_image   = "123456789012.dkr.ecr.us-east-1.amazonaws.com/coheus-backend:latest"
+ecs_cpu           = 512
+ecs_memory        = 1024
+ecs_desired_count = 2
+ecs_min_count     = 2
+ecs_max_count     = 10
+
+# Domain and SSL
+domain_name     = "app.cohi.io"
+certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Alerts
+alert_email = "ops@cohi.io"

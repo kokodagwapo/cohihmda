@@ -155,12 +155,12 @@ export function ClosingFalloutMetricModal({
       <Dialog open={open} onOpenChange={(isOpen) => onOpenChange(isOpen)}>
         <DialogPrimitive.Portal>
           <DialogPrimitive.Overlay
-            className={`fixed inset-0 z-[60] backdrop-blur-sm animate-in fade-in duration-300 ${
+            className={`fixed inset-0 z-[80] backdrop-blur-sm animate-in fade-in duration-300 ${
               isDarkMode ? 'bg-black/60' : 'bg-black/20'
             }`}
           />
           <DialogPrimitive.Content
-            className={`fixed left-[50%] z-[70] w-full translate-x-[-50%] animate-in duration-300 data-[state=open]:slide-in-from-bottom sm:data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 h-[90vh] top-auto bottom-0 sm:top-[5vh] sm:bottom-auto sm:translate-y-0 outline-none flex flex-col ${
+            className={`fixed left-[50%] z-[90] w-full translate-x-[-50%] animate-in duration-300 data-[state=open]:slide-in-from-bottom sm:data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 h-[90vh] top-auto bottom-0 sm:top-[5vh] sm:bottom-auto sm:translate-y-0 outline-none flex flex-col ${
               isDarkMode
                 ? 'bg-[#0B0F1A] shadow-[0_25px_60px_-15px_rgba(15,23,42,0.4)] border-white/10'
                 : 'bg-white shadow-[0_20px_50px_-12px_rgba(15,23,42,0.1)] border-slate-200'

@@ -102,6 +102,7 @@ export const useTopTieringData = (
         if (selectedChannel) params.append('channel_group', selectedChannel);
         
         const queryString = params.toString();
+        // NOTE: Using original endpoint until /api/toptiering is fully tested
         const url = `/api/loans/toptiering${queryString ? `?${queryString}` : ''}`;
         
         console.log('🔍 Fetching toptiering data from', url);

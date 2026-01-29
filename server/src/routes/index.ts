@@ -10,6 +10,9 @@ import adminRoutes from './admin.js';
 import losRoutes from './los.js';
 import synapseRoutes from './synapse.js';
 import loansRoutes from './loans.js';
+import scorecardRoutes from './scorecard/index.js';
+import toptieringRoutes from './toptiering/index.js';
+import predictionsRoutes from './predictions/index.js';
 import fieldMappingsRoutes from './fieldMappings.js';
 import demoRoutes from './demo.js';
 import userPreferencesRoutes from './userPreferences.js';
@@ -46,6 +49,9 @@ export function setupRoutes(app: Express) {
   app.use('/api/los', losRoutes);
   app.use('/api/synapse', synapseRoutes);
   app.use('/api/loans', loansRoutes);
+  app.use('/api/scorecard', scorecardRoutes);
+  app.use('/api/toptiering', toptieringRoutes);
+  app.use('/api/predictions', predictionsRoutes);
   app.use('/api/field-mappings', fieldMappingsRoutes);
   app.use('/api/demo', demoRoutes);
   app.use('/api/user', userPreferencesRoutes);
@@ -159,6 +165,9 @@ export function setupRoutes(app: Express) {
         dashboard: '/api/dashboard',
         rag: '/api/rag',
         loans: '/api/loans',
+        scorecard: '/api/scorecard',
+        toptiering: '/api/toptiering',
+        predictions: '/api/predictions',
         los: '/api/los',
       },
       documentation: 'See README.md for API documentation',

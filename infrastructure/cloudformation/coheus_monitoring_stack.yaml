@@ -1,0 +1,634 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Coheus Monitoring Stack - CloudWatch Dashboard and Comprehensive Alarms
+  
+  This stack creates:
+  - CloudWatch Dashboard with all key metrics
+  - SNS Topic for alerts
+  - Composite alarms for overall system health
+  - Lambda for custom metrics (optional)
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: coheus
+    Description: Project name for resource naming
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  EBEnvironmentName:
+    Type: String
+    Description: Elastic Beanstalk environment name for metrics
+
+  RDSInstanceIdentifier:
+    Type: String
+    Description: RDS instance identifier for metrics
+
+  CloudFrontDistributionId:
+    Type: String
+    Default: ''
+    Description: CloudFront distribution ID for metrics (optional)
+
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: Email address for alert notifications (optional)
+
+  SlackWebhookUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Slack webhook URL for notifications (optional)
+
+  EnableDetailedMonitoring:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable detailed 1-minute metrics (additional cost)
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  HasSlackWebhook: !Not [!Equals [!Ref SlackWebhookUrl, '']]
+  HasCloudFront: !Not [!Equals [!Ref CloudFrontDistributionId, '']]
+
+Resources:
+  # ============================================================================
+  # SNS Topics for Alerts
+  # ============================================================================
+  
+  # Critical alerts - immediate attention required
+  CriticalAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-${Environment}-critical-alerts'
+      DisplayName: !Sub '${ProjectName} Critical Alerts'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-critical-alerts'
+        - Key: Severity
+          Value: critical
+
+  # Warning alerts - attention needed but not urgent
+  WarningAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-${Environment}-warning-alerts'
+      DisplayName: !Sub '${ProjectName} Warning Alerts'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-warning-alerts'
+        - Key: Severity
+          Value: warning
+
+  # Info alerts - for tracking and audit
+  InfoAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-${Environment}-info-alerts'
+      DisplayName: !Sub '${ProjectName} Info Alerts'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-info-alerts'
+        - Key: Severity
+          Value: info
+
+  # Email subscription (conditional)
+  CriticalEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref CriticalAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  WarningEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref WarningAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ============================================================================
+  # Critical Alarms
+  # ============================================================================
+
+  # EB Environment Health - Critical
+  EBHealthCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-eb-health-critical'
+      AlarmDescription: 'CRITICAL: Elastic Beanstalk environment health is Severe or Degraded'
+      MetricName: EnvironmentHealth
+      Namespace: AWS/ElasticBeanstalk
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 20  # 20=Degraded, 25=Severe
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: EnvironmentName
+          Value: !Ref EBEnvironmentName
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: breaching
+
+  # Database CPU Critical
+  DBCPUCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-db-cpu-critical'
+      AlarmDescription: 'CRITICAL: Database CPU utilization exceeds 90%'
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstanceIdentifier
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # Database Connections Critical
+  DBConnectionsCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-db-connections-critical'
+      AlarmDescription: 'CRITICAL: Database connections at maximum capacity'
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 85  # db.t3.micro max is ~87
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstanceIdentifier
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # High 5xx Error Rate Critical
+  HighErrorRateCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-5xx-errors-critical'
+      AlarmDescription: 'CRITICAL: High rate of 5xx errors'
+      MetricName: ApplicationRequests5xx
+      Namespace: AWS/ElasticBeanstalk
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: EnvironmentName
+          Value: !Ref EBEnvironmentName
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # Database Storage Critical
+  DBStorageCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-db-storage-critical'
+      AlarmDescription: 'CRITICAL: Database free storage below 1GB'
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1000000000  # 1 GB
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstanceIdentifier
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # ============================================================================
+  # Warning Alarms
+  # ============================================================================
+
+  # EB Environment Health - Warning
+  EBHealthWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-eb-health-warning'
+      AlarmDescription: 'WARNING: Elastic Beanstalk environment health is degraded'
+      MetricName: EnvironmentHealth
+      Namespace: AWS/ElasticBeanstalk
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 15  # 15=Warning
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: EnvironmentName
+          Value: !Ref EBEnvironmentName
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # Database CPU Warning
+  DBCPUWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-db-cpu-warning'
+      AlarmDescription: 'WARNING: Database CPU utilization exceeds 70%'
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstanceIdentifier
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # High Latency Warning
+  HighLatencyWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-high-latency-warning'
+      AlarmDescription: 'WARNING: Application response time exceeds 2 seconds'
+      MetricName: ApplicationLatencyP99
+      Namespace: AWS/ElasticBeanstalk
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 2  # 2 seconds
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: EnvironmentName
+          Value: !Ref EBEnvironmentName
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # Database Memory Warning
+  DBMemoryWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-db-memory-warning'
+      AlarmDescription: 'WARNING: Database freeable memory is low'
+      MetricName: FreeableMemory
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 200000000  # 200 MB
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstanceIdentifier
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # Database Storage Warning
+  DBStorageWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-db-storage-warning'
+      AlarmDescription: 'WARNING: Database free storage below 5GB'
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5000000000  # 5 GB
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref RDSInstanceIdentifier
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # ============================================================================
+  # Composite Alarms
+  # ============================================================================
+
+  # Overall System Health Composite Alarm
+  SystemHealthCompositeAlarm:
+    Type: AWS::CloudWatch::CompositeAlarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-system-health'
+      AlarmDescription: 'Overall system health - triggered when any critical component fails'
+      AlarmRule: !Sub |
+        ALARM(${EBHealthCriticalAlarm}) OR
+        ALARM(${DBCPUCriticalAlarm}) OR
+        ALARM(${DBConnectionsCriticalAlarm}) OR
+        ALARM(${HighErrorRateCriticalAlarm})
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+
+  # ============================================================================
+  # CloudWatch Dashboard
+  # ============================================================================
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${ProjectName}-${Environment}-dashboard'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 1,
+              "properties": {
+                "markdown": "# ${ProjectName} ${Environment} - System Health Dashboard"
+              }
+            },
+            {
+              "type": "alarm",
+              "x": 0,
+              "y": 1,
+              "width": 24,
+              "height": 3,
+              "properties": {
+                "title": "Alarm Status",
+                "alarms": [
+                  "${EBHealthCriticalAlarm.Arn}",
+                  "${DBCPUCriticalAlarm.Arn}",
+                  "${DBConnectionsCriticalAlarm.Arn}",
+                  "${HighErrorRateCriticalAlarm.Arn}",
+                  "${DBStorageCriticalAlarm.Arn}"
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 4,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "EB Environment Health",
+                "metrics": [
+                  ["AWS/ElasticBeanstalk", "EnvironmentHealth", "EnvironmentName", "${EBEnvironmentName}"]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Maximum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 4,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Application Requests",
+                "metrics": [
+                  ["AWS/ElasticBeanstalk", "ApplicationRequestsTotal", "EnvironmentName", "${EBEnvironmentName}", {"label": "Total"}],
+                  ["AWS/ElasticBeanstalk", "ApplicationRequests2xx", "EnvironmentName", "${EBEnvironmentName}", {"label": "2xx", "color": "#2ca02c"}],
+                  ["AWS/ElasticBeanstalk", "ApplicationRequests4xx", "EnvironmentName", "${EBEnvironmentName}", {"label": "4xx", "color": "#ff7f0e"}],
+                  ["AWS/ElasticBeanstalk", "ApplicationRequests5xx", "EnvironmentName", "${EBEnvironmentName}", {"label": "5xx", "color": "#d62728"}]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 4,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Application Latency",
+                "metrics": [
+                  ["AWS/ElasticBeanstalk", "ApplicationLatencyP50", "EnvironmentName", "${EBEnvironmentName}", {"label": "p50"}],
+                  ["AWS/ElasticBeanstalk", "ApplicationLatencyP90", "EnvironmentName", "${EBEnvironmentName}", {"label": "p90"}],
+                  ["AWS/ElasticBeanstalk", "ApplicationLatencyP99", "EnvironmentName", "${EBEnvironmentName}", {"label": "p99", "color": "#d62728"}]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "text",
+              "x": 0,
+              "y": 10,
+              "width": 24,
+              "height": 1,
+              "properties": {
+                "markdown": "## Database Metrics (RDS)"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 11,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Database CPU Utilization",
+                "metrics": [
+                  ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average",
+                "annotations": {
+                  "horizontal": [
+                    {"label": "Warning", "value": 70, "color": "#ff7f0e"},
+                    {"label": "Critical", "value": 90, "color": "#d62728"}
+                  ]
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 11,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Database Connections",
+                "metrics": [
+                  ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Maximum",
+                "annotations": {
+                  "horizontal": [
+                    {"label": "Max (t3.micro)", "value": 87, "color": "#d62728"}
+                  ]
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 11,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Database Storage",
+                "metrics": [
+                  ["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average",
+                "annotations": {
+                  "horizontal": [
+                    {"label": "Warning (5GB)", "value": 5000000000, "color": "#ff7f0e"},
+                    {"label": "Critical (1GB)", "value": 1000000000, "color": "#d62728"}
+                  ]
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 17,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Database Freeable Memory",
+                "metrics": [
+                  ["AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 17,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Database Read/Write IOPS",
+                "metrics": [
+                  ["AWS/RDS", "ReadIOPS", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Read IOPS"}],
+                  ["AWS/RDS", "WriteIOPS", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Write IOPS"}]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 17,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Database Latency",
+                "metrics": [
+                  ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Read Latency"}],
+                  ["AWS/RDS", "WriteLatency", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Write Latency"}]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  CriticalAlertsTopicArn:
+    Description: SNS topic ARN for critical alerts
+    Value: !Ref CriticalAlertsTopic
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-critical-alerts-topic'
+
+  WarningAlertsTopicArn:
+    Description: SNS topic ARN for warning alerts
+    Value: !Ref WarningAlertsTopic
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-warning-alerts-topic'
+
+  InfoAlertsTopicArn:
+    Description: SNS topic ARN for info alerts
+    Value: !Ref InfoAlertsTopic
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-info-alerts-topic'
+
+  DashboardName:
+    Description: CloudWatch Dashboard name
+    Value: !Ref MonitoringDashboard
+
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ProjectName}-${Environment}-dashboard'
+
+  SystemHealthAlarmArn:
+    Description: Composite alarm ARN for overall system health
+    Value: !GetAtt SystemHealthCompositeAlarm.Arn

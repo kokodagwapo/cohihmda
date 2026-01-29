@@ -5,6 +5,7 @@ import { DashboardCard } from './DashboardCard';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { useDashboardStats } from '@/hooks/useDashboardStats';
+import { useMetrics } from '@/hooks/useMetrics';
 import { LoanCardsContainer } from './LoanCardsContainer';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { useTheme } from '@/components/theme-provider';
@@ -12,7 +13,7 @@ import { api } from '@/lib/api';
 import { ClosingFalloutMetricModal } from '@/components/dashboard/modals/ClosingFalloutMetricModal';
 import { OutcomeLoansModal, type OutcomeModalType } from '@/components/dashboard/modals/OutcomeLoansModal';
 import { LoanRiskDetailModal } from '@/components/dashboard/modals/LoanRiskDetailModal';
-import { PeriodValue, getLoanAmountNumber, isDateInPeriod, isFundedInPeriod, getPeriodRange } from '@/utils/closingFalloutFilters';
+import { PeriodValue, getLoanAmountNumber, isDateInPeriod, isFundedInPeriod, getPeriodRange, inferLoanStatus } from '@/utils/closingFalloutFilters';
 import { transformLoanToCard } from '@/utils/loanDataTransform';
 
 interface ClosingFalloutForecastProps {
@@ -150,6 +151,12 @@ const getForecastLockDate = (loan: any): unknown => {
   );
 };
 
+const getApplicationDate = (loan: any): string | null | undefined => {
+  // Support multiple possible field names for application date
+  return loan?.application_date ?? loan?.['Application Date'] ?? 
+    loan?.app_date ?? loan?.['App Date'] ?? loan?.created_at;
+};
+
 const isLockedForForecast = (loan: any): boolean => {
   const baseStatus = mapForecastStatus(loan);
   if (baseStatus !== 'Active') return false;
@@ -163,9 +170,30 @@ const daysSinceLocal = (dateIso: string | null | undefined, now: Date = new Date
   return Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
 };
 
+/**
+ * Determines if an active loan is likely to close late.
+ * Checks if the loan has exceeded its expected closing date by more than 72 hours (3 days).
+ * Falls back to checking if loan has been in pipeline > threshold days if no expected close date.
+ */
 const isLikelyCloseLateForecast = (loan: any, thresholdDays: number = 30, now: Date = new Date()): boolean => {
   const status = mapForecastStatus(loan);
   if (!status || status !== 'Active') return false;
+  
+  // Primary check: Has the loan exceeded its expected/estimated close date?
+  const expectedCloseDate = loan?.expected_close_date || loan?.estimated_completion_date || 
+    loan?.['Expected Close Date'] || loan?.['Estimated Closing Date'] || loan?.target_close_date;
+  
+  if (expectedCloseDate) {
+    const expected = new Date(expectedCloseDate);
+    if (!Number.isNaN(expected.getTime())) {
+      // Loan is late if it's more than 3 days past expected close date
+      const daysPastExpected = Math.floor((now.getTime() - expected.getTime()) / (1000 * 60 * 60 * 24));
+      return daysPastExpected > 3; // More than 72 hours past expected close
+    }
+  }
+  
+  // Fallback: If no expected close date, check if loan has been in pipeline too long
+  // Average mortgage cycle is 30-45 days, so loans > threshold days are considered at risk
   const days = daysSinceLocal(loan?.application_date, now);
   return days !== null && days > thresholdDays;
 };
@@ -291,7 +319,7 @@ function computeMetricsFromLoans(
   loans: any[],
   period: PeriodValue,
   now: Date,
-  statsData: { pullThroughRate?: number; avgCycleTime?: number; active?: number; activeVolume?: number; locked?: number } | null,
+  statsData: { pullThroughRate?: number; avgCycleTime?: number; active?: number; activeVolume?: number; locked?: number; closed?: number; totalVolume?: number } | null,
   predictions: { likelyWithdraw: number; likelyDecline: number; predictedFalloutTotal: number } | null
 ): {
   activeLoansToday: number;
@@ -305,6 +333,7 @@ function computeMetricsFromLoans(
   pullThroughRateDisplay: number;
   falloutRate: number;
   lockedLoans: number;
+  lockedRolling90: number;
   avgCycleTime: number;
   pipelineValue: number;
 } {
@@ -316,9 +345,11 @@ function computeMetricsFromLoans(
   let activePipelineValue = 0;
   let likelyCloseLateCount = 0;
   let fundedInPeriodCount = 0;
+  let fundedTotalByStatus = 0; // Count funded loans by status (for 'all' period fallback)
   let startedInPeriodCount = 0;
   let lockedCount = 0;
   let lockedInPeriodCount = 0;
+  let lockedInRolling90 = 0; // Locks in rolling 90 days for Pipeline Snapshot KPI
   
   // Single pass through all loans
   for (let i = 0; i < loans.length; i++) {
@@ -336,22 +367,35 @@ function computeMetricsFromLoans(
       }
     }
     
-    // Check if funded in period (historical metric)
+    // Count total funded loans by status (for 'all' period - doesn't require closing_date field)
+    if (status === 'Closed') {
+      fundedTotalByStatus++;
+    }
+    
+    // Check if funded in period (historical metric - requires closing_date field for date filtering)
     if (isFundedInPeriod(loan, period, now)) {
       fundedInPeriodCount++;
     }
     
     // Check if application started in period (for pull-through calculation)
-    if (isDateInPeriod(loan?.application_date, period, now)) {
+    const appDate = getApplicationDate(loan);
+    if (appDate && isDateInPeriod(appDate, period, now)) {
       startedInPeriodCount++;
     }
     
     // Check if locked (needs to be active first)
     if (isLockedForForecast(loan)) {
       lockedCount++;
-      // Check if locked in period
-      if (isDateInPeriod(loan?.lock_date, period, now)) {
-        lockedInPeriodCount++;
+      // Check if locked in period - use getForecastLockDate to get the lock date from multiple possible field names
+      const lockDateValue = getForecastLockDate(loan);
+      if (lockDateValue) {
+        if (isDateInPeriod(String(lockDateValue), period, now)) {
+          lockedInPeriodCount++;
+        }
+        // Also count locks in rolling 90 days for the Pipeline Snapshot KPI
+        if (isDateInPeriod(String(lockDateValue), 'rolling_90_days', now)) {
+          lockedInRolling90++;
+        }
       }
     }
   }
@@ -372,26 +416,60 @@ function computeMetricsFromLoans(
   
   // ======== HISTORICAL METRICS (filtered by period) ========
   
-  // Pull-through rate: funded / started in same period
-  const pullThroughRate = startedInPeriodCount > 0 
-    ? (fundedInPeriodCount / startedInPeriodCount) * 100 
+  // Pull-through rate: Uses rolling 90 days and excludes active loans
+  // This is the industry-standard methodology - only count completed loan journeys
+  // MTD/YTD is inappropriate because loans take 30-45+ days to close on average
+  const rolling90DaysPeriod: PeriodValue = 'rolling_90_days';
+  
+  // Filter to inactive loans only (completed journeys)
+  const inactiveLoans = loans.filter(l => {
+    const status = inferLoanStatus(l);
+    return status !== 'Active' && status !== 'Locked';
+  });
+  
+  // Count loans started in rolling 90 days
+  const startedInRolling = inactiveLoans.filter(l => {
+    const appDate = getApplicationDate(l);
+    return appDate && isDateInPeriod(appDate, rolling90DaysPeriod, now);
+  });
+  
+  // Calculate pull-through from rolling 90 days data, fallback to API data
+  const pullThroughRate = startedInRolling.length > 0
+    ? (inactiveLoans.filter(l => {
+        const appDate = getApplicationDate(l);
+        const hasClosedDate = l?.closing_date || l?.funding_date || l?.fund_date || l?.['Closing Date'];
+        return appDate && isDateInPeriod(appDate, rolling90DaysPeriod, now) && hasClosedDate;
+      }).length / startedInRolling.length) * 100
     : (statsData?.pullThroughRate ?? 0);
+  
   const pullThroughRateDisplay = pullThroughRate > 0 ? Math.round(pullThroughRate) : 0;
   
   // Predicted Closing - current active loans * period's pull-through rate
   const predictedClosing = activeLoansToday > 0 ? Math.round((activeLoansToday * pullThroughRate) / 100) : 0;
   
-  // Locked loans
+  // Locked loans - use statsData for 'all', client-side count for filtered periods
   const lockedLoans = period === 'all'
     ? (statsData?.locked ?? lockedCount)
-    : lockedInPeriodCount;
+    : (lockedInPeriodCount > 0 ? lockedInPeriodCount : 0);
+  
+  // Funded/Closed loans - IMPORTANT: Use statsData?.closed for 'all' period
+  // This ensures it matches ExecutiveDashboard's "Closed Loans" metric
+  // For 'all' period: prefer statsData?.closed, then fundedTotalByStatus (counts by loan status), then fundedInPeriodCount
+  // For other periods: use fundedInPeriodCount (filtered by closing_date field)
+  const closedLoansMTD = period === 'all'
+    ? (statsData?.closed ?? fundedTotalByStatus ?? fundedInPeriodCount)
+    : fundedInPeriodCount;
   
   // Average cycle time (from statsData or default)
   const avgCycleTime = statsData?.avgCycleTime ?? 24;
   
+  // For rolling 90-day locks, use client-side calculation if available, otherwise fall back to statsData.locked
+  // This handles cases where lock_date might not be populated or parseable
+  const lockedRolling90Value = lockedInRolling90 > 0 ? lockedInRolling90 : (statsData?.locked ?? lockedCount);
+  
   return {
     activeLoansToday,
-    closedLoansMTD: fundedInPeriodCount,
+    closedLoansMTD,
     predictedClosing,
     likelyCloseLate: likelyCloseLateCount,
     likelyWithdraw,
@@ -401,6 +479,7 @@ function computeMetricsFromLoans(
     pullThroughRateDisplay,
     falloutRate,
     lockedLoans,
+    lockedRolling90: lockedRolling90Value,
     avgCycleTime,
     pipelineValue
   };
@@ -417,7 +496,7 @@ const getMetricExplanation = (label: string) => {
     case "Predicted Closing": return { title: "Closing Forecast", desc: "Projected number of loans expected to successfully close based on pipeline health and historical conversion rates." };
     case "Likely Withdraw": return { title: "Borrower Says No", desc: "Buyer decision - borrower is rate shopping, experiencing buyer's remorse, or choosing a competitor." };
     case "Likely Decline": return { title: "Lender Says No", desc: "Lender decision - loan failing underwriting criteria, credit issues, or documentation requirements." };
-    case "Likely Close Late": return { title: "Pipeline Stagnation", desc: "Loans that have exceeded their expected closing date by more than 72 hours." };
+    case "Likely Close Late": return { title: "Pipeline Stagnation", desc: "Active loans that have exceeded their expected closing date by more than 72 hours, or have been in pipeline longer than 30 days without an expected close date." };
     default:
       return { title: label, desc: "Standardized performance metric for portfolio monitoring." };
   }
@@ -437,11 +516,15 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   // ============================================================================
 
   const { statsData, statsLoading, funnelData } = useDashboardStats(dateFilter);
+  const { queryMetrics } = useMetrics();
   const [isAnimating, setIsAnimating] = useState(true);
   const [insightsTab, setInsightsTab] = useState<'critical' | 'officers'>('critical');
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
+
+  // State for locked loans fetched via useMetrics (rolling 90 days)
+  const [lockedLoansRolling90, setLockedLoansRolling90] = useState<number>(0);
 
   const [period, setPeriod] = useState<PeriodValue>('all');
   // PERFORMANCE: useDeferredValue defers expensive re-computation during rapid period changes
@@ -624,6 +707,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       pullThroughRateDisplay,
       falloutRate,
       lockedLoans,
+      lockedRolling90: lockedLoans, // Fallback: use total locks when no loan data available
       avgCycleTime,
       pipelineValue
     };
@@ -635,7 +719,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       ? `$${(metrics.pipelineValue / 1000000).toFixed(1)}M`
       : '$0M';
     
-    const locksToday = metrics.lockedLoans;
+    // Use locked loans from useMetrics (rolling 90 days) - same approach as ExecutiveDashboard
+    const locksCount = lockedLoansRolling90;
     
     const pullThrough = `${metrics.pullThroughRateDisplay}%`;
 
@@ -643,26 +728,26 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       {
         label: 'Pipeline UPB',
         value: pipelineUPB,
-        secondaryLabel: 'Total UPB',
+        secondaryLabel: 'Current Pipeline',
         secondaryValue: pipelineUPB,
-        explanation: 'Total Unpaid Principal Balance. Forward-looking revenue.'
+        explanation: 'Total Unpaid Principal Balance of active loans. Forward-looking revenue indicator.'
       },
       {
-        label: 'Locks Today',
-        value: locksToday.toString(),
-        secondaryLabel: 'Locked',
-        secondaryValue: locksToday.toString(),
-        explanation: 'Secured rate locks. Immediate demand signal.'
+        label: 'Locks (90D)',
+        value: locksCount.toString(),
+        secondaryLabel: 'Rolling 90 Days',
+        secondaryValue: locksCount.toString(),
+        explanation: 'Loans with secured rate locks in the past 90 days. Matches ExecutiveDashboard methodology.'
       },
       {
         label: 'Pull-Through',
         value: pullThrough,
-        secondaryLabel: 'Rate',
+        secondaryLabel: 'Rolling 90D',
         secondaryValue: pullThrough,
-        explanation: 'Success funding rate. Core efficiency.'
+        explanation: 'Historical success rate - % of loans that successfully fund. Uses rolling 90-day window for accuracy.'
       }
     ];
-  }, [metrics]);
+  }, [metrics, lockedLoansRolling90]);
 
   // PERFORMANCE: Only trigger animation on initial data load, not on period changes
   // This prevents stutter when switching between periods
@@ -695,6 +780,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   }, [period]);
 
   // Fetch stored predictions from DB (used on load and after predict pipeline completes)
+  // Now includes full loan data with signal strengths for display without re-running predictions
   const fetchStoredPredictions = useCallback(async () => {
     try {
       const response = await api.request<{
@@ -704,12 +790,89 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
           confidence: number;
           reasoning?: string;
           riskFactors?: string[];
+          bucket?: string;
+          loanData?: {
+            loan_id: string;
+            loan_officer?: string;
+            loan_amount?: number;
+            loan_type?: string;
+            current_milestone?: string;
+            fico_score?: number;
+            ltv_ratio?: number;
+            be_dti_ratio?: number;
+            interest_rate?: number;
+            market_rate?: number;
+            marketChangeDelta?: number;
+            activeDays?: number;
+            loPullthroughPercentage?: number;
+            uwPullthroughPercentage?: number;
+            closerPullthroughPercentage?: number;
+            processorPullthroughPercentage?: number;
+            creditMetricsSignalStrength?: number;
+            loanCharacteristicsSignalStrength?: number;
+            timeInMotionSignalStrength?: number;
+            mloAeFalloutProneSignalStrength?: number;
+            interestLockVsMarketSignalStrength?: number;
+            uwPullthroughSignalStrength?: number;
+            closerPullthroughSignalStrength?: number;
+            processorPullthroughSignalStrength?: number;
+            ficoScoreSignal?: number;
+            ltvSignal?: number;
+            dtiSignal?: number;
+            loPullthroughSignal?: number;
+            marketChangeDeltaSignal?: number;
+            riskSummary?: any;
+            bucket?: string;
+          };
         }>;
         count: number;
         summary: { withdraw: number; deny: number; originate: number };
       }>('/api/loans/predictions', { method: 'GET' });
+      
       if (response.predictions && Array.isArray(response.predictions)) {
         setFullPredictions(response.predictions);
+        
+        // Also update the predictions state used for KPI metrics
+        if (response.summary) {
+          setPredictions({
+            likelyWithdraw: response.summary.withdraw,
+            likelyDecline: response.summary.deny,
+            predictedFalloutTotal: response.summary.withdraw + response.summary.deny
+          });
+        }
+        
+        // Update loanPredictions map for card filtering
+        const predictionsMap: Record<string, string> = {};
+        response.predictions.forEach((pred) => {
+          if (pred.loanId && pred.predictedOutcome) {
+            predictionsMap[pred.loanId] = pred.predictedOutcome;
+          }
+        });
+        setLoanPredictions(predictionsMap);
+        
+        // Reconstruct bucketedLoans from stored loanData for display
+        // This allows the critical loan cards to show full signal data on refresh
+        const reconstructedBucketedLoans = response.predictions
+          .filter(pred => pred.loanData) // Only include predictions that have stored loan data
+          .map(pred => ({
+            ...pred.loanData,
+            // Ensure loan_id is set (might be in loanData or from prediction)
+            loan_id: pred.loanData?.loan_id || pred.loanId,
+            // Add the prediction info to each loan
+            bucket: pred.bucket || pred.loanData?.bucket || 'medium',
+            riskSummary: pred.loanData?.riskSummary || {
+              predictedOutcome: pred.predictedOutcome,
+              confidence: pred.confidence,
+              risks: pred.riskFactors || [],
+              positives: [],
+              overallRisk: pred.bucket === 'high' ? 'high' : pred.bucket === 'low' ? 'low' : 'medium'
+            }
+          }));
+        
+        if (reconstructedBucketedLoans.length > 0) {
+          console.log('[Predictions] Restored bucketed loans from database:', reconstructedBucketedLoans.length);
+          setBucketedLoans(reconstructedBucketedLoans);
+        }
       } else {
         setFullPredictions([]);
       }
@@ -771,16 +934,32 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
     fetchStoredPredictions();
   }, [fetchStoredPredictions]);
 
-  // Load full loan set once (ensureLoansLoaded uses 'all' when no arg) for session-cached metrics.
+  // Load full loan set on mount (required for period filtering to work)
+  // The loans are loaded once with 'all' period and then filtered client-side
   useEffect(() => {
-    if (insightsTab === 'critical') {
+    if (!loansRaw && !loansLoading && !loansError) {
       ensureLoansLoaded();
     }
-    if (SHOW_SIGNAL_BUCKETS_TABLE && !loansRaw && !loansLoading && !loansError) {
-      console.log('[Signal Buckets Debug] Auto-loading loans for signal buckets table...');
-      ensureLoansLoaded();
-    }
-  }, [insightsTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch locked loans count using useMetrics with rolling_90_days period
+  // This matches how ExecutiveDashboard fetches locked_loans
+  useEffect(() => {
+    const fetchLockedLoans = async () => {
+      try {
+        const results = await queryMetrics(['locked_loans'], 'rolling_90_days');
+        if (results?.locked_loans?.value) {
+          const value = typeof results.locked_loans.value === 'number'
+            ? results.locked_loans.value
+            : parseFloat(results.locked_loans.value as string) || 0;
+          setLockedLoansRolling90(value);
+        }
+      } catch (error) {
+        console.error('[ClosingFalloutForecast] Failed to fetch locked loans:', error);
+      }
+    };
+    fetchLockedLoans();
+  }, [queryMetrics]);
 
   const criticalLoanCards = useMemo(() => {
     // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
@@ -968,12 +1147,11 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       // Always request the full set ('all') so metrics for every period can be computed client-side
       const { start, end } = getPeriodRange(periodToUse ?? 'all', now);
       
-      // PERFORMANCE: Reduced from 5000 to 500 loans
-      // For critical loans display and signal buckets, 500 is sufficient
-      // Full metrics are computed server-side via /api/dashboard/overview endpoint
-      // Build query parameters
+      // NOTE: A new /api/dashboard/overview endpoint is available that computes metrics server-side.
+      // To fully optimize, refactor this component to use that endpoint instead of client-side computation.
+      // For now, keep fetching 5000 loans for accurate client-side metrics.
       const params = new URLSearchParams();
-      params.append('limit', '500'); // Reduced limit - server computes metrics for large datasets
+      params.append('limit', '5000'); // Full dataset needed for accurate client-side metrics
       params.append('offset', '0');
       
       // Add date filters if period is not 'all'
@@ -1007,7 +1185,11 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   const handleMetricClick = async (label: string) => {
     ensureLoansLoaded(); // Load full set if needed (no refetch if already loaded)
 
-    // Outcome list modals (copied behavior from fallout)
+    // Outcome list modals - show predicted loans
+    if (label === 'Predicted Fallout') {
+      setOutcomeModalType('fallout');
+      return;
+    }
     if (label === 'Likely Withdraw') {
       setOutcomeModalType('withdraw');
       return;
@@ -1076,16 +1258,16 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
             </div>
           </div>
 
-          {/* Main Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 md:gap-8 lg:gap-10 mb-8 md:mb-12">
+          {/* Main Metrics Grid - 3 KPIs centered */}
+          <div className="grid grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-4xl mx-auto">
             {/* Active Loans Today */}
             <Tooltip>
                 <TooltipTrigger asChild>
                   <div 
-                    className="text-center sm:text-left space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
+                    className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
                     onClick={() => handleMetricClick("Active Loans Today")}
                   >
-                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center sm:justify-start">
+                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                       <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                         Active Loans Today
                       </p>
@@ -1107,40 +1289,14 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
                 </TooltipContent>
             </Tooltip>
 
-            {/* Funded Loans */}
-            <Tooltip>
-                <TooltipTrigger asChild>
-                  <div 
-                    className="text-center sm:text-left space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
-                    onClick={() => handleMetricClick(`Funded Loans ${periodLabel}`)}
-                  >
-                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center sm:justify-start">
-                      <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
-                        Funded Loans {periodLabel}
-                      </p>
-                    </div>
-                    <p className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-thin tracking-[-0.04em] transition-all duration-300 group-hover/stat:scale-[1.02] text-slate-900 dark:text-slate-50">
-                      {isAnimating ? animatedClosedLoans.toLocaleString() : metrics.closedLoansMTD.toLocaleString()}
-                    </p>
-                    <p className="text-[8px] md:text-[9px] lg:text-xs text-slate-500/60 dark:text-slate-400/70 font-medium group-hover/stat:text-blue-500 dark:group-hover/stat:text-blue-400 transition-colors duration-300">
-                      {periodLabel}
-                    </p>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
-                  <p className="font-semibold mb-1 text-white">{getMetricExplanation("Funded Loans").title}</p>
-                  <p className="text-xs text-slate-300">{getMetricExplanation("Funded Loans").desc}</p>
-                </TooltipContent>
-            </Tooltip>
-
             {/* Predicted Closing */}
             <Tooltip>
                 <TooltipTrigger asChild>
                   <div 
-                    className="text-center sm:text-left space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
+                    className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
                     onClick={() => handleMetricClick("Predicted Closing")}
                   >
-                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center sm:justify-start">
+                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                       <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                         Predicted Closing
                       </p>
@@ -1149,13 +1305,14 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
                       {isAnimating ? animatedPredictedClosing.toLocaleString() : metrics.predictedClosing.toLocaleString()}
                     </p>
                     <p className="text-[8px] md:text-[9px] lg:text-xs text-slate-500/60 dark:text-slate-400/70 font-medium group-hover/stat:text-blue-500 dark:group-hover/stat:text-blue-400 transition-colors duration-300">
-                      {metrics.predictedClosing > 0 ? `${metrics.pullThroughRateDisplay}% Pull-Through` : '% Pull-Through'}
+                      {metrics.predictedClosing > 0 ? `${metrics.pullThroughRateDisplay}% Pull-Through (R90D)` : '% Pull-Through'}
                     </p>
                   </div>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                <TooltipContent className="max-w-[280px] bg-black text-white border-slate-700">
                   <p className="font-semibold mb-1 text-white">{getMetricExplanation("Predicted Closing").title}</p>
                   <p className="text-xs text-slate-300">{getMetricExplanation("Predicted Closing").desc}</p>
+                  <p className="text-xs text-slate-400 mt-1">Pull-through uses Rolling 90 Days and excludes active loans for accuracy.</p>
                 </TooltipContent>
             </Tooltip>
 
@@ -1163,10 +1320,10 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
             <Tooltip>
                 <TooltipTrigger asChild>
                   <div 
-                    className="text-center sm:text-left space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
+                    className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
                     onClick={() => handleMetricClick("Likely Close Late")}
                   >
-                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center sm:justify-start">
+                    <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                       <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                         Likely Close Late
                       </p>
@@ -1672,7 +1829,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
               : metricModalLabel?.startsWith('Funded Loans')
                 ? `${periodLabel}`
                 : metricModalLabel === 'Predicted Closing'
-                  ? `${metrics.pullThroughRateDisplay}% Pull-Through`
+                  ? `${metrics.pullThroughRateDisplay}% Pull-Through (Rolling 90D)`
                   : metricModalLabel === 'Predicted Fallout'
                     ? `${metrics.falloutRate}%`
                     : undefined
@@ -1688,6 +1845,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
           loansRaw={loansRaw}
           loansLoading={loansLoading}
           loansError={loansError}
+          loanPredictions={loanPredictions}
+          bucketedLoans={bucketedLoans}
         />
 
         {/* Loan Risk Detail Modal - shown when clicking a loan in the signal buckets table */}

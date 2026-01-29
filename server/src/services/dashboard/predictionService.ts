@@ -2769,6 +2769,15 @@ async function runPredictFlow(
       activeCount: bucketedLoans.length,
       historicalCount: historicalWithOutcomes.length,
     });
+    
+    // ——— Step 4: Save predictions to database ———
+    try {
+      const saveResult = await savePredictionsToDatabase(bucketedLoans, dbPool, 'rule-based-v1');
+      logInfo('Step 4: Predictions saved to database', saveResult);
+    } catch (saveErr: any) {
+      // Non-blocking - log error and continue
+      logError('Step 4: Failed to save predictions to database (non-blocking)', saveErr, {});
+    }
   } catch (err: any) {
     logError('Step 3/3: Active bucketing failed', err, { loanCount: preparedLoans.length });
     bucketedLoans = [];
@@ -2975,4 +2984,145 @@ export function generateRuleBasedSummary(loan: any): {
     predictedOutcome,
     confidence
   };
+}
+
+/**
+ * Save predictions to the loan_predictions table in the tenant database
+ * Uses upsert logic - updates existing predictions for the same loan_id if they exist
+ * Saves the full bucketed loan data including signal strengths for display on reload
+ */
+export async function savePredictionsToDatabase(
+  bucketedLoans: any[],
+  dbPool: pg.Pool,
+  modelVersion: string = 'rule-based-v1'
+): Promise<{ saved: number; errors: number }> {
+  let savedCount = 0;
+  let errorCount = 0;
+  
+  if (!bucketedLoans || bucketedLoans.length === 0) {
+    return { saved: 0, errors: 0 };
+  }
+  
+  logInfo('Saving predictions to database', { loanCount: bucketedLoans.length });
+  
+  for (const loan of bucketedLoans) {
+    const loanId = loan.loan_id || loan.loanId;
+    const riskSummary = loan.riskSummary;
+    
+    if (!loanId || !riskSummary) {
+      errorCount++;
+      continue;
+    }
+    
+    // Map 'at_risk' to 'originate' for database storage (constraint only allows withdraw/deny/originate)
+    let predictedOutcome = riskSummary.predictedOutcome;
+    if (predictedOutcome === 'at_risk') {
+      predictedOutcome = 'originate';
+    }
+    
+    // Ensure outcome is valid for the CHECK constraint
+    if (!['withdraw', 'deny', 'originate'].includes(predictedOutcome)) {
+      predictedOutcome = 'originate'; // Default fallback
+    }
+    
+    try {
+      // Generate reasoning from risks array
+      const reasoning = riskSummary.risks && riskSummary.risks.length > 0
+        ? riskSummary.risks.join('; ')
+        : (riskSummary.positives && riskSummary.positives.length > 0 
+            ? `Low risk: ${riskSummary.positives.slice(0, 2).join('; ')}`
+            : `Overall risk: ${riskSummary.overallRisk || 'unknown'}`);
+      
+      // Combine risks and any negative signals as risk factors
+      const riskFactors = riskSummary.risks || [];
+      
+      // Get bucket (high/medium/low)
+      const bucket = loan.bucket || 'medium';
+      
+      // Prepare loan_data JSONB - store all the computed fields for display
+      // This includes signal strengths, credit metrics, pullthrough rates, etc.
+      const loanData = {
+        // Basic loan info
+        loan_id: loanId,
+        loan_officer: loan.loan_officer,
+        loan_amount: loan.loan_amount,
+        loan_type: loan.loan_type,
+        current_milestone: loan.current_milestone || loan.lastCompletedMilestone,
+        
+        // Credit metrics
+        fico_score: loan.fico_score,
+        ltv_ratio: loan.ltv_ratio,
+        be_dti_ratio: loan.be_dti_ratio,
+        
+        // Rate info
+        interest_rate: loan.interest_rate,
+        market_rate: loan.market_rate,
+        marketChangeDelta: loan.marketChangeDelta,
+        
+        // Time in motion
+        activeDays: loan.activeDays,
+        
+        // Pullthrough percentages
+        loPullthroughPercentage: loan.loPullthroughPercentage,
+        uwPullthroughPercentage: loan.uwPullthroughPercentage,
+        closerPullthroughPercentage: loan.closerPullthroughPercentage,
+        processorPullthroughPercentage: loan.processorPullthroughPercentage,
+        
+        // Signal strengths (1-6 scale)
+        creditMetricsSignalStrength: loan.creditMetricsSignalStrength,
+        loanCharacteristicsSignalStrength: loan.loanCharacteristicsSignalStrength,
+        timeInMotionSignalStrength: loan.timeInMotionSignalStrength,
+        mloAeFalloutProneSignalStrength: loan.mloAeFalloutProneSignalStrength,
+        interestLockVsMarketSignalStrength: loan.interestLockVsMarketSignalStrength,
+        uwPullthroughSignalStrength: loan.uwPullthroughSignalStrength,
+        closerPullthroughSignalStrength: loan.closerPullthroughSignalStrength,
+        processorPullthroughSignalStrength: loan.processorPullthroughSignalStrength,
+        
+        // Individual signals
+        ficoScoreSignal: loan.ficoScoreSignal,
+        ltvSignal: loan.ltvSignal,
+        dtiSignal: loan.dtiSignal,
+        loPullthroughSignal: loan.loPullthroughSignal,
+        marketChangeDeltaSignal: loan.marketChangeDeltaSignal,
+        
+        // Risk summary
+        riskSummary: loan.riskSummary,
+        bucket: bucket,
+      };
+      
+      // Upsert: Delete any existing prediction for this loan, then insert new one
+      // This ensures we always have the latest prediction
+      await dbPool.query(
+        `DELETE FROM public.loan_predictions WHERE loan_id = $1`,
+        [String(loanId)]
+      );
+      
+      await dbPool.query(
+        `INSERT INTO public.loan_predictions 
+          (loan_id, predicted_outcome, confidence, reasoning, risk_factors, bucket, loan_data, model_version, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+        [
+          String(loanId),
+          predictedOutcome,
+          Math.round(riskSummary.confidence || 50),
+          reasoning,
+          riskFactors.length > 0 ? riskFactors : null,
+          bucket,
+          JSON.stringify(loanData),
+          modelVersion
+        ]
+      );
+      
+      savedCount++;
+    } catch (err: any) {
+      // Log error but continue processing other loans
+      if (errorCount < 5) { // Only log first 5 errors to avoid spam
+        logError('Failed to save prediction for loan', err, { loanId });
+      }
+      errorCount++;
+    }
+  }
+  
+  logInfo('Predictions saved to database', { saved: savedCount, errors: errorCount, total: bucketedLoans.length });
+  return { saved: savedCount, errors: errorCount };
 }

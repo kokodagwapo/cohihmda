@@ -5,10 +5,7 @@ import { getTenantId } from '../../utils/tenantUtils.js';
 import { handleDatabaseError } from '../../config/database.js';
 import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
 import {
-  getFunnelData,
   getLeaderboardData,
-  getTopTieringRankings,
-  getBusinessOverviewMetrics,
   getInsights,
   getClosingFalloutForecast,
   getDashboardOverview,
@@ -21,32 +18,13 @@ const yearQuerySchema = z.object({
   year: z.string().regex(/^\d{4}$/).optional(),
 });
 
-/**
- * GET /api/dashboard/funnel
- * Get loan funnel data for a specific year
- */
-router.get('/funnel', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
-  try {
-    const { year } = yearQuerySchema.parse(req.query);
-    const targetYear = year || new Date().getFullYear().toString();
-
-    const tenantContext = getTenantContext(req);
-    const funnelData = await getFunnelData(tenantContext.tenantPool, targetYear);
-      res.json({ funnel: funnelData });
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
-    }
-    console.error('Error fetching funnel data:', error);
-    
-    // Handle database connection errors
-    if (handleDatabaseError(error, res, 'Failed to fetch funnel data')) {
-      return;
-    }
-    
-    res.status(500).json({ error: 'Failed to fetch funnel data' });
-  }
-});
+// =============================================================================
+// REMOVED DUPLICATE ENDPOINTS (Backend Routes Consolidation)
+// =============================================================================
+// /funnel - Use /api/loans/funnel instead (more feature-complete with filters)
+// /top-tiering - Use /api/toptiering instead (consolidated endpoint)
+// /business-overview - Use /api/dashboard/overview instead (consolidated)
+// =============================================================================
 
 /**
  * GET /api/dashboard/leaderboard
@@ -99,81 +77,34 @@ router.get('/leaderboard', authenticateToken, attachTenantContext, async (req: A
 });
 
 /**
- * GET /api/dashboard/top-tiering
- * Get TopTiering ranking with productivity, profitability, and complexity scoring
- */
-router.get('/top-tiering', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
-  try {
-    const tenantContext = getTenantContext(req);
-    const result = await getTopTieringRankings(tenantContext.tenantPool);
-    res.json(result);
-  } catch (error: any) {
-    console.error('Error fetching top-tiering rankings:', error);
-    
-    // Handle database connection errors
-    if (handleDatabaseError(error, res, 'Failed to fetch top-tiering rankings')) {
-      return;
-    }
-    
-    res.status(500).json({ error: 'Failed to fetch top-tiering rankings' });
-  }
-});
-
-/**
- * GET /api/dashboard/business-overview
- * Get business overview metrics
- * Query params: year (optional), dateFilter (optional: 'today' | 'mtd' | 'ytd' | 'custom')
- * For custom date range, also accepts: startDate, endDate (ISO strings)
- */
-router.get('/business-overview', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
-  try {
-    const { year } = yearQuerySchema.parse(req.query);
-    const targetYear = year || new Date().getFullYear().toString();
-    const dateFilter = (req.query.dateFilter as 'today' | 'mtd' | 'ytd' | 'custom') || 'ytd';
-    
-    // Parse custom date range if provided
-    let customDateRange: { start: Date; end: Date } | undefined;
-    if (dateFilter === 'custom' && req.query.startDate && req.query.endDate) {
-      customDateRange = {
-        start: new Date(req.query.startDate as string),
-        end: new Date(req.query.endDate as string)
-      };
-    }
-
-    const tenantContext = getTenantContext(req);
-    const metrics = await getBusinessOverviewMetrics(
-      tenantContext.tenantPool, 
-      targetYear,
-      dateFilter,
-      customDateRange
-    );
-    res.json(metrics);
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
-    }
-    console.error('Error fetching business overview:', error);
-    
-    // Handle database connection errors
-    if (handleDatabaseError(error, res, 'Failed to fetch business overview')) {
-      return;
-    }
-    
-    res.status(500).json({ error: 'Failed to fetch business overview' });
-  }
-});
-
-/**
  * GET /api/dashboard/insights
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
+ * 
+ * Query params:
+ * - dateFilter: 'today' | 'mtd' | 'ytd' | 'rolling_90_days' | 'rolling_13_months' (default: 'ytd')
+ * - useLLM: 'true' | 'false' - Use LLM-based dynamic insights (default: true)
+ * - forceRefresh: 'true' | 'false' - Force regeneration, bypass cache (default: false)
  */
 router.get('/insights', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const tenantContext = getTenantContext(req);
-    const { dateFilter = 'ytd' } = req.query;
+    const { 
+      dateFilter = 'ytd',
+      useLLM = 'true',
+      forceRefresh = 'false'
+    } = req.query;
     const authHeader = req.headers.authorization;
 
-    const result = await getInsights(tenantContext.tenantPool, dateFilter as string, authHeader);
+    const result = await getInsights(
+      tenantContext.tenantPool, 
+      dateFilter as string, 
+      authHeader,
+      {
+        useLLM: useLLM === 'true',
+        tenantId: tenantContext.tenantId,
+        forceRefresh: forceRefresh === 'true'
+      }
+    );
     res.json(result);
   } catch (error: any) {
     console.error('Error generating insights:', error);

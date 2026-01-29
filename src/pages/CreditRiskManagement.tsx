@@ -24,7 +24,7 @@ import { toast } from 'sonner';
 import { LoanDrilldownModal } from '@/components/dashboard/LoanDrilldownModal';
 import { useTheme } from '@/components/theme-provider';
 import { useCreditRiskData, ApplicationType, DistributionBucket, LoanMixRow, calculateLoanMixTotals } from '@/hooks/useCreditRiskData';
-import { ChannelSelector } from '@/components/dashboard/ChannelSelector';
+import { useChannelStore } from '@/stores/channelStore';
 import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
 
 interface Loan {
@@ -55,8 +55,8 @@ export default function CreditRiskManagement() {
   // Date selection using reusable hook
   const { year: selectedYear, setYear: setSelectedYear, dateRange, setDateRange } = useDatePeriodState();
   
-  // Channel selector state
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  // Channel filter from global store (synced with header)
+  const { selectedChannel } = useChannelStore();
   
   // Loan Mix tab state
   const [loanMixTab, setLoanMixTab] = useState<'Loan Type' | 'Loan Purpose' | 'Occupancy'>('Loan Type');
@@ -535,8 +535,8 @@ export default function CreditRiskManagement() {
           <TopTieringTopBar title="Credit Risk Management" onOpenSidebar={() => setSidebarOpen(true)} />
 
       {/* Main Content */}
-      <main className="relative flex-1 overflow-y-auto px-6 py-4 max-w-[1800px] mx-auto">
-        <div className="space-y-8">
+      <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3 max-w-[1800px] mx-auto">
+        <div className="space-y-4">
         {/* Header Section */}
         <div className="flex flex-col gap-6">
           {/* Title and Action Buttons */}
@@ -564,7 +564,7 @@ export default function CreditRiskManagement() {
             </div>
           </div>
 
-          {/* Filters - Updated Layout with DatePeriodPicker and ChannelSelector */}
+          {/* Filters - DatePeriodPicker and Application Type */}
           <div className="bg-white dark:bg-slate-800/50 rounded-xl p-5 border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
             <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-end flex-wrap">
               {/* Application Type */}
@@ -598,18 +598,6 @@ export default function CreditRiskManagement() {
                 />
               </div>
               
-              {/* Channel Selector */}
-              <div className="flex-1 min-w-[200px]">
-                <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 block uppercase tracking-wider">
-                  Channel
-                </label>
-                <ChannelSelector
-                  selectedChannel={selectedChannel}
-                  onChannelChange={setSelectedChannel}
-                  compact={true}
-                  useChannelGroups={true}
-                />
-              </div>
             </div>
             
             {/* Error display */}
