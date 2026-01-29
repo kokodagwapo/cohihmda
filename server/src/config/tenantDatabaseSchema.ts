@@ -1225,7 +1225,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         ('fico', 'excellent', -0.10, 'FICO > 760: excellent credit reduces complexity'),
         ('fico', 'good', 0.00, 'FICO 681-760: standard processing'),
         ('fico', 'fair', 0.05, 'FICO 620-681: may require compensating factors'),
-        ('fico', 'poor', 0.15, 'FICO ≤620: subprime, extensive documentation'),
+        ('fico', 'poor', 0.15, 'FICO ≤620: high-risk credit, extensive documentation'),
         -- LTV
         ('ltv', 'high', 0.05, 'LTV ≥95%: high LTV, MI requirements'),
         -- DTI

@@ -193,110 +193,19 @@ export const useOperationsScorecardTrendsData = (
 
 /**
  * Apply comparison view transformations to the data
- * - vs-target: outputVsTarget = units - target (already calculated by API)
- * - monthly: outputVsTarget = current month - previous month
- * - year-over-year: outputVsTarget = current month - same month last year
+ * Note: The table always shows "vs Target" (units - target per actor type).
+ * The comparison toggle is reserved for future chart/visualization features.
+ * API already calculates outputVsTarget as units - target.
  */
 function applyComparisonView(
   data: OperationsScorecardTrendsData,
-  comparisonView: ComparisonViewType,
-  targetUnits: number
+  _comparisonView: ComparisonViewType,
+  _targetUnits: number
 ): OperationsScorecardTrendsData {
-  if (comparisonView === 'vs-target') {
-    // Already calculated by API
-    return data;
-  }
-  
-  const months = data.months;
-  
-  // Create transformed actors with recalculated outputVsTarget
-  const transformedActors = data.actors.map(actor => {
-    const transformedMonths: { [key: string]: MonthlyMetrics } = {};
-    
-    months.forEach((month, index) => {
-      const currentData = actor.months[month];
-      if (!currentData) {
-        transformedMonths[month] = {
-          unitsOutput: 0,
-          outputVsTarget: 0,
-          avgDays: 0,
-          conversionPercent: 0,
-          loanComplexityScore: 0,
-          volumeOutput: 0
-        };
-        return;
-      }
-      
-      let outputVsTarget = currentData.outputVsTarget;
-      
-      if (comparisonView === 'monthly') {
-        // Compare to previous month
-        const prevMonth = months[index + 1];
-        if (prevMonth && actor.months[prevMonth]) {
-          outputVsTarget = currentData.unitsOutput - actor.months[prevMonth].unitsOutput;
-        } else {
-          outputVsTarget = 0;
-        }
-      } else if (comparisonView === 'year-over-year') {
-        // Compare to same month last year (12 months ago)
-        const sameMonthLastYear = months[index + 12];
-        if (sameMonthLastYear && actor.months[sameMonthLastYear]) {
-          outputVsTarget = currentData.unitsOutput - actor.months[sameMonthLastYear].unitsOutput;
-        } else {
-          outputVsTarget = 0;
-        }
-      }
-      
-      transformedMonths[month] = {
-        ...currentData,
-        outputVsTarget
-      };
-    });
-    
-    return {
-      ...actor,
-      months: transformedMonths
-    };
-  });
-  
-  // Recalculate totals
-  const transformedTotals: { [key: string]: MonthlyTotals } = {};
-  months.forEach((month, index) => {
-    const currentTotal = data.totals[month];
-    if (!currentTotal) {
-      transformedTotals[month] = { unitsOutput: 0, outputVsTarget: 0, volumeOutput: 0 };
-      return;
-    }
-    
-    let outputVsTarget = currentTotal.outputVsTarget;
-    
-    if (comparisonView === 'monthly') {
-      const prevMonth = months[index + 1];
-      if (prevMonth && data.totals[prevMonth]) {
-        outputVsTarget = currentTotal.unitsOutput - data.totals[prevMonth].unitsOutput;
-      } else {
-        outputVsTarget = 0;
-      }
-    } else if (comparisonView === 'year-over-year') {
-      const sameMonthLastYear = months[index + 12];
-      if (sameMonthLastYear && data.totals[sameMonthLastYear]) {
-        outputVsTarget = currentTotal.unitsOutput - data.totals[sameMonthLastYear].unitsOutput;
-      } else {
-        outputVsTarget = 0;
-      }
-    }
-    
-    transformedTotals[month] = {
-      ...currentTotal,
-      outputVsTarget
-    };
-  });
-  
-  return {
-    ...data,
-    actors: transformedActors,
-    totals: transformedTotals
-  };
+  // Always return original data - table shows vs target
+  // outputVsTarget is already calculated by API as: unitsOutput - targetUnits
+  // The comparison toggle is reserved for future chart/visualization features
+  return data;
 }
 
 /**

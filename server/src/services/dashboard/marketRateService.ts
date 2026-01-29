@@ -294,6 +294,99 @@ export function clearMarketRateCache(): void {
   cacheInitialized = false;
 }
 
+// Track last auto-sync to avoid repeated calls within short period
+let lastAutoSyncTime = 0;
+const AUTO_SYNC_COOLDOWN = 60 * 1000; // 1 minute cooldown between auto-syncs
+
+/**
+ * Auto-sync missing market rates from FRED API
+ * Called automatically before predictions to ensure market delta data is available
+ * Only fetches missing days (incremental sync)
+ * 
+ * @returns Number of new rates synced, or 0 if already up to date / skipped
+ */
+export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
+  // Check cooldown to avoid repeated calls
+  if (Date.now() - lastAutoSyncTime < AUTO_SYNC_COOLDOWN) {
+    console.log('[FRED API] ⏳ Skipping auto-sync (cooldown active)');
+    return 0;
+  }
+
+  if (!FRED_API_KEY) {
+    console.log('[FRED API] ⚠️ FRED_API_KEY not configured, skipping market rate sync');
+    return 0;
+  }
+
+  try {
+    // Get the most recent rate date from the database
+    const result = await pool.query(
+      'SELECT MAX(rate_date) as last_date FROM public.market_rates'
+    );
+    
+    const lastDateInDb = result.rows[0]?.last_date;
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // Calculate start date for sync
+    let startDate: string;
+    let needsSync = false;
+    
+    if (!lastDateInDb) {
+      // Table is empty - fetch last 3 years (for historical lookups)
+      const threeYearsAgo = new Date();
+      threeYearsAgo.setFullYear(today.getFullYear() - 3);
+      startDate = threeYearsAgo.toISOString().split('T')[0];
+      needsSync = true;
+      console.log('[FRED API] 📊 Market rates table is empty, fetching 3 years of data...');
+    } else {
+      // Calculate days since last sync
+      const lastDate = new Date(lastDateInDb);
+      const daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff > 1) {
+        // Missing days - fetch from day after last date to today
+        const nextDay = new Date(lastDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        startDate = nextDay.toISOString().split('T')[0];
+        needsSync = true;
+        console.log(`[FRED API] 📊 Missing ${daysDiff} days of market rates, syncing from ${startDate}...`);
+      } else {
+        console.log('[FRED API] ✅ Market rates are up to date');
+        lastAutoSyncTime = Date.now();
+        return 0;
+      }
+    }
+    
+    if (needsSync) {
+      lastAutoSyncTime = Date.now();
+      
+      // Fetch and store the missing rates
+      const rates = await fetchMarketRatesFromFRED(startDate, todayStr);
+      
+      if (rates.length === 0) {
+        console.log('[FRED API] ℹ️ No new rates available from FRED');
+        return 0;
+      }
+      
+      const storedCount = await storeMarketRates(rates);
+      
+      // Clear cache so new rates are picked up
+      clearMarketRateCache();
+      
+      console.log(`[FRED API] ✅ Auto-synced ${storedCount} market rates from FRED`);
+      return storedCount;
+    }
+    
+    return 0;
+  } catch (error: any) {
+    // Log error but don't block prediction - market delta is optional
+    console.error('[FRED API] ⚠️ Auto-sync failed (non-blocking):', error.message);
+    logError('Market rate auto-sync failed', error);
+    lastAutoSyncTime = Date.now(); // Still set cooldown to avoid spam
+    return 0;
+  }
+}
+
 /**
  * Get market rate for a specific date from database (with in-memory cache)
  * @param date - Date in YYYY-MM-DD format or Date object

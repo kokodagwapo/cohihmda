@@ -1,8 +1,27 @@
-import { useState, useMemo } from 'react';
-import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Zap, X, CalendarDays, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { format, subQuarters, subMonths, subYears, startOfQuarter, startOfMonth, startOfYear, endOfQuarter, endOfMonth, endOfYear, startOfWeek, subWeeks } from 'date-fns';
 import { useLeaderboardData, LeaderboardLeader, LeaderboardTimeframe } from '@/hooks/useLeaderboardData';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+// Period types for the leaderboard
+type PeriodType = 'wtd' | 'mtd' | 'qtd' | 'lw' | 'lm' | 'lq' | 'ly' | 'custom';
+
+// Period display labels
+const periodLabels: Record<PeriodType, { short: string; long: string }> = {
+  'wtd': { short: 'WTD', long: 'Week-to-Date' },
+  'mtd': { short: 'MTD', long: 'Month-to-Date' },
+  'qtd': { short: 'QTD', long: 'Quarter-to-Date' },
+  'lw': { short: 'LW', long: 'Last Week' },
+  'lm': { short: 'LM', long: 'Last Month' },
+  'lq': { short: 'LQ', long: 'Last Quarter' },
+  'ly': { short: 'LY', long: 'Last Year' },
+  'custom': { short: 'Custom', long: 'Custom Range' },
+};
 
 interface LeaderBoardSectionProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
@@ -10,15 +29,99 @@ interface LeaderBoardSectionProps {
 }
 
 export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoardSectionProps) => {
-  const [timeframe, setTimeframe] = useState<'WTD' | 'MTD' | 'QTD'>('MTD');
+  // Default to Last Quarter (lq)
+  const [period, setPeriod] = useState<PeriodType>('lq');
   const [scope, setScope] = useState<'All' | 'Branch' | 'Team'>('All');
   const [selectedLeader, setSelectedLeader] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ 
+    start: null, 
+    end: null 
+  });
+  const [calendarOpen, setCalendarOpen] = useState(false);
   
-  // Map UI timeframe to API timeframe (lowercase)
+  // Calculate date range based on period selection
+  const calculateDateRange = useCallback((periodType: PeriodType): { startDate: string; endDate: string } | undefined => {
+    const today = new Date();
+    
+    switch (periodType) {
+      case 'wtd': {
+        const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
+        return {
+          startDate: format(weekStart, 'yyyy-MM-dd'),
+          endDate: format(today, 'yyyy-MM-dd'),
+        };
+      }
+      case 'mtd': {
+        const monthStart = startOfMonth(today);
+        return {
+          startDate: format(monthStart, 'yyyy-MM-dd'),
+          endDate: format(today, 'yyyy-MM-dd'),
+        };
+      }
+      case 'qtd': {
+        const quarterStart = startOfQuarter(today);
+        return {
+          startDate: format(quarterStart, 'yyyy-MM-dd'),
+          endDate: format(today, 'yyyy-MM-dd'),
+        };
+      }
+      case 'lw': {
+        const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
+        const lastWeekEnd = subWeeks(startOfWeek(today, { weekStartsOn: 1 }), 0);
+        lastWeekEnd.setDate(lastWeekEnd.getDate() - 1); // End of last week (Sunday)
+        return {
+          startDate: format(lastWeekStart, 'yyyy-MM-dd'),
+          endDate: format(lastWeekEnd, 'yyyy-MM-dd'),
+        };
+      }
+      case 'lm': {
+        const lastMonth = subMonths(today, 1);
+        return {
+          startDate: format(startOfMonth(lastMonth), 'yyyy-MM-dd'),
+          endDate: format(endOfMonth(lastMonth), 'yyyy-MM-dd'),
+        };
+      }
+      case 'lq': {
+        const lastQuarter = subQuarters(today, 1);
+        return {
+          startDate: format(startOfQuarter(lastQuarter), 'yyyy-MM-dd'),
+          endDate: format(endOfQuarter(lastQuarter), 'yyyy-MM-dd'),
+        };
+      }
+      case 'ly': {
+        const lastYear = subYears(today, 1);
+        return {
+          startDate: format(startOfYear(lastYear), 'yyyy-MM-dd'),
+          endDate: format(endOfYear(lastYear), 'yyyy-MM-dd'),
+        };
+      }
+      case 'custom': {
+        if (customDateRange.start && customDateRange.end) {
+          return {
+            startDate: format(customDateRange.start, 'yyyy-MM-dd'),
+            endDate: format(customDateRange.end, 'yyyy-MM-dd'),
+          };
+        }
+        return undefined;
+      }
+      default:
+        return undefined;
+    }
+  }, [customDateRange]);
+  
+  // Map period to API timeframe
   const apiTimeframe = useMemo((): LeaderboardTimeframe => {
-    return timeframe.toLowerCase() as LeaderboardTimeframe;
-  }, [timeframe]);
+    // Map 'lw' to 'wtd' for API (API doesn't have 'lw')
+    if (period === 'lw') return 'custom';
+    if (period === 'custom') return 'custom';
+    return period as LeaderboardTimeframe;
+  }, [period]);
+  
+  // Get date range for API
+  const dateRangeFilter = useMemo(() => {
+    return calculateDateRange(period);
+  }, [period, calculateDateRange]);
   
   // Map scope filter for API
   const scopeFilter = useMemo(() => {
@@ -28,8 +131,20 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
   const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(
     apiTimeframe, 
     selectedTenantId,
-    { scope: scopeFilter as 'all' | 'branch' | 'team' }
+    { 
+      scope: scopeFilter as 'all' | 'branch' | 'team',
+      startDate: dateRangeFilter?.startDate,
+      endDate: dateRangeFilter?.endDate,
+    }
   );
+  
+  // Get the display label for current period
+  const getPeriodDisplayLabel = () => {
+    if (period === 'custom' && customDateRange.start && customDateRange.end) {
+      return `${format(customDateRange.start, 'MMM d')} - ${format(customDateRange.end, 'MMM d, yyyy')}`;
+    }
+    return periodLabels[period].long;
+  };
 
   // Base leader data with sample values (fallback when API doesn't return data)
   const baseLeadersData: LeaderboardLeader[] = [{
@@ -139,16 +254,117 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
               Leaderboard
             </h3>
             <p className="text-[10px] sm:text-sm text-slate-600 dark:text-slate-300 font-light truncate">
-              {timeframe === 'WTD' ? 'Week-to-Date' : timeframe === 'MTD' ? 'Month-to-Date' : 'Quarter-to-Date'} · {scope === 'All' ? 'All branches' : scope === 'Branch' ? 'By branch' : 'By team'}
+              {getPeriodDisplayLabel()} · {scope === 'All' ? 'All branches' : scope === 'Branch' ? 'By branch' : 'By team'}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1 p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
-            {(['WTD', 'MTD', 'QTD'] as const).map(tf => <button key={tf} onClick={() => setTimeframe(tf)} className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all ${timeframe === tf ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                {tf}
-              </button>)}
+        
+        {/* Period Picker - DatePeriodPicker style */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* To-Date periods */}
+          <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
+            {(['wtd', 'mtd', 'qtd'] as const).map(p => (
+              <button 
+                key={p} 
+                onClick={() => setPeriod(p)} 
+                className={cn(
+                  'px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-md text-[10px] sm:text-xs font-medium transition-all whitespace-nowrap touch-manipulation',
+                  period === p 
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                )}
+              >
+                {periodLabels[p].short}
+              </button>
+            ))}
           </div>
+          
+          {/* Last period options */}
+          <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
+            {(['lw', 'lm', 'lq', 'ly'] as const).map(p => (
+              <button 
+                key={p} 
+                onClick={() => setPeriod(p)} 
+                className={cn(
+                  'px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-md text-[10px] sm:text-xs font-medium transition-all whitespace-nowrap touch-manipulation',
+                  period === p 
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                )}
+                title={periodLabels[p].long}
+              >
+                {periodLabels[p].short}
+              </button>
+            ))}
+          </div>
+          
+          {/* Custom date range picker */}
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <Button 
+                variant="outline" 
+                size="sm"
+                className={cn(
+                  'gap-1 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3',
+                  period === 'custom' 
+                    ? 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600' 
+                    : ''
+                )}
+              >
+                <CalendarDays className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">
+                  {period === 'custom' && customDateRange.start && customDateRange.end 
+                    ? `${format(customDateRange.start, 'MMM d')} - ${format(customDateRange.end, 'MMM d')}`
+                    : 'Custom'
+                  }
+                </span>
+                <ChevronDown className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <div className="p-3 border-b border-slate-200 dark:border-slate-700">
+                <p className="text-sm font-medium text-slate-900 dark:text-white">Select Date Range</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Choose start and end dates</p>
+              </div>
+              <Calendar
+                mode="range"
+                selected={{ 
+                  from: customDateRange.start || undefined, 
+                  to: customDateRange.end || undefined 
+                }}
+                onSelect={(range) => {
+                  setCustomDateRange({ 
+                    start: range?.from || null, 
+                    end: range?.to || null 
+                  });
+                  if (range?.from && range?.to) {
+                    setPeriod('custom');
+                    setCalendarOpen(false);
+                  }
+                }}
+                numberOfMonths={2}
+                className="rounded-md"
+              />
+              <div className="p-3 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    setCustomDateRange({ start: null, end: null });
+                    setPeriod('lq'); // Reset to default (Last Quarter)
+                    setCalendarOpen(false);
+                  }}
+                >
+                  Clear
+                </Button>
+                {customDateRange.start && customDateRange.end && (
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    {format(customDateRange.start, 'MMM d, yyyy')} - {format(customDateRange.end, 'MMM d, yyyy')}
+                  </span>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -389,7 +605,7 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId }: LeaderBoard
                   <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 py-2 border-t border-slate-100 dark:border-slate-800">
                     <span>Rank #{leader.rank}</span>
                     <span>{leader.streakDays} day streak</span>
-                    <span>{timeframe}</span>
+                    <span>{periodLabels[period].short}</span>
                   </div>
 
                   {/* AI Insight - Compact */}

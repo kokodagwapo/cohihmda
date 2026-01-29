@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 interface LoanRiskDistributionProps {
   ficoScore: number | null;
@@ -7,7 +7,7 @@ interface LoanRiskDistributionProps {
   isDarkMode?: boolean;
 }
 
-export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = ({
+export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   ficoScore,
   ltvRatio,
   dtiRatio,
@@ -63,4 +63,6 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = ({
       </div>
     </div>
   );
-};
+});
+
+LoanRiskDistribution.displayName = 'LoanRiskDistribution';

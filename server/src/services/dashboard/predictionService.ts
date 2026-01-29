@@ -29,7 +29,7 @@
 
 import pg from 'pg';
 import { logInfo, logError } from '../logger.js';
-import { getMarketRateForDate, getMarketRatesForRange, getMostRecentMarketRate, initializeMarketRateCache } from './marketRateService.js';
+import { getMarketRateForDate, getMarketRatesForRange, getMostRecentMarketRate, initializeMarketRateCache, autoSyncMarketRatesIfNeeded } from './marketRateService.js';
 import { pool } from '../../config/database.js';
 import {
   toCanonicalLoanText,
@@ -66,7 +66,7 @@ export interface PredictionRequest {
 
 export interface PredictionResponse {
   predictions: LoanPrediction[];
-  bucketedLoans?: any[]; // Full loan data with signal strength buckets
+  bucketedLoans?: any[]; // Full loan data with signal strength buckets and rule-based summaries
   summary: {
     totalAnalyzed: number;
     predictedWithdraw: number;
@@ -77,6 +77,8 @@ export interface PredictionResponse {
     model: string;
     timestamp: string;
     processingTimeMs: number;
+    totalBucketedLoans?: number;
+    predictionsInProgress?: boolean;
   };
 }
 
@@ -738,7 +740,7 @@ export function prepareLoanData(loans: any[]): any[] {
 
     return {
       loanId: String(loan.loan_id || loan.id || rawData.GUID || rawData.guid || ''),
-      borrowerName: String(loan.borrower_name || rawData.borrower_name || 'Unknown'),
+      loanNumber: String(loan.loan_number || rawData.loan_number || loan.loan_id || ''),
       loanAmount: parseNumeric(loan.loan_amount || rawData.loan_amount) || 0,
       loanType: String(loan.loan_type || rawData.loan_type || 'Unknown'),
       status: String(loan.status || rawData.status || 'Active'),
@@ -894,8 +896,11 @@ export function prepareLoanData(loans: any[]): any[] {
       // Lender credit amount
       lenderCreditAmount: parseNumeric(rawData.lender_credit_amount || rawData.lenderCreditAmount || rawData.lender_credit),
       // Milestone data for Time in Motion calculation
-      // Extract Last Completed Milestone (the milestone name, not the date)
+      // Extract Current Milestone - check direct DB column first, then raw_data fields
       lastCompletedMilestone: String(
+        loan.current_milestone ||  // Direct DB column (snake_case)
+        rawData.current_milestone ||  // In raw_data as snake_case
+        rawData['Current Milestone'] ||  // In raw_data with spaces
         rawData['Last Completed Milestone'] || 
         rawData.last_completed_milestone || 
         rawData.lastCompletedMilestone || 
@@ -1356,8 +1361,13 @@ function calculatePullthroughForRole(
     // Use same status extraction logic as pullthrough calculation (matches mapForecastStatus priority)
     let status = null;
     
+    // PRIORITY 0: Check direct database column (from optimized queries without raw_data)
+    if (!status && loan.current_loan_status) {
+      status = loan.current_loan_status;
+    }
+    
     // PRIORITY 1: Check current_loan_status from raw_data (primary field, matches mapForecastStatus)
-    if (rawData && typeof rawData === 'object') {
+    if (!status && rawData && typeof rawData === 'object') {
       status = rawData['Current Loan Status'] || rawData.current_loan_status || 
                rawData['Loan Status'] || rawData.loan_status || null;
     }
@@ -1603,8 +1613,13 @@ function calculatePullthroughForRole(
     // Prefer current_loan_status from raw_data (matches finalized loan filter)
     let status = null;
     
+    // Priority 0: Check direct database column (from optimized queries without raw_data)
+    if (!status && loan.current_loan_status) {
+      status = loan.current_loan_status;
+    }
+    
     // Priority 1: Check current_loan_status from raw_data (primary field, matches mapForecastStatus)
-    if (rawData && typeof rawData === 'object') {
+    if (!status && rawData && typeof rawData === 'object') {
       status = rawData['Current Loan Status'] || rawData.current_loan_status || 
                rawData['Loan Status'] || rawData.loan_status || null;
     }
@@ -1640,31 +1655,54 @@ function calculatePullthroughForRole(
     let isOriginated = false;
     let isFinalized = false; // Is this loan in the finalized set (Originated, Denied, or Withdrawn)?
     
-    // Check for Originated (matches: if (s === 'LOAN ORIGINATED') return 'Closed')
-    if (statusUpper === 'LOAN ORIGINATED') {
+    // Check for Originated - multiple variations
+    // Full status: 'LOAN ORIGINATED', Short: 'ORIGINATED', 'FUNDED', 'CLOSED', 'PURCHASED'
+    if (statusUpper === 'LOAN ORIGINATED' || 
+        statusUpper === 'ORIGINATED' ||
+        statusUpper === 'FUNDED' ||
+        statusUpper === 'CLOSED' ||
+        statusUpper === 'PURCHASED' ||
+        statusUpper.includes('ORIGINATED') ||
+        statusUpper.includes('PURCHASED')) {
       isOriginated = true;
       isFinalized = true;
     }
-    // Check for Denied (matches: APPLICATION DENIED || PREAPPROVAL REQUEST DENIED BY FINANCIAL INSTITUTION)
-    else if (statusUpper === 'APPLICATION DENIED' || 
-             statusUpper === 'PREAPPROVAL REQUEST DENIED BY FINANCIAL INSTITUTION') {
+    // Also check funding_date as backup indicator of originated (loan was funded)
+    else if (loan.funding_date || loan.fund_date) {
+      isOriginated = true;
       isFinalized = true;
     }
-    // Check for Withdrawn (matches: APPLICATION WITHDRAWN || APPLICATION APPROVED BUT NOT ACCEPTED || etc.)
+    // Check for Denied - multiple variations
+    else if (statusUpper === 'APPLICATION DENIED' || 
+             statusUpper === 'PREAPPROVAL REQUEST DENIED BY FINANCIAL INSTITUTION' ||
+             statusUpper === 'DENIED' ||
+             statusUpper.includes('DENIED')) {
+      isFinalized = true;
+    }
+    // Check for Withdrawn - multiple variations
     else if (statusUpper === 'APPLICATION WITHDRAWN' ||
              statusUpper === 'APPLICATION APPROVED BUT NOT ACCEPTED' ||
              statusUpper === 'FILE CLOSED FOR INCOMPLETENESS' ||
-             statusUpper === 'PREAPPROVAL REQUEST APPROVED BUT NOT ACCEPTED') {
+             statusUpper === 'PREAPPROVAL REQUEST APPROVED BUT NOT ACCEPTED' ||
+             statusUpper === 'WITHDRAWN' ||
+             statusUpper.includes('WITHDRAWN') ||
+             statusUpper.includes('CANCELLED') ||
+             statusUpper.includes('CANCELED')) {
       isFinalized = true;
     }
     // Exclude Active Loan and other statuses (don't count in total)
     // Note: We already filtered out Active Loan in finalizedLoans filter, but double-check here
-    else if (statusUpper === 'ACTIVE LOAN') {
+    else if (statusUpper === 'ACTIVE LOAN' || statusUpper === 'ACTIVE' || statusUpper === 'INQUIRY') {
       // Should not reach here if finalizedLoans filter is working, but skip just in case
       return;
     }
-    // For any other status, don't count it (exclude from calculation)
-    // This ensures we only count Originated + Denied + Withdrawn
+    // For loans with recognized non-active status but not in above categories,
+    // count as finalized (in the denominator) but not originated
+    else if (statusUpper && statusUpper !== '') {
+      // Any other non-empty status = finalized but not originated
+      isFinalized = true;
+    }
+    // For any other status (empty), don't count it (exclude from calculation)
     
     // Only count loans that are in the finalized set (Originated, Denied, or Withdrawn)
     if (isFinalized) {
@@ -2273,18 +2311,38 @@ export async function bucketLoanData(
       return reasons.length > 0 ? reasons : ['No significant risk factors'];
     };
 
-    // Final output structure (bottom two rows from screenshot)
+    // Final output structure - use snake_case to match database columns
+    // NOTE: loan spread includes prepared data (camelCase from prepareLoanData)
+    // We add snake_case aliases for frontend consistency with DB schema
     return {
       ...loan,
-      // Raw values (from screenshot top section)
-      guid: loan.loanId,
-      mloOrAeName: loan.loanOfficerName || loName || 'Unknown',
-      loanAmount,
-      lockedRate: loan.interestRate,
-      commissionAtRisk,
-      commissionPersonalizationOverride,
-      marketRate: marketDelta.closeMarketRate, 
-      estimatedClosingDate: loan.closingDate || loan.estimatedClosingDate,
+      // Core identifiers (snake_case matching DB)
+      loan_id: loan.loanId,
+      loan_number: loan.loanNumber,
+      loan_amount: loanAmount,
+      loan_type: loan.loanType,
+      
+      // Credit metrics (snake_case matching DB)
+      fico_score: loan.ficoScore,
+      ltv_ratio: loan.ltv,
+      be_dti_ratio: loan.dti,
+      
+      // Personnel (snake_case matching DB)
+      loan_officer: loan.loanOfficerName || loName || 'Unknown',
+      
+      // Rates (snake_case)
+      interest_rate: loan.interestRate,
+      market_rate: marketDelta.closeMarketRate,
+      
+      // Milestone (snake_case)
+      current_milestone: loan.lastCompletedMilestone || lastCompletedMilestone,
+      
+      // Commission fields
+      commission_at_risk: commissionAtRisk,
+      commission_personalization_override: commissionPersonalizationOverride,
+      
+      // Dates
+      estimated_closing_date: loan.closingDate || loan.estimatedClosingDate,
       
       // Individual signal buckets
       ficoScoreSignal: ficoBucket,
@@ -2599,6 +2657,17 @@ export async function predictLoanOutcomes(
   return withPredictMutex(async () => runPredictFlow(request, apiKey));
 }
 
+/**
+ * SIMPLIFIED prediction flow - instant bucketing without RAG/AI batch processing
+ * 
+ * This function:
+ * 1. Buckets historical loans (cached for performance)
+ * 2. Buckets active loans with signal strengths
+ * 3. Generates rule-based risk summaries (instant)
+ * 4. Returns immediately - no background processing
+ * 
+ * AI recommendations are available on-demand via GET /api/loans/:id/recommendations
+ */
 async function runPredictFlow(
   request: PredictionRequest,
   apiKey?: string
@@ -2617,54 +2686,63 @@ async function runPredictFlow(
       predictions: [],
       bucketedLoans: [],
       summary: { totalAnalyzed: 0, predictedWithdraw: 0, predictedDeny: 0, predictedOriginate: 0 },
-      metadata: { model: PREDICTION_MODEL, timestamp: new Date().toISOString(), processingTimeMs: Date.now() - startTime }
+      metadata: { model: 'rule-based', timestamp: new Date().toISOString(), processingTimeMs: Date.now() - startTime }
     };
   }
 
+  // Auto-sync market rates from FRED before prediction (non-blocking)
+  // This ensures market delta calculation has up-to-date data
+  try {
+    const syncedCount = await autoSyncMarketRatesIfNeeded();
+    if (syncedCount > 0) {
+      logInfo('Auto-synced market rates from FRED', { syncedCount });
+    }
+  } catch (syncErr: any) {
+    // Non-blocking - log and continue
+    logError('Market rate auto-sync failed (non-blocking)', syncErr, {});
+  }
+
   const allLoansForPullthrough = allLoans;
-  logInfo('Predict started (one request at a time)', {
+  logInfo('Predict started (simplified - instant bucketing)', {
     activeLoans: preparedLoans.length,
     allLoans: allLoans.length,
     historicalLoans: historicalLoans.length,
     tenantId,
-    flow: '1=hist buckets, 2=hist backfill, 3=active buckets (all bucketing done → UI), then background: embeddings + RAG'
+    flow: '1=hist buckets, 2=hist backfill, 3=active buckets → done'
   });
 
   try {
   await initializeMarketRateCache().catch(err => logError('Market rate cache init failed', err));
 
   let allBucketedHistorical: any[] = [];
-  let bucketCacheChanged = false;
 
   // ——— Step 1: If historical bucket cache is empty, bucket and save all historical loans. ———
   const cachedIds = await getCachedHistoricalBucketLoanIds(tenantId, dbPool);
   if (cachedIds.size === 0 && historicalLoans.length > 0) {
-    logInfo('Step 1/6: Historical bucket cache is empty — bucketing and saving all historical loans', { count: historicalLoans.length });
+    logInfo('Step 1/3: Historical bucket cache is empty — bucketing and saving all historical loans', { count: historicalLoans.length });
     const bucketed = await bucketLoanData(prepareLoanData(historicalLoans), allLoansForPullthrough, { logContext: 'historical' });
     await saveHistoricalBuckets(tenantId, bucketed, dbPool);
     allBucketedHistorical = bucketed;
-    bucketCacheChanged = true;
-    logInfo('Step 1/6: Done — saved all historical buckets', { count: bucketed.length });
+    logInfo('Step 1/3: Done — saved all historical buckets', { count: bucketed.length });
   } else {
-    logInfo('Step 1/6: Historical bucket cache not empty — skipping', { cachedCount: cachedIds.size });
+    logInfo('Step 1/3: Historical bucket cache not empty — skipping', { cachedCount: cachedIds.size });
   }
 
   // ——— Step 2: If cache isn't empty, for each historical loan not in cache: bucket and save. ———
   if (cachedIds.size > 0 && historicalLoans.length > 0) {
     const missed = historicalLoans.filter(l => !cachedIds.has(String(l.loan_id ?? l.loanId ?? '')));
     if (missed.length > 0) {
-      logInfo('Step 2/6: Backfilling historical buckets for loans not in cache', { toAdd: missed.length, cached: cachedIds.size });
+      logInfo('Step 2/3: Backfilling historical buckets for loans not in cache', { toAdd: missed.length, cached: cachedIds.size });
       const bucketedMisses = await bucketLoanData(prepareLoanData(missed), allLoansForPullthrough, { logContext: 'historical' });
       await saveHistoricalBuckets(tenantId, bucketedMisses, dbPool);
-      bucketCacheChanged = true;
       for (const id of bucketedMisses.map(b => String(b.loan_id ?? b.loanId))) {
         if (id) cachedIds.add(id);
       }
-      logInfo('Step 2/6: Done — saved new historical buckets', { count: bucketedMisses.length });
+      logInfo('Step 2/3: Done — saved new historical buckets', { count: bucketedMisses.length });
     } else {
-      logInfo('Step 2/6: All historical loans already in cache — skipping');
+      logInfo('Step 2/3: All historical loans already in cache — skipping');
     }
-    // Build full bucketed historical from cache for steps 3–4 (includes any we just saved in backfill)
+    // Build full bucketed historical from cache
     const ids = historicalLoans.map(l => String(l.loan_id ?? l.loanId ?? '')).filter(Boolean);
     const cached = await getCachedHistoricalBuckets(tenantId, ids, dbPool);
     const prepared = prepareLoanData(historicalLoans);
@@ -2676,398 +2754,87 @@ async function runPredictFlow(
 
   const historicalWithOutcomes = addActualOutcomeToHistorical(allBucketedHistorical);
 
-  // ——— Step 3: Bucket all active loans. ALL bucketing (historical + active) is now complete before embeddings/RAG. ———
-  logInfo('Step 3/6: Bucketing all active loans (all bucketing complete before RAG)', { count: preparedLoans.length });
+  // ——— Step 3: Bucket all active loans with signal strengths ———
+  logInfo('Step 3/3: Bucketing all active loans', { count: preparedLoans.length });
   try {
     bucketedLoans = await bucketLoanData(preparedLoans, allLoansForPullthrough, { logContext: 'active' });
-    logInfo('Step 3/6: Active loan bucketing done — historical and active buckets ready for UI', {
+    
+    // Add rule-based risk summaries to each loan
+    bucketedLoans = bucketedLoans.map(loan => ({
+      ...loan,
+      riskSummary: generateRuleBasedSummary(loan)
+    }));
+    
+    logInfo('Step 3/3: Active loan bucketing done', {
       activeCount: bucketedLoans.length,
       historicalCount: historicalWithOutcomes.length,
     });
   } catch (err: any) {
-    logError('Step 3/6: Active bucketing failed', err, { loanCount: preparedLoans.length });
+    logError('Step 3/3: Active bucketing failed', err, { loanCount: preparedLoans.length });
     bucketedLoans = [];
   }
 
-  // ——— Return bucketed data to UI now. Embeddings + RAG predictions run in background (Step 4–6). ———
-  const loanRagCanonicalConfig: CanonicalConfig = {
-    signalFields: DEFAULT_LOAN_RAG_SIGNAL_FIELDS,
-    labels: DEFAULT_LOAN_RAG_SIGNAL_LABELS,
+  // ——— Return bucketed data immediately (no background processing) ———
+  // Count loans by predicted outcome from riskSummary
+  const outcomeCounts = { withdraw: 0, deny: 0, originate: 0, at_risk: 0 };
+  const bucketCounts = { high: 0, medium: 0, low: 0, unknown: 0 };
+  bucketedLoans.forEach(loan => {
+    // Count by bucket
+    const bucket = loan.bucket || 'unknown';
+    if (bucket in bucketCounts) bucketCounts[bucket as keyof typeof bucketCounts]++;
+    
+    // Count by predicted outcome from riskSummary
+    const outcome = loan.riskSummary?.predictedOutcome;
+    if (outcome && outcome in outcomeCounts) {
+      outcomeCounts[outcome as keyof typeof outcomeCounts]++;
+    }
+  });
+  
+  const processingTimeMs = Date.now() - startTime;
+  logInfo('Prediction complete (simplified - instant)', {
+    bucketedLoansCount: bucketedLoans.length,
+    historicalCount: historicalWithOutcomes.length,
+    processingTimeMs,
+    bucketCounts,
+    outcomeCounts
+  });
+
+  return {
+    predictions: [], // No AI predictions - use rule-based summaries on each loan instead
+    bucketedLoans: bucketedLoans || [],
+    summary: {
+      totalAnalyzed: bucketedLoans.length,
+      // Use actual predicted outcomes from riskSummary
+      predictedWithdraw: outcomeCounts.withdraw,
+      predictedDeny: outcomeCounts.deny,
+      predictedOriginate: outcomeCounts.originate + outcomeCounts.at_risk // at_risk likely to originate with intervention
+    },
+    metadata: {
+      model: 'rule-based',
+      timestamp: new Date().toISOString(),
+      processingTimeMs,
+      totalBucketedLoans: bucketedLoans.length,
+      predictionsInProgress: false // No background processing
+    }
   };
-  let ragPromptTemplate: string;
-    try {
-      const kbResult = await dbPool.query(
-        `SELECT content, priority FROM public.rag_knowledge_base
-         WHERE category = 'Fallout' AND is_active = true ORDER BY priority DESC, created_at DESC`
-      );
-      const stripHtml = (h: string) =>
-        String(h).replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-      const kbContent = kbResult.rows.length > 0
-        ? kbResult.rows.map((r: any) => stripHtml(r.content)).filter((c: string) => c.length > 0).join('\n\n---\n\n')
-        : '';
-      const ragInstruction = `
-For each loan below you will see: (1) Similar-historical summary (outcome counts for top-${LOAN_RAG_TOP_K} historically similar loans). (2) Loan signal strengths and reason codes.
-Use these to predict outcome. In your reasoning include: Historical pattern matches (e.g. "Historical loans with similar signal profiles (Credit: X, Loan Characteristics: Y) were approved Z% of the time"); count of historical similar loans; how historical data informed the prediction.
-
-[BATCH_LOANS_RAG]
-
-Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "string", "predictedOutcome": "withdraw"|"deny"|"originate", "confidence": 0-100, "reasoning": "string", "riskFactors": ["string"] }.`;
-      ragPromptTemplate = request.customPrompt ?? (kbContent ? `${kbContent}\n\n${ragInstruction}` : ragInstruction);
-      if (kbResult.rows.length > 0) logInfo('Using KB Fallout prompt for RAG', { entryCount: kbResult.rows.length });
-    } catch (err: any) {
-      logError('Error loading KB Fallout prompt for RAG', err);
-      ragPromptTemplate = `[BATCH_LOANS_RAG]\n\nReturn ONLY valid JSON with a "predictions" array. Each: { "loanId", "predictedOutcome", "confidence", "reasoning", "riskFactors" }.`;
-    }
-    if (!ragPromptTemplate.includes('[BATCH_LOANS_RAG]')) {
-      ragPromptTemplate = `${ragPromptTemplate}\n\n[BATCH_LOANS_RAG]\n\nReturn ONLY valid JSON with a "predictions" array. Each: { "loanId", "predictedOutcome", "confidence", "reasoning", "riskFactors" }.`;
-    }
-    logInfo('Step 6/6: RAG prompt template ready (background runs Step 4 embeddings + similarity + GPT)', { activeCount: bucketedLoans.length });
-
-    // All bucketing is done; return bucketed data to UI, then run embeddings + RAG in background
-    // Check if OpenAI API key is valid before starting background predictions
-    const apiKeyToUse = apiKey || OPENAI_API_KEY;
-    // Validate API key: must exist, not be empty, not be a placeholder, and start with "sk-" (OpenAI format)
-    const hasValidApiKey = apiKeyToUse && 
-                          apiKeyToUse.trim().length > 0 && 
-                          !apiKeyToUse.includes('your-api-key') &&
-                          !apiKeyToUse.includes('sk-placeholder') &&
-                          apiKeyToUse.trim().startsWith('sk-');
-    
-    // Return bucketedLoans to UI now (all bucketing complete). Step 4 (embeddings) + Step 5–6 (RAG) run in background.
-    const immediateResponse = {
-      predictions: [], // Will be empty initially; background writes to DB and client can poll /predictions
-      bucketedLoans: bucketedLoans || [], // All loans bucketed (historical from cache + active); ready for UI
-      summary: {
-        totalAnalyzed: 0,
-        predictedWithdraw: 0,
-        predictedDeny: 0,
-        predictedOriginate: 0
-      },
-      metadata: {
-        model: PREDICTION_MODEL,
-        timestamp: new Date().toISOString(),
-        processingTimeMs: Date.now() - startTime,
-        totalBucketedLoans: bucketedLoans.length,
-        predictionsInProgress: hasValidApiKey // Only true if API key is valid
-      }
-    };
-
-    // Start AI predictions in the background (fire and forget) - only if API key is valid
-    // This allows the response to be sent immediately while predictions continue
-    // Predictions will complete fully without time limits
-    const runPredictionsInBackground = async () => {
-      const backgroundTenantId = tenantId;
-      const backgroundDbPool = dbPool; // Capture the tenant pool for background operations
-      let ragUnavailable = false; // set when pgvector / loan_outcome_embeddings is missing; skip RAG inference
-      if (!hasValidApiKey) {
-        logInfo('Skipping AI predictions - OPENAI_API_KEY is invalid or not configured', {
-          hasApiKey: !!apiKeyToUse,
-          apiKeyLength: apiKeyToUse?.length || 0,
-          isPlaceholder: apiKeyToUse?.includes('your-api-key') || false
-        });
-        return;
-      }
-      // Step 4 (background): Ensure historical loan embeddings before RAG. All bucketing was done and returned to UI.
-      if (backgroundTenantId && historicalWithOutcomes.length > 0) {
-        try {
-          const existingIds = await getEmbeddedLoanIds(backgroundTenantId, backgroundDbPool);
-          const incrementalOnly = existingIds.size > 0;
-          logInfo('Step 4/6 (background): Ensuring historical loan embeddings (RAG)', {
-            loanCount: historicalWithOutcomes.length,
-            incrementalOnly,
-            existingEmbedded: existingIds.size,
-          });
-          await ensureHistoricalEmbeddings(
-            backgroundTenantId,
-            historicalWithOutcomes as any[],
-            loanRagCanonicalConfig,
-            { incrementalOnly, apiKey: apiKeyToUse, pool: backgroundDbPool }
-          );
-          logInfo('Step 4/6 (background): Historical embeddings ensured');
-        } catch (ragErr: any) {
-          logError('Step 4/6 (background): Historical embedding failed (RAG)', ragErr, { tenantId: backgroundTenantId });
-          const msg = String(ragErr?.message ?? '');
-          if (/loan_outcome_embeddings|relation.*does not exist|type "vector" does not exist/i.test(msg)) {
-            ragUnavailable = true;
-          }
-        }
-      }
-      let predictions: LoanPrediction[] = [];
-      let summary = {
-        totalAnalyzed: 0,
-        predictedWithdraw: 0,
-        predictedDeny: 0,
-        predictedOriginate: 0
-      };
-      
-      // Helper function to save predictions to database
-      // Note: Isolated tenant DBs don't have tenant_id column - each tenant has their own DB
-      const savePredictionsToDatabase = async (predictionsToSave: LoanPrediction[]) => {
-        if (!predictionsToSave.length || !backgroundTenantId) return;
-        
-        try {
-          // Use INSERT ... ON CONFLICT to update existing predictions for the same loan
-          // This allows updating predictions when they change
-          for (const prediction of predictionsToSave) {
-            await backgroundDbPool.query(`
-              INSERT INTO public.loan_predictions 
-              (loan_id, predicted_outcome, confidence, reasoning, risk_factors, model_version, created_at)
-              VALUES ($1, $2, $3, $4, $5, $6, NOW())
-              ON CONFLICT (loan_id, created_at) 
-              DO UPDATE SET
-                predicted_outcome = EXCLUDED.predicted_outcome,
-                confidence = EXCLUDED.confidence,
-                reasoning = EXCLUDED.reasoning,
-                risk_factors = EXCLUDED.risk_factors,
-                model_version = EXCLUDED.model_version,
-                updated_at = NOW()
-            `, [
-              prediction.loanId,
-              prediction.predictedOutcome,
-              prediction.confidence,
-              prediction.reasoning || null,
-              prediction.riskFactors || [],
-              PREDICTION_MODEL
-            ]);
-          }
-          
-          logInfo(`Saved ${predictionsToSave.length} predictions to database`, {
-            tenantId,
-            outcomes: {
-              withdraw: predictionsToSave.filter(p => p.predictedOutcome === 'withdraw').length,
-              deny: predictionsToSave.filter(p => p.predictedOutcome === 'deny').length,
-              originate: predictionsToSave.filter(p => p.predictedOutcome === 'originate').length
-            }
-          });
-        } catch (saveError: any) {
-          logError('Error saving predictions to database', saveError, {
-            predictionCount: predictionsToSave.length,
-            tenantId: backgroundTenantId
-          });
-          // Don't throw - continue processing even if save fails
-        }
-      };
-
-      try {
-        if (bucketedLoans.length === 0) return;
-        if (ragUnavailable) {
-          logInfo('Skipping RAG inference (pgvector/loan_outcome_embeddings not available). Bucketed results were already returned to the UI.', { tenantId: backgroundTenantId });
-          return;
-        }
-        // If Step 4 was skipped (e.g. no historical loans), probe once so we don't fail later in searchSimilarHistorical
-        if (backgroundTenantId) {
-          try {
-            await getEmbeddedLoanIds(backgroundTenantId, backgroundDbPool);
-          } catch (probeErr: any) {
-            const msg = String(probeErr?.message ?? '');
-            if (/loan_outcome_embeddings|relation.*does not exist|type "vector" does not exist/i.test(msg)) {
-              logInfo('Skipping RAG inference (pgvector/loan_outcome_embeddings not available). Bucketed results were already returned to the UI.', { tenantId: backgroundTenantId });
-              return;
-            }
-            throw probeErr;
-          }
-        }
-        const config = loanRagCanonicalConfig;
-        const BATCH_SIZE = ACTIVE_LOAN_BATCH_SIZE;
-
-        logInfo('Step 5/6 (background): Computing active loan embeddings and similarity', {
-          activeCount: bucketedLoans.length,
-          tenantId: backgroundTenantId,
-        });
-
-        // RAG: canonical text per active loan, then batch-embed
-        const canonicalTexts = bucketedLoans.map((loan) => toCanonicalLoanText(loan, config));
-        const allEmbeddings: number[][] = [];
-        const totalEmbedBatches = Math.ceil(canonicalTexts.length / LOAN_RAG_EMBED_BATCH_SIZE);
-        logInfo('Step 5/6 (background): Starting embedding generation', {
-          totalLoans: canonicalTexts.length,
-          batchSize: LOAN_RAG_EMBED_BATCH_SIZE,
-          totalBatches: totalEmbedBatches,
-          model: LOAN_RAG_EMBEDDING_MODEL,
-          hasApiKey: !!apiKeyToUse,
-          apiKeyLength: apiKeyToUse?.length || 0
-        });
-        
-        for (let i = 0; i < canonicalTexts.length; i += LOAN_RAG_EMBED_BATCH_SIZE) {
-          const batchNum = Math.floor(i / LOAN_RAG_EMBED_BATCH_SIZE) + 1;
-          const chunk = canonicalTexts.slice(i, i + LOAN_RAG_EMBED_BATCH_SIZE);
-          try {
-            logInfo(`Embedding batch ${batchNum}/${totalEmbedBatches} starting`, { chunkSize: chunk.length });
-            const results = await generateEmbeddings(chunk, LOAN_RAG_EMBEDDING_MODEL, apiKeyToUse);
-            for (const r of results) allEmbeddings.push(r.embedding);
-            logInfo(`Embedding batch ${batchNum}/${totalEmbedBatches} completed`, { 
-              embeddingsGenerated: results.length,
-              totalSoFar: allEmbeddings.length 
-            });
-          } catch (embedError: any) {
-            logError(`Embedding batch ${batchNum}/${totalEmbedBatches} FAILED`, embedError, {
-              chunkSize: chunk.length,
-              model: LOAN_RAG_EMBEDDING_MODEL
-            });
-            throw embedError; // Re-throw to stop processing
-          }
-        }
-        
-        logInfo('Step 5/6 (background): All embeddings generated, starting similarity search', {
-          totalEmbeddings: allEmbeddings.length,
-          loansToSearch: bucketedLoans.length
-        });
-
-        // Per-loan similarity search + aggregation (skip vector search if no tenant)
-        const aggregated: AggregatedSimilar[] = [];
-        const searchStartTime = Date.now();
-        for (let i = 0; i < bucketedLoans.length; i++) {
-          const similar = backgroundTenantId
-            ? await searchSimilarHistorical(backgroundTenantId, allEmbeddings[i] ?? [], LOAN_RAG_TOP_K, backgroundDbPool)
-            : [];
-          aggregated.push(aggregateRetrieved(similar));
-          
-          // Log progress every 100 loans
-          if ((i + 1) % 100 === 0 || i === bucketedLoans.length - 1) {
-            const elapsed = ((Date.now() - searchStartTime) / 1000).toFixed(1);
-            logInfo(`Similarity search progress: ${i + 1}/${bucketedLoans.length}`, { 
-              completed: i + 1,
-              total: bucketedLoans.length,
-              elapsedSeconds: elapsed
-            });
-          }
-        }
-
-        logInfo('Step 5/6 (background): Similarity done, starting GPT batches', {
-          activeCount: bucketedLoans.length,
-          totalBatches: Math.ceil(bucketedLoans.length / BATCH_SIZE),
-        });
-
-        const loansWithSummaries = bucketedLoans.map((loan, i) => ({ loan, similarSummary: aggregated[i]! }));
-
-        const batches: { loan: any; similarSummary: AggregatedSimilar }[][] = [];
-        for (let i = 0; i < loansWithSummaries.length; i += BATCH_SIZE) {
-          batches.push(loansWithSummaries.slice(i, i + BATCH_SIZE));
-        }
-
-        logInfo('RAG prediction: similarity done, running GPT batches', {
-          totalLoans: bucketedLoans.length,
-          batchSize: BATCH_SIZE,
-          totalBatches: batches.length,
-        });
-
-        logInfo('Step 6/6 (background): Starting GPT prediction batches', {
-          totalBatches: batches.length,
-          batchSize: BATCH_SIZE,
-        });
-
-        let totalBatchCostUsd = 0;
-        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-          const batch = batches[batchIndex]!;
-          try {
-            const loanBlocks = batch
-              .map(
-                ({ loan, similarSummary }) =>
-                  `--- Loan ${loan.loan_id ?? loan.loanId}\nSimilar historical: ${similarSummary.summaryText}\n(Count: ${similarSummary.totalCount})\nSignals and reason codes:\n${JSON.stringify(
-                    {
-                      creditMetricsSignalStrength: loan.creditMetricsSignalStrength,
-                      loanCharacteristicsSignalStrength: loan.loanCharacteristicsSignalStrength,
-                      timeInMotionSignalStrength: loan.timeInMotionSignalStrength,
-                      mloAeFalloutProneSignalStrength: loan.mloAeFalloutProneSignalStrength,
-                      interestLockVsMarketSignalStrength: loan.interestLockVsMarketSignalStrength,
-                      uwPullthroughSignalStrength: loan.uwPullthroughSignalStrength,
-                      creditMetricsReasonCodes: loan.creditMetricsReasonCodes,
-                      loanCharacteristicsReasonCodes: loan.loanCharacteristicsReasonCodes,
-                      timeInMotionReasonCodes: loan.timeInMotionReasonCodes,
-                      mloAeFalloutProneReasonCodes: loan.mloAeFalloutProneReasonCodes,
-                      interestLockVsMarketReasonCodes: loan.interestLockVsMarketReasonCodes,
-                      uwPullthroughReasonCodes: loan.uwPullthroughReasonCodes,
-                    },
-                    null,
-                    2
-                  )}`
-              )
-              .join('\n\n');
-            const batchPrompt = ragPromptTemplate.replace('[BATCH_LOANS_RAG]', loanBlocks);
-            const result = await callAIModel(batchPrompt, apiKeyToUse, `RAG batch ${batchIndex + 1}/${batches.length}`);
-            const batchPredictions = result.predictions;
-            if (result.usage) totalBatchCostUsd += getEstimatedCostUsd(result.usage);
-            predictions.push(...batchPredictions);
-            await savePredictionsToDatabase(batchPredictions);
-            logInfo(`RAG batch ${batchIndex + 1}/${batches.length} completed — ${predictions.length} total predictions so far`, {
-              batchSize: batch.length,
-              predictionsReceived: batchPredictions.length,
-              totalSoFar: predictions.length,
-            });
-            if (batchIndex < batches.length - 1) await new Promise((r) => setTimeout(r, 1000));
-          } catch (batchError: any) {
-            logError(`RAG batch ${batchIndex + 1}/${batches.length} failed`, batchError, { batchSize: batch.length, batchIndex });
-          }
-        }
-        console.log(
-          `[Cost] RAG batches total: $${totalBatchCostUsd.toFixed(4)} (${batches.length} batches, ${predictions.length} loans)`
-        );
-      
-      // Calculate summary from all predictions
-      summary = {
-        totalAnalyzed: predictions.length,
-        predictedWithdraw: predictions.filter(p => p.predictedOutcome === 'withdraw').length,
-        predictedDeny: predictions.filter(p => p.predictedOutcome === 'deny').length,
-        predictedOriginate: predictions.filter(p => p.predictedOutcome === 'originate').length
-      };
-
-      logInfo('Background AI predictions completed', {
-        totalAnalyzed: summary.totalAnalyzed,
-        predictedWithdraw: summary.predictedWithdraw,
-        predictedDeny: summary.predictedDeny,
-        predictedOriginate: summary.predictedOriginate,
-        totalBatches: batches.length,
-        processingTimeMs: Date.now() - startTime
-      });
-      
-      // Final save of any remaining predictions (should already be saved per batch, but ensure completeness)
-      if (predictions.length > 0) {
-        await savePredictionsToDatabase(predictions);
-      }
-    } catch (aiError: any) {
-      logError('Background AI prediction failed', aiError, {
-        bucketedLoansCount: bucketedLoans.length
-      });
-    }
-    };
-    
-    // Start predictions in background (don't await). Track in-progress so frontend can poll until fully done.
-    if (tenantId && hasValidApiKey) predictInProgressByTenant.set(tenantId, true);
-    runPredictionsInBackground()
-      .catch(err => {
-        logError('Error in background prediction task', err);
-      })
-      .finally(() => {
-        if (tenantId) predictInProgressByTenant.set(tenantId, false);
-      });
-
-    // Return bucketedLoans immediately
-    logInfo('Returning bucketed loans to UI (all bucketing done; embeddings + RAG running in background)', {
-      bucketedLoansCount: bucketedLoans.length,
-      historicalCount: historicalWithOutcomes.length,
-    });
-    
-    return immediateResponse;
 
   } catch (error: unknown) {
     logError('Error predicting loan outcomes', error, {});
     
     // Even on error, try to return bucketedLoans if we have them
-    // This ensures the frontend can still display the signal buckets table
-    // Check if bucketedLoans were created before the error
     if (typeof bucketedLoans !== 'undefined' && bucketedLoans.length > 0) {
       logInfo('Returning bucketed loans despite error', { count: bucketedLoans.length });
       return {
         predictions: [],
         bucketedLoans,
         summary: {
-          totalAnalyzed: 0,
+          totalAnalyzed: bucketedLoans.length,
           predictedWithdraw: 0,
           predictedDeny: 0,
           predictedOriginate: 0
         },
         metadata: {
-          model: PREDICTION_MODEL,
+          model: 'rule-based',
           timestamp: new Date().toISOString(),
           processingTimeMs: Date.now() - startTime
         }
@@ -3076,4 +2843,136 @@ Return ONLY valid JSON with a "predictions" array. Each object: { "loanId": "str
     
     throw error;
   }
+}
+
+/**
+ * Generate rule-based risk summary from loan signal strengths
+ * This provides instant prediction summaries without AI
+ * 
+ * Distinguishes between:
+ * - DENY: Credit-related issues (bad FICO, high LTV, high DTI) - lender will reject
+ * - WITHDRAW: Market/process issues (unfavorable rates, long pipeline, low LO pullthrough) - borrower will cancel
+ */
+export function generateRuleBasedSummary(loan: any): {
+  risks: string[];
+  positives: string[];
+  overallRisk: string;
+  predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk';
+  confidence: number;
+} {
+  const risks: string[] = [];
+  const positives: string[] = [];
+  
+  // Track risk categories to determine deny vs withdraw
+  let creditRiskScore = 0;  // Issues that lead to DENY (lender rejection)
+  let processRiskScore = 0; // Issues that lead to WITHDRAW (borrower cancellation)
+  
+  // Credit-related risks (lead to DENIAL by lender)
+  if (loan.creditMetricsSignalStrength >= 5) {
+    risks.push('Credit metrics indicate elevated risk (low FICO, high DTI, or high LTV)');
+    creditRiskScore += 3;
+  } else if (loan.creditMetricsSignalStrength >= 4) {
+    risks.push('Credit metrics are borderline (moderate FICO, DTI, or LTV concerns)');
+    creditRiskScore += 1;
+  }
+  
+  if (loan.loanCharacteristicsSignalStrength >= 5) {
+    risks.push('Loan characteristics indicate higher risk (jumbo, investment, cash-out refi)');
+    creditRiskScore += 2;
+  }
+  
+  // Check individual credit signals for additional denial indicators
+  if (loan.ficoScoreSignal >= 5) {
+    creditRiskScore += 2; // Poor credit score is strong denial indicator
+  }
+  if (loan.dtiSignal >= 5) {
+    creditRiskScore += 1; // High DTI increases denial risk
+  }
+  if (loan.ltvSignal >= 5) {
+    creditRiskScore += 1; // High LTV increases denial risk
+  }
+  
+  // Process/market-related risks (lead to WITHDRAWAL by borrower)
+  if (loan.timeInMotionSignalStrength >= 5) {
+    risks.push('Loan has been in pipeline longer than typical');
+    processRiskScore += 2;
+  } else if (loan.timeInMotionSignalStrength >= 4) {
+    risks.push('Loan is taking longer than average to process');
+    processRiskScore += 1;
+  }
+  
+  if (loan.mloAeFalloutProneSignalStrength >= 5) {
+    risks.push('Loan officer has below-average historical pullthrough rate');
+    processRiskScore += 2;
+  }
+  
+  if (loan.interestLockVsMarketSignalStrength >= 5) {
+    risks.push('Interest rate lock is unfavorable compared to current market');
+    processRiskScore += 3; // Strong withdrawal indicator - borrower may shop elsewhere
+  } else if (loan.interestLockVsMarketSignalStrength >= 4) {
+    risks.push('Interest rate lock is slightly above current market rates');
+    processRiskScore += 1;
+  }
+  
+  // Check market delta signal for additional withdrawal indicators
+  if (loan.marketChangeDeltaSignal >= 5) {
+    processRiskScore += 2; // Rates have improved significantly since lock - borrower may want to relock
+  }
+  
+  // Medium risk signals (bucket 3-4)
+  if (loan.uwPullthroughSignalStrength >= 4) {
+    risks.push('Underwriter has moderate historical fallout rate');
+    creditRiskScore += 1; // UW fallout often indicates documentation/qualification issues
+  }
+  
+  // Low risk signals (bucket 1-2) - indicates likely to close
+  if (loan.creditMetricsSignalStrength <= 2) {
+    positives.push('Strong credit profile (high FICO, low DTI)');
+  }
+  if (loan.loanCharacteristicsSignalStrength <= 2) {
+    positives.push('Favorable loan characteristics (conforming, purchase, owner-occupied)');
+  }
+  if (loan.timeInMotionSignalStrength <= 2) {
+    positives.push('Loan is progressing on schedule');
+  }
+  if (loan.mloAeFalloutProneSignalStrength <= 2) {
+    positives.push('Loan officer has excellent historical pullthrough rate');
+  }
+  if (loan.interestLockVsMarketSignalStrength <= 2) {
+    positives.push('Rate lock is favorable compared to market');
+  }
+  
+  // Determine overall prediction based on risk bucket AND risk category
+  const overallRisk = loan.bucket || 'unknown';
+  let predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk' = 'originate';
+  let confidence = 70;
+  
+  if (overallRisk === 'high') {
+    // Determine whether likely to be denied (credit issues) or withdrawn (process/market issues)
+    if (creditRiskScore > processRiskScore) {
+      predictedOutcome = 'deny';
+      confidence = 55 + Math.min(creditRiskScore * 5, 30);
+    } else if (processRiskScore > creditRiskScore) {
+      predictedOutcome = 'withdraw';
+      confidence = 55 + Math.min(processRiskScore * 5, 30);
+    } else {
+      // Equal risk scores - default to withdraw as it's more common
+      predictedOutcome = 'withdraw';
+      confidence = 55 + Math.min(risks.length * 4, 25);
+    }
+  } else if (overallRisk === 'medium') {
+    predictedOutcome = 'at_risk';
+    confidence = 50 + Math.min(positives.length * 5, 20);
+  } else if (overallRisk === 'low') {
+    predictedOutcome = 'originate';
+    confidence = 70 + Math.min(positives.length * 5, 25);
+  }
+  
+  return {
+    risks,
+    positives,
+    overallRisk,
+    predictedOutcome,
+    confidence
+  };
 }

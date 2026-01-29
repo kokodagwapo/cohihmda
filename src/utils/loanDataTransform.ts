@@ -3,9 +3,16 @@
  * to the format expected by LoanCardsContainer and related components
  */
 
+export interface RiskSummary {
+  risks: string[];
+  positives: string[];
+  overallRisk: string;
+  predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk';
+  confidence: number;
+}
+
 export interface LoanCard {
   id: string;
-  borrower: string;
   officer: string;
   amount: string;
   amountValue?: number;
@@ -15,11 +22,41 @@ export interface LoanCard {
   ficoScore: number | null;
   ltvRatio: number | null;
   dtiRatio: number | null;
+  loanType?: string | null;
+  // Milestone and time in motion
+  currentMilestone?: string | null;
+  activeDays?: number | null;
+  // Rates and market
+  interestRate?: number | null;
+  marketRate?: number | null;
+  marketChangeDelta?: number | null;
+  // Pullthrough percentages
+  loPullthroughPct?: number | null;
+  uwPullthroughPct?: number | null;
+  closerPullthroughPct?: number | null;
+  processorPullthroughPct?: number | null;
+  // Rule-based risk summary from backend
+  riskSummary?: RiskSummary | null;
   // Persona/Actor fields
   underwriter?: string | null;
   closer?: string | null;
   processor?: string | null;
   accountExecutive?: string | null;
+  // Composite signal bucket scores
+  creditMetricsSignalStrength?: number | null;
+  loanCharacteristicsSignalStrength?: number | null;
+  timeInMotionSignalStrength?: number | null;
+  mloAeFalloutProneSignalStrength?: number | null;
+  interestLockVsMarketSignalStrength?: number | null;
+  uwPullthroughSignalStrength?: number | null;
+  closerPullthroughSignalStrength?: number | null;
+  processorPullthroughSignalStrength?: number | null;
+  // Individual signal buckets
+  ficoScoreSignal?: number | null;
+  ltvSignal?: number | null;
+  dtiSignal?: number | null;
+  loPullthroughSignal?: number | null;
+  marketChangeDeltaSignal?: number | null;
 }
 
 export interface LoanOfficerData {
@@ -72,7 +109,7 @@ export function calculateRiskLevel(
   if (ficoScore !== null) {
     if (ficoScore < 620) {
       riskScore += 40;
-      reasons.push({ reason: 'Subprime FICO (<620)', weight: 40 });
+      reasons.push({ reason: 'High-risk FICO (<620)', weight: 40 });
     } else if (ficoScore < 700) {
       riskScore += 20;
       reasons.push({ reason: 'FICO 620–699 needs monitoring', weight: 20 });
@@ -274,7 +311,6 @@ export function transformLoanToCard(loan: any): LoanCard {
 
   return {
     id: loanIdDisplay,
-    borrower,
     officer: loan.loan_officer_name ?? loan.officer ?? loan.loName ?? 'Unassigned',
     amount: formatAmount(amountValue),
     amountValue,
@@ -287,7 +323,14 @@ export function transformLoanToCard(loan: any): LoanCard {
     underwriter: underwriter || null,
     closer: closer || null,
     processor: processor || null,
-    accountExecutive: accountExecutive || null
+    accountExecutive: accountExecutive || null,
+    // Signal bucket scores (if available from prediction data)
+    creditMetricsSignalStrength: loan.creditMetricsSignalStrength ?? null,
+    loanCharacteristicsSignalStrength: loan.loanCharacteristicsSignalStrength ?? null,
+    timeInMotionSignalStrength: loan.timeInMotionSignalStrength ?? null,
+    mloAeFalloutProneSignalStrength: loan.mloAeFalloutProneSignalStrength ?? null,
+    interestLockVsMarketSignalStrength: loan.interestLockVsMarketSignalStrength ?? null,
+    loanType: loan.loan_type ?? loan.loanType ?? null,
   };
 }
 
