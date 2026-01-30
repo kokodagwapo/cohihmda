@@ -46,10 +46,15 @@ $CONTAINER_CPU = 512
 $CONTAINER_MEMORY = 1024
 $DESIRED_COUNT = 2
 
-# Domain Configuration (update these for your environment)
-$DOMAIN_NAME = ""  # e.g., "app.cohi.io"
-$CERTIFICATE_ARN = ""  # ACM certificate ARN (us-east-1 for CloudFront)
-$ALB_CERTIFICATE_ARN = ""  # ACM certificate ARN (same region as deployment)
+# Domain Configuration (coheus1.com subdomains)
+# See docs/deployment/HTTPS_AND_CERTIFICATES.md and COHEUS1_DOMAIN_SETUP.md.
+# Dev:  cohi-dev.coheus1.com (frontend), cohi-dev-api.coheus1.com (API/ALB)
+# Prod: cohi.coheus1.com (frontend), cohi-api.coheus1.com (API/ALB)
+$DOMAIN_NAME = "cohi-dev.coheus1.com"
+$CERTIFICATE_ARN = "arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63"  # CloudFront (us-east-1); must cover $DOMAIN_NAME
+$ALB_CERTIFICATE_ARN = "arn:aws:acm:us-east-2:339712788893:certificate/625a8258-168b-4f11-8ab4-3f866bea2fbd"  # ALB (us-east-2); must cover API domain (see BACKEND_ORIGIN_DOMAIN)
+$BACKEND_ORIGIN_DOMAIN = "cohi-dev-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
+$BACKEND_ORIGIN_PROTOCOL = "https-only"  # Use "https-only" when ALB has cert and BACKEND_ORIGIN_DOMAIN is set.
 
 # Alert Configuration
 $ALERT_EMAIL = ""  # e.g., "alerts@yourcompany.com"

@@ -59,9 +59,10 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
     Description: Second private subnet for the cluster
 
-  AllowedSecurityGroupId:
-    Type: AWS::EC2::SecurityGroup::Id
-    Description: Security group ID that is allowed to connect (e.g., ECS tasks, EB instances)
+  AllowedCIDR:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: CIDR block allowed to connect (VPC CIDR)
 
   MinACU:
     Type: Number
@@ -121,6 +122,7 @@ Parameters:
 Conditions:
   IsManagementCluster: !Equals [!Ref ClusterType, 'management']
   IsTenantCluster: !Equals [!Ref ClusterType, 'tenant']
+  IsProdEnvironment: !Equals [!Ref Environment, 'prod']
   HasClusterIdentifier: !Not [!Equals [!Ref ClusterIdentifier, '']]
   UseGeneratedPassword: !Equals [!Ref MasterPassword, '']
   UseProvidedPassword: !Not [!Equals [!Ref MasterPassword, '']]
@@ -226,8 +228,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          SourceSecurityGroupId: !Ref AllowedSecurityGroupId
-          Description: Allow PostgreSQL from application layer
+          CidrIp: !Ref AllowedCIDR
+          Description: Allow PostgreSQL from VPC
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -311,7 +313,7 @@ Resources:
       PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
       EnableCloudwatchLogsExports:
         - postgresql
-      DeletionProtection: !If [IsManagementCluster, true, false]
+      DeletionProtection: !If [IsProdEnvironment, true, false]
       CopyTagsToSnapshot: true
       ServerlessV2ScalingConfiguration:
         MinCapacity: !Ref MinACU

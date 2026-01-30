@@ -2,8 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app/server
 
-# Install dependencies for development
-RUN apk add --no-cache git
+# Install dependencies for development and health check (wget for ECS)
+RUN apk add --no-cache git wget
 
 # Copy package files
 COPY server/package*.json ./

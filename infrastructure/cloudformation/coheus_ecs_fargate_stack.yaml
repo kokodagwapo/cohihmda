@@ -60,9 +60,10 @@ Parameters:
     Description: Existing public subnet 2 (required if NetworkMode=existing)
 
   # Container Configuration
-  ContainerImage:
+  ContainerImageTag:
     Type: String
-    Description: Docker image URI (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/coheus:latest)
+    Default: latest
+    Description: Docker image tag to deploy
 
   ContainerPort:
     Type: Number
@@ -94,15 +95,15 @@ Parameters:
   DesiredCount:
     Type: Number
     Default: 2
-    MinValue: 1
+    MinValue: 0
     MaxValue: 20
-    Description: Desired number of tasks
+    Description: Desired number of tasks (0 for initial deployment before image push)
 
   MinCount:
     Type: Number
     Default: 2
-    MinValue: 1
-    Description: Minimum tasks for auto-scaling
+    MinValue: 0
+    Description: Minimum tasks for auto-scaling (0 for initial deployment)
 
   MaxCount:
     Type: Number
@@ -118,6 +119,10 @@ Parameters:
   AuroraSecretArn:
     Type: String
     Description: Secrets Manager ARN for Aurora credentials (from Aurora stack output)
+
+  AuroraKmsKeyArn:
+    Type: String
+    Description: KMS key ARN used to encrypt the Aurora secret (from Aurora stack KMSKeyArn output). Required so ECS can decrypt the secret.
 
   # Application Configuration
   JwtSecret:
@@ -193,6 +198,40 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-key'
+
+  # ============================================================================
+  # ECR Repository
+  # ============================================================================
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectName}-backend'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-backend'
 
   # ============================================================================
   # VPC and Networking (Conditional)
@@ -531,6 +570,11 @@ Resources:
                 Action:
                   - kms:Decrypt
                 Resource: !GetAtt EncryptionKey.Arn
+              # Aurora secret is encrypted with Aurora stack's KMS key; ECS must decrypt to fetch DB credentials
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref AuroraKmsKeyArn
 
   ECSTaskRole:
     Type: AWS::IAM::Role
@@ -574,7 +618,7 @@ Resources:
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
         - Name: !Sub '${ProjectName}-backend'
-          Image: !Ref ContainerImage
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:${ContainerImageTag}'
           Essential: true
           PortMappings:
             - ContainerPort: !Ref ContainerPort
@@ -602,13 +646,13 @@ Resources:
               Value: !Ref EncryptionKey
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: JWT_SECRET
+              Value: !Ref JwtSecret
           Secrets:
             - Name: DB_USER
               ValueFrom: !Sub '${AuroraSecretArn}:username::'
             - Name: DB_PASSWORD
               ValueFrom: !Sub '${AuroraSecretArn}:password::'
-            - Name: JWT_SECRET
-              ValueFrom: !Sub '${JWTSecret}:secret::'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -618,11 +662,11 @@ Resources:
           HealthCheck:
             Command:
               - CMD-SHELL
-              - !Sub 'curl -f http://localhost:${ContainerPort}/health || exit 1'
+              - !Sub 'wget --no-verbose --tries=1 --spider http://localhost:${ContainerPort}/health || exit 1'
             Interval: 30
-            Timeout: 5
-            Retries: 3
-            StartPeriod: 60
+            Timeout: 10
+            Retries: 5
+            StartPeriod: 120
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-task'
@@ -758,6 +802,16 @@ Resources:
         - !Ref AlertsTopic
 
 Outputs:
+  ECRRepositoryUri:
+    Description: ECR repository URI
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}'
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-ecr-uri'
+
+  ECRRepositoryName:
+    Description: ECR repository name
+    Value: !Ref ECRRepository
+
   VPCId:
     Description: VPC ID
     Value: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
