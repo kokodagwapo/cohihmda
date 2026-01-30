@@ -356,11 +356,7 @@ Resources:
     Properties:
       AlarmName: !Sub '${ProjectName}-${Environment}-system-health'
       AlarmDescription: 'Overall system health - triggered when any critical component fails'
-      AlarmRule: !Sub |
-        ALARM(${EBHealthCriticalAlarm}) OR
-        ALARM(${DBCPUCriticalAlarm}) OR
-        ALARM(${DBConnectionsCriticalAlarm}) OR
-        ALARM(${HighErrorRateCriticalAlarm})
+      AlarmRule: !Sub 'ALARM(${EBHealthCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${HighErrorRateCriticalAlarm})'
       AlarmActions:
         - !Ref CriticalAlertsTopic
       OKActions:

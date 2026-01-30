@@ -196,6 +196,53 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 # ============================================================================
+# PHASE 4: Allow ECS -> Aurora (update Aurora SG to allow ECS task SG)
+# ============================================================================
+$ECS_SG = Get-StackOutput $STACK_BACKEND "ECSSecurityGroupId"
+if ($ECS_SG -and (Test-StackExists $STACK_AURORA_MGMT)) {
+    Write-Status "Phase 4: Allowing ECS tasks to reach Aurora (ECSSecurityGroupId=$ECS_SG)..." "Magenta"
+    
+    # Use UsePreviousValue for all existing params; only change ECSSecurityGroupId
+    $auroraParams = @(
+        "ParameterKey=ProjectName,UsePreviousValue=true"
+        "ParameterKey=Environment,UsePreviousValue=true"
+        "ParameterKey=ClusterType,UsePreviousValue=true"
+        "ParameterKey=ClusterIdentifier,UsePreviousValue=true"
+        "ParameterKey=VPCId,UsePreviousValue=true"
+        "ParameterKey=PrivateSubnet1,UsePreviousValue=true"
+        "ParameterKey=PrivateSubnet2,UsePreviousValue=true"
+        "ParameterKey=AllowedCIDR,UsePreviousValue=true"
+        "ParameterKey=MinACU,UsePreviousValue=true"
+        "ParameterKey=MaxACU,UsePreviousValue=true"
+        "ParameterKey=DatabaseName,UsePreviousValue=true"
+        "ParameterKey=MasterUsername,UsePreviousValue=true"
+        "ParameterKey=MasterPassword,UsePreviousValue=true"
+        "ParameterKey=BackupRetentionDays,UsePreviousValue=true"
+        "ParameterKey=EnablePerformanceInsights,UsePreviousValue=true"
+        "ParameterKey=KMSKeyArn,UsePreviousValue=true"
+        "ParameterKey=AlertsTopicArn,UsePreviousValue=true"
+        "ParameterKey=ECSSecurityGroupId,ParameterValue=$ECS_SG"
+    )
+    
+    $phase4Err = aws cloudformation update-stack `
+        --stack-name $STACK_AURORA_MGMT `
+        --template-body "file://$TEMPLATE_AURORA" `
+        --parameters $auroraParams `
+        --capabilities CAPABILITY_IAM `
+        --profile $env:AWS_PROFILE `
+        --region $env:AWS_REGION 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Wait-ForStack $STACK_AURORA_MGMT "stack-update-complete"
+        Write-Status "Aurora security group updated: ECS tasks can now connect." "Green"
+    } elseif ($phase4Err -match "No updates are to be performed") {
+        Write-Status "Aurora already allows ECS (no change needed)." "Green"
+    } else {
+        Write-Status "Aurora update failed: $phase4Err" "Red"
+        Write-Status "You may need to manually add ECS SG ($ECS_SG) to Aurora SG for port 5432." "Yellow"
+    }
+}
+
+# ============================================================================
 # Display outputs
 # ============================================================================
 Write-Status "Stack Outputs:" "Green"

@@ -18,6 +18,7 @@ import { transformLoanToCard } from '@/utils/loanDataTransform';
 
 interface ClosingFalloutForecastProps {
   dateFilter?: 'today' | 'mtd' | 'ytd' | 'custom';
+  selectedTenantId?: string | null;
 }
 
 const normalizeRawStatus = (raw: unknown): string =>
@@ -506,7 +507,7 @@ const getMetricExplanation = (label: string) => {
  * Closing & Fallout Forecast Component
  * Displays predictive analytics for loan closings and fallout risk
  */
-export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutForecastProps) => {
+export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }: ClosingFalloutForecastProps) => {
   // ============================================================================
   // TESTING FLAG: Signal Strength Buckets Table
   // Set to true to display the loan signal strength buckets table
@@ -515,8 +516,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
   const SHOW_SIGNAL_BUCKETS_TABLE = false;
   // ============================================================================
 
-  const { statsData, statsLoading, funnelData } = useDashboardStats(dateFilter);
-  const { queryMetrics } = useMetrics();
+  const { statsData, statsLoading, funnelData } = useDashboardStats(dateFilter, 2025, selectedTenantId);
+  const { queryMetrics } = useMetrics(selectedTenantId);
   const [isAnimating, setIsAnimating] = useState(true);
   const [insightsTab, setInsightsTab] = useState<'critical' | 'officers'>('critical');
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
@@ -827,7 +828,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
         }>;
         count: number;
         summary: { withdraw: number; deny: number; originate: number };
-      }>('/api/loans/predictions', { method: 'GET' });
+      }>(selectedTenantId ? `/api/loans/predictions?tenant_id=${selectedTenantId}` : '/api/loans/predictions', { method: 'GET' });
       
       if (response.predictions && Array.isArray(response.predictions)) {
         setFullPredictions(response.predictions);
@@ -880,7 +881,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       console.error('[Predictions] Failed to fetch stored predictions:', error);
       setFullPredictions([]);
     }
-  }, []);
+  }, [selectedTenantId]);
 
   // Manual prediction trigger: runs bucketing with rule-based summaries (instant)
   const runPrediction = useCallback(async () => {
@@ -888,11 +889,12 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
     try {
       // Don't send loanIds - let the backend query the full database with proper filters
       // The frontend's 5000-loan sample may not match the backend's "Active Loan" criteria
+      const predictUrl = selectedTenantId ? `/api/loans/predict?tenant_id=${selectedTenantId}` : '/api/loans/predict';
       const response = await api.request<{
         predictions: Array<{ predictedOutcome: string; loanId: string }>;
         bucketedLoans?: any[];
         summary: { predictedWithdraw: number; predictedDeny: number; predictedOriginate: number };
-      }>('/api/loans/predict', {
+      }>(predictUrl, {
         method: 'POST',
         body: JSON.stringify({})
       });
@@ -927,7 +929,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       setBucketedLoans([]);
       setPredictionsLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch stored predictions from database when loans are loaded
   useEffect(() => {
@@ -1160,6 +1162,11 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd' }: ClosingFalloutFor
       }
       if (end) {
         params.append('end_date', end.toISOString().split('T')[0]);
+      }
+      
+      // Add tenant_id for super_admin viewing other tenants
+      if (selectedTenantId) {
+        params.append('tenant_id', selectedTenantId);
       }
       
       const res = await api.request<{ loans: any[] }>(`/api/loans?${params.toString()}`);

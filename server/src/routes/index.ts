@@ -120,6 +120,15 @@ export function setupRoutes(app: Express) {
           errorCode: error.code,
           errorType: error.constructor?.name,
         };
+        // Log the actual failure so we can tell ECONNREFUSED vs ETIMEDOUT vs auth
+        console.warn('Health check: Database unreachable:', {
+          code: error.code,
+          message: error.message,
+          errno: error.errno,
+          syscall: error.syscall,
+          address: error.address,
+          port: error.port,
+        });
         // Try to reset the pool to reconnect
         try {
           resetPool();
@@ -127,8 +136,6 @@ export function setupRoutes(app: Express) {
         } catch (resetError) {
           console.warn('Could not reset pool:', resetError);
         }
-        // Don't log as error - this is expected if DB is down
-        console.log('Health check: Database disconnected (server still operational)');
       }
     } else {
       health.database = 'skipped';

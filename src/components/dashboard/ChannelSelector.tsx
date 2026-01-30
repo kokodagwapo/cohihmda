@@ -54,8 +54,12 @@ export const ChannelSelector = ({
           channelGroups: ChannelGroupData[] 
         }>(url);
         
-        setChannels(data.channels || []);
-        setChannelGroups(data.channelGroups || []);
+        // Filter out any channels/groups with empty string values (breaks Radix Select)
+        const validChannels = (data.channels || []).filter(c => c.channel && c.channel.trim() !== '');
+        const validChannelGroups = (data.channelGroups || []).filter(g => g.group && g.group.trim() !== '');
+        
+        setChannels(validChannels);
+        setChannelGroups(validChannelGroups);
         
         // Auto-select the most populated channel group as default if no channel is selected
         if (!selectedChannel && useChannelGroups && data.channelGroups && data.channelGroups.length > 0) {

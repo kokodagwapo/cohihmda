@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ChannelSelector } from "@/components/dashboard/ChannelSelector";
 import { useChannelStore } from "@/stores/channelStore";
+import { useTenantStore } from "@/stores/tenantStore";
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -91,6 +92,9 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   
   // Global channel selection from store
   const { selectedChannel, setSelectedChannel } = useChannelStore();
+  
+  // Global tenant selection from store (for super_admin viewing other tenants)
+  const { selectedTenantId } = useTenantStore();
   
   const isDashboard = location.pathname === '/insights';
   const isWorkbench = location.pathname === '/my-dashboard' || location.pathname.startsWith('/workbench');
@@ -1269,12 +1273,13 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
             )}
 
-            {/* Channel Selector - Compact in header */}
-            {isAuthenticated && (
+            {/* Channel Selector - Compact in header (hidden on admin pages) */}
+            {isAuthenticated && !isAdminPage && (
               <div className="hidden sm:flex items-center">
                 <ChannelSelector
                   selectedChannel={selectedChannel}
                   onChannelChange={setSelectedChannel}
+                  selectedTenantId={selectedTenantId}
                   compact={true}
                   useChannelGroups={true}
                 />

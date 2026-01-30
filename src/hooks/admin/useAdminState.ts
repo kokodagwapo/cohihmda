@@ -10,16 +10,13 @@ export type AdminSection =
   | 'org'
   | 'data-quality'
   | 'data-config'  // Tenant data configuration (field mappings, ranges, filters, scoring)
-  | 'system' 
-  | 'security' 
-  | 'monitoring' 
-  | 'los' 
-  | 'synapse' 
-  | 'demo' 
+  | 'infrastructure'  // Renamed from 'system' for clarity
+  | 'security-compliance'  // Combined security and SOC 2
+  | 'connections'  // Combined LOS + Synapse integrations
+  | 'dev-tools'  // Developer tools including demo data
   | 'deployment' 
   | 'stripe' 
   | 'rag-voice' 
-  | 'soc2' 
   | 'aws-hosting'
   | 'metrics-catalog';
 

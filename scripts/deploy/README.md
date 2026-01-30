@@ -53,6 +53,7 @@ This deploys all stacks in order:
 3. **WAF + CloudFront** (frontend CDN)
 4. **Monitoring** (dashboard + alarms)
 5. **Tenant Provisioning** (automation)
+6. **Database Migrations** (schema setup)
 
 **Estimated time:** 30-45 minutes
 
@@ -81,6 +82,9 @@ Deploy stacks one at a time (must follow order):
 
 # Step 5: Deploy tenant provisioning
 .\05-deploy-tenant-provisioning.ps1
+
+# Step 6: Run database migrations and create super admin
+.\06-run-migrations.ps1 -CreateSuperAdmin
 ```
 
 ## Script Options
@@ -226,6 +230,36 @@ aws s3 rm "s3://$Bucket" --recursive --profile $env:AWS_PROFILE --region us-east
 aws s3 rb "s3://$Bucket" --profile $env:AWS_PROFILE --region us-east-1
 .\03-deploy-waf-cloudfront.ps1
 ```
+
+### Health shows "database disconnected" / "Database query timeout"
+
+The backend can't reach Aurora (logs: "Connection terminated due to connection timeout"). Usually the Aurora security group is not allowing ECS tasks.
+
+**1. Aurora cluster status** (RDS console or CLI):
+```powershell
+aws rds describe-db-clusters --db-cluster-identifier coheus-dev-management --profile $env:AWS_PROFILE --region us-east-2 --query 'DBClusters[0].{Status:Status,Endpoint:Endpoint}'
+```
+Status should be `available` and there should be at least one instance in the cluster.
+
+**2. Aurora security group** – must allow inbound **TCP 5432** from your VPC. The Aurora stack uses the VPC’s **primary CIDR** (from `describe-vpcs`). If your ECS subnets use a **different CIDR** (e.g. secondary VPC CIDR), add that CIDR to the Aurora security group or redeploy Aurora with the correct AllowedCIDR.
+
+Check VPC CIDR and Aurora SG:
+```powershell
+. .\config.ps1
+aws ec2 describe-vpcs --vpc-ids $EXISTING_VPC_ID --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'Vpcs[0].{PrimaryCidr:CidrBlock,AllCidrs:CidrBlockAssociationSet[*].CidrBlock}' --output json
+# Aurora SG (from Aurora stack output SecurityGroupId):
+aws ec2 describe-security-groups --group-ids <aurora-sg-id> --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'SecurityGroups[0].IpPermissions'
+```
+Ensure the CIDR that contains your ECS private subnets is allowed on port 5432.
+
+**3. Backend logs** (exact error):
+```powershell
+aws logs tail /ecs/coheus-dev --since 10m --profile $env:AWS_PROFILE --region us-east-2 --filter-pattern "database"
+```
+
+**4. Same VPC** – Aurora and ECS must be in the same VPC (same `EXISTING_VPC_ID`). Confirm both stacks use the same VPC and that the Aurora subnet group uses the same private subnets as ECS.
+
+**5. Allow ECS security group** – The backend deploy script (Phase 4) updates the Aurora stack so the Aurora security group allows inbound TCP 5432 from the **ECS task security group**. If you deployed backend before this was added, run `.\02-deploy-backend.ps1 -SkipBuild` once so Phase 4 runs and adds the ECS SG to Aurora; no code change required.
 
 ### ECS Tasks Not Starting / Stack Update Stuck
 

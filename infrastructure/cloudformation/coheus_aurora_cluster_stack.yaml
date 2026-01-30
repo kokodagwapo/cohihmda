@@ -64,6 +64,11 @@ Parameters:
     Default: '10.0.0.0/16'
     Description: CIDR block allowed to connect (VPC CIDR)
 
+  ECSSecurityGroupId:
+    Type: String
+    Default: ''
+    Description: ECS task security group ID to allow (recommended after backend deploy). Leave empty to use CIDR only.
+
   MinACU:
     Type: Number
     Default: 0.5
@@ -129,6 +134,7 @@ Conditions:
   CreateKMSKey: !Equals [!Ref KMSKeyArn, '']
   HasAlertsTopic: !Not [!Equals [!Ref AlertsTopicArn, '']]
   EnablePerfInsights: !Equals [!Ref EnablePerformanceInsights, 'true']
+  HasECSSecurityGroup: !Not [!Equals [!Ref ECSSecurityGroupId, '']]
 
 Resources:
   # ============================================================================
@@ -224,12 +230,23 @@ Resources:
     Properties:
       GroupDescription: !Sub 'Security group for ${ProjectName} Aurora cluster'
       VpcId: !Ref VPCId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          CidrIp: !Ref AllowedCIDR
-          Description: Allow PostgreSQL from VPC
+      SecurityGroupIngress: !If
+        - HasECSSecurityGroup
+        - - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            CidrIp: !Ref AllowedCIDR
+            Description: Allow PostgreSQL from VPC CIDR
+          - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            SourceSecurityGroupId: !Ref ECSSecurityGroupId
+            Description: Allow PostgreSQL from ECS tasks
+        - - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            CidrIp: !Ref AllowedCIDR
+            Description: Allow PostgreSQL from VPC
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -296,6 +313,7 @@ Resources:
       Engine: aurora-postgresql
       EngineVersion: '17.7'
       EngineMode: provisioned
+      Port: 5432  # Explicit port - CloudFormation bug defaults to 3306 even for PostgreSQL
       DatabaseName: !If
         - IsManagementCluster
         - coheus_management

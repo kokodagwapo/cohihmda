@@ -604,6 +604,21 @@ Resources:
                   - kms:Encrypt
                   - kms:GenerateDataKey
                 Resource: !GetAtt EncryptionKey.Arn
+              # ECS Exec permissions (for running migrations via aws ecs execute-command)
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource: '*'
 
   ECSTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -681,6 +696,7 @@ Resources:
       TaskDefinition: !Ref ECSTaskDefinition
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
+      EnableExecuteCommand: true  # Enables ECS Exec for running migrations
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
