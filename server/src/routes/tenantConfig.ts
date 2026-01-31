@@ -291,149 +291,265 @@ router.delete('/fields/:id', authenticateToken, attachTenantContext, requireRole
 });
 
 // ============================================
-// RANGE RULES
+// ADDITIONAL FIELDS (Dynamic Columns)
 // ============================================
 
+import { AdditionalFieldService, CreateAdditionalFieldInput, UpdateAdditionalFieldInput, DataType } from '../services/additionalFieldService.js';
+
 /**
- * GET /api/tenant-config/range-rules
- * List all range rules
+ * GET /api/tenant-config/additional-fields
+ * List all additional field definitions
  */
-router.get('/range-rules', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
+router.get('/additional-fields', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
+    const connectionId = req.query.connection_id as string | undefined;
     
-    const result = await tenantPool.query(`
-      SELECT id, field_alias, rule_name, description, conditions, min_value, max_value,
-             warning_min, warning_max, severity, tooltip_text, violation_message, highlight_color,
-             is_active, created_at, updated_at
-      FROM public.range_rules
-      ORDER BY field_alias, rule_name
-    `);
+    const service = new AdditionalFieldService(tenantPool);
+    const fields = await service.getFieldDefinitions(connectionId);
     
-    res.json({ rules: result.rows });
+    res.json({ fields });
   } catch (error: any) {
-    logError('Error fetching range rules', error, { userId: req.userId });
-    res.status(500).json({ error: 'Failed to fetch range rules' });
+    logError('Error fetching additional fields', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to fetch additional fields' });
   }
 });
 
 /**
- * POST /api/tenant-config/range-rules
- * Create a range rule
+ * GET /api/tenant-config/additional-fields/:id
+ * Get a single additional field definition
  */
-router.post('/range-rules', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
+router.get('/additional-fields/:id', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
+    const { id } = req.params;
+    
+    const service = new AdditionalFieldService(tenantPool);
+    const field = await service.getFieldDefinitionById(id);
+    
+    if (!field) {
+      return res.status(404).json({ error: 'Additional field not found' });
+    }
+    
+    res.json({ field });
+  } catch (error: any) {
+    logError('Error fetching additional field', error, { userId: req.userId, fieldId: req.params.id });
+    res.status(500).json({ error: 'Failed to fetch additional field' });
+  }
+});
+
+/**
+ * POST /api/tenant-config/additional-fields
+ * Create a new additional field (adds column to loans table)
+ */
+router.post('/additional-fields', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { tenantPool, tenantId } = getTenantContext(req);
     
     const schema = z.object({
-      field_alias: z.string().min(1),
-      rule_name: z.string().min(1),
-      description: z.string().optional(),
-      conditions: z.record(z.any()).optional(),
-      min_value: z.number().optional(),
-      max_value: z.number().optional(),
-      warning_min: z.number().optional(),
-      warning_max: z.number().optional(),
-      severity: z.enum(['info', 'warning', 'critical']).optional(),
-      tooltip_text: z.string().optional(),
-      violation_message: z.string().optional(),
-      highlight_color: z.string().optional(),
+      losConnectionId: z.string().uuid(),
+      losFieldId: z.string().min(1),
+      displayName: z.string().min(1).max(255),
+      dataType: z.enum(['string', 'number', 'date', 'boolean', 'currency', 'percentage']),
+      category: z.string().max(100).nullish(),
+      description: z.string().nullish(),
+      includeInRag: z.boolean().optional().default(true),
     });
     
     const data = schema.parse(req.body);
     
-    const result = await tenantPool.query(`
-      INSERT INTO public.range_rules (field_alias, rule_name, description, conditions, min_value, max_value,
-                                       warning_min, warning_max, severity, tooltip_text, violation_message,
-                                       highlight_color, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING *
-    `, [data.field_alias, data.rule_name, data.description || null, JSON.stringify(data.conditions || {}),
-        data.min_value ?? null, data.max_value ?? null, data.warning_min ?? null, data.warning_max ?? null,
-        data.severity || 'warning', data.tooltip_text || null, data.violation_message || null,
-        data.highlight_color || null, req.userId]);
+    const service = new AdditionalFieldService(tenantPool);
     
-    logInfo('Range rule created', { userId: req.userId, ruleId: result.rows[0].id });
-    res.status(201).json({ rule: result.rows[0] });
+    // Check if field ID is already defined for this connection
+    const isDuplicate = await service.isFieldIdAlreadyDefined(data.losConnectionId, data.losFieldId);
+    if (isDuplicate) {
+      return res.status(400).json({ error: 'This LOS field ID is already defined for this connection' });
+    }
+    
+    // Validate the field exists in Encompass (optional - get API server from connection)
+    const connectionResult = await tenantPool.query(
+      'SELECT encompass_api_server FROM public.los_connections WHERE id = $1',
+      [data.losConnectionId]
+    );
+    const apiServer = connectionResult.rows[0]?.encompass_api_server;
+    
+    // Create the field (this also creates the column)
+    const input: CreateAdditionalFieldInput = {
+      losConnectionId: data.losConnectionId,
+      losFieldId: data.losFieldId,
+      displayName: data.displayName,
+      dataType: data.dataType as DataType,
+      category: data.category,
+      description: data.description,
+      includeInRag: data.includeInRag,
+      createdBy: req.userId,
+    };
+    
+    const field = await service.createField(input);
+    
+    logInfo('Additional field created', { 
+      userId: req.userId, 
+      fieldId: field.id, 
+      columnName: field.columnName,
+      losFieldId: data.losFieldId 
+    });
+    
+    res.status(201).json({ 
+      field,
+      message: 'Field created successfully. Run a data sync to populate this field for existing loans.',
+      requiresSync: true
+    });
   } catch (error: any) {
-    logError('Error creating range rule', error, { userId: req.userId });
-    res.status(500).json({ error: 'Failed to create range rule' });
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'A field with this LOS field ID or column name already exists' });
+    }
+    logError('Error creating additional field', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to create additional field' });
   }
 });
 
 /**
- * PUT /api/tenant-config/range-rules/:id
- * Update a range rule
+ * PUT /api/tenant-config/additional-fields/:id
+ * Update an additional field definition (does not change column)
  */
-router.put('/range-rules/:id', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
+router.put('/additional-fields/:id', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
     const { id } = req.params;
     
     const schema = z.object({
-      rule_name: z.string().min(1).optional(),
-      description: z.string().optional(),
-      conditions: z.record(z.any()).optional(),
-      min_value: z.number().nullable().optional(),
-      max_value: z.number().nullable().optional(),
-      warning_min: z.number().nullable().optional(),
-      warning_max: z.number().nullable().optional(),
-      severity: z.enum(['info', 'warning', 'critical']).optional(),
-      tooltip_text: z.string().optional(),
-      violation_message: z.string().optional(),
-      highlight_color: z.string().optional(),
-      is_active: z.boolean().optional(),
+      displayName: z.string().min(1).max(255).optional(),
+      category: z.string().max(100).nullable().optional(),
+      description: z.string().nullable().optional(),
+      isEnabled: z.boolean().optional(),
+      includeInRag: z.boolean().optional(),
+      sortOrder: z.number().int().optional(),
     });
     
     const data = schema.parse(req.body);
     
-    const result = await tenantPool.query(`
-      UPDATE public.range_rules
-      SET rule_name = COALESCE($1, rule_name), description = COALESCE($2, description),
-          conditions = COALESCE($3, conditions), min_value = COALESCE($4, min_value),
-          max_value = COALESCE($5, max_value), warning_min = COALESCE($6, warning_min),
-          warning_max = COALESCE($7, warning_max), severity = COALESCE($8, severity),
-          tooltip_text = COALESCE($9, tooltip_text), violation_message = COALESCE($10, violation_message),
-          highlight_color = COALESCE($11, highlight_color), is_active = COALESCE($12, is_active),
-          updated_at = NOW()
-      WHERE id = $13
-      RETURNING *
-    `, [data.rule_name, data.description, data.conditions ? JSON.stringify(data.conditions) : null,
-        data.min_value, data.max_value, data.warning_min, data.warning_max, data.severity,
-        data.tooltip_text, data.violation_message, data.highlight_color, data.is_active, id]);
+    const service = new AdditionalFieldService(tenantPool);
     
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Range rule not found' });
+    const input: UpdateAdditionalFieldInput = {
+      displayName: data.displayName,
+      category: data.category ?? undefined,
+      description: data.description ?? undefined,
+      isEnabled: data.isEnabled,
+      includeInRag: data.includeInRag,
+      sortOrder: data.sortOrder,
+    };
+    
+    const field = await service.updateField(id, input, req.userId);
+    
+    if (!field) {
+      return res.status(404).json({ error: 'Additional field not found' });
     }
     
-    logInfo('Range rule updated', { userId: req.userId, ruleId: id });
-    res.json({ rule: result.rows[0] });
+    logInfo('Additional field updated', { userId: req.userId, fieldId: id });
+    res.json({ field });
   } catch (error: any) {
-    logError('Error updating range rule', error, { userId: req.userId, ruleId: req.params.id });
-    res.status(500).json({ error: 'Failed to update range rule' });
+    logError('Error updating additional field', error, { userId: req.userId, fieldId: req.params.id });
+    res.status(500).json({ error: 'Failed to update additional field' });
   }
 });
 
 /**
- * DELETE /api/tenant-config/range-rules/:id
- * Delete a range rule
+ * DELETE /api/tenant-config/additional-fields/:id
+ * Delete an additional field (drops column from loans table)
  */
-router.delete('/range-rules/:id', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
+router.delete('/additional-fields/:id', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
     const { id } = req.params;
     
-    const result = await tenantPool.query('DELETE FROM public.range_rules WHERE id = $1 RETURNING id', [id]);
+    const service = new AdditionalFieldService(tenantPool);
+    const success = await service.deleteField(id, req.userId);
     
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Range rule not found' });
+    if (!success) {
+      return res.status(404).json({ error: 'Additional field not found' });
     }
     
-    logInfo('Range rule deleted', { userId: req.userId, ruleId: id });
+    logInfo('Additional field deleted', { userId: req.userId, fieldId: id });
     res.json({ success: true });
   } catch (error: any) {
-    logError('Error deleting range rule', error, { userId: req.userId, ruleId: req.params.id });
-    res.status(500).json({ error: 'Failed to delete range rule' });
+    logError('Error deleting additional field', error, { userId: req.userId, fieldId: req.params.id });
+    res.status(500).json({ error: 'Failed to delete additional field' });
+  }
+});
+
+/**
+ * POST /api/tenant-config/additional-fields/validate
+ * Validate that a LOS field ID exists in Encompass
+ */
+router.post('/additional-fields/validate', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
+  try {
+    const { tenantPool, tenantId } = getTenantContext(req);
+    
+    const schema = z.object({
+      losConnectionId: z.string().uuid(),
+      losFieldId: z.string().min(1),
+    });
+    
+    const data = schema.parse(req.body);
+    
+    // Get API server from connection
+    const connectionResult = await tenantPool.query(
+      'SELECT encompass_api_server FROM public.los_connections WHERE id = $1',
+      [data.losConnectionId]
+    );
+    const apiServer = connectionResult.rows[0]?.encompass_api_server;
+    
+    const service = new AdditionalFieldService(tenantPool);
+    const result = await service.validateFieldExists(tenantId, data.losConnectionId, data.losFieldId, apiServer);
+    
+    res.json(result);
+  } catch (error: any) {
+    logError('Error validating LOS field', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to validate LOS field' });
+  }
+});
+
+/**
+ * GET /api/tenant-config/additional-fields/:id/audit
+ * Get audit log for an additional field
+ */
+router.get('/additional-fields/:id/audit', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
+  try {
+    const { tenantPool } = getTenantContext(req);
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit as string) || 50;
+    
+    const service = new AdditionalFieldService(tenantPool);
+    const auditLog = await service.getAuditLog(id, limit);
+    
+    res.json({ auditLog });
+  } catch (error: any) {
+    logError('Error fetching additional field audit log', error, { userId: req.userId, fieldId: req.params.id });
+    res.status(500).json({ error: 'Failed to fetch audit log' });
+  }
+});
+
+/**
+ * POST /api/tenant-config/additional-fields/generate-column-name
+ * Generate a column name from a display name (for preview)
+ */
+router.post('/additional-fields/generate-column-name', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
+  try {
+    const { tenantPool } = getTenantContext(req);
+    
+    const schema = z.object({
+      displayName: z.string().min(1).max(255),
+    });
+    
+    const data = schema.parse(req.body);
+    
+    const service = new AdditionalFieldService(tenantPool);
+    const columnName = await service.generateUniqueColumnName(data.displayName);
+    
+    res.json({ columnName });
+  } catch (error: any) {
+    logError('Error generating column name', error, { userId: req.userId });
+    res.status(500).json({ error: 'Failed to generate column name' });
   }
 });
 

@@ -1999,7 +1999,7 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
           closing_date: parseDate(getField(['closing_date', 'close_date', 'fund_date', 'funded_date'])),
           lock_date: parseDate(getField(['lock_date', 'rate_lock_date'])), // Added lock_date
           interest_rate: parseNumber(getField(['interest_rate', 'rate', 'apr', 'note_rate'])),
-          raw_data: record, // Store original record for reference
+          // Note: raw_data column has been removed - metadata stored in structured columns
         };
 
         // Validate required fields
@@ -2019,14 +2019,16 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
         const cycleTimeDays = parseNumber(getField(['cycle_time_days', 'cycleTime', 'cycle_time']));
         const complexityScore = parseNumber(getField(['complexity_score', 'complexityScore', 'complexity'])); // For TopTiering Ops scoring
         
-        // Store loan data in the database - include all fields in raw_data for comprehensive access
+        // Store loan data in the database
+        // Note: raw_data column has been removed - additional metadata stored in metadata JSONB
         await pool.query(
           `INSERT INTO public.loans (
             tenant_id, loan_id, borrower_name, loan_amount, loan_type, 
             status, application_date, closing_date, lock_date, interest_rate,
             loan_purpose, branch, credit_pull_date, cycle_time_days,
-            raw_data, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
+            fico_score, ltv_ratio, loan_officer_name, fallout_reason,
+            metadata, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
           ON CONFLICT (tenant_id, loan_id) 
           DO UPDATE SET
             borrower_name = EXCLUDED.borrower_name,
@@ -2041,7 +2043,11 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
             branch = EXCLUDED.branch,
             credit_pull_date = EXCLUDED.credit_pull_date,
             cycle_time_days = EXCLUDED.cycle_time_days,
-            raw_data = EXCLUDED.raw_data,
+            fico_score = EXCLUDED.fico_score,
+            ltv_ratio = EXCLUDED.ltv_ratio,
+            loan_officer_name = EXCLUDED.loan_officer_name,
+            fallout_reason = EXCLUDED.fallout_reason,
+            metadata = EXCLUDED.metadata,
             updated_at = NOW()`,
           [
             tenantId,
@@ -2060,16 +2066,14 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
             cycleTimeDays || (loanData.application_date && loanData.closing_date 
               ? Math.round((new Date(loanData.closing_date).getTime() - new Date(loanData.application_date).getTime()) / (1000 * 60 * 60 * 24))
               : null),
+            ficoScore,
+            ltv,
+            loanOfficerName,
+            falloutReason,
             JSON.stringify({
-              ...(typeof loanData.raw_data === 'object' && loanData.raw_data !== null ? loanData.raw_data : {}),
-              ...(typeof record === 'object' && record !== null ? record : {}),
-              // Ensure all fields are in raw_data for API access (Business Overview, Leaderboard, Loan Funnel, Ops)
               respa_date: respaDate, // For Ops turn time by stage calculations
-              fico_score: ficoScore,
-              ltv: ltv,
-              loan_officer_name: loanOfficerName,
-              fallout_reason: falloutReason,
               complexity_score: complexityScore, // For TopTiering Ops complexity scoring
+              import_source: 'csv',
             }),
           ]
         );
@@ -2159,7 +2163,7 @@ router.get('/field-population-stats', authenticateToken, attachTenantContext, ap
       FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name = 'loans'
-        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'raw_data', 'metadata')
+        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'metadata')
       ORDER BY column_name
     `);
 
@@ -2278,7 +2282,7 @@ router.get('/field-mapping-debug', authenticateToken, attachTenantContext, apiLi
       FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name = 'loans'
-        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'raw_data', 'metadata')
+        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'metadata')
     `);
     const dbColumns = new Set(columnsResult.rows.map((r: any) => r.column_name));
 

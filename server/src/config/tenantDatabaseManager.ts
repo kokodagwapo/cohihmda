@@ -39,20 +39,25 @@ class TenantDatabaseManager {
 
   /**
    * Get tenant database configuration from management database
+   * Accepts either tenant UUID or slug
    * Includes retry logic for transient connection failures
    */
-  async getTenantConfig(tenantId: string, retries = 2): Promise<TenantDatabaseConfig> {
+  async getTenantConfig(tenantIdOrSlug: string, retries = 2): Promise<TenantDatabaseConfig> {
     let lastError: Error | null = null;
+    
+    // Determine if this is a UUID or a slug
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantIdOrSlug);
     
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
+        // Query by ID if UUID, otherwise by slug
         const result = await managementPool.query(
           `SELECT 
             id, name, slug, database_name, database_host, database_port,
             database_user, database_password_encrypted, status, deployment_type
           FROM coheus_tenants 
-          WHERE id = $1 AND status = 'active'`,
-          [tenantId]
+          WHERE ${isUUID ? 'id' : 'slug'} = $1 AND status = 'active'`,
+          [tenantIdOrSlug]
         );
 
         if (result.rows.length === 0) {
@@ -98,15 +103,21 @@ class TenantDatabaseManager {
       }
     }
     
-    throw lastError || new Error(`Failed to get tenant config for ${tenantId}`);
+    throw lastError || new Error(`Failed to get tenant config for ${tenantIdOrSlug}`);
   }
 
   /**
    * Get or create tenant database pool
+   * Accepts either tenant UUID or slug
    * Validates connection health and auto-recovers from stale pools
    */
-  async getTenantPool(tenantId: string): Promise<pg.Pool> {
-    // Check cache first
+  async getTenantPool(tenantIdOrSlug: string): Promise<pg.Pool> {
+    // Get tenant config first to get the actual tenant ID
+    // (input could be either slug or ID)
+    const config = await this.getTenantConfig(tenantIdOrSlug);
+    const tenantId = config.id; // Always use the actual UUID for caching
+    
+    // Check cache using the actual tenant ID
     const cached = this.tenantPools.get(tenantId);
     if (cached) {
       // Validate the connection is still healthy
@@ -140,9 +151,6 @@ class TenantDatabaseManager {
         return cached.pool;
       }
     }
-
-    // Get tenant config
-    const config = await this.getTenantConfig(tenantId);
 
     // Evict old pools if cache is full
     if (this.tenantPools.size >= this.maxPoolCacheSize) {

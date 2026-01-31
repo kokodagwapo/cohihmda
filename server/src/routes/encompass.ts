@@ -16,6 +16,7 @@ import {
   getAllCoheusAliases,
   getDefaultFieldId,
 } from '../services/encompassFieldMapper.js';
+import { EncompassFieldDiscoveryService } from '../services/encompassFieldDiscoveryService.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -510,6 +511,221 @@ router.get('/field-mappings', authenticateToken, apiLimiter, async (req: AuthReq
   } catch (error: any) {
     console.error('Error getting field mappings:', error);
     res.status(500).json({ error: error.message || 'Failed to get field mappings' });
+  }
+});
+
+// ============================================================================
+// Field Discovery Routes (Auto-Mapping)
+// ============================================================================
+
+/**
+ * GET /api/encompass/discovery/fields/:connectionId
+ * Discover all available fields from Encompass (RDB + Custom)
+ */
+router.get('/discovery/fields/:connectionId', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  console.log('[Discovery Fields] Request received');
+  try {
+    const tenantId = req.query.tenant_id as string | undefined;
+    const losConnectionId = req.params.connectionId;
+    const useCache = req.query.use_cache !== 'false';
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    if (!losConnectionId) {
+      return res.status(400).json({ error: 'Connection ID is required' });
+    }
+
+    // Get tenant database pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Get API server URL from connection
+    const connectionResult = await tenantPool.query(
+      'SELECT encompass_api_server FROM public.los_connections WHERE id = $1',
+      [losConnectionId]
+    );
+    const apiServer = connectionResult.rows[0]?.encompass_api_server || 'https://api.elliemae.com';
+
+    // Create discovery service
+    const discoveryService = new EncompassFieldDiscoveryService(tenantPool, apiServer);
+
+    console.log('[Discovery Fields] Discovering fields...');
+    const result = await discoveryService.discoverAvailableFields(tenantId, losConnectionId, useCache);
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error('[Discovery Fields] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to discover fields' });
+  }
+});
+
+/**
+ * POST /api/encompass/discovery/analyze/:connectionId
+ * Analyze field population from sample loans
+ */
+router.post('/discovery/analyze/:connectionId', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  console.log('[Discovery Analyze] Request received');
+  try {
+    const tenantId = req.query.tenant_id as string | undefined;
+    const losConnectionId = req.params.connectionId;
+
+    const schema = z.object({
+      sampleSize: z.number().int().min(10).max(200).optional().default(50),
+      fieldsToAnalyze: z.array(z.string()).optional(),
+    });
+
+    const body = schema.parse(req.body || {});
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    if (!losConnectionId) {
+      return res.status(400).json({ error: 'Connection ID is required' });
+    }
+
+    // Get tenant database pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Get API server URL from connection
+    const connectionResult = await tenantPool.query(
+      'SELECT encompass_api_server FROM public.los_connections WHERE id = $1',
+      [losConnectionId]
+    );
+    const apiServer = connectionResult.rows[0]?.encompass_api_server || 'https://api.elliemae.com';
+
+    // Create discovery service
+    const discoveryService = new EncompassFieldDiscoveryService(tenantPool, apiServer);
+
+    console.log(`[Discovery Analyze] Analyzing ${body.sampleSize} sample loans...`);
+    const result = await discoveryService.analyzeFieldPopulation(tenantId, losConnectionId, {
+      sampleSize: body.sampleSize,
+      fieldsToAnalyze: body.fieldsToAnalyze,
+    });
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    console.error('[Discovery Analyze] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to analyze fields' });
+  }
+});
+
+/**
+ * GET /api/encompass/discovery/suggestions/:connectionId
+ * Get auto-mapping suggestions with confidence scores
+ */
+router.get('/discovery/suggestions/:connectionId', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  console.log('[Discovery Suggestions] Request received');
+  try {
+    const tenantId = req.query.tenant_id as string | undefined;
+    const losConnectionId = req.params.connectionId;
+    const runAnalysis = req.query.run_analysis !== 'false';
+    const sampleSize = parseInt(req.query.sample_size as string) || 50;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    if (!losConnectionId) {
+      return res.status(400).json({ error: 'Connection ID is required' });
+    }
+
+    // Get tenant database pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Get API server URL from connection
+    const connectionResult = await tenantPool.query(
+      'SELECT encompass_api_server FROM public.los_connections WHERE id = $1',
+      [losConnectionId]
+    );
+    const apiServer = connectionResult.rows[0]?.encompass_api_server || 'https://api.elliemae.com';
+
+    // Create discovery service
+    const discoveryService = new EncompassFieldDiscoveryService(tenantPool, apiServer);
+
+    console.log('[Discovery Suggestions] Generating suggestions...');
+    const result = await discoveryService.generateMappingSuggestions(tenantId, losConnectionId, {
+      runAnalysis,
+      sampleSize,
+    });
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error('[Discovery Suggestions] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate suggestions' });
+  }
+});
+
+/**
+ * POST /api/encompass/discovery/apply/:connectionId
+ * Apply selected mapping suggestions as field swaps
+ */
+router.post('/discovery/apply/:connectionId', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  console.log('[Discovery Apply] Request received');
+  try {
+    const tenantId = req.query.tenant_id as string | undefined;
+    const losConnectionId = req.params.connectionId;
+
+    const schema = z.object({
+      suggestions: z.array(z.object({
+        coheusAlias: z.string(),
+        fieldId: z.string(),
+      })).min(1),
+    });
+
+    const body = schema.parse(req.body);
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    if (!losConnectionId) {
+      return res.status(400).json({ error: 'Connection ID is required' });
+    }
+
+    // Get tenant database pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Get API server URL from connection
+    const connectionResult = await tenantPool.query(
+      'SELECT encompass_api_server FROM public.los_connections WHERE id = $1',
+      [losConnectionId]
+    );
+    const apiServer = connectionResult.rows[0]?.encompass_api_server || 'https://api.elliemae.com';
+
+    // Create discovery service
+    const discoveryService = new EncompassFieldDiscoveryService(tenantPool, apiServer);
+
+    console.log(`[Discovery Apply] Applying ${body.suggestions.length} suggestions...`);
+    const result = await discoveryService.applySuggestions(losConnectionId, body.suggestions);
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    console.error('[Discovery Apply] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to apply suggestions' });
   }
 });
 

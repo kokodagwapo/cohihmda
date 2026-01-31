@@ -57,6 +57,7 @@ export interface MigrationRunnerOptions {
   dryRun?: boolean;
   verbose?: boolean;
   targetVersion?: string;
+  force?: boolean; // Skip checksum validation (use with caution)
 }
 
 /**
@@ -234,7 +235,7 @@ export class MigrationRunner {
     migrationsDir: string,
     options: MigrationRunnerOptions = {}
   ): Promise<{ applied: MigrationResult[]; pending: MigrationFile[]; errors: MigrationResult[] }> {
-    const { dryRun = false, targetVersion } = options;
+    const { dryRun = false, targetVersion, force = false } = options;
     
     // Ensure migration tracking table exists
     if (!dryRun) {
@@ -257,10 +258,22 @@ export class MigrationRunner {
     for (const applied of appliedMigrations) {
       const file = allMigrations.find(m => m.version === applied.version);
       if (file && file.checksum !== applied.checksum) {
-        console.error(`❌ CHECKSUM MISMATCH: Migration ${applied.version} (${applied.name}) has been modified after being applied!`);
-        console.error(`   Applied checksum: ${applied.checksum}`);
-        console.error(`   Current checksum: ${file.checksum}`);
-        throw new Error(`Migration ${applied.version} has been modified. This is not allowed.`);
+        if (force) {
+          console.warn(`⚠️  CHECKSUM MISMATCH (--force): Migration ${applied.version} (${applied.name}) - updating checksum`);
+          console.warn(`   Old checksum: ${applied.checksum}`);
+          console.warn(`   New checksum: ${file.checksum}`);
+          // Update the checksum in the database to match current file
+          await this.pool.query(
+            'UPDATE schema_migrations SET checksum = $1 WHERE version = $2',
+            [file.checksum, applied.version]
+          );
+        } else {
+          console.error(`❌ CHECKSUM MISMATCH: Migration ${applied.version} (${applied.name}) has been modified after being applied!`);
+          console.error(`   Applied checksum: ${applied.checksum}`);
+          console.error(`   Current checksum: ${file.checksum}`);
+          console.error(`   Use --fix-checksums to update and continue (use with caution)`);
+          throw new Error(`Migration ${applied.version} has been modified. This is not allowed.`);
+        }
       }
     }
     

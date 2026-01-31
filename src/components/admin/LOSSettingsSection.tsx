@@ -12,7 +12,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CreateLOSConnectionDialog } from './CreateLOSConnectionDialog';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
 import { LoanDetailsTable } from './LoanDetailsTable';
-import { FieldPopulationStats } from './FieldPopulationStats';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
 interface LOSSettingsSectionProps {
@@ -372,10 +371,13 @@ export const LOSSettingsSection = ({
                               <span className="text-slate-500 dark:text-slate-500">Environment:</span>
                               <span className="ml-2 capitalize">{connection.api_environment || 'N/A'}</span>
                             </div>
-                            <div>
-                              <span className="text-slate-500 dark:text-slate-500">Sync:</span>
-                              <span className="ml-2 capitalize">{connection.sync_frequency || 'N/A'}</span>
-                            </div>
+                            {/* Sync schedule - Super Admin only */}
+                            {!isTenantAdmin && (
+                              <div>
+                                <span className="text-slate-500 dark:text-slate-500">Sync Schedule:</span>
+                                <span className="ml-2 capitalize">{connection.sync_frequency || 'daily'}</span>
+                              </div>
+                            )}
                             <div>
                               <span className="text-slate-500 dark:text-slate-500">Last Sync:</span>
                               <span className="ml-2">
@@ -408,55 +410,60 @@ export const LOSSettingsSection = ({
                           )}
                         </div>
                         <div className="flex items-center gap-2 ml-4">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => handleTestConnection(connection.id)}
-                            title="Test Connection"
-                          >
-                            <Network className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => handleSyncConnection(connection.id, false, false)}
-                            title="Sync Now"
-                          >
-                            <RefreshCw className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                            onClick={() => handleSyncConnection(connection.id, false, true)}
-                            title="Test Mode (Limited Records)"
-                          >
-                            <Play className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                            onClick={() => handleSyncConnection(connection.id, true, false)}
-                            title="Full Sync & Clear Database"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => handleToggleConnection(connection.id, connection.is_active)}
-                            title={connection.is_active ? "Deactivate" : "Activate"}
-                          >
-                            {connection.is_active ? (
-                              <Pause className="h-4 w-4" />
-                            ) : (
-                              <Play className="h-4 w-4" />
-                            )}
-                          </Button>
+                          {/* Sync controls - Super Admin only */}
+                          {!isTenantAdmin && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => handleTestConnection(connection.id)}
+                                title="Test Connection"
+                              >
+                                <Network className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => handleSyncConnection(connection.id, false, false)}
+                                title="Sync Now"
+                              >
+                                <RefreshCw className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                                onClick={() => handleSyncConnection(connection.id, false, true)}
+                                title="Test Mode (Limited Records)"
+                              >
+                                <Play className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                                onClick={() => handleSyncConnection(connection.id, true, false)}
+                                title="Full Sync & Clear Database"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => handleToggleConnection(connection.id, connection.is_active)}
+                                title={connection.is_active ? "Deactivate" : "Activate"}
+                              >
+                                {connection.is_active ? (
+                                  <Pause className="h-4 w-4" />
+                                ) : (
+                                  <Play className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </>
+                          )}
                           {connection.los_type === 'encompass' && (
                             <>
                               <Button
@@ -525,14 +532,6 @@ export const LOSSettingsSection = ({
           )}
         </CardContent>
       </Card>
-
-      {/* Field Population Statistics */}
-      {selectedTenantId && losConnections && losConnections.length > 0 && (
-        <FieldPopulationStats 
-          tenantId={selectedTenantId} 
-          losConnectionId={losConnections[0].id}
-        />
-      )}
 
       {/* Supported LOS Types */}
       {Object.keys(losTypes).length > 0 && (

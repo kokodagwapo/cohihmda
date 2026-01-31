@@ -31,12 +31,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion';
 import { 
   Shield, 
   Plus, 
@@ -46,17 +40,19 @@ import {
   Eye, 
   Search,
   Users,
-  Filter,
   Layout,
   Lock,
   Unlock,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
-  ChevronRight,
-  Building,
-  MapPin,
-  UserCircle
+  LayoutDashboard,
+  FileText,
+  Trophy,
+  GitBranch,
+  BarChart3,
+  AlertTriangle,
+  MessageSquare,
+  Settings,
+  User
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
@@ -77,8 +73,7 @@ interface Role {
   updated_at: string;
   user_count?: number;
   permissions?: Permission[];
-  field_filters?: FieldFilter[];
-  section_access?: SectionAccess[];
+  feature_access?: FeatureAccess[];
 }
 
 /**
@@ -95,45 +90,29 @@ interface Permission {
 }
 
 /**
- * Field-based filter for RLS
+ * Feature access control
  */
-interface FieldFilter {
-  id: string;
-  field_name: string;
-  operator: 'equals' | 'in' | 'starts_with' | 'contains';
-  value: string | string[];
-  is_dynamic: boolean; // If true, value is derived from user attribute
-}
-
-/**
- * Section access control
- */
-interface SectionAccess {
-  section_id: string;
-  section_name: string;
+interface FeatureAccess {
+  feature_id: string;
+  feature_name: string;
   has_access: boolean;
 }
 
 // System roles that cannot be edited
 const SYSTEM_ROLES = ['super_admin', 'tenant_admin'];
 
-// Default sections available for access control
-const DEFAULT_SECTIONS = [
-  { id: 'insights', name: 'Insights Dashboard', description: 'Main analytics dashboard' },
-  { id: 'loans', name: 'Loans', description: 'Loan data and details' },
-  { id: 'leaderboard', name: 'Leaderboard', description: 'Performance rankings' },
-  { id: 'funnel', name: 'Loan Funnel', description: 'Pipeline visualization' },
-  { id: 'reports', name: 'Reports', description: 'Generated reports' },
-  { id: 'data_quality', name: 'Data Quality', description: 'Data quality dashboard' },
-];
-
-// Default filter fields for RLS
-const FILTER_FIELDS = [
-  { name: 'branch_code', label: 'Branch', type: 'string', icon: Building },
-  { name: 'loan_officer_email', label: 'Loan Officer (Email)', type: 'string', icon: UserCircle },
-  { name: 'loan_officer_id', label: 'Loan Officer (ID)', type: 'string', icon: UserCircle },
-  { name: 'region', label: 'Region', type: 'string', icon: MapPin },
-  { name: 'channel', label: 'Channel', type: 'string', icon: Filter },
+// Available features for access control
+const AVAILABLE_FEATURES = [
+  { id: 'insights', name: 'Insights Dashboard', description: 'Main analytics and KPIs', icon: LayoutDashboard },
+  { id: 'loans', name: 'Loan Browser', description: 'View and search loan data', icon: FileText },
+  { id: 'leaderboard', name: 'Leaderboard', description: 'Performance rankings', icon: Trophy },
+  { id: 'funnel', name: 'Loan Funnel', description: 'Pipeline visualization', icon: GitBranch },
+  { id: 'reports', name: 'Reports', description: 'Generated reports', icon: BarChart3 },
+  { id: 'data_quality', name: 'Data Quality', description: 'Data quality dashboard', icon: AlertTriangle },
+  { id: 'data_chat', name: 'Data Chat', description: 'AI-powered data assistant', icon: MessageSquare },
+  { id: 'my_dashboard', name: 'My Dashboard', description: 'Personal dashboard', icon: User },
+  { id: 'users', name: 'User Management', description: 'Manage users (admin only)', icon: Users },
+  { id: 'settings', name: 'Settings', description: 'Organization settings (admin only)', icon: Settings },
 ];
 
 // Default resources for permission matrix
@@ -174,10 +153,9 @@ export function RolesPermissionsSection() {
       resource: r.id,
       actions: { create: false, read: true, update: false, delete: false }
     })),
-    field_filters: [] as FieldFilter[],
-    section_access: DEFAULT_SECTIONS.map(s => ({
-      section_id: s.id,
-      section_name: s.name,
+    feature_access: AVAILABLE_FEATURES.map(f => ({
+      feature_id: f.id,
+      feature_name: f.name,
       has_access: true
     }))
   });
@@ -210,16 +188,16 @@ export function RolesPermissionsSection() {
             resource: r.id,
             actions: { create: true, read: true, update: true, delete: true }
           })),
-          section_access: DEFAULT_SECTIONS.map(s => ({
-            section_id: s.id,
-            section_name: s.name,
+          feature_access: AVAILABLE_FEATURES.map(f => ({
+            feature_id: f.id,
+            feature_name: f.name,
             has_access: true
           }))
         },
         {
           id: '2',
           name: 'Loan Officer',
-          description: 'Can view and manage their own loans',
+          description: 'Standard loan officer with access to their synced loans',
           is_system_role: false,
           is_default: true,
           tenant_id: selectedTenantId || null,
@@ -232,28 +210,23 @@ export function RolesPermissionsSection() {
             { resource: 'reports', actions: { create: true, read: true, update: false, delete: false } },
             { resource: 'settings', actions: { create: false, read: false, update: false, delete: false } }
           ],
-          field_filters: [
-            {
-              id: 'f1',
-              field_name: 'loan_officer_email',
-              operator: 'equals',
-              value: '{{user.email}}',
-              is_dynamic: true
-            }
-          ],
-          section_access: [
-            { section_id: 'insights', section_name: 'Insights Dashboard', has_access: true },
-            { section_id: 'loans', section_name: 'Loans', has_access: true },
-            { section_id: 'leaderboard', section_name: 'Leaderboard', has_access: true },
-            { section_id: 'funnel', section_name: 'Loan Funnel', has_access: true },
-            { section_id: 'reports', section_name: 'Reports', has_access: true },
-            { section_id: 'data_quality', section_name: 'Data Quality', has_access: false }
+          feature_access: [
+            { feature_id: 'insights', feature_name: 'Insights Dashboard', has_access: true },
+            { feature_id: 'loans', feature_name: 'Loan Browser', has_access: true },
+            { feature_id: 'leaderboard', feature_name: 'Leaderboard', has_access: true },
+            { feature_id: 'funnel', feature_name: 'Loan Funnel', has_access: true },
+            { feature_id: 'reports', feature_name: 'Reports', has_access: true },
+            { feature_id: 'data_quality', feature_name: 'Data Quality', has_access: false },
+            { feature_id: 'data_chat', feature_name: 'Data Chat', has_access: true },
+            { feature_id: 'my_dashboard', feature_name: 'My Dashboard', has_access: true },
+            { feature_id: 'users', feature_name: 'User Management', has_access: false },
+            { feature_id: 'settings', feature_name: 'Settings', has_access: false }
           ]
         },
         {
           id: '3',
           name: 'Branch Manager',
-          description: 'Can view all loans in their branch',
+          description: 'Manager with visibility across team members',
           is_system_role: false,
           is_default: false,
           tenant_id: selectedTenantId || null,
@@ -266,25 +239,16 @@ export function RolesPermissionsSection() {
             { resource: 'reports', actions: { create: true, read: true, update: true, delete: false } },
             { resource: 'settings', actions: { create: false, read: true, update: false, delete: false } }
           ],
-          field_filters: [
-            {
-              id: 'f2',
-              field_name: 'branch_code',
-              operator: 'equals',
-              value: '{{user.branch_code}}',
-              is_dynamic: true
-            }
-          ],
-          section_access: DEFAULT_SECTIONS.map(s => ({
-            section_id: s.id,
-            section_name: s.name,
-            has_access: true
+          feature_access: AVAILABLE_FEATURES.map(f => ({
+            feature_id: f.id,
+            feature_name: f.name,
+            has_access: !['users', 'settings'].includes(f.id)
           }))
         },
         {
           id: '4',
           name: 'Viewer',
-          description: 'Read-only access to all data',
+          description: 'Read-only access to dashboards and reports',
           is_system_role: false,
           is_default: false,
           tenant_id: selectedTenantId || null,
@@ -295,11 +259,18 @@ export function RolesPermissionsSection() {
             resource: r.id,
             actions: { create: false, read: true, update: false, delete: false }
           })),
-          section_access: DEFAULT_SECTIONS.map(s => ({
-            section_id: s.id,
-            section_name: s.name,
-            has_access: true
-          }))
+          feature_access: [
+            { feature_id: 'insights', feature_name: 'Insights Dashboard', has_access: true },
+            { feature_id: 'loans', feature_name: 'Loan Browser', has_access: false },
+            { feature_id: 'leaderboard', feature_name: 'Leaderboard', has_access: true },
+            { feature_id: 'funnel', feature_name: 'Loan Funnel', has_access: false },
+            { feature_id: 'reports', feature_name: 'Reports', has_access: true },
+            { feature_id: 'data_quality', feature_name: 'Data Quality', has_access: false },
+            { feature_id: 'data_chat', feature_name: 'Data Chat', has_access: true },
+            { feature_id: 'my_dashboard', feature_name: 'My Dashboard', has_access: false },
+            { feature_id: 'users', feature_name: 'User Management', has_access: false },
+            { feature_id: 'settings', feature_name: 'Settings', has_access: false }
+          ]
         }
       ];
       
@@ -329,10 +300,9 @@ export function RolesPermissionsSection() {
         resource: r.id,
         actions: { create: false, read: true, update: false, delete: false }
       })),
-      field_filters: [],
-      section_access: DEFAULT_SECTIONS.map(s => ({
-        section_id: s.id,
-        section_name: s.name,
+      feature_access: AVAILABLE_FEATURES.map(f => ({
+        feature_id: f.id,
+        feature_name: f.name,
         has_access: true
       }))
     });
@@ -388,10 +358,9 @@ export function RolesPermissionsSection() {
         resource: r.id,
         actions: { create: false, read: true, update: false, delete: false }
       })),
-      field_filters: role.field_filters || [],
-      section_access: role.section_access || DEFAULT_SECTIONS.map(s => ({
-        section_id: s.id,
-        section_name: s.name,
+      feature_access: role.feature_access || AVAILABLE_FEATURES.map(f => ({
+        feature_id: f.id,
+        feature_name: f.name,
         has_access: true
       }))
     });
@@ -462,10 +431,9 @@ export function RolesPermissionsSection() {
         resource: r.id,
         actions: { create: false, read: true, update: false, delete: false }
       })),
-      field_filters: role.field_filters || [],
-      section_access: role.section_access || DEFAULT_SECTIONS.map(s => ({
-        section_id: s.id,
-        section_name: s.name,
+      feature_access: role.feature_access || AVAILABLE_FEATURES.map(f => ({
+        feature_id: f.id,
+        feature_name: f.name,
         has_access: true
       }))
     });
@@ -482,38 +450,6 @@ export function RolesPermissionsSection() {
     setUsersDialogOpen(true);
   };
 
-  const addFieldFilter = () => {
-    setFormData(prev => ({
-      ...prev,
-      field_filters: [
-        ...prev.field_filters,
-        {
-          id: `new-${Date.now()}`,
-          field_name: '',
-          operator: 'equals',
-          value: '',
-          is_dynamic: false
-        }
-      ]
-    }));
-  };
-
-  const updateFieldFilter = (index: number, updates: Partial<FieldFilter>) => {
-    setFormData(prev => ({
-      ...prev,
-      field_filters: prev.field_filters.map((f, i) =>
-        i === index ? { ...f, ...updates } : f
-      )
-    }));
-  };
-
-  const removeFieldFilter = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      field_filters: prev.field_filters.filter((_, i) => i !== index)
-    }));
-  };
-
   const updatePermission = (resource: string, action: keyof Permission['actions'], value: boolean) => {
     setFormData(prev => ({
       ...prev,
@@ -525,11 +461,11 @@ export function RolesPermissionsSection() {
     }));
   };
 
-  const updateSectionAccess = (sectionId: string, hasAccess: boolean) => {
+  const updateFeatureAccess = (featureId: string, hasAccess: boolean) => {
     setFormData(prev => ({
       ...prev,
-      section_access: prev.section_access.map(s =>
-        s.section_id === sectionId ? { ...s, has_access: hasAccess } : s
+      feature_access: prev.feature_access.map(f =>
+        f.feature_id === featureId ? { ...f, has_access: hasAccess } : f
       )
     }));
   };
@@ -557,10 +493,10 @@ export function RolesPermissionsSection() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-light text-slate-900 dark:text-white">
-            Roles & Permissions
+            Access & Permissions
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Manage access control and field-based filtering for your organization
+            Manage feature access and action permissions for your organization
           </p>
         </div>
         <Button
@@ -631,10 +567,10 @@ export function RolesPermissionsSection() {
                         <Users className="h-3 w-3" />
                         {role.user_count || 0} users
                       </span>
-                      {role.field_filters && role.field_filters.length > 0 && (
+                      {role.feature_access && (
                         <span className="flex items-center gap-1">
-                          <Filter className="h-3 w-3" />
-                          {role.field_filters.length} filter{role.field_filters.length !== 1 ? 's' : ''}
+                          <Layout className="h-3 w-3" />
+                          {role.feature_access.filter(f => f.has_access).length} features
                         </span>
                       )}
                     </div>
@@ -727,11 +663,10 @@ export function RolesPermissionsSection() {
           </DialogHeader>
 
           <Tabs defaultValue="basic" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="basic">Basic Info</TabsTrigger>
               <TabsTrigger value="permissions">Permissions</TabsTrigger>
-              <TabsTrigger value="filters">Data Filters</TabsTrigger>
-              <TabsTrigger value="sections">Sections</TabsTrigger>
+              <TabsTrigger value="features">Feature Access</TabsTrigger>
             </TabsList>
 
             {/* Basic Info Tab */}
@@ -802,125 +737,49 @@ export function RolesPermissionsSection() {
               </Table>
             </TabsContent>
 
-            {/* Data Filters Tab (RLS) */}
-            <TabsContent value="filters" className="space-y-4 mt-4">
+            {/* Feature Access Tab */}
+            <TabsContent value="features" className="space-y-4 mt-4">
               <div className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-                Define field-based filters to control which data users with this role can access.
-                Dynamic values (e.g., {`{{user.email}}`}) are replaced with the user's attributes.
-              </div>
-
-              {formData.field_filters.map((filter, index) => (
-                <Card key={filter.id} className="p-4">
-                  <div className="grid gap-4 sm:grid-cols-4">
-                    <div>
-                      <Label>Field</Label>
-                      <Select
-                        value={filter.field_name}
-                        onValueChange={(value) => updateFieldFilter(index, { field_name: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select field" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {FILTER_FIELDS.map(field => (
-                            <SelectItem key={field.name} value={field.name}>
-                              {field.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Operator</Label>
-                      <Select
-                        value={filter.operator}
-                        onValueChange={(value: any) => updateFieldFilter(index, { operator: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="equals">Equals</SelectItem>
-                          <SelectItem value="in">In List</SelectItem>
-                          <SelectItem value="starts_with">Starts With</SelectItem>
-                          <SelectItem value="contains">Contains</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Value</Label>
-                      <Input
-                        value={typeof filter.value === 'string' ? filter.value : filter.value.join(', ')}
-                        onChange={(e) => updateFieldFilter(index, { value: e.target.value })}
-                        placeholder="Value or {{user.attribute}}"
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFieldFilter(index)}
-                        className="text-rose-600"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id={`dynamic-${index}`}
-                        checked={filter.is_dynamic}
-                        onCheckedChange={(checked) => updateFieldFilter(index, { is_dynamic: checked })}
-                      />
-                      <Label htmlFor={`dynamic-${index}`} className="text-sm">
-                        Dynamic value (use user attributes)
-                      </Label>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-
-              <Button
-                variant="outline"
-                onClick={addFieldFilter}
-                className="w-full gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Add Filter
-              </Button>
-
-              {formData.field_filters.length === 0 && (
-                <p className="text-center text-sm text-slate-500 dark:text-slate-400 py-4">
-                  No filters configured. Users with this role will see all data.
-                </p>
-              )}
-            </TabsContent>
-
-            {/* Sections Tab */}
-            <TabsContent value="sections" className="space-y-4 mt-4">
-              <div className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-                Control which dashboard sections users with this role can access.
+                Control which features and pages users with this role can access.
+                Loan data access is controlled per-user via Encompass sync.
               </div>
 
               <div className="space-y-2">
-                {formData.section_access.map(section => (
-                  <div
-                    key={section.section_id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Layout className="h-4 w-4 text-slate-400" />
-                      <span className="font-medium text-slate-900 dark:text-white">
-                        {section.section_name}
-                      </span>
+                {formData.feature_access.map(feature => {
+                  const featureDef = AVAILABLE_FEATURES.find(f => f.id === feature.feature_id);
+                  const FeatureIcon = featureDef?.icon || Layout;
+                  return (
+                    <div
+                      key={feature.feature_id}
+                      className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700"
+                    >
+                      <div className="flex items-center gap-3">
+                        <FeatureIcon className="h-4 w-4 text-slate-400" />
+                        <div>
+                          <span className="font-medium text-slate-900 dark:text-white">
+                            {feature.feature_name}
+                          </span>
+                          {featureDef?.description && (
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {featureDef.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={feature.has_access}
+                        onCheckedChange={(checked) => updateFeatureAccess(feature.feature_id, checked)}
+                      />
                     </div>
-                    <Switch
-                      checked={section.has_access}
-                      onCheckedChange={(checked) => updateSectionAccess(section.section_id, checked)}
-                    />
-                  </div>
-                ))}
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  <strong>Note:</strong> Loan data access is managed per-user based on their Encompass permissions.
+                  Use User Management to sync individual users' loan access.
+                </p>
               </div>
             </TabsContent>
           </Tabs>
@@ -1004,46 +863,28 @@ export function RolesPermissionsSection() {
                 </div>
               </div>
 
-              {/* Field Filters Summary */}
+              {/* Feature Access Summary */}
               <div>
-                <h4 className="text-sm font-medium mb-2">Data Filters (RLS)</h4>
-                {selectedRole.field_filters && selectedRole.field_filters.length > 0 ? (
-                  <div className="space-y-2">
-                    {selectedRole.field_filters.map(filter => (
-                      <div key={filter.id} className="flex items-center gap-2 text-sm p-2 rounded bg-slate-50 dark:bg-slate-800">
-                        <Filter className="h-4 w-4 text-slate-400" />
-                        <span>
-                          <strong>{filter.field_name}</strong> {filter.operator} {
-                            filter.is_dynamic ? (
-                              <Badge variant="outline" className="text-xs">{filter.value}</Badge>
-                            ) : (
-                              <span className="text-slate-600 dark:text-slate-400">{filter.value}</span>
-                            )
-                          }
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">No filters - full data access</p>
-                )}
-              </div>
-
-              {/* Section Access Summary */}
-              <div>
-                <h4 className="text-sm font-medium mb-2">Section Access</h4>
+                <h4 className="text-sm font-medium mb-2">Feature Access</h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedRole.section_access?.map(section => (
+                  {selectedRole.feature_access?.map(feature => (
                     <Badge
-                      key={section.section_id}
-                      variant={section.has_access ? 'default' : 'secondary'}
-                      className={section.has_access ? '' : 'opacity-50'}
+                      key={feature.feature_id}
+                      variant={feature.has_access ? 'default' : 'secondary'}
+                      className={feature.has_access ? '' : 'opacity-50'}
                     >
-                      {section.has_access ? <Unlock className="h-3 w-3 mr-1" /> : <Lock className="h-3 w-3 mr-1" />}
-                      {section.section_name}
+                      {feature.has_access ? <Unlock className="h-3 w-3 mr-1" /> : <Lock className="h-3 w-3 mr-1" />}
+                      {feature.feature_name}
                     </Badge>
                   ))}
                 </div>
+              </div>
+
+              {/* Loan Access Note */}
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  <strong>Loan Data Access:</strong> Controlled per-user via Encompass sync, not by role.
+                </p>
               </div>
             </div>
           )}

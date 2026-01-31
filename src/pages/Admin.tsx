@@ -12,6 +12,7 @@ import { ConnectionsSection } from '@/components/admin/ConnectionsSection';
 import { DeploymentSection } from '@/components/admin/DeploymentSection';
 import { RAGVoiceSection } from '@/components/admin/RAGVoiceSection';
 import { UserManagementSection } from '@/components/admin/UserManagementSection';
+import { PlatformTeamSection } from '@/components/admin/PlatformTeamSection';
 import { RolesPermissionsSection } from '@/components/admin/RolesPermissionsSection';
 import { SSOConfigSection } from '@/components/admin/SSOConfigSection';
 import { OrgSettingsSection } from '@/components/admin/OrgSettingsSection';
@@ -244,7 +245,7 @@ export const Admin = () => {
       { id: 'org-overview', label: 'Overview' },
       { id: 'tenants', label: 'Tenants' },
       { id: 'users', label: 'Users' },
-      { id: 'roles', label: 'Roles & Permissions' },
+      { id: 'roles', label: 'Access & Permissions' },
       { id: 'sso', label: 'SSO Configuration' },
       { id: 'org', label: 'Organization Settings' },
       { id: 'data-quality', label: 'Data Quality' },
@@ -399,12 +400,17 @@ export const Admin = () => {
               />
             )}
 
+            {/* Platform Team Section (Super Admin only) */}
+            {activeSection === 'platform-team' && (
+              <PlatformTeamSection />
+            )}
+
             {/* Users Section */}
             {activeSection === 'users' && (
               <UserManagementSection />
             )}
 
-            {/* Roles & Permissions Section */}
+            {/* Access & Permissions Section */}
             {activeSection === 'roles' && (
               <RolesPermissionsSection />
             )}

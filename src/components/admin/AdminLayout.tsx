@@ -43,6 +43,7 @@ const allAdminSections: AdminSectionDef[] = [
   // ============ PLATFORM MANAGEMENT ============
   { id: 'overview' as AdminSection, label: 'Platform Overview', icon: BarChart3, description: 'Platform-wide statistics and metrics', color: 'text-blue-300 dark:text-blue-400/70', allowedRoles: ['super_admin', 'platform_admin', 'support'], category: 'Platform' },
   { id: 'tenants' as AdminSection, label: 'Tenants', icon: Building2, description: 'Manage all tenant accounts', color: 'text-emerald-300 dark:text-emerald-400/70', allowedRoles: ['super_admin', 'platform_admin'], category: 'Platform' },
+  { id: 'platform-team' as AdminSection, label: 'Platform Team', icon: Crown, description: 'Manage Cohi internal team members', color: 'text-amber-300 dark:text-amber-400/70', allowedRoles: ['super_admin'], category: 'Platform' },
   { id: 'deployment' as AdminSection, label: 'Deployment', icon: Cloud, description: 'Manage deployment instances', color: 'text-sky-300 dark:text-sky-400/70', allowedRoles: ['super_admin', 'platform_admin'], category: 'Platform' },
   
   // ============ ORGANIZATION (Tenant Admin) ============
@@ -51,7 +52,7 @@ const allAdminSections: AdminSectionDef[] = [
   
   // ============ USER MANAGEMENT ============
   { id: 'users' as AdminSection, label: 'Users', icon: Users, description: 'Manage organization users', color: 'text-purple-300 dark:text-purple-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'], category: 'Users & Access' },
-  { id: 'roles' as AdminSection, label: 'Roles & Permissions', icon: Shield, description: 'Role management and field-based access', color: 'text-pink-300 dark:text-pink-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'], category: 'Users & Access' },
+  { id: 'roles' as AdminSection, label: 'Access & Permissions', icon: Shield, description: 'Feature access and action permissions', color: 'text-pink-300 dark:text-pink-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'], category: 'Users & Access' },
   { id: 'sso' as AdminSection, label: 'SSO Configuration', icon: Key, description: 'Single Sign-On settings', color: 'text-yellow-300 dark:text-yellow-400/70', allowedRoles: ['super_admin', 'platform_admin', 'tenant_admin'], category: 'Users & Access' },
   
   // ============ DATA MANAGEMENT ============

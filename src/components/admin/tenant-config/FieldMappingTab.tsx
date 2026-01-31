@@ -2,12 +2,18 @@
  * Field Mapping Tab
  * Wrapper for Encompass field mapping functionality
  * Allows tenant admins to configure which LOS fields map to Coheus aliases
+ * 
+ * Sub-tabs:
+ * - Default Fields: Standard Coheus field mappings
+ * - Additional Fields: Client-defined custom fields that add columns to loans table
+ * - Population Stats: Data completeness metrics for all loan fields
  */
 
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -20,9 +26,14 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  Loader2
+  Loader2,
+  Settings2,
+  PlusCircle,
+  Database
 } from 'lucide-react';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
+import { AdditionalFieldsTab } from './AdditionalFieldsTab';
+import { FieldPopulationStats } from '@/components/admin/FieldPopulationStats';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
@@ -39,6 +50,7 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(
     losConnections.length > 0 ? losConnections[0].id : null
   );
+  const [activeSubTab, setActiveSubTab] = useState<'default' | 'additional' | 'population'>('default');
 
   // Get the selected connection
   const selectedConnection = losConnections.find(c => c.id === selectedConnectionId);
@@ -173,13 +185,47 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
               </div>
             )}
 
-            {/* Field Mapping Component */}
+            {/* Sub-tabs for Default Fields, Additional Fields, and Population Stats */}
             {selectedConnectionId && selectedTenantId && (
-              <EncompassFieldMapping
-                losConnectionId={selectedConnectionId}
-                tenantId={selectedTenantId}
-                onMappingChange={handleMappingChange}
-              />
+              <Tabs value={activeSubTab} onValueChange={(v) => setActiveSubTab(v as 'default' | 'additional' | 'population')} className="w-full">
+                <TabsList className="grid w-full grid-cols-3 mb-6">
+                  <TabsTrigger value="default" className="flex items-center gap-2">
+                    <Settings2 className="h-4 w-4" />
+                    Default Fields
+                  </TabsTrigger>
+                  <TabsTrigger value="additional" className="flex items-center gap-2">
+                    <PlusCircle className="h-4 w-4" />
+                    Additional Fields
+                  </TabsTrigger>
+                  <TabsTrigger value="population" className="flex items-center gap-2">
+                    <Database className="h-4 w-4" />
+                    Population Stats
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="default" className="mt-0">
+                  <EncompassFieldMapping
+                    losConnectionId={selectedConnectionId}
+                    tenantId={selectedTenantId}
+                    onMappingChange={handleMappingChange}
+                  />
+                </TabsContent>
+
+                <TabsContent value="additional" className="mt-0">
+                  <AdditionalFieldsTab
+                    losConnectionId={selectedConnectionId}
+                    tenantId={selectedTenantId}
+                    onRefresh={onRefresh}
+                  />
+                </TabsContent>
+
+                <TabsContent value="population" className="mt-0">
+                  <FieldPopulationStats
+                    tenantId={selectedTenantId}
+                    losConnectionId={selectedConnectionId}
+                  />
+                </TabsContent>
+              </Tabs>
             )}
           </div>
         )}

@@ -149,7 +149,7 @@ async function runManagementMigrations(options: {
  */
 async function runTenantMigrations(
   tenant: TenantInfo,
-  options: { dryRun?: boolean; targetVersion?: string; verbose?: boolean }
+  options: { dryRun?: boolean; targetVersion?: string; verbose?: boolean; force?: boolean }
 ): Promise<boolean> {
   console.log(`\n🏢 Tenant: ${tenant.slug} (${tenant.database_name})`);
   console.log('-'.repeat(50));
@@ -170,6 +170,7 @@ async function runTenantMigrations(
     const { applied, errors } = await runner.runPendingMigrations(migrationsDir, {
       dryRun: options.dryRun,
       targetVersion: options.targetVersion,
+      force: options.force,
     });
     
     if (errors.length > 0) {
@@ -274,6 +275,7 @@ async function main(): Promise<void> {
   // Parse flags
   const dryRun = args.includes('--dry-run');
   const verbose = args.includes('--verbose') || args.includes('-v');
+  const force = args.includes('--fix-checksums') || args.includes('--force') || args.includes('-f');
   const targetVersionIdx = args.indexOf('--target');
   const targetVersion = targetVersionIdx >= 0 ? args[targetVersionIdx + 1] : undefined;
   const allTenants = args.includes('--all');
@@ -284,6 +286,10 @@ async function main(): Promise<void> {
   
   if (dryRun) {
     console.log('   Mode: DRY RUN (no changes will be made)');
+  }
+  
+  if (force) {
+    console.log('   Mode: FIX CHECKSUMS (mismatches will be updated)');
   }
   
   try {
@@ -331,7 +337,7 @@ async function main(): Promise<void> {
             let failed = 0;
             
             for (const tenant of tenants) {
-              const success = await runTenantMigrations(tenant, { dryRun, targetVersion, verbose });
+              const success = await runTenantMigrations(tenant, { dryRun, targetVersion, verbose, force });
               if (!success) failed++;
             }
             
@@ -347,7 +353,7 @@ async function main(): Promise<void> {
               process.exit(1);
             }
             
-            const success = await runTenantMigrations(tenant, { dryRun, targetVersion, verbose });
+            const success = await runTenantMigrations(tenant, { dryRun, targetVersion, verbose, force });
             if (!success) process.exit(1);
           }
         } finally {
@@ -377,7 +383,7 @@ async function main(): Promise<void> {
           let allFailed = 0;
           
           for (const tenant of allTenantsList) {
-            const success = await runTenantMigrations(tenant, { dryRun, targetVersion, verbose });
+            const success = await runTenantMigrations(tenant, { dryRun, targetVersion, verbose, force });
             if (!success) allFailed++;
           }
           
@@ -440,6 +446,7 @@ Options:
   --dry-run          Preview without making changes
   --verbose, -v      Show detailed output
   --target <version> Run migrations up to specified version
+  --fix-checksums    Update checksums for modified migrations (use with caution)
   --tenant           (for create) Create a tenant migration
 `);
         process.exit(1);

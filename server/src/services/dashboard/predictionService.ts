@@ -703,12 +703,18 @@ async function callAIModel(
 /**
  * Prepare loan data for AI analysis
  * Extracts and formats relevant loan fields with proper validation and normalization
+ * 
+ * Note: raw_data column has been removed. This function now relies solely on
+ * the structured loan columns. Legacy raw_data support is provided for backward
+ * compatibility during migration but should be empty.
  */
 export function prepareLoanData(loans: any[]): any[] {
   return loans.map(loan => {
-    const rawData = typeof loan.raw_data === 'string' 
-      ? JSON.parse(loan.raw_data) 
-      : (loan.raw_data || {});
+    // Legacy raw_data support - will be empty after migration
+    // Kept for backward compatibility during transition
+    const rawData = loan.raw_data 
+      ? (typeof loan.raw_data === 'string' ? JSON.parse(loan.raw_data) : loan.raw_data)
+      : {};
     
     // Parse metadata if it's a string (JSONB from database)
     const metadata = typeof loan.metadata === 'string'
@@ -758,7 +764,7 @@ export function prepareLoanData(loans: any[]): any[] {
           rawData['interest rate'] ||
           rawData['Rate'] ||
           rawData.rate ||
-          // Try case-insensitive search in raw_data for any field containing "interest" or "rate"
+          // Try case-insensitive search for any field containing "interest" or "rate"
           (() => {
             if (rawData && typeof rawData === 'object') {
               for (const key in rawData) {
@@ -810,7 +816,7 @@ export function prepareLoanData(loans: any[]): any[] {
           rawData['dti ratio'] || // Case-insensitive
           rawData['Debt-to-Income Ratio'] ||
           rawData['Fields.742'] ||                // Encompass: BE DTI Ratio
-          // Try case-insensitive search in raw_data for any field containing "dti"
+          // Try case-insensitive search for any field containing "dti"
           (() => {
             if (rawData && typeof rawData === 'object') {
               for (const key in rawData) {
@@ -896,30 +902,36 @@ export function prepareLoanData(loans: any[]): any[] {
       // Lender credit amount
       lenderCreditAmount: parseNumeric(rawData.lender_credit_amount || rawData.lenderCreditAmount || rawData.lender_credit),
       // Milestone data for Time in Motion calculation
-      // Extract Current Milestone - check direct DB column first, then raw_data fields
+      // Extract Current Milestone - check direct DB column first, then fallback fields
       lastCompletedMilestone: String(
         loan.current_milestone ||  // Direct DB column (snake_case)
-        rawData.current_milestone ||  // In raw_data as snake_case
-        rawData['Current Milestone'] ||  // In raw_data with spaces
+        loan.last_completed_milestone ||
+        rawData.current_milestone ||  // Legacy support
+        rawData['Current Milestone'] ||  // Legacy support
         rawData['Last Completed Milestone'] || 
         rawData.last_completed_milestone || 
         rawData.lastCompletedMilestone || 
         rawData['Fields.Log.MS.CurrentMilestone'] ||
         ''
       ),
-      // Check for milestone date fields from CSV
-      milestones: rawData.milestones || rawData.milestone_data || (() => {
-        // Build milestone array from CSV date fields if available
+      // Check for milestone date fields
+      milestones: loan.milestones || rawData.milestones || rawData.milestone_data || (() => {
+        // Build milestone array from date fields if available
         const milestoneDates: any[] = [];
-        if (rawData['Credit Pull Date']) milestoneDates.push({ name: 'Credit Pull', date: parseDate(rawData['Credit Pull Date']) });
-        if (rawData['Conditional Approval Date']) milestoneDates.push({ name: 'Conditional Approval', date: parseDate(rawData['Conditional Approval Date']) });
-        if (rawData['UW Final Approval Date']) milestoneDates.push({ name: 'UW Final Approval', date: parseDate(rawData['UW Final Approval Date']) });
-        if (rawData['CTC Date']) milestoneDates.push({ name: 'Clear to Close', date: parseDate(rawData['CTC Date']) });
-        if (rawData['Last Completed Milestone']) milestoneDates.push({ name: 'Last Completed', date: parseDate(rawData['Last Completed Milestone']) });
+        const creditPullDate = loan.credit_pull_date || rawData['Credit Pull Date'];
+        const conditionalApprovalDate = loan.conditional_approval_date || rawData['Conditional Approval Date'];
+        const uwFinalApprovalDate = loan.uw_final_approval_date || rawData['UW Final Approval Date'];
+        const ctcDate = loan.ctc_date || rawData['CTC Date'];
+        const lastCompletedMilestoneDate = loan.last_completed_milestone_date || rawData['Last Completed Milestone'];
+        
+        if (creditPullDate) milestoneDates.push({ name: 'Credit Pull', date: parseDate(creditPullDate) });
+        if (conditionalApprovalDate) milestoneDates.push({ name: 'Conditional Approval', date: parseDate(conditionalApprovalDate) });
+        if (uwFinalApprovalDate) milestoneDates.push({ name: 'UW Final Approval', date: parseDate(uwFinalApprovalDate) });
+        if (ctcDate) milestoneDates.push({ name: 'Clear to Close', date: parseDate(ctcDate) });
+        if (lastCompletedMilestoneDate) milestoneDates.push({ name: 'Last Completed', date: parseDate(lastCompletedMilestoneDate) });
         return milestoneDates.length > 0 ? milestoneDates : null;
       })(),
-      // Keep raw_data for additional fields not in main columns
-      raw_data: loan.raw_data,
+      // Note: raw_data column has been removed - additional fields should use structured columns
       // Calculate days since application
       daysSinceApplication: applicationDate 
         ? Math.floor((new Date().getTime() - applicationDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -972,12 +984,14 @@ async function calculateMarketDelta(loan: any): Promise<{
     };
   }
 
-  // Determine if loan is active (check status from raw_data if available)
-  const rawData = typeof loan.raw_data === 'string' 
-    ? (() => { try { return JSON.parse(loan.raw_data); } catch { return {}; } })()
-    : (loan.raw_data || {});
+  // Determine if loan is active (check status from loan columns)
+  // Note: raw_data column has been removed - use structured columns only
+  const rawData = loan.raw_data 
+    ? (typeof loan.raw_data === 'string' ? JSON.parse(loan.raw_data) : loan.raw_data)
+    : {}; // Empty for backward compatibility
   
   const currentLoanStatus = loan.status || 
+                            loan.current_loan_status ||
                             rawData['Current Loan Status'] || 
                             rawData.current_loan_status ||
                             rawData['Loan Status'] ||
@@ -991,8 +1005,10 @@ async function calculateMarketDelta(loan: any): Promise<{
                     currentLoanStatus.toLowerCase() === 'active' ||
                     currentLoanStatus.toLowerCase() === 'inquiry');
   
-  // Extract Current Status Date from raw_data (for historical loans)
-  const currentStatusDate = rawData['Current Status Date'] ||
+  // Extract Current Status Date (for historical loans)
+  const currentStatusDate = loan.current_status_date ||
+                            loan.status_date ||
+                            rawData['Current Status Date'] ||
                             rawData.current_status_date ||
                             rawData['Status Date'] ||
                             rawData.status_date ||
@@ -1215,6 +1231,9 @@ async function calculateMarketDelta(loan: any): Promise<{
 /**
  * Calculate pullthrough rate for a specific role
  * Based on PULLTHROUGH_CALCULATION.md
+ * 
+ * Note: raw_data column has been removed. This function now primarily relies on
+ * structured loan columns and metadata fields.
  */
 function calculatePullthroughForRole(
   allLoans: any[],
@@ -1222,24 +1241,25 @@ function calculatePullthroughForRole(
 ): Record<string, number> {
   const pullthroughMap: Record<string, number> = {};
 
-  // Find role column by checking raw_data (CSV field names) and metadata
-  // Store the ACTUAL field name from raw_data, not the candidate name
+  // Find role column by checking loan columns and metadata
+  // Legacy raw_data support kept for backward compatibility
   let roleColumn: string | null = null;
-  let actualRawDataKey: string | null = null; // The actual key name in raw_data
+  let actualRawDataKey: string | null = null; // The actual key name for value extraction
   
-  // Try to find a matching field in the first loan's raw_data or metadata
+  // Try to find a matching field in the first loan's properties or metadata
   if (allLoans.length > 0) {
     const firstLoan = allLoans[0];
-    const rawData = typeof firstLoan.raw_data === 'string' 
-      ? JSON.parse(firstLoan.raw_data) 
-      : (firstLoan.raw_data || {});
+    // Legacy raw_data support - will be empty after migration
+    const rawData = firstLoan.raw_data 
+      ? (typeof firstLoan.raw_data === 'string' ? JSON.parse(firstLoan.raw_data) : firstLoan.raw_data)
+      : {};
     
-    // First, check if raw_data has any keys at all (it should for CSV imports)
+    // Check keys available in the loan object (excluding internal fields)
     const rawDataKeys = rawData && typeof rawData === 'object' ? Object.keys(rawData) : [];
     
-    // Debug: log raw_data keys to help diagnose
+    // Debug: log keys to help diagnose
     if (rawDataKeys.length > 0 && rawDataKeys.length < 50) {
-      logInfo('Checking raw_data for role column', {
+      logInfo('Checking for role column', {
         roleCandidates: roleColumnCandidates,
         rawDataKeys: rawDataKeys.slice(0, 20), // First 20 keys
         rawDataKeyCount: rawDataKeys.length
@@ -1251,24 +1271,24 @@ function calculatePullthroughForRole(
       // Use 'in' operator to check if column EXISTS (even if value is null/empty)
       if (candidate in firstLoan) {
         roleColumn = candidate;
-        actualRawDataKey = candidate; // Not raw_data, but use same field for consistency
+        actualRawDataKey = candidate; // Use this field for consistency
         break;
       }
       
-      // Check exact match in raw_data (for CSV imports)
+      // Check exact match in legacy data (for CSV imports)
       if (rawData && typeof rawData === 'object' && rawData[candidate] !== undefined) {
         roleColumn = candidate;
         actualRawDataKey = candidate; // Store actual key
         break;
       }
       
-      // Check case-insensitive match in raw_data (for CSV field names with spaces/casing)
+      // Check case-insensitive match (for CSV field names with spaces/casing)
       const lowerCandidate = candidate.toLowerCase();
       for (const key of rawDataKeys) {
         const lowerKey = key.toLowerCase();
         if (lowerKey === lowerCandidate) {
           roleColumn = candidate; // Use candidate for consistency in logic
-          actualRawDataKey = key; // Store ACTUAL key from raw_data
+          actualRawDataKey = key; // Store ACTUAL key for value extraction
           break;
         }
         // Also check for partial matches (e.g., "loan officer" in "Loan Officer Name")
