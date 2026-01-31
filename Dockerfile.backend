@@ -2,22 +2,23 @@ FROM node:20-alpine
 
 WORKDIR /app/server
 
-# Install dependencies for development
-RUN apk add --no-cache git
+# Install dependencies for development and health check (wget for ECS)
+RUN apk add --no-cache git wget
 
 # Copy package files
 COPY server/package*.json ./
 
-# Install all dependencies (including dev dependencies)
+# Install all dependencies (including dev dependencies for tsx)
 RUN npm ci
 
-# Copy server source (will be mounted as volume in docker-compose)
-# This is here for cases where volume mount is not used
+# Copy server source
 COPY server/ ./
 
 # Expose port
 EXPOSE 3001
 
-# Run development server with hot-reload
+# Default command
+# For production: npm start
+# For development: npm run dev
 CMD ["npm", "run", "dev"]
 

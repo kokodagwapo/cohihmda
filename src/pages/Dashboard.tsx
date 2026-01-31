@@ -62,6 +62,7 @@ import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
 import { TenantSelector } from '@/components/dashboard/TenantSelector';
 import { useChannelStore } from '@/stores/channelStore';
+import { useTenantStore } from '@/stores/tenantStore';
 
 
 
@@ -98,11 +99,11 @@ const Dashboard = () => {
   // User state for greeting - derive from AuthContext user
   const [displayName, setDisplayName] = useState<string | null>(null);
   
-  // Tenant selection state for admins
+  // Tenant selection state for admins - uses global store (shared with Navigation header)
   // For tenant_admin users, this is automatically set to their tenant_id
   const isTenantAdmin = user?.role === 'tenant_admin';
   const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const { selectedTenantId, setSelectedTenantId } = useTenantStore();
   
   // Track user ID to detect user changes and reset state
   const [prevUserId, setPrevUserId] = useState<string | null>(null);
@@ -127,7 +128,7 @@ const Dashboard = () => {
       
       setPrevUserId(currentUserId);
     }
-  }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
+  }, [user?.id, user?.role, user?.tenant_id, prevUserId, setSelectedTenantId]);
   
   // Channel filter state - uses global store (shared with Navigation header)
   const { selectedChannel, setSelectedChannel } = useChannelStore();
@@ -1086,7 +1087,7 @@ const Dashboard = () => {
                 {dashboardVisibility.executiveDashboard && <div id="executiveDashboard" className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
                 
                 {/* Closing & Fallout Forecast */}
-                {dashboardVisibility.closingFalloutForecast && <div id="closingFalloutForecast" className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}
+                {dashboardVisibility.closingFalloutForecast && <div id="closingFalloutForecast" className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
               </div>
             )}
           </div>}

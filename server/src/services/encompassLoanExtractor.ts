@@ -1,6 +1,7 @@
 /**
  * Encompass Loan Extractor Service
  * Extracts loans from Encompass API and maps fields to PostgreSQL columns
+ * Enhanced to support additional client-defined fields
  */
 
 import { EncompassApiService, EncompassLoan } from './encompassApiService.js';
@@ -13,6 +14,7 @@ import {
   normalizeColumnName,
   getColumnNameAliases,
 } from './encompassFieldMapper.js';
+import { AdditionalFieldService, AdditionalFieldDefinition } from './additionalFieldService.js';
 
 export interface LoanRecord {
   [columnName: string]: any;
@@ -192,6 +194,43 @@ export class EncompassLoanExtractor {
       }
     }
 
+    // Load additional field definitions for this connection
+    let additionalFields: AdditionalFieldDefinition[] = [];
+    try {
+      const additionalFieldService = new AdditionalFieldService(this.tenantPool);
+      additionalFields = await additionalFieldService.getEnabledFieldsForEtl(losConnectionId);
+      
+      if (additionalFields.length > 0) {
+        console.log(`[EncompassLoanExtractor] Found ${additionalFields.length} additional fields to sync`);
+        
+        // Add additional field IDs to the request
+        for (const field of additionalFields) {
+          // Add the LOS field ID if not already in the list
+          const fieldId = field.losFieldId;
+          if (!encompassFieldIds.includes(fieldId)) {
+            encompassFieldIds.push(fieldId);
+          }
+          // Also add without/with Fields. prefix variation
+          if (fieldId.startsWith('Fields.')) {
+            const withoutPrefix = fieldId.replace('Fields.', '');
+            if (!encompassFieldIds.includes(withoutPrefix)) {
+              encompassFieldIds.push(withoutPrefix);
+            }
+          } else if (!fieldId.startsWith('CX.')) {
+            const withPrefix = `Fields.${fieldId}`;
+            if (!encompassFieldIds.includes(withPrefix)) {
+              encompassFieldIds.push(withPrefix);
+            }
+          }
+        }
+        
+        console.log(`[EncompassLoanExtractor] Total field IDs after adding additional fields: ${encompassFieldIds.length}`);
+      }
+    } catch (error: any) {
+      console.warn(`[EncompassLoanExtractor] Could not load additional fields (table may not exist yet): ${error.message}`);
+      // Continue without additional fields
+    }
+
     // Request loans from Encompass API
     // Use folderNames if provided, otherwise fall back to folderName for backward compatibility
     const folderNames = options.folderNames || (options.folderName ? [options.folderName] : undefined);
@@ -219,7 +258,8 @@ export class EncompassLoanExtractor {
           tenantId,
           losConnectionId,
           fieldSwaps,
-          fieldFormatMap  // Pass the format map for proper type conversion
+          fieldFormatMap,  // Pass the format map for proper type conversion
+          additionalFields // Pass additional field definitions
         );
         records.push(record);
         processedCount++;
@@ -250,7 +290,8 @@ export class EncompassLoanExtractor {
     tenantId: string,
     losConnectionId: string,
     fieldSwaps: Map<string, string>,
-    fieldFormatMap: Map<string, string> = new Map()
+    fieldFormatMap: Map<string, string> = new Map(),
+    additionalFields: AdditionalFieldDefinition[] = []
   ): Promise<LoanRecord> {
     const record: LoanRecord = {};
     
@@ -466,7 +507,7 @@ export class EncompassLoanExtractor {
     const loanKeys = Object.keys(loan);
     for (const loanKey of loanKeys) {
       // Skip if already mapped or if it's a system field
-      if (loanKey === 'loanGuid' || loanKey === 'guid' || loanKey === 'fields' || loanKey === 'raw_data') {
+      if (loanKey === 'loanGuid' || loanKey === 'guid' || loanKey === 'fields') {
         continue;
       }
       
@@ -538,22 +579,104 @@ export class EncompassLoanExtractor {
       }
     }
 
-    // Store all loan fields in raw_data for reference
-    record.raw_data = { ...loan };
+    // ADDITIONAL FIELDS: Map client-defined additional fields to their columns
+    // These fields are tracked in the additional_field_definitions table
+    if (additionalFields.length > 0) {
+      for (const additionalField of additionalFields) {
+        const { losFieldId, columnName, dataType, displayName } = additionalField;
+        
+        // Skip if column doesn't exist or is disabled
+        if (!columnName || !additionalField.columnCreated) {
+          continue;
+        }
 
-    // Ensure loan_id is set (prioritize GUID as unique identifier)
-    // GUID is the unique identifier for Encompass loans
-    // Check multiple possible locations for GUID
+        // Try to find the value in the loan using various key formats
+        let value: any = undefined;
+        
+        // Try various key formats
+        const keyVariations = [
+          losFieldId,
+          losFieldId.replace('Fields.', ''),
+          `Fields.${losFieldId.replace('Fields.', '')}`,
+          losFieldId.replace('CX.', ''),
+          losFieldId.toLowerCase(),
+          losFieldId.replace('Fields.', '').toLowerCase(),
+        ];
+        
+        for (const key of keyVariations) {
+          if (loan[key] !== undefined && loan[key] !== null && loan[key] !== '') {
+            value = loan[key];
+            break;
+          }
+        }
+        
+        // Case-insensitive search as fallback
+        if (value === undefined) {
+          const lowerFieldId = losFieldId.toLowerCase();
+          const matchingKey = Object.keys(loan).find(key => {
+            const lowerKey = key.toLowerCase();
+            return lowerKey === lowerFieldId || 
+                   lowerKey === lowerFieldId.replace('fields.', '') ||
+                   lowerKey.replace('fields.', '') === lowerFieldId.replace('fields.', '');
+          });
+          if (matchingKey) {
+            value = loan[matchingKey];
+          }
+        }
+        
+        // If value found, transform based on data type and add to record
+        if (value !== undefined && value !== null && value !== '') {
+          // Get Encompass format if available
+          const format = fieldFormatMap.get(losFieldId) || 
+                        fieldFormatMap.get(losFieldId.replace('Fields.', '')) ||
+                        null;
+          
+          // Transform the value (use displayName as alias for type detection)
+          const transformedValue = this.transformValueForAdditionalField(value, dataType, format);
+          record[columnName] = transformedValue;
+        }
+      }
+    }
+
+    // Note: raw_data column has been removed. Unmapped fields are no longer stored.
+    // Use the additional_field_definitions system to track additional fields.
+
+    // =============================================================================
+    // IMPORTANT: Loan Identifiers
+    // =============================================================================
+    // guid: Encompass GUID - unique system identifier (used for joins/access filtering)
+    // loan_number: Human-readable loan number (Fields.364) - for display
+    // loan_id: DEPRECATED - will be removed in future, kept for backwards compatibility
+    // =============================================================================
+    
+    // Extract GUID from various possible locations in the Encompass response
     const guid = loan['Fields.GUID'] || loan['GUID'] || loan.loanGuid || loan.guid;
     
-    if (!record.loan_id) {
-      record.loan_id = guid || loan['Fields.364'] || loan['Loan.LoanNumber'] || null;
+    // Extract loan number from Fields.364 or other locations
+    const loanNumber = loan['Fields.364'] || loan['Loan.LoanNumber'] || loan.loanNumber || record.loan_number;
+    
+    // Set guid (primary identifier)
+    if (!record.guid && guid) {
+      // Normalize GUID - remove curly braces if present, lowercase
+      record.guid = guid.replace(/[{}]/g, '').toLowerCase();
     }
     
-    // Validate loan_id is not null (required for database)
+    // Set loan_number (human-readable)
+    if (!record.loan_number && loanNumber) {
+      record.loan_number = loanNumber;
+    }
+    
+    // Set loan_id for backwards compatibility (DEPRECATED)
+    // Prefer GUID, fallback to loan_number
     if (!record.loan_id) {
-      console.warn(`[EncompassLoanExtractor] Loan missing GUID/loan_id, loan object keys:`, Object.keys(loan).slice(0, 20));
-      record.loan_id = guid || `LOAN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      record.loan_id = record.guid || record.loan_number || null;
+    }
+    
+    // Validate guid is set (required for database uniqueness)
+    if (!record.guid) {
+      console.warn(`[EncompassLoanExtractor] Loan missing GUID, loan object keys:`, Object.keys(loan).slice(0, 20));
+      // Generate a fallback GUID if absolutely necessary
+      record.guid = `generated-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
     
     // Note: Removed verbose logging - use debug endpoint for field mapping issues
@@ -720,5 +843,90 @@ export class EncompassLoanExtractor {
 
     // Default: return as-is
     return value;
+  }
+
+  /**
+   * Transform value for additional fields based on configured data type
+   * Uses explicit data type from field definition rather than heuristics
+   */
+  private transformValueForAdditionalField(
+    value: any, 
+    dataType: string, 
+    encompassFormat?: string | null
+  ): any {
+    // Handle empty values
+    if (value === '' || value === null || value === undefined) {
+      return null;
+    }
+
+    // Use Encompass format if available (most accurate)
+    if (encompassFormat) {
+      // Delegate to the main transformValue method for format-based conversion
+      return this.transformValue(value, '', encompassFormat);
+    }
+
+    // Transform based on configured data type
+    switch (dataType) {
+      case 'string':
+        // Return as string
+        return String(value);
+      
+      case 'number':
+      case 'currency':
+      case 'percentage':
+        // Parse as number
+        if (typeof value === 'string') {
+          // Remove currency symbols, commas, etc.
+          const cleanValue = value.replace(/[$,]/g, '').trim();
+          const num = parseFloat(cleanValue);
+          return isNaN(num) ? null : num;
+        }
+        return typeof value === 'number' ? value : null;
+      
+      case 'date':
+        // Parse as date
+        if (typeof value === 'string') {
+          const dateStr = value.trim();
+          if (!dateStr) return null;
+          
+          // Try ISO format first
+          let date = new Date(dateStr);
+          
+          // If that fails, try Encompass format: "M/d/yyyy"
+          if (isNaN(date.getTime())) {
+            const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (match) {
+              const [, month, day, year] = match;
+              date = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+            }
+          }
+          
+          if (!isNaN(date.getTime())) {
+            return date.toISOString().split('T')[0]; // Return as DATE (YYYY-MM-DD)
+          }
+          
+          // Return original if can't parse
+          return dateStr;
+        }
+        if (value instanceof Date) {
+          return value.toISOString().split('T')[0];
+        }
+        return value;
+      
+      case 'boolean':
+        // Parse as boolean
+        if (typeof value === 'boolean') {
+          return value;
+        }
+        if (typeof value === 'string') {
+          const upper = value.toUpperCase().trim();
+          return upper === 'Y' || upper === 'YES' || upper === 'TRUE' || upper === '1' || upper === 'X';
+        }
+        return value === 1 || value === true;
+      
+      default:
+        // Unknown type - return as-is
+        return value;
+    }
   }
 }

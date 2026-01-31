@@ -1,11 +1,7 @@
 # ============================================================================
-# Deploy Aurora Serverless v2 Clusters (Step 1)
+# Deploy Aurora Serverless v2 Cluster (Step 1)
 # ============================================================================
-# MUST BE DEPLOYED FIRST - ECS Backend depends on Aurora endpoints
-#
-# This script deploys:
-# - Management Aurora cluster (tenant registry)
-# - First tenant Aurora cluster
+# All resources defined in CloudFormation - no CLI resource creation
 # ============================================================================
 
 param(
@@ -20,59 +16,26 @@ param(
 Write-Status "Starting Aurora Cluster Deployment" "Magenta"
 
 # Use existing VPC from config
-if ($USE_EXISTING_VPC) {
-    $VPC_ID = $EXISTING_VPC_ID
-    $PRIVATE_SUBNET_1 = $EXISTING_PRIVATE_SUBNET_1
-    $PRIVATE_SUBNET_2 = $EXISTING_PRIVATE_SUBNET_2
-    Write-Status "Using existing VPC: $VPC_ID"
-} else {
+if (-not $USE_EXISTING_VPC) {
     Write-Status "ERROR: USE_EXISTING_VPC must be enabled. Edit config.ps1" "Red"
     exit 1
 }
 
-if (-not $PRIVATE_SUBNET_1 -or -not $PRIVATE_SUBNET_2) {
-    Write-Status "ERROR: Private subnets not found in VPC $VPC_ID" "Red"
-    Write-Status "Ensure VPC has at least 2 private subnets (MapPublicIpOnLaunch=false)" "Yellow"
+if (-not $EXISTING_PRIVATE_SUBNET_1 -or -not $EXISTING_PRIVATE_SUBNET_2) {
+    Write-Status "ERROR: Private subnets not found in VPC $EXISTING_VPC_ID" "Red"
     exit 1
 }
 
-Write-Status "VPC: $VPC_ID"
-Write-Status "Private Subnets: $PRIVATE_SUBNET_1, $PRIVATE_SUBNET_2"
-
-# Create or find Aurora security group
-$AURORA_SG_NAME = "$PROJECT_NAME-$ENVIRONMENT-aurora-sg"
-$AURORA_SG = aws ec2 describe-security-groups `
-    --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=$AURORA_SG_NAME" `
+# Get VPC CIDR for security group
+$VPC_CIDR = aws ec2 describe-vpcs `
+    --vpc-ids $EXISTING_VPC_ID `
     --profile $env:AWS_PROFILE `
     --region $env:AWS_REGION `
-    --query 'SecurityGroups[0].GroupId' `
-    --output text 2>$null
+    --query 'Vpcs[0].CidrBlock' `
+    --output text
 
-if (-not $AURORA_SG -or $AURORA_SG -eq "None") {
-    Write-Status "Creating Aurora security group..."
-    $AURORA_SG = aws ec2 create-security-group `
-        --group-name $AURORA_SG_NAME `
-        --description "Security group for Aurora Serverless v2 clusters" `
-        --vpc-id $VPC_ID `
-        --profile $env:AWS_PROFILE `
-        --region $env:AWS_REGION `
-        --query 'GroupId' `
-        --output text
-    
-    # Allow PostgreSQL from within VPC
-    $VPC_CIDR = aws ec2 describe-vpcs --vpc-ids $VPC_ID --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'Vpcs[0].CidrBlock' --output text
-    aws ec2 authorize-security-group-ingress `
-        --group-id $AURORA_SG `
-        --protocol tcp `
-        --port 5432 `
-        --cidr $VPC_CIDR `
-        --profile $env:AWS_PROFILE `
-        --region $env:AWS_REGION
-    
-    Write-Status "Created Aurora SG: $AURORA_SG" "Green"
-} else {
-    Write-Status "Using existing Aurora SG: $AURORA_SG"
-}
+Write-Status "VPC: $EXISTING_VPC_ID (CIDR: $VPC_CIDR)"
+Write-Status "Private Subnets: $EXISTING_PRIVATE_SUBNET_1, $EXISTING_PRIVATE_SUBNET_2"
 
 # Function to deploy Aurora cluster
 function Deploy-AuroraCluster {
@@ -88,10 +51,10 @@ function Deploy-AuroraCluster {
         "ParameterKey=ProjectName,ParameterValue=$PROJECT_NAME"
         "ParameterKey=Environment,ParameterValue=$ENVIRONMENT"
         "ParameterKey=ClusterType,ParameterValue=$Type"
-        "ParameterKey=VPCId,ParameterValue=$VPC_ID"
-        "ParameterKey=PrivateSubnet1,ParameterValue=$PRIVATE_SUBNET_1"
-        "ParameterKey=PrivateSubnet2,ParameterValue=$PRIVATE_SUBNET_2"
-        "ParameterKey=AllowedSecurityGroupId,ParameterValue=$AURORA_SG"
+        "ParameterKey=VPCId,ParameterValue=$EXISTING_VPC_ID"
+        "ParameterKey=PrivateSubnet1,ParameterValue=$EXISTING_PRIVATE_SUBNET_1"
+        "ParameterKey=PrivateSubnet2,ParameterValue=$EXISTING_PRIVATE_SUBNET_2"
+        "ParameterKey=AllowedCIDR,ParameterValue=$VPC_CIDR"
     )
     
     if ($Type -eq "management") {
@@ -115,6 +78,8 @@ function Deploy-AuroraCluster {
         
         if ($LASTEXITCODE -eq 0) {
             Wait-ForStack $StackName "stack-update-complete"
+        } else {
+            Write-Status "No updates to perform" "Yellow"
         }
     } else {
         Write-Status "Creating new stack..."
@@ -151,10 +116,10 @@ if ($ClusterType -eq "management") {
 
 Write-Status "Aurora Deployment Complete!" "Green"
 Write-Host ""
-Write-Host "Management Cluster Endpoint:" -ForegroundColor Cyan
+Write-Host "Cluster Endpoint:" -ForegroundColor Cyan
 $mgmtEndpoint = Get-StackOutput $STACK_AURORA_MGMT "ClusterEndpoint"
 $mgmtSecretArn = Get-StackOutput $STACK_AURORA_MGMT "SecretArn"
-Write-Host "  Endpoint: $mgmtEndpoint"
+Write-Host "  Endpoint:   $mgmtEndpoint"
 Write-Host "  Secret ARN: $mgmtSecretArn"
 Write-Host ""
 Write-Host "NEXT: Deploy ECS Fargate backend with:" -ForegroundColor Yellow

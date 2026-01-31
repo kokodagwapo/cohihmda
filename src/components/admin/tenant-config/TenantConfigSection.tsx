@@ -1,8 +1,8 @@
 /**
  * Tenant Configuration Section
  * Self-service mapping tool for lender admins
- * Manages field mappings, range rules, filters, and scoring weights
- * Note: Personas/user profiles are managed in Roles & Permissions section
+ * Manages field mappings, filters, and scoring weights
+ * Note: Personas/user profiles are managed in Access & Permissions section
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -12,28 +12,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { 
-  Database, 
-  Ruler, 
   Filter, 
   BarChart3, 
   Loader2,
   RefreshCw,
   Settings2,
-  Link2
+  Link2,
+  Building2
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/AuthContext';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
-import { FieldDictionaryTab } from './FieldDictionaryTab';
 import { FieldMappingTab } from './FieldMappingTab';
-import { RangeRulesTab } from './RangeRulesTab';
 import { FilterBuilderTab } from './FilterBuilderTab';
 import { ScoringWeightsTab } from './ScoringWeightsTab';
 
 export function TenantConfigSection() {
   const { toast } = useToast();
-  const { user } = useAuth();
   
   // Use admin tenant context
   const { selectedTenantId, isTenantAdmin, currentTenantName } = useAdminTenant();
@@ -41,8 +36,6 @@ export function TenantConfigSection() {
   const [loading, setLoading] = useState(false);
   
   // Data states
-  const [customFields, setCustomFields] = useState<any[]>([]);
-  const [rangeRules, setRangeRules] = useState<any[]>([]);
   const [filters, setFilters] = useState<any[]>([]);
   const [scoringWeights, setScoringWeights] = useState<Record<string, any[]>>({});
   const [complexityComponents, setComplexityComponents] = useState<Record<string, any[]>>({});
@@ -50,20 +43,28 @@ export function TenantConfigSection() {
 
   // Load all data
   const loadData = useCallback(async () => {
+    // For platform admins, require a tenant to be selected
+    if (!isTenantAdmin && !selectedTenantId) {
+      setLosConnections([]);
+      setFilters([]);
+      setScoringWeights({});
+      setComplexityComponents({});
+      return;
+    }
+    
     setLoading(true);
     try {
-      const [fieldsRes, rulesRes, filtersRes, salesWeightsRes, opsWeightsRes, complexityRes, losRes] = await Promise.all([
-        api.request<{ fields: any[] }>('/api/tenant-config/fields'),
-        api.request<{ rules: any[] }>('/api/tenant-config/range-rules'),
-        api.request<{ filters: any[] }>('/api/tenant-config/filters'),
-        api.request<{ weights: Record<string, any[]> }>('/api/tenant-config/scoring-weights/sales'),
-        api.request<{ weights: Record<string, any[]> }>('/api/tenant-config/scoring-weights/operations'),
-        api.request<{ components: Record<string, any[]> }>('/api/tenant-config/complexity'),
-        api.request<{ connections: any[] }>('/api/los/connections'),
+      // Build tenant query param for platform admins
+      const tenantParam = selectedTenantId ? `?tenant_id=${selectedTenantId}` : '';
+      
+      const [filtersRes, salesWeightsRes, opsWeightsRes, complexityRes, losRes] = await Promise.all([
+        api.request<{ filters: any[] }>(`/api/tenant-config/filters${tenantParam}`),
+        api.request<{ weights: Record<string, any[]> }>(`/api/tenant-config/scoring-weights/sales${tenantParam}`),
+        api.request<{ weights: Record<string, any[]> }>(`/api/tenant-config/scoring-weights/operations${tenantParam}`),
+        api.request<{ components: Record<string, any[]> }>(`/api/tenant-config/complexity${tenantParam}`),
+        api.request<{ connections: any[] }>(`/api/los/connections${tenantParam}`),
       ]);
       
-      setCustomFields(fieldsRes.fields || []);
-      setRangeRules(rulesRes.rules || []);
       setFilters(filtersRes.filters || []);
       setScoringWeights({
         sales: salesWeightsRes.weights?.default || [],
@@ -81,16 +82,14 @@ export function TenantConfigSection() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, selectedTenantId, isTenantAdmin]);
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, selectedTenantId]);
 
   const tabs = [
     { id: 'mapping', label: 'Field Mapping', icon: Link2, count: null },
-    { id: 'fields', label: 'Custom Fields', icon: Database, count: customFields.length },
-    { id: 'ranges', label: 'Range Rules', icon: Ruler, count: rangeRules.length },
     { id: 'filters', label: 'Saved Filters', icon: Filter, count: filters.length },
     { id: 'scoring', label: 'Scoring Weights', icon: BarChart3, count: null },
   ];
@@ -137,9 +136,27 @@ export function TenantConfigSection() {
         </CardHeader>
       </Card>
 
-      {/* Tabs */}
+      {/* No tenant selected message for platform admins */}
+      {!isTenantAdmin && !selectedTenantId && (
+        <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
+          <CardContent className="flex items-center gap-4 py-8">
+            <Building2 className="h-12 w-12 text-amber-500 dark:text-amber-400" strokeWidth={1.5} />
+            <div>
+              <h3 className="text-lg font-medium text-amber-900 dark:text-amber-100">
+                Select a Tenant
+              </h3>
+              <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                Use the tenant selector above to choose which organization's configuration to manage.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tabs - only show when tenant is selected (or for tenant admins) */}
+      {(isTenantAdmin || selectedTenantId) && (
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5 gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+        <TabsList className="grid w-full grid-cols-3 gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
           {tabs.map((tab) => (
             <TabsTrigger
               key={tab.id}
@@ -172,20 +189,6 @@ export function TenantConfigSection() {
               />
             </TabsContent>
 
-            <TabsContent value="fields">
-              <FieldDictionaryTab
-                fields={customFields}
-                onRefresh={loadData}
-              />
-            </TabsContent>
-
-            <TabsContent value="ranges">
-              <RangeRulesTab
-                rules={rangeRules}
-                onRefresh={loadData}
-              />
-            </TabsContent>
-
             <TabsContent value="filters">
               <FilterBuilderTab
                 filters={filters}
@@ -203,6 +206,7 @@ export function TenantConfigSection() {
           </>
         )}
       </Tabs>
+      )}
     </motion.div>
   );
 }

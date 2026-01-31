@@ -12,6 +12,7 @@ import { authenticateToken, AuthRequest } from '../../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
 import { apiLimiter } from '../../middleware/rateLimiter.js';
 import { logError, logWarn, logInfo, logDebug } from '../../services/logger.js';
+import { getLoanAccessContext } from '../../services/userLoanAccessService.js';
 import {
   isActorMissing,
   buildChannelWhereClause,
@@ -47,6 +48,21 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
   try {
     const tenantPool = getTenantContext(req).tenantPool;
 
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return empty toptiering data
+    if (accessCtx.hasNoAccess) {
+      return res.json({
+        actor: req.query.actor || 'branch',
+        dateRange: {},
+        data: [],
+        summary: { totalActors: 0, topTierCount: 0, middleTierCount: 0, developTierCount: 0 },
+        accessFiltered: true,
+        noAccess: true
+      });
+    }
+
     const actor = (req.query.actor as string) || 'branch';
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
@@ -67,13 +83,23 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
     logInfo('[TopTiering] Start', {
       actor,
       dateRange: { start: effectiveStartDate.toISOString(), end: effectiveEndDate.toISOString() },
-      channel: channelGroup
+      channel: channelGroup,
+      hasAccessFilter: accessCtx.requiresFiltering
     });
 
     // SQL filtering setup
     const channelClause = buildChannelWhereClause(channelGroup);
     const startDateStr = formatDateForSQL(effectiveStartDate);
     const endDateStr = formatDateForSQL(effectiveEndDate);
+    
+    // Build query params with access filter
+    const queryParams = accessCtx.requiresFiltering 
+      ? [startDateStr, endDateStr, accessCtx.userId]
+      : [startDateStr, endDateStr];
+    
+    const accessWhereClause = accessCtx.requiresFiltering 
+      ? `AND guid IN (SELECT loan_guid FROM user_loan_access WHERE user_id = $3)` 
+      : '';
 
     // Fetch FUNDED loans with aggregation
     const fundedLoansResult = await retryQuery(
@@ -87,14 +113,15 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
          FROM public.loans 
          WHERE COALESCE(funding_date, closing_date) >= $1
            AND COALESCE(funding_date, closing_date) <= $2
+           ${accessWhereClause}
            ${channelClause}`,
-        [startDateStr, endDateStr]
+        queryParams
       ),
       2, 500
     );
     const fundedLoans = fundedLoansResult.rows;
 
-    // Fetch LOST OPPORTUNITY loans
+    // Fetch LOST OPPORTUNITY loans (with access filter)
     const lostOpportunityResult = await retryQuery(
       () => tenantPool.query(
         `SELECT 
@@ -111,8 +138,9 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
              current_loan_status ILIKE '%not accepted%' OR
              current_loan_status ILIKE '%incomplete%'
            )
+           ${accessWhereClause}
            ${channelClause}`,
-        [startDateStr, endDateStr]
+        queryParams
       ),
       2, 500
     );

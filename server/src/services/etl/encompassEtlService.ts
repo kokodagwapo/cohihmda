@@ -91,11 +91,11 @@ export class EncompassEtlService {
       // Verify actual database count after load
       try {
         const verifyResult = await this.tenantPool.query(
-          'SELECT COUNT(*) as count, COUNT(DISTINCT loan_id) as unique_count FROM public.loans'
+          'SELECT COUNT(*) as count, COUNT(DISTINCT guid) as unique_count FROM public.loans'
         );
         const dbCount = parseInt(verifyResult.rows[0]?.count || '0', 10);
         const uniqueCount = parseInt(verifyResult.rows[0]?.unique_count || '0', 10);
-        console.log(`[EncompassEtlService] Database verification - Total rows: ${dbCount}, Unique loan_ids: ${uniqueCount}`);
+        console.log(`[EncompassEtlService] Database verification - Total rows: ${dbCount}, Unique GUIDs: ${uniqueCount}`);
         
         if (dbCount !== recordsSynced) {
           console.warn(`[EncompassEtlService] WARNING: Expected ${recordsSynced} loans in DB but found ${dbCount}`);
@@ -232,14 +232,28 @@ export class EncompassEtlService {
           ...loan,
         };
 
-        // Ensure loan_id is set
+        // Ensure guid is set (primary identifier)
+        if (!transformedLoan.guid) {
+          transformedLoan.guid = loan.guid || loan.loanGuid || loan['Fields.GUID'] || loan['GUID'];
+          // Normalize GUID - remove curly braces, lowercase
+          if (transformedLoan.guid) {
+            transformedLoan.guid = transformedLoan.guid.replace(/[{}]/g, '').toLowerCase();
+          }
+        }
+        
+        // Ensure loan_number is set (human-readable)
+        if (!transformedLoan.loan_number) {
+          transformedLoan.loan_number = loan.loan_number || loan['Fields.364'] || loan['Loan.LoanNumber'];
+        }
+        
+        // Set loan_id for backwards compatibility (DEPRECATED)
         if (!transformedLoan.loan_id) {
-          transformedLoan.loan_id = loan.loan_number || loan.guid || `LOAN-${Date.now()}`;
+          transformedLoan.loan_id = transformedLoan.guid || transformedLoan.loan_number;
         }
 
-        // Validate required fields
-        if (!transformedLoan.loan_id) {
-          throw new Error('Missing loan_id');
+        // Validate required fields - guid is required
+        if (!transformedLoan.guid) {
+          throw new Error('Missing guid');
         }
 
         transformed.push(transformedLoan);
@@ -385,25 +399,25 @@ export class EncompassEtlService {
     let failureCount = 0;
     const errors: string[] = [];
 
-    // Check for duplicate loan_ids in the batch before inserting
-    const loanIdMap = new Map<string, number>();
-    const duplicateLoanIds: string[] = [];
+    // Check for duplicate GUIDs in the batch before inserting
+    const guidMap = new Map<string, number>();
+    const duplicateGuids: string[] = [];
     for (const loan of loans) {
-      const loanId = loan.loan_id;
-      if (loanId) {
-        const count = (loanIdMap.get(loanId) || 0) + 1;
-        loanIdMap.set(loanId, count);
+      const guid = loan.guid;
+      if (guid) {
+        const count = (guidMap.get(guid) || 0) + 1;
+        guidMap.set(guid, count);
         if (count === 2) {
-          duplicateLoanIds.push(loanId);
+          duplicateGuids.push(guid);
         }
       }
     }
     
-    if (duplicateLoanIds.length > 0) {
-      console.warn(`[EncompassEtlService] Found ${duplicateLoanIds.length} duplicate loan_ids in batch:`, duplicateLoanIds.slice(0, 10));
-      console.warn(`[EncompassEtlService] Total unique loan_ids: ${loanIdMap.size}, Total loans: ${loans.length}`);
+    if (duplicateGuids.length > 0) {
+      console.warn(`[EncompassEtlService] Found ${duplicateGuids.length} duplicate GUIDs in batch:`, duplicateGuids.slice(0, 10));
+      console.warn(`[EncompassEtlService] Total unique GUIDs: ${guidMap.size}, Total loans: ${loans.length}`);
     } else {
-      console.log(`[EncompassEtlService] All ${loans.length} loans have unique loan_ids`);
+      console.log(`[EncompassEtlService] All ${loans.length} loans have unique GUIDs`);
     }
 
     // Get all available database columns with their data types dynamically
@@ -415,7 +429,7 @@ export class EncompassEtlService {
         FROM information_schema.columns
         WHERE table_schema = 'public'
           AND table_name = 'loans'
-          AND column_name NOT IN ('id', 'created_at', 'updated_at', 'tenant_id', 'raw_data')
+          AND column_name NOT IN ('id', 'created_at', 'updated_at', 'tenant_id')
         ORDER BY column_name
       `);
       availableColumns = columnsResult.rows.map((r: any) => ({
@@ -428,7 +442,9 @@ export class EncompassEtlService {
       console.warn('[EncompassEtlService] Could not fetch column list, using fallback:', error.message);
       // Fallback to common fields if schema query fails
       availableColumns = [
-        { name: 'loan_id', data_type: 'text' },
+        { name: 'guid', data_type: 'text' },
+        { name: 'loan_number', data_type: 'text' },
+        { name: 'loan_id', data_type: 'text' }, // Deprecated, for backwards compatibility
         { name: 'loan_amount', data_type: 'numeric' },
         { name: 'loan_type', data_type: 'text' },
         { name: 'loan_program', data_type: 'text' },
@@ -556,54 +572,18 @@ export class EncompassEtlService {
           }
         }
 
-        // Collect all fields that aren't in availableColumns or already in columns
-        // These will go into raw_data
-        const rawDataFields: Record<string, any> = {};
-        const existingRawData = (loan.raw_data && typeof loan.raw_data === 'object') 
-          ? (typeof loan.raw_data === 'string' ? JSON.parse(loan.raw_data) : loan.raw_data)
-          : {};
-        
-        for (const [key, value] of Object.entries(loan)) {
-          // Skip tenant_id, columns already added, and null/undefined values
-          if (key !== 'tenant_id' && 
-              !columns.includes(key) && 
-              value !== null && 
-              value !== undefined &&
-              key !== 'raw_data') {
-            // Validate numeric values to prevent overflow
-            let validatedValue = value;
-            if (typeof value === 'number') {
-              // Check for common DECIMAL(5,3) fields (max 99.999)
-              const decimal53Fields = ['margin', 'first_rate_adjustment_cap', 'floor_rate', 'life_cap', 'maximum_rate_adjustment_cap'];
-              if (decimal53Fields.includes(key) && value > 99.999) {
-                console.warn(`[EncompassEtlService] Loan ${loan.loan_id}: ${key} ${value} exceeds DECIMAL(5,3) max (99.999), clamping to 99.999`);
-                validatedValue = 99.999;
-              }
-              // Check for common DECIMAL(5,2) fields (max 999.99)
-              const decimal52Fields = ['cltv', 'hcltv', 'mi_percent_coverage_1', 'mi_percent_coverage_2', 'mi_cancel_percent'];
-              if (decimal52Fields.includes(key) && value > 999.99) {
-                console.warn(`[EncompassEtlService] Loan ${loan.loan_id}: ${key} ${value} exceeds DECIMAL(5,2) max (999.99), clamping to 999.99`);
-                validatedValue = 999.99;
-              }
-            }
-            rawDataFields[key] = validatedValue;
-          }
-        }
-
-        // Always add raw_data column (merge existing + new fields)
-        // This ensures we capture all data even if it doesn't map to a specific column
-        const mergedRawData = { ...existingRawData, ...rawDataFields };
-        columns.push('raw_data');
-        values.push(JSON.stringify(mergedRawData));
-        placeholders.push(`$${paramIndex}`);
-        paramIndex++;
+        // Note: raw_data column has been removed. Unmapped fields are no longer stored.
+        // Clients should use the additional_field_definitions system to define which 
+        // additional fields they want to track beyond the default Coheus fields.
 
         // Build UPDATE clause for ON CONFLICT
         // Note: Tenant databases don't have tenant_id column
+        // guid is the unique identifier, loan_id is deprecated
         const updateClauses: string[] = [];
         for (let i = 1; i < columns.length; i++) {
           const col = columns[i];
-          if (col !== 'loan_id') {
+          // Don't update guid (the unique key) or id (the primary key)
+          if (col !== 'guid' && col !== 'id') {
             updateClauses.push(`${col} = EXCLUDED.${col}`);
           }
         }
@@ -635,14 +615,15 @@ export class EncompassEtlService {
         
         // Log pre-insertion issues for debugging
         if (integerIssues.length > 0 && failureCount < 5) {
-          console.error(`[EncompassEtlService] PRE-INSERT WARNING for loan ${loan.loan_id}:`);
+          console.error(`[EncompassEtlService] PRE-INSERT WARNING for loan ${loan.guid || loan.loan_number || 'unknown'}:`);
           console.error(`  INTEGER columns with problematic values:`, integerIssues);
         }
 
+        // Use guid as the unique conflict target (loan_id is deprecated)
         const query = `
           INSERT INTO public.loans (${columns.join(', ')})
           VALUES (${placeholders.join(', ')})
-          ON CONFLICT (loan_id) 
+          ON CONFLICT (guid) 
           DO UPDATE SET ${updateClauses.join(', ')}
         `;
 
@@ -659,7 +640,7 @@ export class EncompassEtlService {
         processedCount++;
         
         // Enhanced error logging to identify the problematic field
-        let errorMsg = `Loan ${loan.loan_id || 'unknown'}: ${error.message}`;
+        let errorMsg = `Loan ${loan.guid || loan.loan_number || 'unknown'}: ${error.message}`;
         
         // For type conversion errors, try to identify which field failed
         if (error.message && (error.message.includes('invalid input syntax for type') || error.message.includes('numeric field overflow'))) {
@@ -684,7 +665,7 @@ export class EncompassEtlService {
           
           // Log first few failing loans with their problematic values
           if (failureCount <= 3) {
-            console.error(`[EncompassEtlService] Sample failing loan values for ${loan.loan_id}:`);
+            console.error(`[EncompassEtlService] Sample failing loan values for ${loan.guid || loan.loan_number || 'unknown'}:`);
             const problematicFields: Array<{ field: string; value: any; valueType: string; dbType: string }> = [];
             for (let i = 0; i < columns.length; i++) {
               const col = columns[i];
@@ -763,7 +744,7 @@ export class EncompassEtlService {
                 numericFields[key] = value;
               }
             }
-            console.error(`[EncompassEtlService] Numeric overflow detected but field unknown. All numeric fields for loan ${loan.loan_id}:`, numericFields);
+            console.error(`[EncompassEtlService] Numeric overflow detected but field unknown. All numeric fields for loan ${loan.guid || loan.loan_number || 'unknown'}:`, numericFields);
             errorMsg += ` (Unable to identify field - see logs for all numeric values)`;
           }
         }

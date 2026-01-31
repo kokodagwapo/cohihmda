@@ -1,12 +1,17 @@
 import pg from 'pg';
-import { queryMetrics, DateRange } from '../metrics/metricsService.js';
+import { queryMetrics, DateRange, type MetricQueryOptions } from '../metrics/metricsService.js';
 import { collectInsightMetrics, generateLLMInsights, clearCache as clearInsightsCache } from '../insights/index.js';
 import type { GeneratedInsight } from '../insights/index.js';
+import type { LoanAccessFilter } from '../userLoanAccessService.js';
 
 /**
  * Analytics Service
  * Contains business logic for dashboard analytics endpoints
  * Uses tenant database pools (no tenant_id columns in tenant DBs)
+ * 
+ * Note: Functions in this service that query loans should accept an optional
+ * userAccessFilter parameter to support user-level loan access filtering.
+ * When the filter is provided, it should be applied to all loan queries.
  */
 
 export interface FunnelData {

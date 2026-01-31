@@ -8,11 +8,11 @@ import { OverviewSection } from '@/components/admin/OverviewSection';
 import { TenantsSection } from '@/components/admin/TenantsSection';
 import { SystemSection } from '@/components/admin/SystemSection';
 import { SecuritySection } from '@/components/admin/SecuritySection';
-import { LOSSettingsSection } from '@/components/admin/LOSSettingsSection';
-import { SynapseSection } from '@/components/admin/SynapseSection';
+import { ConnectionsSection } from '@/components/admin/ConnectionsSection';
 import { DeploymentSection } from '@/components/admin/DeploymentSection';
 import { RAGVoiceSection } from '@/components/admin/RAGVoiceSection';
 import { UserManagementSection } from '@/components/admin/UserManagementSection';
+import { PlatformTeamSection } from '@/components/admin/PlatformTeamSection';
 import { RolesPermissionsSection } from '@/components/admin/RolesPermissionsSection';
 import { SSOConfigSection } from '@/components/admin/SSOConfigSection';
 import { OrgSettingsSection } from '@/components/admin/OrgSettingsSection';
@@ -179,32 +179,24 @@ export const Admin = () => {
             await loadUsers();
             break;
           case 'roles':
-            // Roles section loads its own data
-            break;
           case 'sso':
-            // SSO section loads its own data
-            break;
           case 'org':
-            // Org settings section loads its own data
-            break;
           case 'data-quality':
-            // Data quality section loads its own data
+            // These sections load their own data
             break;
-          case 'system':
+          case 'infrastructure':
             await loadSystemInfo();
             break;
-          case 'security':
+          case 'security-compliance':
             await loadSecurityInfo();
             break;
-          case 'los':
-            // For tenant admins, automatically load their tenant's LOS data
+          case 'connections':
+            // Load both LOS and Synapse data for combined section
             if (!isPlatform && user?.tenant_id) {
               await loadLosData(user.tenant_id);
             } else {
               await loadLosData();
             }
-            break;
-          case 'synapse':
             await loadSynapseData();
             break;
           case 'deployment':
@@ -215,7 +207,8 @@ export const Admin = () => {
             await loadRagVoiceData(false);
             break;
           case 'metrics-catalog':
-            // Metrics catalog loads on demand, no pre-loading needed
+          case 'dev-tools':
+            // These load on demand, no pre-loading needed
             break;
         }
         markSectionLoaded(activeSection);
@@ -242,6 +235,7 @@ export const Admin = () => {
     loadRagVoiceData,
     isPlatform,
     user?.tenant_id,
+    loadUsers,
   ]);
 
   // Get current section name for mobile header
@@ -251,22 +245,20 @@ export const Admin = () => {
       { id: 'org-overview', label: 'Overview' },
       { id: 'tenants', label: 'Tenants' },
       { id: 'users', label: 'Users' },
-      { id: 'roles', label: 'Roles & Permissions' },
+      { id: 'roles', label: 'Access & Permissions' },
       { id: 'sso', label: 'SSO Configuration' },
       { id: 'org', label: 'Organization Settings' },
       { id: 'data-quality', label: 'Data Quality' },
-      { id: 'data-config', label: 'Data Configuration' },
-      { id: 'los', label: 'LOS Settings' },
-      { id: 'synapse', label: 'Integrations' },
+      { id: 'data-config', label: 'Field Mapping & Rules' },
+      { id: 'connections', label: 'Connections & Integrations' },
       { id: 'rag-voice', label: 'AI Assistant' },
-      { id: 'demo', label: 'Demo Data' },
-      { id: 'system', label: 'System' },
-      { id: 'security', label: 'Platform Security' },
-      { id: 'soc2', label: 'SOC 2 Compliance' },
+      { id: 'infrastructure', label: 'Infrastructure' },
+      { id: 'security-compliance', label: 'Security & Compliance' },
       { id: 'deployment', label: 'Deployment' },
       { id: 'stripe', label: 'Stripe Payments' },
       { id: 'aws-hosting', label: 'AWS Hosting' },
       { id: 'metrics-catalog', label: 'Metrics Catalog' },
+      { id: 'dev-tools', label: 'Developer Tools' },
     ];
     return sections.find(s => s.id === activeSection)?.label || 'Overview';
   };
@@ -408,12 +400,17 @@ export const Admin = () => {
               />
             )}
 
+            {/* Platform Team Section (Super Admin only) */}
+            {activeSection === 'platform-team' && (
+              <PlatformTeamSection />
+            )}
+
             {/* Users Section */}
             {activeSection === 'users' && (
               <UserManagementSection />
             )}
 
-            {/* Roles & Permissions Section */}
+            {/* Access & Permissions Section */}
             {activeSection === 'roles' && (
               <RolesPermissionsSection />
             )}
@@ -438,39 +435,61 @@ export const Admin = () => {
               <TenantConfigSection />
             )}
 
-            {/* System Section */}
-            {activeSection === 'system' && (
+            {/* Infrastructure Section (formerly System) */}
+            {activeSection === 'infrastructure' && (
               <SystemSection systemInfo={systemInfo} loading={systemLoading} />
             )}
 
-            {/* Security Section */}
-            {activeSection === 'security' && (
-              <SecuritySection
-                securityInfo={securityInfo}
-                loading={securityLoading}
-                onNavigate={setActiveSection}
-              />
+            {/* Security & Compliance Section (combined Security + SOC 2) */}
+            {activeSection === 'security-compliance' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-6"
+              >
+                {/* Section Header */}
+                <div className="flex items-center justify-between p-6 rounded-2xl bg-gradient-to-br from-rose-50 via-white to-red-50 dark:from-slate-800/50 dark:to-slate-900/50 border border-rose-200/40 dark:border-slate-700/50 shadow-lg shadow-rose-500/10">
+                  <div>
+                    <h2 className="text-4xl font-thin text-slate-900 dark:text-white tracking-tight mb-2">
+                      Security & Compliance
+                    </h2>
+                    <p className="text-base text-slate-600 dark:text-slate-400 font-extralight tracking-wide">
+                      Platform security settings and SOC 2 audit trail
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Security Settings */}
+                <SecuritySection
+                  securityInfo={securityInfo}
+                  loading={securityLoading}
+                  onNavigate={setActiveSection}
+                />
+                
+                {/* SOC 2 Compliance */}
+                <div className="mt-8">
+                  <h3 className="text-2xl font-light text-slate-900 dark:text-white mb-4">SOC 2 Compliance & Audit Trail</h3>
+                  <SOC2ComplianceSection />
+                </div>
+              </motion.div>
             )}
 
-            {/* SOC 2 Compliance Section */}
-            {activeSection === 'soc2' && (
-              <SOC2ComplianceSection />
-            )}
-
-            {/* LOS Settings Section */}
-            {activeSection === 'los' && (
-              <LOSSettingsSection
+            {/* Connections & Integrations Section (combined LOS + Synapse) */}
+            {activeSection === 'connections' && (
+              <ConnectionsSection
+                // LOS props
                 losConnections={losConnections}
                 losTypes={losTypes}
-                loading={losLoading}
+                losLoading={losLoading}
                 tenantMetrics={tenantMetrics}
                 loadingMetrics={loadingMetrics}
-                onTest={testLosConnection}
-                onSync={syncLosConnection}
-                onToggle={toggleLosConnection}
-                onCreate={createLosConnection}
-                onUpdate={updateLosConnection}
-                onDelete={deleteLosConnection}
+                onTestLos={testLosConnection}
+                onSyncLos={syncLosConnection}
+                onToggleLos={toggleLosConnection}
+                onCreateLos={createLosConnection}
+                onUpdateLos={updateLosConnection}
+                onDeleteLos={deleteLosConnection}
                 onLoadLosData={loadLosData}
                 onLoadMetrics={async (tenantId) => {
                   setLoadingMetrics(true);
@@ -488,24 +507,39 @@ export const Admin = () => {
                     setLoadingMetrics(false);
                   }
                 }}
-              />
-            )}
-
-            {/* Synapse Connect Section */}
-            {activeSection === 'synapse' && (
-              <SynapseSection
+                // Synapse props
                 vendorConnections={vendorConnections}
                 vendorCatalog={vendorCatalog}
-                loading={synapseLoading}
-                onTest={testSynapseConnection}
-                onCreate={createSynapseConnection}
-                onRefresh={loadSynapseData}
+                synapseLoading={synapseLoading}
+                onTestSynapse={testSynapseConnection}
+                onCreateSynapse={createSynapseConnection}
+                onRefreshSynapse={loadSynapseData}
               />
             )}
 
-            {/* Demo Data Section */}
-            {activeSection === 'demo' && (
-              <DemoDataSection />
+            {/* Developer Tools Section (includes Demo Data) */}
+            {activeSection === 'dev-tools' && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-6"
+              >
+                {/* Section Header */}
+                <div className="flex items-center justify-between p-6 rounded-2xl bg-gradient-to-br from-slate-50 via-white to-gray-50 dark:from-slate-800/50 dark:to-slate-900/50 border border-slate-200/40 dark:border-slate-700/50 shadow-lg shadow-slate-500/10">
+                  <div>
+                    <h2 className="text-4xl font-thin text-slate-900 dark:text-white tracking-tight mb-2">
+                      Developer Tools
+                    </h2>
+                    <p className="text-base text-slate-600 dark:text-slate-400 font-extralight tracking-wide">
+                      Demo data, testing utilities, and diagnostics
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Demo Data Upload */}
+                <DemoDataSection />
+              </motion.div>
             )}
 
             {/* Deployment Section */}

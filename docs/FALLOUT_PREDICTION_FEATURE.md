@@ -62,30 +62,246 @@ Key functions:
 ### 2. Frontend Components
 
 #### `src/components/dashboard/ClosingFalloutForecast.tsx`
-**Main dashboard component** (~1600 lines)
+**Main dashboard component** (~1860 lines)
 
-Key features:
-- "Start Prediction" button triggers prediction
-- Displays predicted fallout metrics (withdraw count, decline count)
-- Shows critical loan cards with risk assessments
-- Manages bucketed loan data state
+The primary container for the Closing & Fallout Forecast section of the executive dashboard.
+
+**Key State:**
+```typescript
+// Prediction results
+const [predictions, setPredictions] = useState<{ likelyWithdraw: number; likelyDecline: number; predictedFalloutTotal: number } | null>(null);
+const [bucketedLoans, setBucketedLoans] = useState<any[]>([]);
+const [loanPredictions, setLoanPredictions] = useState<Record<string, string>>({}); // loan_id -> outcome
+
+// Data state
+const [loansRaw, setLoansRaw] = useState<any[] | null>(null);
+const [period, setPeriod] = useState<PeriodValue>('all');
+```
+
+**Key Features:**
+- **"Start Prediction" button** - Triggers `POST /api/loans/predict` and updates state
+- **Main KPIs (3 centered):**
+  - Active Loans Today (with pipeline value)
+  - Predicted Closing (based on pullthrough rate)
+  - Likely Close Late (loans past expected close)
+- **Outcome Metrics Grid (3 cards):**
+  - Predicted Fallout (total at-risk loans)
+  - Likely Withdraw (borrower-initiated)
+  - Likely Decline (lender-initiated)
+- **Pipeline Snapshot (right panel):**
+  - Pipeline UPB (total active volume)
+  - Locks (90D) - Rate locks from useMetrics hook
+  - Pull-Through rate (rolling 90 days)
+- **Critical Loans Tab** - Shows high-risk loan cards
+- **Loan Officers Tab** - Shows officer-level metrics
+
+**Key Hooks Used:**
+- `useDashboardStats()` - Fetches aggregate statistics
+- `useMetrics()` - Fetches time-filtered metrics (locked_loans, etc.)
+
+---
 
 #### `src/components/dashboard/LoanCardsContainer.tsx`
 **Critical loan card display** (~450 lines)
 
-Key features:
-- Tabs: All Loans, Likely Withdrawal, Likely Decline
-- Risk level badges and predicted outcome indicators
-- Drill-down modal on card click
+Displays tabbed list of critical loans with filtering by predicted outcome.
+
+**Props:**
+```typescript
+interface LoanCardsContainerProps {
+  loans: LoanCard[];
+  isDarkMode: boolean;
+  onLoanClick: (loan: LoanCard) => void;
+  predictions?: Array<{ loanId: string; predictedOutcome: string; confidence: number; reasoning?: string }>;
+}
+```
+
+**Key Features:**
+- **Tabs:** All Loans | Likely Withdrawal | Likely Decline
+- **Risk level badges:** CRITICAL (rose) / AT RISK (amber) / LOW (emerald)
+- **Predicted outcome badges:** "↩ Withdraw" or "⛔ Decline"
+- **Virtual scrolling** for performance with large loan lists
+- **Click handler** opens `LoanDrilldownModal`
+
+---
 
 #### `src/components/dashboard/LoanDrilldownModal.tsx`
-**Detailed loan view** (~580 lines)
+**Detailed loan view modal** (~580 lines)
 
-Key features:
-- Signal strength bucket scores display
-- Risk/success factors list
-- AI recommendations integration
-- Predicted outcome badge
+Full-screen modal showing comprehensive loan risk analysis.
+
+**Props:**
+```typescript
+interface LoanDrilldownModalProps {
+  loan: LoanCard;
+  isOpen: boolean;
+  onClose: () => void;
+  isDarkMode: boolean;
+}
+```
+
+**Modal Sections:**
+
+1. **Header:**
+   - Risk level badge (CRITICAL/AT RISK/LOW)
+   - Predicted outcome badge (Withdraw/Decline)
+   - Borrower name and loan ID
+
+2. **Signal Strength Buckets Grid (8 buckets):**
+   | Bucket | Description |
+   |--------|-------------|
+   | Credit Metrics | Composite FICO/LTV/DTI score |
+   | Loan Characteristics | Amount, type, purpose |
+   | Time in Motion | Days since application |
+   | MLO Fallout Prone | Loan officer pullthrough |
+   | Lock vs Market | Rate lock favorability |
+   | UW Pullthrough | Underwriter success rate |
+   | Closer Pullthrough | Closer success rate |
+   | Processor Pullthrough | Processor success rate |
+
+3. **Loan Information:**
+   - Loan Officer, Type, Current Milestone, Active Days
+
+4. **Credit Metrics:**
+   - FICO Score, LTV Ratio, DTI Ratio (color-coded by risk)
+
+5. **Rate & Market:**
+   - Interest Rate, Market Rate, Market Delta
+
+6. **Success/Warning/Critical Factors:**
+   - Three-column layout showing risk factors by severity
+
+7. **AI Recommendations:**
+   - On-demand recommendations via `/api/loans/:loanId/recommendations`
+
+---
+
+#### `src/components/dashboard/modals/OutcomeLoansModal.tsx`
+**Predicted outcome loans modal** (~380 lines)
+
+Modal for viewing loans by predicted outcome (fallout, withdraw, decline, delayed).
+
+**Props:**
+```typescript
+interface OutcomeLoansModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  outcomeType: 'fallout' | 'withdraw' | 'decline' | 'delayed' | null;
+  dateFilter: PeriodValue;
+  isDarkMode: boolean;
+  loansRaw: any[] | null;
+  loanPredictions?: Record<string, string>; // loan_id -> outcome
+  bucketedLoans?: any[]; // Loans with riskSummary attached
+}
+```
+
+**Modal Layout:**
+
+1. **Header:**
+   - Icon and title based on outcome type
+   - Subtitle with loan count
+
+2. **Summary Stats (2 cards):**
+   - Total count (with withdraw/decline breakdown for fallout)
+   - At-risk volume (dollar amount)
+
+3. **Loan List:**
+   - Scrollable list of at-risk loans
+   - Each card shows: borrower, loan ID, amount, risk badge, reason
+   - Click opens `LoanDrilldownModal`
+
+**Filtering Logic:**
+```typescript
+// For withdraw/decline: uses PREDICTED outcomes from loanPredictions/bucketedLoans
+const targetOutcomes = outcomeType === 'fallout' 
+  ? ['withdraw', 'deny'] 
+  : [outcomeType === 'withdraw' ? 'withdraw' : 'deny'];
+
+// For delayed: uses heuristic (isLikelyCloseLate)
+return isLikelyCloseLate(loan, 30, now);
+```
+
+---
+
+#### `src/components/dashboard/modals/ClosingFalloutMetricModal.tsx`
+**General metric drilldown modal** (~325 lines)
+
+Modal for drilling into any KPI (Active Loans, Funded Loans, Predicted Closing, Predicted Fallout).
+
+**Key Features:**
+- **Alethia Insights** - AI-generated Success/Warning/Critical insights
+- **Hero Stats** - Selected metric value + computed volume
+- **Priority Loans** - Top 8 loans by risk score
+- **TopTiering Insights** - Loan officer performance analysis
+- **Borrower Coaching** - Suggested actions for at-risk borrowers
+
+---
+
+#### `src/utils/closingFalloutFilters.ts`
+**Utility functions for filtering and calculations** (~400 lines)
+
+Key exports:
+```typescript
+// Period filtering
+export type PeriodValue = 'today' | 'wtd' | 'mtd' | 'qtd' | 'ytd' | 'rolling_90_days' | 'all' | 'custom';
+export function getPeriodRange(period: PeriodValue, now: Date, year?: number): { start: Date | null; end: Date | null };
+export function isDateInPeriod(dateValue: any, period: PeriodValue, now?: Date): boolean;
+
+// Loan status inference
+export function inferLoanStatus(loan: any): 'Active' | 'Locked' | 'Funded' | 'Withdrawn' | 'Denied' | 'Unknown';
+export function isFundedInPeriod(loan: any, period: PeriodValue): boolean;
+export function isLikelyCloseLate(loan: any, thresholdDays: number, now: Date): boolean;
+
+// Value extraction
+export function getLoanAmountNumber(loan: any): number;
+```
+
+---
+
+#### `src/utils/loanDataTransform.ts`
+**Loan data transformation** (~250 lines)
+
+Transforms raw loan data into display-ready card format.
+
+```typescript
+export interface LoanCard {
+  id: string;
+  borrower: string;
+  officer: string;
+  amount: string; // Formatted (e.g., "$425,000")
+  riskLevel: 'Low' | 'Medium' | 'Very High';
+  riskScore: number; // 0-100
+  reason: string;
+  status: string;
+  signalBuckets?: {
+    creditMetrics: number;
+    loanCharacteristics: number;
+    timeInMotion: number;
+    // ... etc
+  };
+}
+
+export function transformLoanToCard(loan: any): LoanCard;
+```
+
+---
+
+#### `src/hooks/useMetrics.ts`
+**Metrics fetching hook** (~160 lines)
+
+React hook for querying time-filtered metrics from the backend.
+
+```typescript
+export const useMetrics = (selectedTenantId?: string | null, year?: number) => {
+  const queryMetric = (metricId: string, period: PeriodValue): Promise<MetricResult>;
+  const queryMetrics = (metricIds: string[], period: PeriodValue): Promise<Record<string, MetricResult>>;
+  const queryMetricsWithDateRange = (metricIds: string[], start: Date, end: Date): Promise<Record<string, MetricResult>>;
+  
+  return { queryMetric, queryMetrics, queryMetricsWithDateRange, loading, error };
+};
+```
+
+Used in `ClosingFalloutForecast` for fetching `locked_loans` with rolling 90-day period.
 
 ---
 
@@ -444,27 +660,144 @@ Fetches AI-generated recommendations for a specific loan.
 
 ## Frontend Display
 
-### Critical Loans Section
-Shows high-risk loans with:
-- **Predicted Outcome Badge**: "⚠ Likely Decline" or "↩ Likely Withdraw"
-- **Risk Level**: CRITICAL / AT RISK / LOW
-- **Confidence Score**: Percentage
-- **Risk Factors**: Top 3 contributing factors
+### Main Dashboard Layout
 
-### Tabs
-- **All Loans**: Complete list of critical loans
-- **Likely Withdrawal**: Loans predicted to withdraw (process/market issues)
-- **Likely Decline**: Loans predicted to be denied (credit issues)
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CLOSINGS & FALLOUT FORECAST                          [Period Dropdown] │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                 │
+│    │ Active Loans │  │  Predicted   │  │ Likely Close │   ┌───────────┐ │
+│    │    Today     │  │   Closing    │  │     Late     │   │ Pipeline  │ │
+│    │     247      │  │     189      │  │      12      │   │  Snapshot │ │
+│    │  $89.2M UPB  │  │ 76% P/T R90D │  │    Units     │   │           │ │
+│    └──────────────┘  └──────────────┘  └──────────────┘   │ UPB: $89M │ │
+│                                                            │ Locks: 45 │ │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐          │ P/T: 76%  │ │
+│  │ Predicted  │  │   Likely   │  │   Likely   │          └───────────┘ │
+│  │  Fallout   │  │  Withdraw  │  │  Decline   │                        │
+│  │    17      │  │     12     │  │     5      │                        │
+│  │   6.9%     │  │            │  │            │   [Start Prediction]   │
+│  └────────────┘  └────────────┘  └────────────┘                        │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│  [Critical Loans]  [Loan Officers]                                       │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │ ┌───────────────────────────────────────────────────────────────┐  ││
+│  │ │ CRITICAL | ↩ Withdraw                              $425,000   │  ││
+│  │ │ John Smith - Loan #12345                                      │  ││
+│  │ │ Interest rate lock is unfavorable compared to current market  │  ││
+│  │ └───────────────────────────────────────────────────────────────┘  ││
+│  │ ┌───────────────────────────────────────────────────────────────┐  ││
+│  │ │ AT RISK | ⛔ Decline                                $315,000   │  ││
+│  │ │ Jane Doe - Loan #12346                                        │  ││
+│  │ │ Credit metrics indicate elevated risk (FICO 618, DTI 52%)     │  ││
+│  │ └───────────────────────────────────────────────────────────────┘  ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### KPI Click Behavior
+
+| KPI Clicked | Modal Opened | Content |
+|-------------|--------------|---------|
+| Active Loans Today | `ClosingFalloutMetricModal` | Alethia insights + priority loans |
+| Predicted Closing | `ClosingFalloutMetricModal` | Closing forecast analysis |
+| Likely Close Late | `OutcomeLoansModal` (delayed) | Loans past expected close date |
+| Predicted Fallout | `OutcomeLoansModal` (fallout) | All predicted withdraw + decline |
+| Likely Withdraw | `OutcomeLoansModal` (withdraw) | Borrower-initiated fallout |
+| Likely Decline | `OutcomeLoansModal` (decline) | Lender-initiated fallout |
+
+### Critical Loans Card Display
+
+Each critical loan card shows:
+- **Risk Level Badge**: CRITICAL (rose) / AT RISK (amber) / LOW (emerald)
+- **Predicted Outcome Badge**: "↩ Withdraw" or "⛔ Decline"
+- **Borrower/Officer Name**
+- **Loan Amount**
+- **Primary Risk Reason** (top contributing factor)
+
+### OutcomeLoansModal Layout
+
+When clicking Predicted Fallout, Likely Withdraw, or Likely Decline:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  🔺 Predicted Fallout                              [X]  │
+│  All At-Risk Loans - 17 loans                           │
+│  Loans predicted to either withdraw or decline...       │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────────┐  ┌──────────────────┐            │
+│  │  Total Fallout   │  │  At-Risk Volume  │            │
+│  │       17         │  │     $6.2M        │            │
+│  │ 12 withdraw · 5  │  │  Pipeline at risk│            │
+│  │     decline      │  │                  │            │
+│  └──────────────────┘  └──────────────────┘            │
+│                                                         │
+│  ┌─────────────────────────────────────────────────────┤
+│  │ At-Risk Loans                            17 loans   │
+│  ├─────────────────────────────────────────────────────┤
+│  │ ┌─────────────────────────────────────────────────┐ │
+│  │ │ 📄 John Smith              $425,000  [Critical] │ │
+│  │ │    Loan #12345 · LO: Mary Johnson               │ │
+│  │ │    Interest lock unfavorable vs market          │ │
+│  │ │                                  View Details → │ │
+│  │ └─────────────────────────────────────────────────┘ │
+│  │ ┌─────────────────────────────────────────────────┐ │
+│  │ │ 📄 Jane Doe                $315,000  [At Risk]  │ │
+│  │ │    Loan #12346 · LO: Bob Wilson                 │ │
+│  │ │    Credit metrics indicate elevated risk        │ │
+│  │ │                                  View Details → │ │
+│  │ └─────────────────────────────────────────────────┘ │
+│  └─────────────────────────────────────────────────────┤
+└─────────────────────────────────────────────────────────┘
+```
 
 ### Loan Drilldown Modal
-Detailed view showing:
-- All signal strength bucket scores
-- FICO/LTV/DTI metrics with status colors
-- Loan information (officer, type, milestone, active days)
-- Rate & Market details (lock rate, market rate, delta)
-- Historical pullthrough rates
-- Success/Warning/Critical factors
-- AI recommendations (on-demand)
+
+Detailed view when clicking any loan card:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  [CRITICAL] [↩ Withdraw]                                          [X]  │
+│  John Smith · Loan #12345                                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  SIGNAL STRENGTH BUCKETS                                               │
+│  ┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐   │
+│  │ Credit  ││  Loan   ││ Time in ││   MLO   ││Lock vs ││   UW    │   │
+│  │ Metrics ││ Charact ││ Motion  ││ Fallout ││ Market  ││Pullthru │   │
+│  │   ▓▓▓░░ ││  ▓▓░░░  ││ ▓▓▓▓▓░  ││  ▓▓░░░  ││ ▓▓▓▓▓▓  ││  ▓▓░░░  │   │
+│  │   4/6   ││   3/6   ││   5/6   ││   2/6   ││   6/6   ││   3/6   │   │
+│  └─────────┘└─────────┘└─────────┘└─────────┘└─────────┘└─────────┘   │
+│                                                                         │
+│  LOAN INFORMATION                    CREDIT METRICS                     │
+│  ┌────────────────────────┐         ┌────────────────────────┐         │
+│  │ Loan Officer: M.Johnson│         │ FICO: 680 [▓▓▓░░░]     │         │
+│  │ Type: Conventional     │         │ LTV: 85% [▓▓▓▓░░]      │         │
+│  │ Milestone: Processing  │         │ DTI: 42% [▓▓▓░░░]      │         │
+│  │ Active Days: 47        │         └────────────────────────┘         │
+│  └────────────────────────┘                                            │
+│                                                                         │
+│  RATE & MARKET                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Interest Rate: 6.75%  │  Market Rate: 6.25%  │  Delta: +0.50%    │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                     │
+│  │  ✓ SUCCESS  │  │  ⚠ WARNING  │  │  ✗ CRITICAL │                     │
+│  │  LO has 78% │  │  47 days in │  │  Rate lock  │                     │
+│  │  pullthrough│  │  pipeline   │  │  unfavorable│                     │
+│  └─────────────┘  └─────────────┘  └─────────────┘                     │
+│                                                                         │
+│  AI RECOMMENDATIONS                                      [Loading...]   │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ • Consider offering a rate renegotiation to retain borrower      │  │
+│  │ • Expedite processing to reduce pipeline time                    │  │
+│  │ • Schedule check-in call with borrower this week                 │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

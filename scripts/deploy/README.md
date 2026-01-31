@@ -14,6 +14,18 @@ Aurora Serverless v2 (database) → ECS Fargate (compute) → WAF/CloudFront (fr
 2. **Docker** installed (for building backend image)
 3. **PowerShell** 5.1+ (Windows) or PowerShell Core (cross-platform)
 
+## Regions
+
+- **Aurora, ECS, ALB, VPC** use the region in `config.ps1` (e.g. **us-east-2**).
+- **WAF + CloudFront** is deployed in **us-east-1** only. AWS requires WAF (when used with CloudFront) to be in us-east-1. This is normal: CloudFront is global and the origin is your ALB URL, so your backend in us-east-2 works as the origin.
+
+## HTTPS and certificates
+
+- **User → CloudFront:** Always HTTPS (CloudFront default cert or your custom domain cert in us-east-1).
+- **CloudFront → ALB:** Default is **HTTP** (port 80) so it works without an ALB certificate. For **full TLS** (CloudFront → ALB over HTTPS), you need an ACM cert on the ALB and a custom API domain; then set `BackendOriginProtocol` to **https-only** in the WAF stack.
+- Full explanation: **[docs/deployment/HTTPS_AND_CERTIFICATES.md](../../docs/deployment/HTTPS_AND_CERTIFICATES.md)**.
+- **coheus1.com subdomains** (cohi-dev.coheus1.com / cohi.coheus1.com): **[docs/deployment/COHEUS1_DOMAIN_SETUP.md](../../docs/deployment/COHEUS1_DOMAIN_SETUP.md)**.
+
 ## Quick Start
 
 ### 1. Configure Deployment
@@ -41,6 +53,7 @@ This deploys all stacks in order:
 3. **WAF + CloudFront** (frontend CDN)
 4. **Monitoring** (dashboard + alarms)
 5. **Tenant Provisioning** (automation)
+6. **Database Migrations** (schema setup)
 
 **Estimated time:** 30-45 minutes
 
@@ -69,6 +82,9 @@ Deploy stacks one at a time (must follow order):
 
 # Step 5: Deploy tenant provisioning
 .\05-deploy-tenant-provisioning.ps1
+
+# Step 6: Run database migrations and create super admin
+.\06-run-migrations.ps1 -CreateSuperAdmin
 ```
 
 ## Script Options
@@ -193,6 +209,79 @@ To delete all resources:
    ```powershell
    docker build -t coheus-backend -f Dockerfile.backend .
    ```
+
+### Frontend shows "server unavailable" or 504 on /api/* or /health
+
+1. **CloudFront → ALB protocol:** The WAF stack’s backend origin is set to **http-only** so CloudFront talks to the ALB on port 80. If your ALB has no HTTPS listener (no certificate), CloudFront must use HTTP to the origin; otherwise you get 504. After changing this in the template, run `.\03-deploy-waf-cloudfront.ps1` to update the stack.
+
+2. **Backend not running:** 504 can also mean the ALB has no healthy targets (ECS tasks down or failing health checks). Check:
+   ```powershell
+   aws ecs describe-services --cluster coheus-dev-cluster --services coheus-dev-service --profile $env:AWS_PROFILE --region us-east-2 --query 'services[0].{running:runningCount,desired:desiredCount}'
+   ```
+   If running is 0, start the backend: `.\02-deploy-backend.ps1 -SkipBuild` (or full deploy). Then test the ALB directly: `curl http://<ALB_DNS>/health` (use ALB DNS from backend stack outputs).
+
+### WAF/CloudFront: "S3 bucket already exists" on redeploy
+
+The WAF/CloudFront stack includes a custom resource that **empties the frontend S3 bucket on stack delete**, so you can delete the stack and redeploy without manual steps. If you see "bucket already exists", it usually means the stack was deleted with an older template (before this was added). Empty and delete the bucket once, then redeploy:
+
+```powershell
+$Bucket = "coheus-frontend-339712788893"   # or $PROJECT_NAME-frontend-$AWS_ACCOUNT_ID from config
+aws s3 rm "s3://$Bucket" --recursive --profile $env:AWS_PROFILE --region us-east-1
+aws s3 rb "s3://$Bucket" --profile $env:AWS_PROFILE --region us-east-1
+.\03-deploy-waf-cloudfront.ps1
+```
+
+### Health shows "database disconnected" / "Database query timeout"
+
+The backend can't reach Aurora (logs: "Connection terminated due to connection timeout"). Usually the Aurora security group is not allowing ECS tasks.
+
+**1. Aurora cluster status** (RDS console or CLI):
+```powershell
+aws rds describe-db-clusters --db-cluster-identifier coheus-dev-management --profile $env:AWS_PROFILE --region us-east-2 --query 'DBClusters[0].{Status:Status,Endpoint:Endpoint}'
+```
+Status should be `available` and there should be at least one instance in the cluster.
+
+**2. Aurora security group** – must allow inbound **TCP 5432** from your VPC. The Aurora stack uses the VPC’s **primary CIDR** (from `describe-vpcs`). If your ECS subnets use a **different CIDR** (e.g. secondary VPC CIDR), add that CIDR to the Aurora security group or redeploy Aurora with the correct AllowedCIDR.
+
+Check VPC CIDR and Aurora SG:
+```powershell
+. .\config.ps1
+aws ec2 describe-vpcs --vpc-ids $EXISTING_VPC_ID --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'Vpcs[0].{PrimaryCidr:CidrBlock,AllCidrs:CidrBlockAssociationSet[*].CidrBlock}' --output json
+# Aurora SG (from Aurora stack output SecurityGroupId):
+aws ec2 describe-security-groups --group-ids <aurora-sg-id> --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'SecurityGroups[0].IpPermissions'
+```
+Ensure the CIDR that contains your ECS private subnets is allowed on port 5432.
+
+**3. Backend logs** (exact error):
+```powershell
+aws logs tail /ecs/coheus-dev --since 10m --profile $env:AWS_PROFILE --region us-east-2 --filter-pattern "database"
+```
+
+**4. Same VPC** – Aurora and ECS must be in the same VPC (same `EXISTING_VPC_ID`). Confirm both stacks use the same VPC and that the Aurora subnet group uses the same private subnets as ECS.
+
+**5. Allow ECS security group** – The backend deploy script (Phase 4) updates the Aurora stack so the Aurora security group allows inbound TCP 5432 from the **ECS task security group**. If you deployed backend before this was added, run `.\02-deploy-backend.ps1 -SkipBuild` once so Phase 4 runs and adds the ECS SG to Aurora; no code change required.
+
+### ECS Tasks Not Starting / Stack Update Stuck
+
+When Phase 3 hangs at "Waiting for coheus-dev-backend (stack-update-complete)", CloudFormation is waiting for the ECS service to stabilize (tasks running and passing ALB health checks). If tasks keep failing, the update never completes.
+
+**1. Check ECS service events** (most recent first):
+```powershell
+aws ecs describe-services --cluster coheus-dev-cluster --services coheus-dev-service --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'services[0].events[0:10]' --output table
+```
+
+**2. List tasks and their status**:
+```powershell
+aws ecs list-tasks --cluster coheus-dev-cluster --service-name coheus-dev-service --profile $env:AWS_PROFILE --region $env:AWS_REGION
+aws ecs describe-tasks --cluster coheus-dev-cluster --tasks <task-arn-from-above> --profile $env:AWS_PROFILE --region $env:AWS_REGION --query 'tasks[0].{lastStatus:lastStatus,stopCode:stopCode,stoppedReason:stoppedReason,containers:containers[0].{exitCode:exitCode,reason:reason}}'
+```
+
+**3. Check container logs** (CloudWatch):
+```powershell
+aws logs tail /ecs/coheus-dev --since 30m --profile $env:AWS_PROFILE --region $env:AWS_REGION
+```
+
+**4. If the deployment is stuck**, you can cancel the waiter (Ctrl+C). The stack update will continue in the background. If the deployment circuit breaker triggers, the stack will roll back. After fixing the cause (e.g. JWT secret, health check, or missing env), run the deploy again.
 
 ### Permission Denied
 

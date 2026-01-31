@@ -11,6 +11,7 @@ import { queryMetric, queryMetrics, queryMetricsByCategory, queryMetricsGroupedB
 import { explainMetric, explainMetricResult, chatAboutMetrics, getStaticMetricDescriptions, MetricChatMessage } from '../services/metrics/metricsAiService.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { pool } from '../config/database.js';
+import { getLoanAccessContext } from '../services/userLoanAccessService.js';
 
 /**
  * Helper to get tenant_id - from query param or user's profile
@@ -70,11 +71,24 @@ router.get('/catalog', authenticateToken, apiLimiter, async (req: AuthRequest, r
  * GET /api/metrics/:metricId
  * Query a single metric
  * Query params: startDate, endDate (ISO strings), dateField (optional)
+ * Respects user-level loan access filtering
  */
 router.get('/:metricId', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const { metricId } = req.params;
     const tenantPool = getTenantContext(req).tenantPool;
+    
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return zero metric
+    if (accessCtx.hasNoAccess) {
+      return res.json({
+        metricId,
+        value: 0,
+        metadata: { accessFiltered: true, noAccess: true }
+      });
+    }
     
     // Parse date range from query params - keep as strings to avoid timezone issues
     const dateRange: DateRange | undefined = req.query.startDate || req.query.endDate
@@ -96,7 +110,8 @@ router.get('/:metricId', authenticateToken, attachTenantContext, apiLimiter, asy
     const result = await queryMetric(tenantPool, metricId, { 
       dateRange, 
       dateField,
-      additionalFilters: Object.keys(additionalFilters).length > 0 ? additionalFilters : undefined
+      additionalFilters: Object.keys(additionalFilters).length > 0 ? additionalFilters : undefined,
+      userAccessFilter: accessCtx.getFilter('l')
     });
     res.json(result);
   } catch (error: any) {
@@ -109,11 +124,24 @@ router.get('/:metricId', authenticateToken, attachTenantContext, apiLimiter, asy
  * POST /api/metrics/query
  * Query multiple metrics in a single call
  * Body: { metricIds: string[], dateRange?: { start?: string, end?: string }, dateField?: string, groupBy?: string, additionalFilters?: object }
+ * Respects user-level loan access filtering
  */
 router.post('/query', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const { metricIds, dateRange, dateField, groupBy, additionalFilters } = req.body;
     const tenantPool = getTenantContext(req).tenantPool;
+    
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return empty/zero metrics
+    if (accessCtx.hasNoAccess) {
+      const emptyResults: Record<string, any> = {};
+      for (const id of (metricIds || [])) {
+        emptyResults[id] = { metricId: id, value: 0, metadata: { accessFiltered: true, noAccess: true } };
+      }
+      return res.json({ metrics: emptyResults, accessFiltered: true });
+    }
     
     if (!Array.isArray(metricIds) || metricIds.length === 0) {
       return res.status(400).json({ error: 'metricIds must be a non-empty array' });
@@ -134,13 +162,15 @@ router.post('/query', authenticateToken, attachTenantContext, apiLimiter, async 
       dateRange: dateRange,
       parsedDateRange: parsedDateRange,
       groupBy,
-      additionalFilters
+      additionalFilters,
+      hasAccessFilter: accessCtx.requiresFiltering
     });
     
     const options = { 
       dateRange: parsedDateRange, 
       dateField,
-      additionalFilters
+      additionalFilters,
+      userAccessFilter: accessCtx.getFilter('l')
     };
     
     // If groupBy is specified, return grouped results
@@ -167,11 +197,20 @@ router.post('/query', authenticateToken, attachTenantContext, apiLimiter, async 
  * GET /api/metrics/category/:category
  * Query all metrics in a category
  * Query params: startDate, endDate (ISO strings), dateField (optional)
+ * Respects user-level loan access filtering
  */
 router.get('/category/:category', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const { category } = req.params;
     const tenantPool = getTenantContext(req).tenantPool;
+    
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return empty metrics
+    if (accessCtx.hasNoAccess) {
+      return res.json({ metrics: {}, accessFiltered: true, noAccess: true });
+    }
     
     // Parse date range from query params - keep as strings to avoid timezone issues
     const dateRange: DateRange | undefined = req.query.startDate || req.query.endDate
@@ -191,7 +230,8 @@ router.get('/category/:category', authenticateToken, attachTenantContext, apiLim
     if (req.query.status) additionalFilters.status = req.query.status;
     
     const results = await queryMetricsByCategory(tenantPool, category, { 
-      dateRange, 
+      dateRange,
+      userAccessFilter: accessCtx.getFilter('l'), 
       dateField,
       additionalFilters: Object.keys(additionalFilters).length > 0 ? additionalFilters : undefined
     });

@@ -3,6 +3,7 @@
 This document details the Single Sign-On (SSO) authentication strategy for Cohi, supporting both legacy Coheus (Qlik) clients and new direct integrations.
 
 > **Naming Convention:**
+>
 > - **Cohi** - The new executive intelligence platform (this product)
 > - **Coheus** - The legacy Qlik Sense-based product
 
@@ -93,18 +94,94 @@ Cohi supports multiple authentication methods to accommodate different client sc
 
 ---
 
+## Cognito User Pool Configuration
+
+Cohi uses a single AWS Cognito User Pool for both management and tenant authentication.
+
+### Production User Pool
+
+| Setting          | Value                                                                     |
+| ---------------- | ------------------------------------------------------------------------- |
+| **User Pool ID** | `us-east-2_lArr8IsFK`                                                     |
+| **ARN**          | `arn:aws:cognito-idp:us-east-2:339712788893:userpool/us-east-2_lArr8IsFK` |
+| **Region**       | `us-east-2`                                                               |
+| **Domain**       | Configure in Cognito Console                                              |
+
+### Environment Variables
+
+```bash
+# Required for backend SSO integration
+COGNITO_USER_POOL_ID=us-east-2_lArr8IsFK
+COGNITO_USER_POOL_ARN=arn:aws:cognito-idp:us-east-2:339712788893:userpool/us-east-2_lArr8IsFK
+COGNITO_CLIENT_ID=<create-app-client-in-cognito>
+COGNITO_CLIENT_SECRET=<from-app-client>
+COGNITO_DOMAIN=<your-domain>.auth.us-east-2.amazoncognito.com
+COGNITO_REGION=us-east-2
+```
+
+### App Client Setup
+
+Create an App Client in the Cognito User Pool:
+
+1. Navigate to AWS Console > Cognito > User Pools > `us-east-2_lArr8IsFK`
+2. Go to **App integration** > **App clients**
+3. Click **Create app client**
+4. Configure:
+   - App client name: `cohi-backend`
+   - Generate client secret: **Yes**
+   - Auth flows: Authorization code grant
+   - OAuth 2.0 scopes: `openid`, `email`, `profile`
+   - Callback URLs: `https://your-domain/api/auth/cognito/callback`
+   - Sign-out URLs: `https://your-domain/logout`
+
+### Adding Identity Providers
+
+For each tenant that needs SSO:
+
+1. Go to **Sign-in experience** > **Federated sign-in**
+2. Click **Add identity provider**
+3. Choose SAML or OIDC
+4. Configure with tenant's IdP metadata
+5. Name format: `tenant-{slug}-{idp}` (e.g., `tenant-acme-okta`)
+
+---
+
 ## Authentication Methods
 
 ### Method Comparison
 
-| Feature | Coheus Bridge | Cognito SAML | Direct OIDC | Local Auth |
-|---------|---------------|--------------|-------------|------------|
-| **Target Users** | Existing Qlik clients | New SaaS clients | Self-hosted | Internal/simple |
-| **SSO Reconfiguration** | None | One-time setup | One-time setup | N/A |
-| **Supported IdPs** | Any (via Qlik) | SAML 2.0 IdPs | OIDC IdPs | N/A |
-| **MFA Support** | Via Qlik/IdP | Via Cognito/IdP | Via IdP | Optional (TOTP) |
-| **Deployment Mode** | SaaS only | SaaS | Self-hosted | Both |
-| **Setup Complexity** | Low (exists) | Medium | Medium | Low |
+| Feature                 | Coheus Bridge         | Cognito SAML     | Direct OIDC    | Local Auth      |
+| ----------------------- | --------------------- | ---------------- | -------------- | --------------- |
+| **Target Users**        | Existing Qlik clients | New SaaS clients | Self-hosted    | Internal/simple |
+| **SSO Reconfiguration** | None                  | One-time setup   | One-time setup | N/A             |
+| **Supported IdPs**      | Any (via Qlik)        | SAML 2.0 IdPs    | OIDC IdPs      | N/A             |
+| **MFA Support**         | Via Qlik/IdP          | Via Cognito/IdP  | Via IdP        | Optional (TOTP) |
+| **Deployment Mode**     | SaaS only             | SaaS             | Self-hosted    | Both            |
+| **Setup Complexity**    | Low (exists)          | Medium           | Medium         | Low             |
+
+### Authentication Modes
+
+Cohi supports three authentication modes per tenant:
+
+| Mode              | Description                           | Use Case              |
+| ----------------- | ------------------------------------- | --------------------- |
+| **Hybrid**        | Email/password + SSO both available   | Beta, gradual rollout |
+| **SSO-Preferred** | SSO primary, password for break-glass | Transition period     |
+| **SSO-Only**      | SSO required, no password option      | Production security   |
+
+Configuration is stored in `coheus_tenants.auth_config`:
+
+```json
+{
+  "mode": "hybrid",
+  "allow_email_password": true,
+  "allow_sso": true,
+  "sso_required_for_roles": [],
+  "break_glass_enabled": true
+}
+```
+
+See [SSO_MIGRATION_GUIDE.md](./SSO_MIGRATION_GUIDE.md) for migrating between modes.
 
 ### Unified JWT Format
 
@@ -113,29 +190,36 @@ All authentication methods produce the same JWT format for Cohi backend:
 ```typescript
 interface CohiJwtPayload {
   // Standard JWT claims
-  iss: string;              // 'cohi.io' or self-hosted domain
-  aud: string;              // 'cohi-api'
-  sub: string;              // User ID (varies by method)
-  iat: number;              // Issued at
-  exp: number;              // Expiration (15 min for access token)
-  
+  iss: string; // 'cohi.io' or self-hosted domain
+  aud: string; // 'cohi-api'
+  sub: string; // User ID (varies by method)
+  iat: number; // Issued at
+  exp: number; // Expiration (15 min for access token)
+
   // Cohi-specific claims
-  tenant_id: string;        // Cohi tenant UUID
-  tenant_slug: string;      // Tenant identifier (for routing)
-  email: string;            // User email address
-  role: UserRole;           // 'super_admin' | 'tenant_admin' | 'user' | 'viewer'
-  
+  tenant_id: string; // Cohi tenant UUID
+  tenant_slug: string; // Tenant identifier (for routing)
+  email: string; // User email address
+  role: UserRole; // 'super_admin' | 'tenant_admin' | 'user' | 'viewer'
+
   // Authentication metadata
-  auth_method: 'coheus' | 'cognito' | 'oidc' | 'local';
-  idp_sub?: string;         // Original IdP subject (for audit)
-  idp_name?: string;        // IdP identifier (for debugging)
-  
+  auth_method: "coheus" | "cognito" | "oidc" | "local";
+  idp_sub?: string; // Original IdP subject (for audit)
+  idp_name?: string; // IdP identifier (for debugging)
+
   // Optional: Qlik-specific (for Coheus Bridge)
-  qlik_directory?: string;  // Qlik userDirectory
-  qlik_user?: string;       // Qlik userId
+  qlik_directory?: string; // Qlik userDirectory
+  qlik_user?: string; // Qlik userId
 }
 
-type UserRole = 'super_admin' | 'tenant_admin' | 'admin' | 'user' | 'viewer' | 'loan_officer' | 'processor';
+type UserRole =
+  | "super_admin"
+  | "tenant_admin"
+  | "admin"
+  | "user"
+  | "viewer"
+  | "loan_officer"
+  | "processor";
 ```
 
 ---
@@ -206,36 +290,40 @@ Enable existing Coheus (Qlik) clients to access Cohi without any SSO reconfigura
 ```typescript
 // server/src/routes/auth.ts
 
-router.get('/coheus/:virtualProxy', async (req, res) => {
+router.get("/coheus/:virtualProxy", async (req, res) => {
   const { virtualProxy } = req.params;
   const cookies = req.headers.cookie;
-  
+
   if (!cookies) {
-    return res.status(401).json({ error: 'No Qlik session cookie' });
+    return res.status(401).json({ error: "No Qlik session cookie" });
   }
-  
+
   try {
     // 1. Validate Qlik session via QPS API
     const qlikUser = await validateQlikSession(cookies, virtualProxy);
-    
-    if (!qlikUser || qlikUser.session === 'inactive') {
-      return res.status(401).json({ error: 'Invalid Qlik session' });
+
+    if (!qlikUser || qlikUser.session === "inactive") {
+      return res.status(401).json({ error: "Invalid Qlik session" });
     }
-    
+
     // 2. Map Qlik userDirectory to Cohi tenant
-    const tenantMapping = await getTenantByQlikDirectory(qlikUser.userDirectory);
-    
+    const tenantMapping = await getTenantByQlikDirectory(
+      qlikUser.userDirectory,
+    );
+
     if (!tenantMapping) {
-      return res.status(403).json({ error: 'Unknown Qlik directory - tenant not configured' });
+      return res
+        .status(403)
+        .json({ error: "Unknown Qlik directory - tenant not configured" });
     }
-    
+
     // 3. Find or create user in Cohi
     const user = await findOrCreateUser({
-      email: qlikUser.userId + '@' + tenantMapping.email_domain,
+      email: qlikUser.userId + "@" + tenantMapping.email_domain,
       tenantId: tenantMapping.tenant_id,
       externalId: `qlik:${qlikUser.userDirectory}:${qlikUser.userId}`,
     });
-    
+
     // 4. Generate Cohi JWT
     const token = generateCohiJwt({
       sub: user.id,
@@ -243,37 +331,39 @@ router.get('/coheus/:virtualProxy', async (req, res) => {
       tenant_slug: tenantMapping.tenant_slug,
       email: user.email,
       role: user.role,
-      auth_method: 'coheus',
+      auth_method: "coheus",
       qlik_directory: qlikUser.userDirectory,
       qlik_user: qlikUser.userId,
     });
-    
+
     // 5. Redirect to Cohi frontend with token
-    const frontendUrl = process.env.FRONTEND_URL || 'https://app.cohi.io';
+    const frontendUrl = process.env.FRONTEND_URL || "https://app.cohi.io";
     res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
-    
   } catch (error) {
-    console.error('Coheus bridge auth failed:', error);
-    res.status(500).json({ error: 'Authentication failed' });
+    console.error("Coheus bridge auth failed:", error);
+    res.status(500).json({ error: "Authentication failed" });
   }
 });
 
-async function validateQlikSession(cookies: string, virtualProxy: string): Promise<QlikUser | null> {
-  const qlikDomain = process.env.QLIK_SERVER_URL || 'https://qlik.cohi.io';
+async function validateQlikSession(
+  cookies: string,
+  virtualProxy: string,
+): Promise<QlikUser | null> {
+  const qlikDomain = process.env.QLIK_SERVER_URL || "https://qlik.cohi.io";
   const qpsUrl = `${qlikDomain}/${virtualProxy}/qps/user`;
-  
+
   const response = await fetch(qpsUrl, {
-    method: 'GET',
+    method: "GET",
     headers: {
-      'Cookie': cookies,
-      'User-Agent': 'CohiAuth/1.0',
+      Cookie: cookies,
+      "User-Agent": "CohiAuth/1.0",
     },
   });
-  
+
   if (!response.ok) {
     return null;
   }
-  
+
   return response.json();
 }
 ```
@@ -285,23 +375,23 @@ Create a Qlik mashup or extension that launches Cohi:
 ```javascript
 // qlik-cohi-launcher.js (Qlik extension)
 
-define(['qlik'], function(qlik) {
+define(["qlik"], function (qlik) {
   return {
-    paint: function($element) {
-      const virtualProxy = qlik.navigation.getCurrentSheetId().split('/')[0];
-      
+    paint: function ($element) {
+      const virtualProxy = qlik.navigation.getCurrentSheetId().split("/")[0];
+
       $element.html(`
         <button onclick="launchCohi('${virtualProxy}')" class="cohi-launch-btn">
           Launch Cohi Dashboard
         </button>
       `);
-    }
+    },
   };
 });
 
 function launchCohi(virtualProxy) {
   // Opens Cohi auth endpoint - cookies are sent automatically
-  window.open(`https://api.cohi.io/auth/coheus/${virtualProxy}`, '_blank');
+  window.open(`https://api.cohi.io/auth/coheus/${virtualProxy}`, "_blank");
 }
 ```
 
@@ -315,14 +405,14 @@ Enable new clients (or migrating Coheus clients) to configure SSO directly with 
 
 ### Supported Identity Providers
 
-| IdP | Configuration | Notes |
-|-----|---------------|-------|
-| **Okta** | SAML 2.0 App | Well-documented, recommended |
-| **Azure AD / Entra** | Enterprise App | Common in enterprises |
-| **Ping Identity** | SAML Connection | Enterprise-focused |
-| **OneLogin** | SAML App | SMB-friendly |
-| **Google Workspace** | SAML App | Limited to Google accounts |
-| **Custom SAML** | Any SAML 2.0 | Requires metadata XML |
+| IdP                  | Configuration   | Notes                        |
+| -------------------- | --------------- | ---------------------------- |
+| **Okta**             | SAML 2.0 App    | Well-documented, recommended |
+| **Azure AD / Entra** | Enterprise App  | Common in enterprises        |
+| **Ping Identity**    | SAML Connection | Enterprise-focused           |
+| **OneLogin**         | SAML App        | SMB-friendly                 |
+| **Google Workspace** | SAML App        | Limited to Google accounts   |
+| **Custom SAML**      | Any SAML 2.0    | Requires metadata XML        |
 
 ### Architecture
 
@@ -362,17 +452,17 @@ Enable new clients (or migrating Coheus clients) to configure SSO directly with 
 
 const handleEmailSubmit = async (email: string) => {
   // Extract domain from email
-  const domain = email.split('@')[1];
-  
+  const domain = email.split("@")[1];
+
   // Lookup tenant by email domain
   const response = await fetch(`/api/auth/lookup-tenant?domain=${domain}`);
   const { tenant, sso_method, idp_name } = await response.json();
-  
-  if (sso_method === 'cognito_saml') {
+
+  if (sso_method === "cognito_saml") {
     // Redirect to Cognito with IdP hint
     const cognitoUrl = buildCognitoAuthUrl(idp_name);
     window.location.href = cognitoUrl;
-  } else if (sso_method === 'coheus') {
+  } else if (sso_method === "coheus") {
     // Show "Login via Qlik" button
     showQlikLoginOption(tenant);
   } else {
@@ -384,12 +474,12 @@ const handleEmailSubmit = async (email: string) => {
 function buildCognitoAuthUrl(idpName: string): string {
   const params = new URLSearchParams({
     client_id: COGNITO_CLIENT_ID,
-    response_type: 'code',
-    scope: 'openid email profile',
+    response_type: "code",
+    scope: "openid email profile",
     redirect_uri: `${window.location.origin}/auth/callback`,
-    identity_provider: idpName,  // e.g., 'tenant-abc-okta'
+    identity_provider: idpName, // e.g., 'tenant-abc-okta'
   });
-  
+
   return `https://${COGNITO_DOMAIN}/oauth2/authorize?${params}`;
 }
 ```
@@ -399,24 +489,25 @@ function buildCognitoAuthUrl(idpName: string): string {
 ```typescript
 // server/src/routes/auth.ts
 
-router.get('/cognito/callback', async (req, res) => {
+router.get("/cognito/callback", async (req, res) => {
   const { code, error } = req.query;
-  
+
   if (error) {
     return res.redirect(`/login?error=${error}`);
   }
-  
+
   try {
     // 1. Exchange code for tokens
     const tokens = await exchangeCognitoCode(code as string);
-    
+
     // 2. Decode ID token to get user info
     const idToken = jwt.decode(tokens.id_token) as CognitoIdToken;
-    
+
     // 3. Extract tenant from custom claim or email domain
-    const tenantId = idToken['custom:tenant_id'] || 
-                     await getTenantByEmailDomain(idToken.email);
-    
+    const tenantId =
+      idToken["custom:tenant_id"] ||
+      (await getTenantByEmailDomain(idToken.email));
+
     // 4. Find or create user
     const user = await findOrCreateUser({
       email: idToken.email,
@@ -424,7 +515,7 @@ router.get('/cognito/callback', async (req, res) => {
       externalId: `cognito:${idToken.sub}`,
       fullName: idToken.name,
     });
-    
+
     // 5. Generate Cohi JWT
     const cohiToken = generateCohiJwt({
       sub: user.id,
@@ -432,17 +523,16 @@ router.get('/cognito/callback', async (req, res) => {
       tenant_slug: await getTenantSlug(tenantId),
       email: user.email,
       role: user.role,
-      auth_method: 'cognito',
+      auth_method: "cognito",
       idp_sub: idToken.sub,
       idp_name: idToken.identities?.[0]?.providerName,
     });
-    
+
     // 6. Redirect to frontend with token
     res.redirect(`/auth/callback?token=${cohiToken}`);
-    
   } catch (error) {
-    console.error('Cognito callback failed:', error);
-    res.redirect('/login?error=auth_failed');
+    console.error("Cognito callback failed:", error);
+    res.redirect("/login?error=auth_failed");
   }
 });
 ```
@@ -462,6 +552,7 @@ Self-hosted Cohi deployments support customer-configured SSO through:
 ### Option A: Cognito (Recommended)
 
 CloudFormation deploys a Cognito User Pool in the customer's account. Customer then:
+
 1. Configures their IdP as a SAML provider in Cognito
 2. Provides IdP metadata via Cohi Admin UI
 3. Users login via their corporate SSO
@@ -515,37 +606,41 @@ For customers with OIDC-capable IdPs who prefer not to use Cognito:
 ```typescript
 // Admin UI allows customer to configure OIDC
 interface OIDCConfiguration {
-  provider_name: string;           // "Okta", "Azure AD", etc.
-  discovery_url: string;           // https://company.okta.com/.well-known/openid-configuration
+  provider_name: string; // "Okta", "Azure AD", etc.
+  discovery_url: string; // https://company.okta.com/.well-known/openid-configuration
   client_id: string;
-  client_secret: string;           // Encrypted at rest
-  scopes: string[];                // ['openid', 'email', 'profile']
+  client_secret: string; // Encrypted at rest
+  scopes: string[]; // ['openid', 'email', 'profile']
 }
 
 // Backend validates OIDC tokens directly
-router.get('/oidc/callback', async (req, res) => {
+router.get("/oidc/callback", async (req, res) => {
   const { code } = req.query;
   const oidcConfig = await getOIDCConfiguration();
-  
+
   // 1. Discover OIDC endpoints
-  const discovery = await fetch(oidcConfig.discovery_url).then(r => r.json());
-  
+  const discovery = await fetch(oidcConfig.discovery_url).then((r) => r.json());
+
   // 2. Exchange code for tokens
-  const tokens = await exchangeOIDCCode(code, discovery.token_endpoint, oidcConfig);
-  
+  const tokens = await exchangeOIDCCode(
+    code,
+    discovery.token_endpoint,
+    oidcConfig,
+  );
+
   // 3. Validate ID token
-  const jwks = await fetch(discovery.jwks_uri).then(r => r.json());
+  const jwks = await fetch(discovery.jwks_uri).then((r) => r.json());
   const idToken = await verifyOIDCToken(tokens.id_token, jwks);
-  
+
   // 4. Generate Cohi JWT
   const cohiToken = generateCohiJwt({
     sub: idToken.sub,
     email: idToken.email,
-    auth_method: 'oidc',
+    auth_method: "oidc",
     idp_sub: idToken.sub,
     idp_name: oidcConfig.provider_name,
   });
-  
+
   res.redirect(`/auth/callback?token=${cohiToken}`);
 });
 ```
@@ -556,25 +651,27 @@ Simple email/password authentication stored in local PostgreSQL:
 
 ```typescript
 // Standard login endpoint (already exists)
-router.post('/signin', async (req, res) => {
+router.post("/signin", async (req, res) => {
   const { email, password } = req.body;
-  
-  const user = await pool.query(
-    'SELECT * FROM users WHERE email = $1',
-    [email]
-  );
-  
-  if (!user.rows[0] || !bcrypt.compareSync(password, user.rows[0].encrypted_password)) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+
+  const user = await pool.query("SELECT * FROM users WHERE email = $1", [
+    email,
+  ]);
+
+  if (
+    !user.rows[0] ||
+    !bcrypt.compareSync(password, user.rows[0].encrypted_password)
+  ) {
+    return res.status(401).json({ error: "Invalid credentials" });
   }
-  
+
   const token = generateCohiJwt({
     sub: user.rows[0].id,
     email: user.rows[0].email,
     role: user.rows[0].role,
-    auth_method: 'local',
+    auth_method: "local",
   });
-  
+
   res.json({ token });
 });
 ```
@@ -587,54 +684,54 @@ router.post('/signin', async (req, res) => {
 
 **Goal:** Existing Coheus/Qlik clients can access Cohi immediately.
 
-| Task | Priority | Effort |
-|------|----------|--------|
-| Create `/auth/coheus/:virtualProxy` endpoint | High | 1 day |
-| Implement QPS session validation | High | 1 day |
-| Create tenant_sso_configs table | High | 0.5 day |
-| Add Qlik directory → tenant mapping | High | 0.5 day |
-| Build Qlik mashup/extension for launch | Medium | 1 day |
-| Test with 2-3 design partner tenants | High | 2 days |
-| Document Qlik admin configuration | Medium | 1 day |
+| Task                                         | Priority | Effort  |
+| -------------------------------------------- | -------- | ------- |
+| Create `/auth/coheus/:virtualProxy` endpoint | High     | 1 day   |
+| Implement QPS session validation             | High     | 1 day   |
+| Create tenant_sso_configs table              | High     | 0.5 day |
+| Add Qlik directory → tenant mapping          | High     | 0.5 day |
+| Build Qlik mashup/extension for launch       | Medium   | 1 day   |
+| Test with 2-3 design partner tenants         | High     | 2 days  |
+| Document Qlik admin configuration            | Medium   | 1 day   |
 
 ### Phase 2: Cognito Foundation (Week 3-4)
 
 **Goal:** Set up Cognito infrastructure for new clients.
 
-| Task | Priority | Effort |
-|------|----------|--------|
-| Create Cognito User Pool (SaaS) | High | 0.5 day |
-| Configure OAuth 2.0 App Client | High | 0.5 day |
-| Implement `/auth/cognito/callback` | High | 1 day |
-| Add `/auth/lookup-tenant` endpoint | High | 0.5 day |
-| Build email-domain routing logic | High | 1 day |
-| Update Login.tsx for SSO flow | High | 1 day |
-| Create admin UI for tenant SSO config | Medium | 2 days |
+| Task                                  | Priority | Effort  |
+| ------------------------------------- | -------- | ------- |
+| Create Cognito User Pool (SaaS)       | High     | 0.5 day |
+| Configure OAuth 2.0 App Client        | High     | 0.5 day |
+| Implement `/auth/cognito/callback`    | High     | 1 day   |
+| Add `/auth/lookup-tenant` endpoint    | High     | 0.5 day |
+| Build email-domain routing logic      | High     | 1 day   |
+| Update Login.tsx for SSO flow         | High     | 1 day   |
+| Create admin UI for tenant SSO config | Medium   | 2 days  |
 
 ### Phase 3: SAML IdP Integration (Week 5-6)
 
 **Goal:** Enable tenant admins to configure their IdP.
 
-| Task | Priority | Effort |
-|------|----------|--------|
-| Add Okta as test SAML IdP | High | 1 day |
-| Add Azure AD as test SAML IdP | High | 1 day |
-| Implement JIT user provisioning | High | 1 day |
-| Build user attribute mapping | Medium | 1 day |
-| Create IdP configuration wizard | Medium | 2 days |
-| Document client-side IdP setup | High | 1 day |
+| Task                            | Priority | Effort |
+| ------------------------------- | -------- | ------ |
+| Add Okta as test SAML IdP       | High     | 1 day  |
+| Add Azure AD as test SAML IdP   | High     | 1 day  |
+| Implement JIT user provisioning | High     | 1 day  |
+| Build user attribute mapping    | Medium   | 1 day  |
+| Create IdP configuration wizard | Medium   | 2 days |
+| Document client-side IdP setup  | High     | 1 day  |
 
 ### Phase 4: Self-Hosted SSO (Week 7-8)
 
 **Goal:** Self-hosted customers can configure SSO.
 
-| Task | Priority | Effort |
-|------|----------|--------|
-| Add Cognito to CloudFormation | High | 1 day |
-| Create post-deploy SSO wizard | High | 2 days |
-| Implement direct OIDC validation | Medium | 2 days |
-| Test full self-hosted SSO flow | High | 2 days |
-| Document customer SSO setup | High | 1 day |
+| Task                             | Priority | Effort |
+| -------------------------------- | -------- | ------ |
+| Add Cognito to CloudFormation    | High     | 1 day  |
+| Create post-deploy SSO wizard    | High     | 2 days |
+| Implement direct OIDC validation | Medium   | 2 days |
+| Test full self-hosted SSO flow   | High     | 2 days |
+| Document customer SSO setup      | High     | 1 day  |
 
 ---
 
@@ -648,38 +745,38 @@ router.post('/signin', async (req, res) => {
 CREATE TABLE tenant_sso_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES cohi_tenants(id) ON DELETE CASCADE,
-    
+
     -- SSO Method
     sso_method TEXT NOT NULL CHECK (sso_method IN ('coheus', 'cognito_saml', 'oidc', 'local')),
     is_active BOOLEAN DEFAULT true,
-    
+
     -- Coheus Bridge Configuration
     qlik_user_directory TEXT,           -- Maps to Qlik userDirectory claim
     qlik_virtual_proxy TEXT,            -- e.g., 'acmelender'
     qlik_server_url TEXT,               -- e.g., 'https://qlik.cohi.io'
-    
+
     -- Cognito SAML Configuration
     cognito_idp_name TEXT,              -- Unique identifier in Cognito, e.g., 'tenant-abc-okta'
     cognito_idp_type TEXT,              -- 'okta', 'azure_ad', 'ping', 'custom_saml'
     cognito_idp_metadata_url TEXT,      -- IdP metadata URL (preferred)
     cognito_idp_metadata_xml TEXT,      -- Or raw XML if URL not available
     cognito_attribute_mapping JSONB,    -- Custom attribute mapping
-    
+
     -- Direct OIDC Configuration (for self-hosted)
     oidc_provider_name TEXT,            -- Display name, e.g., 'Company Okta'
     oidc_discovery_url TEXT,            -- OIDC discovery endpoint
     oidc_client_id TEXT,
     oidc_client_secret_encrypted TEXT,  -- Encrypted with KMS
     oidc_scopes TEXT[] DEFAULT ARRAY['openid', 'email', 'profile'],
-    
+
     -- Email Domain Routing
     email_domains TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
-    
+
     -- Metadata
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_by UUID,
-    
+
     UNIQUE(tenant_id)
 );
 
@@ -687,11 +784,11 @@ CREATE TABLE tenant_sso_configs (
 CREATE INDEX idx_tenant_sso_email_domains ON tenant_sso_configs USING GIN (email_domains);
 
 -- Index for Qlik directory lookup
-CREATE INDEX idx_tenant_sso_qlik_directory ON tenant_sso_configs (qlik_user_directory) 
+CREATE INDEX idx_tenant_sso_qlik_directory ON tenant_sso_configs (qlik_user_directory)
   WHERE qlik_user_directory IS NOT NULL;
 
 -- Index for Cognito IdP lookup
-CREATE INDEX idx_tenant_sso_cognito_idp ON tenant_sso_configs (cognito_idp_name) 
+CREATE INDEX idx_tenant_sso_cognito_idp ON tenant_sso_configs (cognito_idp_name)
   WHERE cognito_idp_name IS NOT NULL;
 ```
 
@@ -736,25 +833,25 @@ VALUES (
 
 ### Authentication Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/auth/lookup-tenant?domain={domain}` | Get tenant SSO config by email domain |
-| `GET` | `/auth/coheus/:virtualProxy` | Coheus bridge authentication |
-| `GET` | `/auth/cognito/callback` | Cognito OAuth callback |
-| `GET` | `/auth/oidc/callback` | Direct OIDC callback |
-| `POST` | `/auth/signin` | Local email/password login |
-| `POST` | `/auth/signout` | Logout (invalidate session) |
-| `POST` | `/auth/refresh` | Refresh access token |
-| `GET` | `/auth/me` | Get current user info |
+| Method | Path                                  | Description                           |
+| ------ | ------------------------------------- | ------------------------------------- |
+| `GET`  | `/auth/lookup-tenant?domain={domain}` | Get tenant SSO config by email domain |
+| `GET`  | `/auth/coheus/:virtualProxy`          | Coheus bridge authentication          |
+| `GET`  | `/auth/cognito/callback`              | Cognito OAuth callback                |
+| `GET`  | `/auth/oidc/callback`                 | Direct OIDC callback                  |
+| `POST` | `/auth/signin`                        | Local email/password login            |
+| `POST` | `/auth/signout`                       | Logout (invalidate session)           |
+| `POST` | `/auth/refresh`                       | Refresh access token                  |
+| `GET`  | `/auth/me`                            | Get current user info                 |
 
 ### Admin Endpoints (SSO Configuration)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/admin/tenants/:id/sso` | Get tenant SSO configuration |
-| `PUT` | `/admin/tenants/:id/sso` | Update tenant SSO configuration |
-| `POST` | `/admin/tenants/:id/sso/test` | Test SSO configuration |
-| `GET` | `/admin/cognito/saml-metadata` | Get Cognito SP metadata for IdP setup |
+| Method | Path                           | Description                           |
+| ------ | ------------------------------ | ------------------------------------- |
+| `GET`  | `/admin/tenants/:id/sso`       | Get tenant SSO configuration          |
+| `PUT`  | `/admin/tenants/:id/sso`       | Update tenant SSO configuration       |
+| `POST` | `/admin/tenants/:id/sso/test`  | Test SSO configuration                |
+| `GET`  | `/admin/cognito/saml-metadata` | Get Cognito SP metadata for IdP setup |
 
 ---
 
@@ -795,11 +892,13 @@ VALUES (
 ## Related Documentation
 
 ### Security
+
 - [AUTH_REFACTOR.md](./AUTH_REFACTOR.md) - Internal authentication refactoring
 - [STATE_MANAGEMENT.md](./STATE_MANAGEMENT.md) - Frontend state management
 - [ROW_LEVEL_SECURITY.md](./ROW_LEVEL_SECURITY.md) - Custom field-based access control
 
 ### Architecture
+
 - [OVERVIEW.md](../architecture/OVERVIEW.md) - System architecture
 - [ADMIN_PANEL.md](../architecture/ADMIN_PANEL.md) - Admin panel architecture
 - [CLIENT_ADMIN_REQUIREMENTS.md](../architecture/CLIENT_ADMIN_REQUIREMENTS.md) - Tenant admin features (includes SSO section)

@@ -48,7 +48,7 @@ export function CreateLOSConnectionDialog({
     encompass_selected_folders: [] as string[],
     // General fields
     sync_enabled: true,
-    sync_frequency: 'hourly',
+    sync_frequency: 'daily', // Default to daily - controlled by super admin
   });
 
   const isEncompass = formData.los_type === 'encompass';
@@ -170,7 +170,7 @@ export function CreateLOSConnectionDialog({
           encompass_sa_password: '',
           encompass_selected_folders: [],
           sync_enabled: true,
-          sync_frequency: 'hourly',
+          sync_frequency: 'daily',
         });
       }
     } catch (error: any) {
@@ -482,7 +482,7 @@ export function CreateLOSConnectionDialog({
                                 encompass_sa_password: '',
                                 encompass_selected_folders: [],
                                 sync_enabled: true,
-                                sync_frequency: 'hourly',
+                                sync_frequency: 'daily',
                               });
                               setConnectionIdForFolders(null);
                               setAvailableFolders([]);

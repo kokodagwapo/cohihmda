@@ -18,7 +18,7 @@ export const Login = () => {
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedTenant, setSelectedTenant] = useState<string>('');
+  const [selectedTenant, setSelectedTenant] = useState<string>('__auto__');
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline' | 'not-configured'>('checking');
   const [showTenantSelect, setShowTenantSelect] = useState(false);
@@ -108,8 +108,8 @@ export const Login = () => {
     try {
       setServerStatus('checking');
       
-      // Pass tenant slug if selected (empty string means auto-detect / super admin)
-      await login(email.trim(), password, selectedTenant || undefined);
+      // Pass tenant slug if selected (__auto__ means auto-detect / super admin)
+      await login(email.trim(), password, selectedTenant === '__auto__' ? undefined : selectedTenant);
       
       setServerStatus('online');
       
@@ -190,7 +190,7 @@ export const Login = () => {
                       <SelectValue placeholder="Auto-detect (or Cohi admin)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">
+                      <SelectItem value="__auto__">
                         <span className="flex items-center gap-2">
                           <Shield className="h-4 w-4 text-amber-500" />
                           Auto-detect / Cohi Admin

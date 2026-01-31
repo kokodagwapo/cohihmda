@@ -2,9 +2,23 @@
  * Metrics Service
  * Centralized metrics library for dashboard analytics
  * Provides a catalog of metrics that can be queried individually or in groups
+ * 
+ * LOAN ACCESS FILTERING:
+ * All query functions support user-level loan access filtering via the 
+ * `userAccessFilter` option. This ensures users only see metrics for 
+ * loans they have access to (based on Encompass permissions).
+ * 
+ * @example
+ * import { getLoanAccessContext } from '../userLoanAccessService';
+ * 
+ * const ctx = await getLoanAccessContext(req, tenantPool);
+ * const metrics = await queryMetrics(tenantPool, ['active_loans'], {
+ *   userAccessFilter: ctx.getFilter('l'),
+ * });
  */
 
 import pg from 'pg';
+import type { LoanAccessFilter } from '../userLoanAccessService.js';
 
 // Date range interface
 export interface DateRange {
@@ -39,6 +53,14 @@ export interface MetricQueryOptions {
   dateField?: string; // Override default date field for this metric
   additionalFilters?: Record<string, any>;
   groupBy?: string[];
+  /**
+   * User-level loan access filter
+   * Obtained from getLoanAccessContext(req, pool).getFilter('l')
+   * - null = full access (no filter applied)
+   * - { sql: 'FALSE', ... } = no access (returns 0/empty)
+   * - { sql: 'l.guid IN (...)', ... } = filtered access
+   */
+  userAccessFilter?: LoanAccessFilter | null;
 }
 
 // Metrics catalog - all available metrics with SQL implementations
@@ -988,6 +1010,11 @@ function buildWhereClause(filters: Record<string, any>, paramOffset: number = 0)
 
 /**
  * Query a single metric
+ * 
+ * @param tenantPool - Tenant database connection pool
+ * @param metricId - ID of the metric to query from METRICS_CATALOG
+ * @param options - Query options including date range, filters, and user access filter
+ * @returns Metric result with value and metadata
  */
 export async function queryMetric(
   tenantPool: pg.Pool,
@@ -999,6 +1026,32 @@ export async function queryMetric(
     throw new Error(`Metric ${metricId} not found in catalog`);
   }
   
+  // Check for no-access filter (returns zero immediately)
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return {
+      metricId,
+      value: 0,
+      metadata: { 
+        dateRange: options.dateRange,
+        accessFiltered: true,
+        noAccess: true,
+      }
+    };
+  }
+  
+  // Build user access clause (must be first to get correct param index)
+  let currentParamIndex = 1;
+  let userAccessClause = '';
+  const userAccessParams: any[] = [];
+  
+  if (options.userAccessFilter && options.userAccessFilter.sql !== 'FALSE') {
+    // User has filtered access - apply the junction table filter
+    userAccessClause = `AND ${options.userAccessFilter.sql}`;
+    userAccessParams.push(...options.userAccessFilter.params);
+    currentParamIndex += options.userAccessFilter.paramOffset;
+  }
+  // null userAccessFilter means full access - no clause needed
+  
   const dateField = options.dateField || metric.defaultDateField || 'application_date';
   // Skip date filtering for metrics that represent current state (e.g., active_loans, locked_loans)
   let dateRangeClause;
@@ -1006,23 +1059,26 @@ export async function queryMetric(
     dateRangeClause = { clause: '', params: [] };
   } else if (metric.id === 'avg_cycle_time' && options.dateRange) {
     // Special handling for avg_cycle_time: filter by closing_date OR funding_date
-    dateRangeClause = buildDateRangeClauseForCycleTime(options.dateRange);
+    dateRangeClause = buildDateRangeClauseForCycleTime(options.dateRange, currentParamIndex - 1);
   } else {
-    dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
+    dateRangeClause = buildDateRangeClause(options.dateRange, dateField, currentParamIndex - 1);
   }
+  currentParamIndex += dateRangeClause.params.length;
+  
   const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
+    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
     : { clause: '', params: [] };
   
-  // Build parameters array
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  // Build parameters array in order: userAccess, dateRange, additionalFilters
+  const params = [...userAccessParams, ...dateRangeClause.params, ...additionalFiltersClause.params];
   
-  // Build query with date filtering
+  // Build query with all filtering
   const query = `
     SELECT 
       ${metric.sqlQuery} as metric_value
     FROM public.loans l
     WHERE 1=1
+      ${userAccessClause}
       ${dateRangeClause.clause}
       ${additionalFiltersClause.clause}
   `;
@@ -1072,6 +1128,49 @@ export async function queryMetric(
         console.log(`[MetricsService] Full query executed:`, query);
         console.log(`[MetricsService] Query params:`, params);
         console.log(`[MetricsService] Query result:`, result.rows[0]);
+      }
+      
+      // Debug loan access GUIDs if userAccessFilter is applied
+      if (options.userAccessFilter && options.userAccessFilter.params.length > 0) {
+        const userId = options.userAccessFilter.params[0];
+        try {
+          // Check loans.guid column
+          const guidQuery = `SELECT 
+            COUNT(*) as total_loans,
+            COUNT(CASE WHEN guid IS NOT NULL THEN 1 END) as loans_with_guid,
+            COUNT(CASE WHEN guid IS NULL THEN 1 END) as loans_without_guid,
+            (SELECT guid FROM loans WHERE guid IS NOT NULL LIMIT 1) as sample_loan_guid,
+            (SELECT loan_id FROM loans WHERE loan_id IS NOT NULL LIMIT 1) as sample_loan_id
+          FROM loans`;
+          const guidResult = await tenantPool.query(guidQuery);
+          console.log(`[MetricsService] GUID DEBUG - loans table:`, guidResult.rows[0]);
+          
+          // Check user_loan_access
+          const accessQuery = `SELECT 
+            COUNT(*) as user_access_count,
+            (SELECT loan_guid FROM user_loan_access WHERE user_id = $1 LIMIT 1) as sample_access_guid
+          FROM user_loan_access WHERE user_id = $1`;
+          const accessResult = await tenantPool.query(accessQuery, [userId]);
+          console.log(`[MetricsService] GUID DEBUG - user_loan_access:`, accessResult.rows[0]);
+          
+          // Check matching
+          const matchQuery = `SELECT COUNT(*) as matching_count
+            FROM user_loan_access ula 
+            INNER JOIN loans l ON l.guid = ula.loan_guid 
+            WHERE ula.user_id = $1`;
+          const matchResult = await tenantPool.query(matchQuery, [userId]);
+          console.log(`[MetricsService] GUID DEBUG - matching loans:`, matchResult.rows[0]);
+          
+          // Check if loan_id matches instead
+          const loanIdMatchQuery = `SELECT COUNT(*) as loan_id_matching_count
+            FROM user_loan_access ula 
+            INNER JOIN loans l ON l.loan_id = ula.loan_guid 
+            WHERE ula.user_id = $1`;
+          const loanIdMatchResult = await tenantPool.query(loanIdMatchQuery, [userId]);
+          console.log(`[MetricsService] GUID DEBUG - loan_id matching:`, loanIdMatchResult.rows[0]);
+        } catch (guidErr) {
+          console.error(`[MetricsService] GUID DEBUG error:`, guidErr);
+        }
       }
     } catch (e) {
       console.error(`[MetricsService] Error in debug query for ${metricId}:`, e);
@@ -1168,6 +1267,22 @@ export async function queryMetricGroupedBy(
     throw new Error(`Metric ${metricId} not found in catalog`);
   }
   
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return [];
+  }
+  
+  // Build user access clause first
+  let currentParamIndex = 1;
+  let userAccessClause = '';
+  const userAccessParams: any[] = [];
+  
+  if (options.userAccessFilter && options.userAccessFilter.sql !== 'FALSE') {
+    userAccessClause = `AND ${options.userAccessFilter.sql}`;
+    userAccessParams.push(...options.userAccessFilter.params);
+    currentParamIndex += options.userAccessFilter.paramOffset;
+  }
+  
   const dateField = options.dateField || metric.defaultDateField || 'application_date';
   
   // Build date range clause
@@ -1175,14 +1290,15 @@ export async function queryMetricGroupedBy(
   if (metric.ignoreDateFilter) {
     dateRangeClause = { clause: '', params: [] };
   } else {
-    dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
+    dateRangeClause = buildDateRangeClause(options.dateRange, dateField, currentParamIndex - 1);
   }
+  currentParamIndex += dateRangeClause.params.length;
   
   const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
+    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
     : { clause: '', params: [] };
   
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  const params = [...userAccessParams, ...dateRangeClause.params, ...additionalFiltersClause.params];
   
   // Validate groupBy field
   const allowedGroupByFields = ['loan_officer', 'branch', 'processor', 'underwriter', 'channel', 'investor', 'loan_type', 'loan_purpose', 'occupancy_type'];
@@ -1199,6 +1315,7 @@ export async function queryMetricGroupedBy(
     FROM public.loans l
     WHERE l.${groupBy} IS NOT NULL 
       AND TRIM(l.${groupBy}::text) != ''
+      ${userAccessClause}
       ${dateRangeClause.clause}
       ${additionalFiltersClause.clause}
     GROUP BY l.${groupBy}
@@ -1291,6 +1408,41 @@ export interface DistributionBucket {
   sortOrder: number;
 }
 
+// Helper to build all filter clauses with proper parameter ordering
+function buildAllFilterClauses(options: MetricQueryOptions, dateField: string): {
+  userAccessClause: string;
+  dateRangeClause: { clause: string; params: any[] };
+  additionalFiltersClause: { clause: string; params: any[] };
+  allParams: any[];
+} {
+  let currentParamIndex = 1;
+  let userAccessClause = '';
+  const userAccessParams: any[] = [];
+  
+  // Build user access clause first
+  if (options.userAccessFilter && options.userAccessFilter.sql !== 'FALSE') {
+    userAccessClause = `AND ${options.userAccessFilter.sql}`;
+    userAccessParams.push(...options.userAccessFilter.params);
+    currentParamIndex += options.userAccessFilter.paramOffset;
+  }
+  
+  // Build date range clause
+  const dateRangeClause = buildDateRangeClause(options.dateRange, dateField, currentParamIndex - 1);
+  currentParamIndex += dateRangeClause.params.length;
+  
+  // Build additional filters clause
+  const additionalFiltersClause = options.additionalFilters 
+    ? buildWhereClause(options.additionalFilters, currentParamIndex - 1)
+    : { clause: '', params: [] };
+  
+  return {
+    userAccessClause,
+    dateRangeClause,
+    additionalFiltersClause,
+    allParams: [...userAccessParams, ...dateRangeClause.params, ...additionalFiltersClause.params],
+  };
+}
+
 /**
  * Query FICO distribution with bucketed ranges
  * Matches reference app: 800-850, 750-799, 680-719, 620-679, 580-619, <580
@@ -1300,13 +1452,14 @@ export async function queryFicoDistribution(
   tenantPool: pg.Pool,
   options: MetricQueryOptions = {}
 ): Promise<DistributionBucket[]> {
-  const dateField = options.dateField || 'application_date';
-  const dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
-  const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
-    : { clause: '', params: [] };
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return [];
+  }
   
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  const dateField = options.dateField || 'application_date';
+  const { userAccessClause, dateRangeClause, additionalFiltersClause, allParams } = 
+    buildAllFilterClauses(options, dateField);
   
   // FICO ranges ordered from HIGH to LOW (descending) to match reference app
   const query = `
@@ -1333,6 +1486,7 @@ export async function queryFicoDistribution(
         l.loan_amount
       FROM public.loans l
       WHERE 1=1 
+        ${userAccessClause}
         ${dateRangeClause.clause}
         ${additionalFiltersClause.clause}
     ),
@@ -1352,7 +1506,7 @@ export async function queryFicoDistribution(
     ORDER BY MIN(fb.sort_order)
   `;
   
-  const result = await tenantPool.query(query, params);
+  const result = await tenantPool.query(query, allParams);
   
   return result.rows.map(row => ({
     range: row.range,
@@ -1372,13 +1526,14 @@ export async function queryLtvDistribution(
   tenantPool: pg.Pool,
   options: MetricQueryOptions = {}
 ): Promise<DistributionBucket[]> {
-  const dateField = options.dateField || 'application_date';
-  const dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
-  const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
-    : { clause: '', params: [] };
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return [];
+  }
   
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  const dateField = options.dateField || 'application_date';
+  const { userAccessClause, dateRangeClause, additionalFiltersClause, allParams } = 
+    buildAllFilterClauses(options, dateField);
   
   const query = `
     WITH ltv_buckets AS (
@@ -1404,6 +1559,7 @@ export async function queryLtvDistribution(
         l.loan_amount
       FROM public.loans l
       WHERE 1=1 
+        ${userAccessClause}
         ${dateRangeClause.clause}
         ${additionalFiltersClause.clause}
     ),
@@ -1422,7 +1578,7 @@ export async function queryLtvDistribution(
     ORDER BY MIN(lb.sort_order)
   `;
   
-  const result = await tenantPool.query(query, params);
+  const result = await tenantPool.query(query, allParams);
   
   return result.rows.map(row => ({
     range: row.range,
@@ -1442,13 +1598,14 @@ export async function queryDtiDistribution(
   tenantPool: pg.Pool,
   options: MetricQueryOptions = {}
 ): Promise<DistributionBucket[]> {
-  const dateField = options.dateField || 'application_date';
-  const dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
-  const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
-    : { clause: '', params: [] };
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return [];
+  }
   
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  const dateField = options.dateField || 'application_date';
+  const { userAccessClause, dateRangeClause, additionalFiltersClause, allParams } = 
+    buildAllFilterClauses(options, dateField);
   
   const query = `
     WITH dti_buckets AS (
@@ -1472,6 +1629,7 @@ export async function queryDtiDistribution(
         l.loan_amount
       FROM public.loans l
       WHERE 1=1 
+        ${userAccessClause}
         ${dateRangeClause.clause}
         ${additionalFiltersClause.clause}
     ),
@@ -1490,7 +1648,7 @@ export async function queryDtiDistribution(
     ORDER BY MIN(db.sort_order)
   `;
   
-  const result = await tenantPool.query(query, params);
+  const result = await tenantPool.query(query, allParams);
   
   return result.rows.map(row => ({
     range: row.range,
@@ -1523,13 +1681,14 @@ export async function queryLoanMix(
   groupBy: 'loan_type' | 'loan_purpose' | 'occupancy_type',
   options: MetricQueryOptions = {}
 ): Promise<LoanMixRow[]> {
-  const dateField = options.dateField || 'application_date';
-  const dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
-  const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
-    : { clause: '', params: [] };
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return [];
+  }
   
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  const dateField = options.dateField || 'application_date';
+  const { userAccessClause, dateRangeClause, additionalFiltersClause, allParams } = 
+    buildAllFilterClauses(options, dateField);
   
   // Validate groupBy field
   const allowedGroupByFields = ['loan_type', 'loan_purpose', 'occupancy_type'];
@@ -1550,6 +1709,7 @@ export async function queryLoanMix(
         l.be_dti_ratio
       FROM public.loans l
       WHERE l.${groupBy} IS NOT NULL 
+        ${userAccessClause}
         ${dateRangeClause.clause}
         ${additionalFiltersClause.clause}
     ),
@@ -1590,7 +1750,7 @@ export async function queryLoanMix(
     ORDER BY SUM(ld.loan_amount) DESC NULLS LAST
   `;
   
-  const result = await tenantPool.query(query, params);
+  const result = await tenantPool.query(query, allParams);
   
   return result.rows.map(row => ({
     category: row.category,
@@ -1627,13 +1787,20 @@ export async function queryCreditRiskStory(
   tenantPool: pg.Pool,
   options: MetricQueryOptions = {}
 ): Promise<CreditRiskStoryData> {
-  const dateField = options.dateField || 'application_date';
-  const dateRangeClause = buildDateRangeClause(options.dateRange, dateField);
-  const additionalFiltersClause = options.additionalFilters 
-    ? buildWhereClause(options.additionalFilters, dateRangeClause.params.length)
-    : { clause: '', params: [] };
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return {
+      largestLoanType: { category: '', volumePercent: 0 },
+      largestLoanPurpose: { category: '', volumePercent: 0 },
+      largestOccupancy: { category: '', volumePercent: 0 },
+      conventionalQualifiedPercent: 0,
+      governmentQualifiedPercent: 0
+    };
+  }
   
-  const params = [...dateRangeClause.params, ...additionalFiltersClause.params];
+  const dateField = options.dateField || 'application_date';
+  const { userAccessClause, dateRangeClause, additionalFiltersClause, allParams } = 
+    buildAllFilterClauses(options, dateField);
   
   // Query for qualified loan percentages - VOLUME BASED (matches Qlik)
   // Qlik uses [Loan Type Group] with pattern matching: *Conv* for Conventional, *Gov* for Government
@@ -1649,6 +1816,7 @@ export async function queryCreditRiskStory(
         l.loan_amount
       FROM public.loans l
       WHERE 1=1
+        ${userAccessClause}
         ${dateRangeClause.clause}
         ${additionalFiltersClause.clause}
     ),
@@ -1688,7 +1856,7 @@ export async function queryCreditRiskStory(
     FROM conventional_stats cs, government_stats gs
   `;
   
-  const result = await tenantPool.query(qualifiedQuery, params);
+  const result = await tenantPool.query(qualifiedQuery, allParams);
   
   const conventionalQualifiedPercent = parseFloat(result.rows[0]?.conventional_qualified_pct) || 0;
   const governmentQualifiedPercent = parseFloat(result.rows[0]?.government_qualified_pct) || 0;
@@ -1740,6 +1908,8 @@ export interface ActorMetricsQueryOptions {
   dateRange: DateRange;
   channelGroup?: string;
   actorMissingMode?: 'strict' | 'extended';
+  /** User-level loan access filter */
+  userAccessFilter?: LoanAccessFilter | null;
 }
 
 /**
@@ -1756,24 +1926,41 @@ export async function queryActorMetrics(
   actorConfig: ActorConfig,
   options: ActorMetricsQueryOptions
 ): Promise<ActorMetricsResult[]> {
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return [];
+  }
+  
   const { actorColumn, outputDateField, turnTimeStartField, turnTimeEndField } = actorConfig;
   const { dateRange, channelGroup, actorMissingMode = 'extended' } = options;
 
   const channelClause = buildChannelWhereClause(channelGroup);
   const actorNotMissingClause = buildActorNotMissingClause(actorColumn, actorMissingMode);
 
-  // Build date range clause
-  const dateClause = dateRange.start && dateRange.end
-    ? `AND ${outputDateField} >= $1 AND ${outputDateField} < $2`
-    : dateRange.start
-    ? `AND ${outputDateField} >= $1`
-    : dateRange.end
-    ? `AND ${outputDateField} < $1`
-    : '';
-
+  // Build params array with user access filter first
   const params: any[] = [];
-  if (dateRange.start) params.push(dateRange.start);
-  if (dateRange.end) params.push(dateRange.end);
+  let paramIndex = 1;
+  
+  // User access clause
+  let userAccessClause = '';
+  if (options.userAccessFilter && options.userAccessFilter.sql !== 'FALSE') {
+    userAccessClause = `AND ${options.userAccessFilter.sql.replace(/\$1/g, `$${paramIndex}`)}`;
+    params.push(...options.userAccessFilter.params);
+    paramIndex += options.userAccessFilter.paramOffset;
+  }
+
+  // Build date range clause with correct param indices
+  let dateClause = '';
+  if (dateRange.start && dateRange.end) {
+    dateClause = `AND ${outputDateField} >= $${paramIndex} AND ${outputDateField} < $${paramIndex + 1}`;
+    params.push(dateRange.start, dateRange.end);
+  } else if (dateRange.start) {
+    dateClause = `AND ${outputDateField} >= $${paramIndex}`;
+    params.push(dateRange.start);
+  } else if (dateRange.end) {
+    dateClause = `AND ${outputDateField} < $${paramIndex}`;
+    params.push(dateRange.end);
+  }
 
   const query = `
     SELECT 
@@ -1810,6 +1997,7 @@ export async function queryActorMetrics(
       COUNT(CASE WHEN UPPER(current_loan_status) LIKE '%DENIED%' THEN 1 END) as denied_count
     FROM public.loans
     WHERE ${actorNotMissingClause}
+      ${userAccessClause}
       ${dateClause}
       ${channelClause}
     GROUP BY ${actorColumn}
@@ -1857,22 +2045,48 @@ export async function queryTotalMetrics(
   turnTimeEndField: string,
   options: ActorMetricsQueryOptions
 ): Promise<TotalMetricsResult> {
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return {
+      totalUnits: 0,
+      totalVolume: 0,
+      totalRevenue: 0,
+      avgTurnTime: null,
+      waFico: null,
+      waLtv: null,
+      waDti: null,
+      governmentPercent: 0,
+      purchasePercent: 0,
+    };
+  }
+  
   const { dateRange, channelGroup } = options;
-
   const channelClause = buildChannelWhereClause(channelGroup);
 
-  // Build date range clause
-  const dateClause = dateRange.start && dateRange.end
-    ? `AND ${outputDateField} >= $1 AND ${outputDateField} < $2`
-    : dateRange.start
-    ? `AND ${outputDateField} >= $1`
-    : dateRange.end
-    ? `AND ${outputDateField} < $1`
-    : '';
-
+  // Build params array with user access filter first
   const params: any[] = [];
-  if (dateRange.start) params.push(dateRange.start);
-  if (dateRange.end) params.push(dateRange.end);
+  let paramIndex = 1;
+  
+  // User access clause
+  let userAccessClause = '';
+  if (options.userAccessFilter && options.userAccessFilter.sql !== 'FALSE') {
+    userAccessClause = `AND ${options.userAccessFilter.sql.replace(/\$1/g, `$${paramIndex}`)}`;
+    params.push(...options.userAccessFilter.params);
+    paramIndex += options.userAccessFilter.paramOffset;
+  }
+
+  // Build date range clause
+  let dateClause = '';
+  if (dateRange.start && dateRange.end) {
+    dateClause = `AND ${outputDateField} >= $${paramIndex} AND ${outputDateField} < $${paramIndex + 1}`;
+    params.push(dateRange.start, dateRange.end);
+  } else if (dateRange.start) {
+    dateClause = `AND ${outputDateField} >= $${paramIndex}`;
+    params.push(dateRange.start);
+  } else if (dateRange.end) {
+    dateClause = `AND ${outputDateField} < $${paramIndex}`;
+    params.push(dateRange.end);
+  }
 
   const query = `
     SELECT 
@@ -1911,6 +2125,7 @@ export async function queryTotalMetrics(
       , 1) as purchase_percent
     FROM public.loans
     WHERE ${outputDateField} IS NOT NULL
+      ${userAccessClause}
       ${dateClause}
       ${channelClause}
   `;
@@ -1949,18 +2164,34 @@ export async function queryMonthlyMetrics(
   turnTimeEndField: string,
   options: ActorMetricsQueryOptions
 ): Promise<Map<string, MonthlyMetricsResult[]>> {
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === 'FALSE') {
+    return new Map();
+  }
+  
   const { dateRange, channelGroup, actorMissingMode = 'extended' } = options;
 
   const channelClause = buildChannelWhereClause(channelGroup);
   const actorNotMissingClause = buildActorNotMissingClause(actorColumn, actorMissingMode);
 
-  const dateClause = dateRange.start && dateRange.end
-    ? `AND ${outputDateField} >= $1 AND ${outputDateField} < $2`
-    : '';
-
+  // Build params array with user access filter first
   const params: any[] = [];
-  if (dateRange.start) params.push(dateRange.start);
-  if (dateRange.end) params.push(dateRange.end);
+  let paramIndex = 1;
+  
+  // User access clause
+  let userAccessClause = '';
+  if (options.userAccessFilter && options.userAccessFilter.sql !== 'FALSE') {
+    userAccessClause = `AND ${options.userAccessFilter.sql.replace(/\$1/g, `$${paramIndex}`)}`;
+    params.push(...options.userAccessFilter.params);
+    paramIndex += options.userAccessFilter.paramOffset;
+  }
+
+  // Build date clause
+  let dateClause = '';
+  if (dateRange.start && dateRange.end) {
+    dateClause = `AND ${outputDateField} >= $${paramIndex} AND ${outputDateField} < $${paramIndex + 1}`;
+    params.push(dateRange.start, dateRange.end);
+  }
 
   const query = `
     SELECT 
@@ -1978,6 +2209,7 @@ export async function queryMonthlyMetrics(
       ) as avg_turn_time
     FROM public.loans
     WHERE ${actorNotMissingClause}
+      ${userAccessClause}
       ${dateClause}
       ${channelClause}
     GROUP BY ${actorColumn}, TO_CHAR(${outputDateField}, 'YYYY-MM')

@@ -411,31 +411,7 @@ export const OverviewSection = ({ stats, overviewLoading }: OverviewSectionProps
           </Card>
         )}
 
-        {/* Card 10: LOS Connections */}
-        <Card className="border-slate-200/60 dark:border-slate-700/50 bg-white/90 dark:bg-slate-800/70 backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.05)] dark:shadow-[0_4px_12px_rgba(0,0,0,0.2)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_8px_20px_rgba(0,0,0,0.3)] transition-all duration-300 rounded-xl hover:border-slate-300 dark:hover:border-slate-600">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-base font-extralight text-slate-700 dark:text-slate-300 tracking-tight">
-              LOS Connections
-            </CardTitle>
-            <div className="p-1.5 rounded-lg bg-orange-50 dark:bg-orange-900/20">
-              <Link2 className="h-4 w-4 text-orange-600 dark:text-orange-400" strokeWidth={1.5} />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl sm:text-4xl font-thin text-slate-900 dark:text-white tracking-tight">
-              {overviewLoading ? (
-                <div className="h-8 w-16 bg-slate-200 dark:bg-slate-700 animate-pulse rounded" />
-              ) : (
-                stats.losConnections
-              )}
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-light">
-              Active integrations
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Card 11: Total Documents */}
+        {/* Card 10: Total Documents */}
         <Card className="border-slate-200/60 dark:border-slate-700/50 bg-white/90 dark:bg-slate-800/70 backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.05)] dark:shadow-[0_4px_12px_rgba(0,0,0,0.2)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_8px_20px_rgba(0,0,0,0.3)] transition-all duration-300 rounded-xl hover:border-slate-300 dark:hover:border-slate-600">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-base font-extralight text-slate-700 dark:text-slate-300 tracking-tight">
