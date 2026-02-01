@@ -11,6 +11,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
 import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
 import { useChannelStore } from '@/stores/channelStore';
+import { useTenantStore } from '@/stores/tenantStore';
+import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
@@ -30,6 +32,14 @@ const CompanyScorecard = () => {
   const [selectedDateField, setSelectedDateField] = useState<string>('application_date');
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
+  
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
+  const { user } = useAuth();
+  
+  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant
+  const tenantId = selectedTenantId || user?.tenant_id || null;
+  
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -50,7 +60,8 @@ const CompanyScorecard = () => {
     application: selectedApplication,
     channel: selectedChannel, // Channel filter - matches Qlik [Consolidated Channels]
     dateRange: dateRange, // Pass the calculated date range from the hook
-    dateField: selectedDateField // All metrics will filter on this date field
+    dateField: selectedDateField, // All metrics will filter on this date field
+    tenantId: tenantId // Tenant context (admins viewing other tenants, or user's own tenant)
   };
   const { data, loading, error } = useCompanyScorecardData(filters);
 

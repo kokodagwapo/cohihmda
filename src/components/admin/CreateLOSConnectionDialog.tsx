@@ -197,7 +197,7 @@ export function CreateLOSConnectionDialog({
             <div className="space-y-4">
               <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Basic Information</h3>
               
-              <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="los_type">LOS Type</Label>
                   <Select
@@ -207,7 +207,7 @@ export function CreateLOSConnectionDialog({
                     <SelectTrigger>
                       <SelectValue placeholder="Select LOS type" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="z-[9999]" position="popper" sideOffset={4}>
                       {Object.entries(losTypes || {}).map(([key, config]: [string, any]) => (
                         <SelectItem key={key} value={key}>
                           {config.name || key}
@@ -237,9 +237,9 @@ export function CreateLOSConnectionDialog({
                     onValueChange={(value) => setFormData({ ...formData, connection_method: value })}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select connection method" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="z-[9999]" position="popper" sideOffset={4}>
                       <SelectItem value="api">API</SelectItem>
                       <SelectItem value="csv_upload">CSV Upload</SelectItem>
                       <SelectItem value="database">Database</SelectItem>
@@ -254,9 +254,9 @@ export function CreateLOSConnectionDialog({
                     onValueChange={(value) => setFormData({ ...formData, api_environment: value })}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select environment" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="z-[9999]" position="popper" sideOffset={4}>
                       <SelectItem value="production">Production</SelectItem>
                       <SelectItem value="sandbox">Sandbox</SelectItem>
                     </SelectContent>
@@ -304,9 +304,9 @@ export function CreateLOSConnectionDialog({
                     onValueChange={(value) => setFormData({ ...formData, encompass_extraction_method: value })}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select extraction method" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="z-[9999]" position="popper" sideOffset={4}>
                       <SelectItem value="partner">Partner Flow (Recommended)</SelectItem>
                       <SelectItem value="ropc">ROPC Flow</SelectItem>
                       <SelectItem value="api">API Flow</SelectItem>
@@ -509,9 +509,9 @@ export function CreateLOSConnectionDialog({
                   onValueChange={(value) => setFormData({ ...formData, sync_frequency: value })}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Select sync frequency" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="z-[9999]" position="popper" sideOffset={4}>
                     <SelectItem value="realtime">Real-time</SelectItem>
                     <SelectItem value="hourly">Hourly</SelectItem>
                     <SelectItem value="daily">Daily</SelectItem>

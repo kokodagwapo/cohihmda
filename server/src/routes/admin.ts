@@ -17,6 +17,7 @@ import { z } from "zod";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
+import ssoConfigRoutes from "./admin/ssoConfig.js";
 
 const router = Router();
 
@@ -2064,5 +2065,8 @@ router.post(
     }
   },
 );
+
+// Mount SSO configuration routes
+router.use("/sso", ssoConfigRoutes);
 
 export default router;

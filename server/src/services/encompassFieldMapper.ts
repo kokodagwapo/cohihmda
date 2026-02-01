@@ -4,85 +4,30 @@
  */
 
 import { pool } from '../config/database.js';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { 
+  DEFAULT_ENCOMPASS_FIELD_MAPPINGS, 
+  getAllCoheusAliases as getAliases,
+  getDefaultEncompassFieldId,
+  getFieldMappingCount 
+} from '../config/defaultEncompassFieldMappings.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Load data dictionary once at startup
+// Cache the data dictionary as a Map for backward compatibility
 let dataDictionary: Map<string, string> | null = null;
 
 /**
- * Load data dictionary from XML file
+ * Get the data dictionary as a Map
+ * Uses the TypeScript constants from defaultEncompassFieldMappings.ts
  */
 function loadDataDictionary(): Map<string, string> {
   if (dataDictionary) {
     return dataDictionary;
   }
 
-  try {
-    const xmlPath = join(
-      __dirname,
-      '../../../QlikAppsAndLogicDictionaryDocs/logic-dictionary-docs/data-dictionary/CoheusDataDictionary.xml'
-    );
-    const xmlContent = readFileSync(xmlPath, 'utf-8');
-    const fieldMap = new Map<string, string>();
-
-    // Parse XML to extract field mappings
-    const fieldRegex = /<Field Id="([^"]+)" Alias="([^"]+)"\s*\/>/g;
-    let match;
-    const duplicateFieldIds = new Map<string, string[]>(); // Track fieldIds with multiple aliases
-    while ((match = fieldRegex.exec(xmlContent)) !== null) {
-      const fieldId = match[1];
-      const alias = match[2];
-      
-      // Check for duplicates (same fieldId, different alias)
-      if (fieldMap.has(alias)) {
-        // Same alias, different fieldId - this shouldn't happen
-        console.warn(`[EncompassFieldMapper] Duplicate alias "${alias}" with different field IDs: existing=${fieldMap.get(alias)}, new=${fieldId}`);
-      } else if (Array.from(fieldMap.values()).includes(fieldId)) {
-        // Same fieldId, different alias - track it
-        const existingAlias = Array.from(fieldMap.entries()).find(([a, f]) => f === fieldId)?.[0];
-        if (existingAlias) {
-          if (!duplicateFieldIds.has(fieldId)) {
-            duplicateFieldIds.set(fieldId, [existingAlias]);
-          }
-          duplicateFieldIds.get(fieldId)!.push(alias);
-        }
-      }
-      
-      fieldMap.set(alias, fieldId);
-    }
-
-    // Log duplicates (informational - this is expected and handled)
-    if (duplicateFieldIds.size > 0) {
-      console.log(`[EncompassFieldMapper] ℹ️ Found ${duplicateFieldIds.size} field IDs with multiple aliases (this is normal):`);
-      for (const [fieldId, aliases] of duplicateFieldIds.entries()) {
-        console.log(`[EncompassFieldMapper]   ${fieldId}: ${aliases.join(', ')}`);
-      }
-    }
-    
-    // DEBUG: Check if Application Date is in the map
-    if (fieldMap.has('Application Date')) {
-      console.log(`[EncompassFieldMapper] ✅ "Application Date" is in data dictionary -> ${fieldMap.get('Application Date')}`);
-    } else {
-      console.error(`[EncompassFieldMapper] ❌ "Application Date" NOT in data dictionary!`);
-      // Check what Fields.3142 maps to
-      const field3142Alias = Array.from(fieldMap.entries()).find(([a, f]) => f === 'Fields.3142')?.[0];
-      if (field3142Alias) {
-        console.warn(`[EncompassFieldMapper] ⚠️ Fields.3142 also maps to "${field3142Alias}" (multiple aliases for same field ID is OK)`);
-      }
-    }
-
-    dataDictionary = fieldMap;
-    console.log(`[EncompassFieldMapper] Loaded ${fieldMap.size} fields from data dictionary`);
-    return fieldMap;
-  } catch (error: any) {
-    console.error('[EncompassFieldMapper] Error loading data dictionary:', error.message);
-    return new Map();
-  }
+  // Convert the constants object to a Map
+  dataDictionary = new Map(Object.entries(DEFAULT_ENCOMPASS_FIELD_MAPPINGS));
+  console.log(`[EncompassFieldMapper] ✅ Loaded ${dataDictionary.size} fields from TypeScript constants`);
+  
+  return dataDictionary;
 }
 
 /**

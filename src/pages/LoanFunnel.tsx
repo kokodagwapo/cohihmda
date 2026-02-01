@@ -1,25 +1,20 @@
 import { useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { LoanFunnelView } from '@/components/dashboard/views/LoanFunnelView';
-import { useAuth } from '@/contexts/AuthContext';
-import { TenantSelector } from '@/components/dashboard/TenantSelector';
 import { useChannelStore } from '@/stores/channelStore';
+import { useTenantStore } from '@/stores/tenantStore';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
 const LoanFunnel = () => {
-  const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [view, setView] = useState<'funnel' | 'bar' | 'revenue' | 'units' | 'volume' | 'detail'>('funnel');
   const [year, setYear] = useState(new Date().getFullYear());
   
-  // Tenant selection state for admins
-  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(
-    user?.role === 'tenant_admin' && user?.tenant_id ? user.tenant_id : null
-  );
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
   
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
@@ -47,18 +42,6 @@ const LoanFunnel = () => {
         <div className="flex-1 flex flex-col min-w-0">
           <TopTieringTopBar title="Loan Funnel" onOpenSidebar={() => setSidebarOpen(true)} />
           
-          {/* Filters bar - only show for platform admins */}
-          {isPlatformAdmin && (
-            <div className="border-b border-slate-200/70 dark:border-slate-700/50 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm px-4 sm:px-6 py-2">
-              <div className="flex items-center gap-4 flex-wrap">
-                <TenantSelector
-                  selectedTenantId={selectedTenantId}
-                  onTenantChange={setSelectedTenantId}
-                  compact={true}
-                />
-              </div>
-            </div>
-          )}
           
           {/* Main content */}
           <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3">

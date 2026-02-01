@@ -68,7 +68,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { TenantSelector } from '@/components/dashboard/TenantSelector';
+import { useTenantStore } from '@/stores/tenantStore';
 
 // Column schema type from backend
 interface ColumnSchema {
@@ -214,7 +214,9 @@ export default function Loans() {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
   
   // Data state
   const [columns, setColumns] = useState<ColumnSchema[]>([]);
@@ -547,13 +549,6 @@ export default function Loans() {
               </div>
             </div>
             
-            {isAdmin && (
-              <TenantSelector
-                selectedTenantId={selectedTenantId}
-                onTenantChange={setSelectedTenantId}
-                compact={true}
-              />
-            )}
           </div>
         </div>
       </header>

@@ -31,16 +31,26 @@ router.post(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
+      // Base schema - database fields are optional for cloud deployments
       const schema = z.object({
         name: z.string().min(1),
         slug: z.string().min(1).regex(/^[a-z0-9-]+$/),
         deployment_type: z.enum(['cloud', 'on_premise', 'per_lender_aws']),
-        database_host: z.string().min(1),
+        // These are only required for non-cloud deployments
+        database_host: z.string().optional(),
         database_port: z.number().optional(),
-        database_user: z.string().min(1),
-        database_password: z.string().min(1),
+        database_user: z.string().optional(),
+        database_password: z.string().optional(),
         aws_account_id: z.string().optional(),
         rds_instance_id: z.string().optional(),
+      }).refine((data) => {
+        // For non-cloud deployments, require database credentials
+        if (data.deployment_type !== 'cloud') {
+          return data.database_host && data.database_user && data.database_password;
+        }
+        return true;
+      }, {
+        message: 'Non-cloud deployments require database_host, database_user, and database_password',
       });
 
       const validated = schema.parse(req.body);

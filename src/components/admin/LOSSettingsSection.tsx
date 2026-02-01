@@ -1,18 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
-import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, Globe, CheckCircle2, XCircle, Clock, Network, BarChart3, Folder, Trash2, AlertTriangle } from 'lucide-react';
+import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, CheckCircle2, XCircle, Clock, Network, BarChart3, Folder, Trash2, AlertTriangle, StopCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { CreateLOSConnectionDialog } from './CreateLOSConnectionDialog';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
-import { LoanDetailsTable } from './LoanDetailsTable';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
+
+// Sync progress tracking interface
+interface SyncProgress {
+  connectionId: string;
+  status: 'starting' | 'fetching' | 'processing' | 'saving' | 'complete' | 'error';
+  message: string;
+  currentBatch: number;
+  totalBatches: number;
+  loansProcessed: number;
+  loansTotal: number;
+  startTime: Date;
+  error?: string;
+}
 
 interface LOSSettingsSectionProps {
   losConnections: any[];
@@ -63,15 +76,108 @@ export const LOSSettingsSection = ({
   onLoadMetrics,
 }: LOSSettingsSectionProps) => {
   const { toast } = useToast();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [newConnectionOpen, setNewConnectionOpen] = useState(false);
   const [fieldMappingConnectionId, setFieldMappingConnectionId] = useState<string | null>(null);
   const [folderSelectionConnectionId, setFolderSelectionConnectionId] = useState<string | null>(null);
   const [clearingDatabase, setClearingDatabase] = useState(false);
+  
+  // Sync progress tracking
+  const [syncProgress, setSyncProgress] = useState<Map<string, SyncProgress>>(new Map());
+  const syncPollIntervalRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   // Use admin tenant context for tenant selection
   const { selectedTenantId, setSelectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName, tenants } = useAdminTenant();
+  
+  // Cleanup poll intervals on unmount
+  useEffect(() => {
+    return () => {
+      syncPollIntervalRef.current.forEach((interval) => clearInterval(interval));
+    };
+  }, []);
+  
+  // Poll for sync status
+  const pollSyncStatus = useCallback(async (connectionId: string) => {
+    try {
+      const response = await api.request<{
+        status: string;
+        progress?: {
+          current_batch: number;
+          total_batches: number;
+          loans_processed: number;
+          loans_total: number;
+          message: string;
+        };
+        error?: string;
+      }>(`/api/los/connections/${connectionId}/sync-status?tenant_id=${selectedTenantId}`);
+      
+      setSyncProgress(prev => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(connectionId);
+        
+        if (response.status === 'idle' || response.status === 'complete') {
+          // Sync finished
+          if (existing) {
+            newMap.set(connectionId, {
+              ...existing,
+              status: 'complete',
+              message: 'Sync completed successfully',
+              loansProcessed: response.progress?.loans_processed || existing.loansProcessed,
+              loansTotal: response.progress?.loans_total || existing.loansTotal,
+            });
+            
+            // Clear the interval
+            const interval = syncPollIntervalRef.current.get(connectionId);
+            if (interval) {
+              clearInterval(interval);
+              syncPollIntervalRef.current.delete(connectionId);
+            }
+            
+            // Remove progress after 5 seconds
+            setTimeout(() => {
+              setSyncProgress(p => {
+                const updated = new Map(p);
+                updated.delete(connectionId);
+                return updated;
+              });
+            }, 5000);
+          }
+        } else if (response.status === 'error') {
+          if (existing) {
+            newMap.set(connectionId, {
+              ...existing,
+              status: 'error',
+              message: response.error || 'Sync failed',
+              error: response.error,
+            });
+            
+            // Clear the interval
+            const interval = syncPollIntervalRef.current.get(connectionId);
+            if (interval) {
+              clearInterval(interval);
+              syncPollIntervalRef.current.delete(connectionId);
+            }
+          }
+        } else if (response.progress) {
+          // Update progress
+          newMap.set(connectionId, {
+            connectionId,
+            status: response.status as SyncProgress['status'],
+            message: response.progress.message || 'Syncing...',
+            currentBatch: response.progress.current_batch,
+            totalBatches: response.progress.total_batches,
+            loansProcessed: response.progress.loans_processed,
+            loansTotal: response.progress.loans_total,
+            startTime: existing?.startTime || new Date(),
+          });
+        }
+        
+        return newMap;
+      });
+    } catch (error) {
+      console.error('Error polling sync status:', error);
+    }
+  }, [selectedTenantId]);
 
   // Check URL params for connection and tab
   useEffect(() => {
@@ -135,7 +241,35 @@ export const LOSSettingsSection = ({
         );
         if (!confirmed) return;
       }
+      
+      // Initialize progress tracking
+      setSyncProgress(prev => {
+        const newMap = new Map(prev);
+        newMap.set(connectionId, {
+          connectionId,
+          status: 'starting',
+          message: 'Initiating sync...',
+          currentBatch: 0,
+          totalBatches: 0,
+          loansProcessed: 0,
+          loansTotal: 0,
+          startTime: new Date(),
+        });
+        return newMap;
+      });
+      
       await onSync(connectionId, selectedTenantId || undefined, clearDatabase, testMode);
+      
+      // Start polling for progress
+      const pollInterval = setInterval(() => {
+        pollSyncStatus(connectionId);
+      }, 2000); // Poll every 2 seconds
+      
+      syncPollIntervalRef.current.set(connectionId, pollInterval);
+      
+      // Initial poll
+      setTimeout(() => pollSyncStatus(connectionId), 500);
+      
       toast({
         title: 'Sync Started',
         description: clearDatabase 
@@ -145,9 +279,65 @@ export const LOSSettingsSection = ({
             : 'Connection sync has been initiated.',
       });
     } catch (error) {
+      // Remove progress on error
+      setSyncProgress(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(connectionId);
+        return newMap;
+      });
+      
       toast({
         title: 'Sync Failed',
         description: 'Failed to start sync.',
+        variant: 'destructive',
+      });
+    }
+  };
+  
+  const handleCancelSync = async (connectionId: string) => {
+    try {
+      await api.request(`/api/los/connections/${connectionId}/cancel-sync?tenant_id=${selectedTenantId}`, {
+        method: 'POST',
+      });
+      
+      // Clear polling
+      const interval = syncPollIntervalRef.current.get(connectionId);
+      if (interval) {
+        clearInterval(interval);
+        syncPollIntervalRef.current.delete(connectionId);
+      }
+      
+      // Update progress to show cancelled
+      setSyncProgress(prev => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(connectionId);
+        if (existing) {
+          newMap.set(connectionId, {
+            ...existing,
+            status: 'error',
+            message: 'Sync cancelled by user',
+          });
+        }
+        return newMap;
+      });
+      
+      // Remove after delay
+      setTimeout(() => {
+        setSyncProgress(p => {
+          const updated = new Map(p);
+          updated.delete(connectionId);
+          return updated;
+        });
+      }, 3000);
+      
+      toast({
+        title: 'Sync Cancelled',
+        description: 'The sync operation has been cancelled.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to cancel sync.',
         variant: 'destructive',
       });
     }
@@ -387,7 +577,7 @@ export const LOSSettingsSection = ({
                               </span>
                             </div>
                           </div>
-                          {connection.last_sync_status && (
+                          {connection.last_sync_status && !syncProgress.has(connection.id) && (
                             <div className="mt-2 flex items-center gap-2">
                               <span className="text-base font-extralight text-slate-500 dark:text-slate-500">Status:</span>
                               {connection.last_sync_status === 'success' ? (
@@ -408,6 +598,88 @@ export const LOSSettingsSection = ({
                               )}
                             </div>
                           )}
+                          
+                          {/* Sync Progress Bar */}
+                          {syncProgress.has(connection.id) && (
+                            <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  {syncProgress.get(connection.id)?.status === 'complete' ? (
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                  ) : syncProgress.get(connection.id)?.status === 'error' ? (
+                                    <XCircle className="h-4 w-4 text-red-500" />
+                                  ) : (
+                                    <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                                  )}
+                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                    {syncProgress.get(connection.id)?.message || 'Syncing...'}
+                                  </span>
+                                </div>
+                                {syncProgress.get(connection.id)?.status !== 'complete' && 
+                                 syncProgress.get(connection.id)?.status !== 'error' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-red-600 hover:text-red-700 dark:text-red-400"
+                                    onClick={() => handleCancelSync(connection.id)}
+                                    title="Cancel Sync"
+                                  >
+                                    <StopCircle className="h-3 w-3 mr-1" />
+                                    Cancel
+                                  </Button>
+                                )}
+                              </div>
+                              
+                              {/* Progress bar */}
+                              {syncProgress.get(connection.id)?.status !== 'complete' && 
+                               syncProgress.get(connection.id)?.status !== 'error' && (
+                                <>
+                                  {syncProgress.get(connection.id)?.loansTotal > 0 ? (
+                                    // Determinate progress bar
+                                    <Progress 
+                                      value={(syncProgress.get(connection.id)!.loansProcessed / syncProgress.get(connection.id)!.loansTotal) * 100} 
+                                      className="h-2 mb-2"
+                                    />
+                                  ) : (
+                                    // Indeterminate progress bar (animated)
+                                    <div className="h-2 mb-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                      <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+                                    </div>
+                                  )}
+                                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                                    {syncProgress.get(connection.id)?.loansTotal > 0 ? (
+                                      <span>
+                                        {syncProgress.get(connection.id)?.loansProcessed.toLocaleString()} / {syncProgress.get(connection.id)?.loansTotal.toLocaleString()} loans
+                                      </span>
+                                    ) : syncProgress.get(connection.id)?.loansProcessed > 0 ? (
+                                      <span>
+                                        {syncProgress.get(connection.id)?.loansProcessed.toLocaleString()} loans synced so far
+                                      </span>
+                                    ) : (
+                                      <span>Fetching loans from Encompass...</span>
+                                    )}
+                                    {syncProgress.get(connection.id)?.totalBatches > 0 && (
+                                      <span>
+                                        Batch {syncProgress.get(connection.id)?.currentBatch} of {syncProgress.get(connection.id)?.totalBatches}
+                                      </span>
+                                    )}
+                                    {syncProgress.get(connection.id)?.startTime && (
+                                      <span>
+                                        {Math.round((Date.now() - syncProgress.get(connection.id)!.startTime.getTime()) / 1000)}s elapsed
+                                      </span>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                              
+                              {/* Error message */}
+                              {syncProgress.get(connection.id)?.status === 'error' && syncProgress.get(connection.id)?.error && (
+                                <div className="mt-2 text-xs text-red-600 dark:text-red-400">
+                                  {syncProgress.get(connection.id)?.error}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 ml-4">
                           {/* Sync controls - Super Admin only */}
@@ -419,6 +691,7 @@ export const LOSSettingsSection = ({
                                 className="h-8 w-8 p-0"
                                 onClick={() => handleTestConnection(connection.id)}
                                 title="Test Connection"
+                                disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
                               >
                                 <Network className="h-4 w-4" />
                               </Button>
@@ -428,8 +701,9 @@ export const LOSSettingsSection = ({
                                 className="h-8 w-8 p-0"
                                 onClick={() => handleSyncConnection(connection.id, false, false)}
                                 title="Sync Now"
+                                disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
                               >
-                                <RefreshCw className="h-4 w-4" />
+                                <RefreshCw className={`h-4 w-4 ${syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error' ? 'animate-spin' : ''}`} />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -437,6 +711,7 @@ export const LOSSettingsSection = ({
                                 className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                                 onClick={() => handleSyncConnection(connection.id, false, true)}
                                 title="Test Mode (Limited Records)"
+                                disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
                               >
                                 <Play className="h-4 w-4" />
                               </Button>
@@ -446,6 +721,7 @@ export const LOSSettingsSection = ({
                                 className="h-8 w-8 p-0 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                                 onClick={() => handleSyncConnection(connection.id, true, false)}
                                 title="Full Sync & Clear Database"
+                                disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -455,6 +731,7 @@ export const LOSSettingsSection = ({
                                 className="h-8 w-8 p-0"
                                 onClick={() => handleToggleConnection(connection.id, connection.is_active)}
                                 title={connection.is_active ? "Deactivate" : "Activate"}
+                                disabled={syncProgress.has(connection.id) && syncProgress.get(connection.id)?.status !== 'complete' && syncProgress.get(connection.id)?.status !== 'error'}
                               >
                                 {connection.is_active ? (
                                   <Pause className="h-4 w-4" />
@@ -533,50 +810,6 @@ export const LOSSettingsSection = ({
         </CardContent>
       </Card>
 
-      {/* Supported LOS Types */}
-      {Object.keys(losTypes).length > 0 && (
-        <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <CardHeader>
-            <CardTitle className="text-lg font-thin text-slate-900 dark:text-white tracking-tight">
-              Supported LOS Systems
-            </CardTitle>
-            <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-              Available Loan Origination System integrations
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Object.entries(losTypes).map(([key, config]: [string, any]) => (
-                <div
-                  key={key}
-                  className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800/30"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-base font-extralight text-slate-900 dark:text-white">
-                      {config.name || key}
-                    </h4>
-                    <Badge variant="outline" className="text-base font-extralight border-slate-300 dark:border-slate-600">
-                      {config.authType || 'N/A'}
-                    </Badge>
-                  </div>
-                  {config.documentation && (
-                    <a
-                      href={config.documentation}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 font-light flex items-center gap-1"
-                    >
-                      <Globe className="h-3 w-3" />
-                      Documentation
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Create Connection Dialog */}
       <CreateLOSConnectionDialog
         open={newConnectionOpen}
@@ -654,9 +887,6 @@ export const LOSSettingsSection = ({
           </CardContent>
         </Card>
       )}
-
-      {/* Loan Details Table */}
-      <LoanDetailsTable tenantId={selectedTenantId} />
     </motion.div>
   );
 };

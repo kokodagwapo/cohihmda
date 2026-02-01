@@ -101,6 +101,16 @@ interface SsoState {
 }
 
 /**
+ * Get the primary frontend URL for SSO redirects
+ * FRONTEND_URL may contain comma-separated values for CORS, but we need just the first one
+ */
+function getPrimaryFrontendUrl(): string {
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  // Handle comma-separated URLs (take the first one)
+  return frontendUrl.split(",")[0].trim();
+}
+
+/**
  * Get Cognito configuration (public endpoint)
  */
 router.get("/config", (req, res) => {
@@ -136,7 +146,7 @@ router.get("/authorize", async (req, res) => {
     const stateEncoded = Buffer.from(JSON.stringify(state)).toString(
       "base64url",
     );
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const frontendUrl = getPrimaryFrontendUrl();
     const redirectUri = `${frontendUrl}/auth/sso/callback`;
 
     const authUrl = buildAuthorizationUrl(redirectUri, stateEncoded, idpHint);
@@ -185,7 +195,7 @@ router.post("/callback", async (req, res) => {
       }
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const frontendUrl = getPrimaryFrontendUrl();
     const redirectUri = `${frontendUrl}/auth/sso/callback`;
 
     // Exchange code for tokens
@@ -309,7 +319,7 @@ router.get("/logout", (req, res) => {
     return res.redirect("/");
   }
 
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const frontendUrl = getPrimaryFrontendUrl();
   const logoutUrl = buildLogoutUrl(`${frontendUrl}/`);
 
   return res.redirect(logoutUrl);
@@ -384,6 +394,14 @@ router.get("/lookup-tenant", async (req, res) => {
   }
 });
 
+// Domains that are allowed to auto-provision platform users via SSO
+// Add your company domain(s) here
+const PLATFORM_JIT_DOMAINS = [
+  'teraverde.com',
+  'coheus.io',
+  'coheus.com',
+];
+
 /**
  * Find or create user from SSO
  */
@@ -396,28 +414,37 @@ async function findOrCreateSsoUser(
 > {
   const mgmtPool = getManagementPool();
   const email = userInfo.email.toLowerCase();
+  const emailDomain = email.split("@")[1];
 
-  // Check if this is a super admin
-  const superAdminResult = await mgmtPool.query(
+  // Check if this is an existing platform user
+  const platformUserResult = await mgmtPool.query(
     `SELECT id, email, full_name, role, is_active 
      FROM coheus_users WHERE email = $1`,
     [email],
   );
 
-  if (superAdminResult.rows.length > 0) {
-    const superAdmin = superAdminResult.rows[0];
-    if (!superAdmin.is_active) {
+  if (platformUserResult.rows.length > 0) {
+    const platformUser = platformUserResult.rows[0];
+    if (!platformUser.is_active) {
       return { user: null, tenantSlug: null, isSuperAdmin: false };
     }
 
+    // Update last login
+    await mgmtPool.query(
+      `UPDATE coheus_users SET last_login_at = NOW() WHERE id = $1`,
+      [platformUser.id],
+    );
+
+    const isSuperAdmin = ['super_admin', 'platform_admin'].includes(platformUser.role);
+    
     return {
       user: {
-        ...superAdmin,
+        ...platformUser,
         tenant_id: null,
         tenant_name: null,
       },
       tenantSlug: null,
-      isSuperAdmin: true,
+      isSuperAdmin,
     };
   }
 
@@ -437,7 +464,6 @@ async function findOrCreateSsoUser(
 
   if (!tenantInfo) {
     // Try to find tenant by email domain
-    const domain = email.split("@")[1];
     const domainResult = await mgmtPool.query(
       `
       SELECT 
@@ -449,7 +475,7 @@ async function findOrCreateSsoUser(
         AND $1 = ANY(tip.email_domains)
       LIMIT 1
     `,
-      [domain],
+      [emailDomain],
     );
 
     if (domainResult.rows.length > 0) {
@@ -458,8 +484,43 @@ async function findOrCreateSsoUser(
     }
   }
 
+  // If no tenant found, check if we should JIT provision a platform user
   if (!tenantInfo) {
-    logWarn("[CognitoAuth] No tenant found for SSO user", { email });
+    // Check if email domain is allowed for platform JIT provisioning
+    if (PLATFORM_JIT_DOMAINS.includes(emailDomain)) {
+      logInfo("[CognitoAuth] JIT provisioning new platform user as super_admin", { email, domain: emailDomain });
+      
+      // Create new platform user with 'super_admin' role - full access to all tenants and features
+      const newPlatformUser = await mgmtPool.query(
+        `INSERT INTO coheus_users (email, full_name, role, is_active, encrypted_password, last_login_at)
+         VALUES ($1, $2, 'super_admin', true, $3, NOW())
+         RETURNING id, email, full_name, role, is_active`,
+        [
+          email,
+          userInfo.fullName ||
+            `${userInfo.firstName || ""} ${userInfo.lastName || ""}`.trim() ||
+            email.split("@")[0],
+          crypto.randomBytes(32).toString("hex"), // Random password (not usable - SSO only)
+        ],
+      );
+
+      const user = newPlatformUser.rows[0];
+      return {
+        user: {
+          ...user,
+          tenant_id: null,
+          tenant_name: null,
+        },
+        tenantSlug: null,
+        isSuperAdmin: true, // Platform users from allowed domains get super_admin
+      };
+    }
+
+    logWarn("[CognitoAuth] No tenant found for SSO user and domain not in JIT list", { 
+      email, 
+      domain: emailDomain,
+      allowedDomains: PLATFORM_JIT_DOMAINS,
+    });
     return { user: null, tenantSlug: null, isSuperAdmin: false };
   }
 

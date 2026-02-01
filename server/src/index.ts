@@ -35,6 +35,11 @@ if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_ENV_LOGGING === 
 }
 
 const app = express();
+
+// Trust proxy - required when behind ALB/CloudFront to correctly identify client IPs
+// This fixes express-rate-limit ERR_ERL_UNEXPECTED_X_FORWARDED_FOR error
+app.set('trust proxy', 1);
+
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 

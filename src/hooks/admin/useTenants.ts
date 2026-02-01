@@ -40,18 +40,23 @@ export const useTenants = () => {
   const createTenant = useCallback(async (tenantData: any) => {
     try {
       // Use new management database endpoint with full provisioning
-      // tenantData should include: name, slug, deployment_type, database_host, database_port, database_user, database_password
-      // Default values for local development (backend will use these if not provided)
-      const fullTenantData = {
+      const deploymentType = tenantData.deployment_type || 'cloud';
+      
+      // Base data - always required
+      const fullTenantData: any = {
         name: tenantData.name,
         slug: tenantData.slug || tenantData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        deployment_type: tenantData.deployment_type || 'cloud',
-        database_host: tenantData.database_host || '127.0.0.1',
-        database_port: tenantData.database_port || 5432,
-        database_user: tenantData.database_user || 'postgres',
-        database_password: tenantData.database_password || 'postgres',
-        ...tenantData,
+        deployment_type: deploymentType,
       };
+      
+      // For non-cloud deployments, include database credentials
+      // For cloud deployments, the backend uses its own environment variables
+      if (deploymentType !== 'cloud') {
+        fullTenantData.database_host = tenantData.database_host;
+        fullTenantData.database_port = tenantData.database_port || 5432;
+        fullTenantData.database_user = tenantData.database_user;
+        fullTenantData.database_password = tenantData.database_password;
+      }
       
       await api.request('/api/tenants', {
         method: 'POST',

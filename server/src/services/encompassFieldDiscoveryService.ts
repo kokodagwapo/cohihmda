@@ -482,6 +482,7 @@ export class EncompassFieldDiscoveryService {
 
   /**
    * Generate suggestion for a single Coheus alias
+   * SMART MATCHING: Always searches for best match across ALL fields, not just default
    */
   private generateSuggestionForAlias(
     alias: string,
@@ -498,14 +499,24 @@ export class EncompassFieldDiscoveryService {
     const defaultField = defaultFieldId ? fieldMap.get(defaultFieldId) : null;
     const defaultFieldStats = defaultFieldId ? populationMap.get(defaultFieldId) : null;
 
-    // Try to find best match
+    // ALWAYS search for best matches across all discovered fields
+    const allMatches = this.findAllMatchesByDescription(alias, fieldMap, populationMap);
+    
+    // Track alternatives for the response
+    const alternativeSuggestions: Array<{
+      fieldId: string;
+      description: string;
+      confidence: number;
+      reason: string;
+    }> = [];
+
     let suggestedFieldId: string | null = null;
     let suggestedFieldDescription: string | undefined;
     let confidence = 0;
     let matchReason = '';
     let populationRate: number | undefined;
 
-    // Case 1: Current swap exists and is valid
+    // Case 1: Current swap exists and is valid - respect existing mappings
     if (currentMappedFieldId && fieldMap.has(currentMappedFieldId)) {
       suggestedFieldId = currentMappedFieldId;
       suggestedFieldDescription = fieldMap.get(currentMappedFieldId)?.description;
@@ -522,55 +533,90 @@ export class EncompassFieldDiscoveryService {
         confidence = 60;
         matchReason = 'Existing mapping (no population data)';
       }
-    }
-    // Case 2: Default field exists
-    else if (defaultField) {
-      suggestedFieldId = defaultFieldId;
-      suggestedFieldDescription = defaultField.description;
-      populationRate = defaultFieldStats?.populationRate;
-
-      // Calculate confidence based on match quality
-      const descriptionMatch = this.calculateDescriptionSimilarity(alias, defaultField.description);
-      const hasPopulation = defaultFieldStats && defaultFieldStats.populationRate > 0;
-
-      if (descriptionMatch > 0.8 && hasPopulation && defaultFieldStats!.populationRate > 50) {
-        confidence = 98;
-        matchReason = 'Exact match with high population';
-      } else if (descriptionMatch > 0.8 && hasPopulation) {
-        confidence = 90;
-        matchReason = 'Exact match with data';
-      } else if (descriptionMatch > 0.8) {
-        confidence = 85;
-        matchReason = 'Exact match (no population data)';
-      } else if (descriptionMatch > 0.5 && hasPopulation) {
-        confidence = 75;
-        matchReason = 'Good match with data';
-      } else if (descriptionMatch > 0.5) {
-        confidence = 65;
-        matchReason = 'Good match (no population data)';
-      } else if (hasPopulation && defaultFieldStats!.populationRate > 50) {
-        confidence = 70;
-        matchReason = 'Field exists with high population';
-      } else if (hasPopulation) {
-        confidence = 55;
-        matchReason = 'Field exists with some data';
-      } else {
-        confidence = 45;
-        matchReason = 'Field exists in schema';
+      
+      // Add alternatives from search (excluding current)
+      for (const match of allMatches.slice(0, 3)) {
+        if (match.fieldId !== currentMappedFieldId) {
+          alternativeSuggestions.push(match);
+        }
       }
     }
-    // Case 3: Try to find by description matching
+    // Case 2: Evaluate default field vs discovered alternatives
     else {
-      const match = this.findBestMatchByDescription(alias, fieldMap, populationMap);
-      if (match) {
-        suggestedFieldId = match.fieldId;
-        suggestedFieldDescription = match.description;
-        confidence = match.confidence;
-        matchReason = match.reason;
-        populationRate = populationMap.get(match.fieldId)?.populationRate;
+      // Score the default field if it exists
+      let defaultScore = 0;
+      let defaultReason = '';
+      
+      if (defaultField) {
+        const descMatch = this.calculateDescriptionSimilarity(alias, defaultField.description);
+        const hasPopulation = defaultFieldStats && defaultFieldStats.populationRate > 0;
+        const highPopulation = defaultFieldStats && defaultFieldStats.populationRate > 50;
+        
+        // Calculate default field score
+        defaultScore = descMatch * 40; // Up to 40 points for description match
+        if (highPopulation) defaultScore += 35;
+        else if (hasPopulation) defaultScore += 20;
+        defaultScore += 15; // Bonus for being the known default
+        
+        if (descMatch > 0.8 && highPopulation) {
+          defaultReason = 'Default field with exact match and high population';
+        } else if (descMatch > 0.8) {
+          defaultReason = 'Default field with exact match';
+        } else if (highPopulation) {
+          defaultReason = 'Default field with high population';
+        } else if (hasPopulation) {
+          defaultReason = 'Default field with some data';
+        } else {
+          defaultReason = 'Default field (no population data)';
+        }
+      }
+      
+      // Find best alternative from description search
+      const bestAlternative = allMatches.length > 0 ? allMatches[0] : null;
+      
+      // Compare default vs best alternative
+      if (defaultField && (!bestAlternative || defaultScore >= bestAlternative.confidence)) {
+        // Default field wins
+        suggestedFieldId = defaultFieldId;
+        suggestedFieldDescription = defaultField.description;
+        populationRate = defaultFieldStats?.populationRate;
+        confidence = Math.min(Math.round(defaultScore), 98);
+        matchReason = defaultReason;
+        
+        // Add alternatives
+        for (const match of allMatches.slice(0, 3)) {
+          if (match.fieldId !== defaultFieldId) {
+            alternativeSuggestions.push(match);
+          }
+        }
+      } else if (bestAlternative) {
+        // Alternative wins - suggest it instead of default
+        suggestedFieldId = bestAlternative.fieldId;
+        suggestedFieldDescription = bestAlternative.description;
+        confidence = bestAlternative.confidence;
+        matchReason = bestAlternative.reason + (defaultFieldId ? ' (better than default)' : '');
+        populationRate = populationMap.get(bestAlternative.fieldId)?.populationRate;
+        
+        // Add default as an alternative if it exists
+        if (defaultField && defaultFieldId) {
+          alternativeSuggestions.push({
+            fieldId: defaultFieldId,
+            description: defaultField.description,
+            confidence: Math.round(defaultScore),
+            reason: defaultReason,
+          });
+        }
+        
+        // Add other alternatives
+        for (const match of allMatches.slice(1, 3)) {
+          if (match.fieldId !== suggestedFieldId) {
+            alternativeSuggestions.push(match);
+          }
+        }
       } else {
+        // No matches found at all
         confidence = 0;
-        matchReason = 'No matching field found';
+        matchReason = 'No matching field found in Encompass';
       }
     }
 
@@ -593,7 +639,67 @@ export class EncompassFieldDiscoveryService {
       populationRate,
       isCurrentlyMapped,
       currentMappedFieldId,
+      alternativeSuggestions: alternativeSuggestions.length > 0 ? alternativeSuggestions : undefined,
     };
+  }
+
+  /**
+   * Find ALL matching fields by description (returns top matches sorted by score)
+   */
+  private findAllMatchesByDescription(
+    alias: string,
+    fieldMap: Map<string, DiscoveredField>,
+    populationMap: Map<string, FieldPopulationStats>
+  ): Array<{ fieldId: string; description: string; confidence: number; reason: string }> {
+    const matches: Array<{ fieldId: string; description: string; score: number; populationBonus: number }> = [];
+    const seenFieldIds = new Set<string>();
+
+    for (const [fieldId, field] of fieldMap) {
+      // Skip duplicates (fields indexed with and without Fields. prefix)
+      const normalizedId = fieldId.replace(/^Fields\./, '');
+      if (seenFieldIds.has(normalizedId)) continue;
+      seenFieldIds.add(normalizedId);
+
+      if (!field.description) continue;
+      
+      const similarity = this.calculateDescriptionSimilarity(alias, field.description);
+      
+      // Only consider fields with decent similarity
+      if (similarity >= 0.3) {
+        const stats = populationMap.get(fieldId);
+        const populationBonus = stats 
+          ? (stats.populationRate > 50 ? 30 : stats.populationRate > 0 ? 15 : 0)
+          : 0;
+        
+        matches.push({
+          fieldId,
+          description: field.description,
+          score: similarity * 50 + populationBonus, // Base score + population bonus
+          populationBonus,
+        });
+      }
+    }
+
+    // Sort by score descending
+    matches.sort((a, b) => b.score - a.score);
+
+    // Convert to final format with confidence and reason
+    return matches.slice(0, 5).map(match => {
+      const confidence = Math.min(Math.round(match.score), 90);
+      let reason = 'Description match';
+      if (match.populationBonus > 20) {
+        reason = 'Description match with high population';
+      } else if (match.populationBonus > 0) {
+        reason = 'Description match with data';
+      }
+      
+      return {
+        fieldId: match.fieldId,
+        description: match.description,
+        confidence,
+        reason,
+      };
+    });
   }
 
   /**
@@ -621,49 +727,6 @@ export class EncompassFieldDiscoveryService {
     const overlapScore = matchingWords.length / Math.max(aliasWords.length, descWords.length);
 
     return Math.min(overlapScore, 0.8);
-  }
-
-  /**
-   * Find best matching field by description
-   */
-  private findBestMatchByDescription(
-    alias: string,
-    fieldMap: Map<string, DiscoveredField>,
-    populationMap: Map<string, FieldPopulationStats>
-  ): { fieldId: string; description: string; confidence: number; reason: string } | null {
-    let bestMatch: { fieldId: string; description: string; score: number } | null = null;
-
-    for (const [fieldId, field] of fieldMap) {
-      if (!field.description) continue;
-      
-      const similarity = this.calculateDescriptionSimilarity(alias, field.description);
-      
-      if (similarity > 0.5 && (!bestMatch || similarity > bestMatch.score)) {
-        bestMatch = { fieldId, description: field.description, score: similarity };
-      }
-    }
-
-    if (!bestMatch) return null;
-
-    const stats = populationMap.get(bestMatch.fieldId);
-    let confidence = Math.round(bestMatch.score * 60); // Base confidence from similarity
-    let reason = 'Description match';
-
-    // Boost confidence if field has data
-    if (stats && stats.populationRate > 50) {
-      confidence = Math.min(confidence + 25, 80);
-      reason = 'Description match with high population';
-    } else if (stats && stats.populationRate > 0) {
-      confidence = Math.min(confidence + 15, 70);
-      reason = 'Description match with data';
-    }
-
-    return {
-      fieldId: bestMatch.fieldId,
-      description: bestMatch.description,
-      confidence,
-      reason,
-    };
   }
 
   // --------------------------------------------------------------------------

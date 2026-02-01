@@ -199,6 +199,8 @@ export function SSOConfigSection() {
   const [idpMetadataXml, setIdpMetadataXml] = useState('');
   const [idpMetadataUrl, setIdpMetadataUrl] = useState('');
   const [showSecret, setShowSecret] = useState(false);
+  const [emailDomains, setEmailDomains] = useState<string[]>([]);
+  const [newDomain, setNewDomain] = useState('');
   
   // SAML fields
   const [idpEntityId, setIdpEntityId] = useState('');
@@ -243,41 +245,69 @@ export function SSOConfigSection() {
   const loadSSOConfig = async () => {
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // const response = await api.request(`/api/sso/config${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`);
+      const response = await api.request(`/api/admin/sso/config${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`);
       
-      // Mock config for development
-      const mockConfig: SSOConfig = {
-        id: '1',
-        tenant_id: selectedTenantId || 'default',
-        provider: 'coheus_bridge',
-        is_enabled: false,
-        is_primary: true,
-        idp_entity_id: '',
-        idp_sso_url: '',
-        sp_entity_id: `urn:cohi:${selectedTenantId || 'default'}`,
-        sp_acs_url: `${window.location.origin}/api/auth/sso/callback`,
-        sp_slo_url: `${window.location.origin}/api/auth/sso/logout`,
-        sp_metadata_url: `${window.location.origin}/api/auth/sso/metadata`,
-        attribute_mapping: DEFAULT_ATTRIBUTE_NAMES['coheus_bridge'],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
+      // Map response to config
+      const configs = response.configurations || [];
+      const primaryConfig = configs.find((c: any) => c.is_primary) || configs[0];
       
-      setConfig(mockConfig);
-      setProvider(mockConfig.provider);
-      setIsEnabled(mockConfig.is_enabled);
-      setAttributeMapping(mockConfig.attribute_mapping);
-      
-      if (mockConfig.idp_entity_id) setIdpEntityId(mockConfig.idp_entity_id);
-      if (mockConfig.idp_sso_url) setIdpSsoUrl(mockConfig.idp_sso_url);
-      if (mockConfig.idp_slo_url) setIdpSloUrl(mockConfig.idp_slo_url);
-      if (mockConfig.idp_certificate) setIdpCertificate(mockConfig.idp_certificate);
-      
+      if (primaryConfig) {
+        const mappedConfig: SSOConfig = {
+          id: primaryConfig.id,
+          tenant_id: primaryConfig.tenant_id,
+          provider: primaryConfig.idp_type || 'saml',
+          is_enabled: primaryConfig.is_enabled,
+          is_primary: primaryConfig.is_primary,
+          idp_entity_id: primaryConfig.config?.idp_entity_id,
+          idp_sso_url: primaryConfig.config?.idp_sso_url,
+          idp_slo_url: primaryConfig.config?.idp_slo_url,
+          idp_certificate: primaryConfig.config?.idp_certificate,
+          oidc_client_id: primaryConfig.config?.oidc_client_id,
+          oidc_issuer_url: primaryConfig.config?.oidc_issuer_url,
+          sp_entity_id: response.sp_info?.entity_id,
+          sp_acs_url: response.sp_info?.acs_url,
+          sp_slo_url: response.sp_info?.slo_url,
+          sp_metadata_url: response.sp_info?.metadata_url,
+          attribute_mapping: primaryConfig.config?.attribute_mapping || DEFAULT_ATTRIBUTE_NAMES[primaryConfig.idp_type || 'saml'],
+          created_at: primaryConfig.created_at,
+          updated_at: primaryConfig.updated_at,
+        };
+        
+        setConfig(mappedConfig);
+        setProvider(mappedConfig.provider);
+        setIsEnabled(mappedConfig.is_enabled);
+        setAttributeMapping(mappedConfig.attribute_mapping);
+        setEmailDomains(primaryConfig.email_domains || []);
+        
+        if (mappedConfig.idp_entity_id) setIdpEntityId(mappedConfig.idp_entity_id);
+        if (mappedConfig.idp_sso_url) setIdpSsoUrl(mappedConfig.idp_sso_url);
+        if (mappedConfig.idp_slo_url) setIdpSloUrl(mappedConfig.idp_slo_url);
+        if (mappedConfig.oidc_client_id) setOidcClientId(mappedConfig.oidc_client_id);
+        if (mappedConfig.oidc_issuer_url) setOidcIssuerUrl(mappedConfig.oidc_issuer_url);
+      } else {
+        // No config exists, use defaults from SP info
+        const defaultConfig: SSOConfig = {
+          id: '',
+          tenant_id: selectedTenantId || '',
+          provider: 'saml',
+          is_enabled: false,
+          is_primary: true,
+          sp_entity_id: response.sp_info?.entity_id,
+          sp_acs_url: response.sp_info?.acs_url,
+          sp_slo_url: response.sp_info?.slo_url,
+          sp_metadata_url: response.sp_info?.metadata_url,
+          attribute_mapping: DEFAULT_ATTRIBUTE_NAMES['saml'],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        setConfig(defaultConfig);
+        setIsEnabled(false);
+      }
     } catch (error: any) {
+      console.error('Failed to load SSO config:', error);
       toast({
         title: 'Error',
-        description: 'Failed to load SSO configuration',
+        description: error.message || 'Failed to load SSO configuration',
         variant: 'destructive'
       });
     } finally {
@@ -287,53 +317,66 @@ export function SSOConfigSection() {
 
   const loadLoginHistory = async () => {
     try {
-      // TODO: Replace with actual API call
-      // Mock login history
-      const mockHistory: SSOLoginEntry[] = [
-        {
-          id: '1',
-          user_email: 'john.smith@lender.com',
-          user_name: 'John Smith',
-          provider: 'coheus_bridge',
-          status: 'success',
-          ip_address: '192.168.1.100',
-          created_at: new Date(Date.now() - 3600000).toISOString()
-        },
-        {
-          id: '2',
-          user_email: 'jane.doe@lender.com',
-          user_name: 'Jane Doe',
-          provider: 'coheus_bridge',
-          status: 'success',
-          ip_address: '192.168.1.101',
-          created_at: new Date(Date.now() - 7200000).toISOString()
-        },
-        {
-          id: '3',
-          user_email: 'unknown@external.com',
-          provider: 'saml',
-          status: 'failed',
-          error_message: 'User not found in organization',
-          ip_address: '10.0.0.50',
-          created_at: new Date(Date.now() - 86400000).toISOString()
-        }
-      ];
-      
-      setLoginHistory(mockHistory);
+      const response = await api.request(`/api/admin/sso/history${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`);
+      setLoginHistory(response.history || []);
     } catch (error: any) {
       console.error('Failed to load login history:', error);
+      // Don't show error toast for history - it's non-critical
     }
   };
 
   const handleSaveConfig = async () => {
+    // Validate email domains
+    if (emailDomains.length === 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'At least one email domain is required for SSO',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
     setSaving(true);
     try {
-      // TODO: Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 500));
+      const payload: any = {
+        provider_type: provider,
+        email_domains: emailDomains,
+        is_enabled: isEnabled,
+        attribute_mapping: attributeMapping,
+      };
+      
+      // Add SAML config
+      if (provider === 'saml' || provider === 'azure_ad' || provider === 'okta') {
+        if (idpMetadataUrl) {
+          payload.metadata_url = idpMetadataUrl;
+        } else if (idpMetadataXml) {
+          payload.metadata_xml = idpMetadataXml;
+        } else if (!idpEntityId) {
+          toast({
+            title: 'Validation Error',
+            description: 'Please provide IdP metadata (URL or XML)',
+            variant: 'destructive'
+          });
+          setSaving(false);
+          return;
+        }
+      }
+      
+      // Add OIDC config
+      if (provider === 'oidc' || provider === 'google') {
+        payload.oidc_client_id = oidcClientId;
+        payload.oidc_client_secret = oidcClientSecret;
+        payload.oidc_issuer_url = oidcIssuerUrl;
+      }
+      
+      await api.request(`/api/admin/sso/config${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
       
       toast({
         title: 'Success',
-        description: 'SSO configuration saved successfully'
+        description: 'SSO configuration saved successfully. Users with the specified email domains can now sign in via SSO.'
       });
       
       loadSSOConfig();
@@ -349,15 +392,30 @@ export function SSOConfigSection() {
   };
 
   const handleTestConnection = async () => {
+    if (!config?.id) {
+      toast({
+        title: 'Error',
+        description: 'Please save the configuration first before testing',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
     setTesting(true);
     try {
-      // TODO: Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      toast({
-        title: 'Test Successful',
-        description: 'SSO connection is working correctly'
+      const response = await api.request('/api/admin/sso/test', {
+        method: 'POST',
+        body: JSON.stringify({ config_id: config.id }),
       });
+      
+      // Open test URL in new window
+      if (response.test_url) {
+        window.open(response.test_url, '_blank', 'width=500,height=600');
+        toast({
+          title: 'Test Initiated',
+          description: 'Complete the sign-in process in the new window to verify the connection.'
+        });
+      }
       
       setTestDialogOpen(false);
     } catch (error: any) {
@@ -590,6 +648,59 @@ export function SSOConfigSection() {
                     {PROVIDERS[provider].description}
                   </p>
                 )}
+              </div>
+
+              {/* Email Domains - Required for SSO routing */}
+              <div className="space-y-2 p-4 border rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                <Label className="text-base font-medium">Email Domains *</Label>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
+                  Users with email addresses from these domains will be routed to this SSO provider.
+                </p>
+                <div className="flex gap-2 mb-2">
+                  <Input
+                    value={newDomain}
+                    onChange={(e) => setNewDomain(e.target.value.toLowerCase())}
+                    placeholder="e.g., yourcompany.com"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newDomain) {
+                        e.preventDefault();
+                        if (!emailDomains.includes(newDomain)) {
+                          setEmailDomains([...emailDomains, newDomain]);
+                        }
+                        setNewDomain('');
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (newDomain && !emailDomains.includes(newDomain)) {
+                        setEmailDomains([...emailDomains, newDomain]);
+                        setNewDomain('');
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {emailDomains.map((domain) => (
+                    <Badge key={domain} variant="secondary" className="px-3 py-1">
+                      {domain}
+                      <button
+                        type="button"
+                        className="ml-2 hover:text-rose-600"
+                        onClick={() => setEmailDomains(emailDomains.filter(d => d !== domain))}
+                      >
+                        ×
+                      </button>
+                    </Badge>
+                  ))}
+                  {emailDomains.length === 0 && (
+                    <span className="text-sm text-slate-400 italic">No domains added yet</span>
+                  )}
+                </div>
               </div>
 
               {/* Coheus Bridge Info */}

@@ -45,6 +45,7 @@ export interface LeaderboardEntry {
   loansClosed: number;
   loansStarted?: number;
   totalVolume: number;
+  totalRevenue: number; // Actual revenue: Base Buy + Orig Fees - Lender Credits
   avgCycleTime: number;
   pullThroughRate: number;
   delta?: number; // Percentage change from previous period
@@ -229,10 +230,13 @@ function getDateRangeForTimeframe(timeframe: ExtendedTimeframe, customStart?: st
       end = new Date(now.getFullYear() - 1, 11, 31);
       break;
     case 'custom':
-      // Custom date range
+      // Custom date range - parse as local dates (not UTC)
       if (customStart && customEnd) {
-        start = new Date(customStart);
-        end = new Date(customEnd);
+        // Parse 'YYYY-MM-DD' strings as local dates to match preset calculations
+        const [startYear, startMonth, startDay] = customStart.split('-').map(Number);
+        const [endYear, endMonth, endDay] = customEnd.split('-').map(Number);
+        start = new Date(startYear, startMonth - 1, startDay);
+        end = new Date(endYear, endMonth - 1, endDay);
       } else {
         // Default to MTD if no custom dates provided
         start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -247,62 +251,119 @@ function getDateRangeForTimeframe(timeframe: ExtendedTimeframe, customStart?: st
 
 /**
  * Calculate date range for previous period (for delta calculation)
+ * 
+ * Comparison strategy:
+ * - For "to-date" periods (WTD, MTD, QTD, YTD): Compare to previous equivalent period
+ * - For "last" periods (LW, LM, LQ, LY): Compare to the period before that
+ * - For custom: Compare to same period one year prior (year-over-year)
  */
-function getPreviousPeriodRange(timeframe: ExtendedTimeframe): { start: Date; end: Date } {
+function getPreviousPeriodRange(
+  timeframe: ExtendedTimeframe, 
+  customStart?: string, 
+  customEnd?: string
+): { start: Date; end: Date } {
   const now = new Date();
   let start: Date;
   let end: Date;
   
+  // Helper to get quarter info
+  const getQuarterInfo = (date: Date) => {
+    const quarter = Math.floor(date.getMonth() / 3); // 0-3
+    const year = date.getFullYear();
+    return { quarter, year };
+  };
+  
+  // Helper to get previous quarter
+  const getPrevQuarter = (quarter: number, year: number) => {
+    if (quarter === 0) {
+      return { quarter: 3, year: year - 1 };
+    }
+    return { quarter: quarter - 1, year };
+  };
+  
   switch (timeframe) {
-    case 'wtd':
-      // Previous week
-      const currentWeekStart = new Date(now);
-      currentWeekStart.setDate(now.getDate() - now.getDay());
-      end = new Date(currentWeekStart);
-      end.setDate(end.getDate() - 1);
-      start = new Date(end);
-      start.setDate(start.getDate() - 6);
+    case 'wtd': {
+      // WTD compares to previous week (same days)
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
+      const prevWeekEnd = new Date(weekStart);
+      prevWeekEnd.setDate(prevWeekEnd.getDate() - 1); // Saturday of last week
+      const prevWeekStart = new Date(prevWeekEnd);
+      prevWeekStart.setDate(prevWeekStart.getDate() - 6); // Sunday of last week
+      start = prevWeekStart;
+      end = prevWeekEnd;
       break;
-    case 'mtd':
-      // Previous month (same period as Last Month)
-      end = new Date(now.getFullYear(), now.getMonth(), 0);
+    }
+    case 'mtd': {
+      // MTD compares to previous month (same days into the month)
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      end = new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), new Date(now.getFullYear(), now.getMonth(), 0).getDate()));
       break;
-    case 'qtd':
-      // Previous quarter (same period as Last Quarter)
-      const currentQuarter = Math.floor(now.getMonth() / 3);
-      const prevQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
-      const prevQuarterYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
-      start = new Date(prevQuarterYear, prevQuarter * 3, 1);
-      end = new Date(prevQuarterYear, prevQuarter * 3 + 3, 0);
+    }
+    case 'qtd': {
+      // QTD compares to previous quarter (same days into the quarter)
+      const { quarter: currQ, year: currY } = getQuarterInfo(now);
+      const { quarter: prevQ, year: prevY } = getPrevQuarter(currQ, currY);
+      const daysIntoQuarter = Math.floor((now.getTime() - new Date(currY, currQ * 3, 1).getTime()) / (1000 * 60 * 60 * 24));
+      start = new Date(prevY, prevQ * 3, 1);
+      end = new Date(prevY, prevQ * 3, 1 + daysIntoQuarter);
       break;
-    case 'lm':
-      // For "Last Month", compare to the month before that
+    }
+    case 'lw': {
+      // Last Week compares to the week before that
+      const lastWeekStart = new Date(now);
+      lastWeekStart.setDate(now.getDate() - now.getDay() - 7); // Start of last week
+      const twoWeeksAgoStart = new Date(lastWeekStart);
+      twoWeeksAgoStart.setDate(twoWeeksAgoStart.getDate() - 7);
+      start = twoWeeksAgoStart;
+      end = new Date(twoWeeksAgoStart);
+      end.setDate(end.getDate() + 6);
+      break;
+    }
+    case 'lm': {
+      // Last Month compares to the month before that
+      start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
       end = new Date(now.getFullYear(), now.getMonth() - 1, 0); // Last day of 2 months ago
-      start = new Date(now.getFullYear(), now.getMonth() - 2, 1); // First day of 2 months ago
       break;
-    case 'lq':
-      // For "Last Quarter", compare to the quarter before that
-      const lqCurrentQuarter = Math.floor(now.getMonth() / 3);
-      const lqPrevQuarter = lqCurrentQuarter === 0 ? 3 : lqCurrentQuarter - 1;
-      const lqPrevPrevQuarter = lqPrevQuarter === 0 ? 3 : lqPrevQuarter - 1;
-      const lqYear = lqPrevQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
-      const lqPrevYear = lqPrevPrevQuarter === 3 ? lqYear - 1 : lqYear;
-      start = new Date(lqPrevYear, lqPrevPrevQuarter * 3, 1);
-      end = new Date(lqPrevYear, lqPrevPrevQuarter * 3 + 3, 0);
+    }
+    case 'lq': {
+      // Last Quarter compares to the quarter before that
+      const { quarter: currQ, year: currY } = getQuarterInfo(now);
+      const { quarter: lastQ, year: lastY } = getPrevQuarter(currQ, currY); // Last Quarter
+      const { quarter: prevQ, year: prevY } = getPrevQuarter(lastQ, lastY); // Quarter before Last
+      start = new Date(prevY, prevQ * 3, 1);
+      end = new Date(prevY, prevQ * 3 + 3, 0); // Last day of that quarter
       break;
-    case 'ly':
-      // For "Last Year", compare to the year before that
+    }
+    case 'ly': {
+      // Last Year compares to the year before that
       start = new Date(now.getFullYear() - 2, 0, 1);
       end = new Date(now.getFullYear() - 2, 11, 31);
       break;
-    case 'custom':
-    case 'ytd':
-    default:
-      // For custom and YTD, compare to previous year same period
-      start = new Date(now.getFullYear() - 1, 0, 1);
-      end = new Date(now.getFullYear() - 1, 11, 31);
+    }
+    case 'custom': {
+      // Custom date range compares to same period one year prior (year-over-year)
+      if (customStart && customEnd) {
+        // Parse 'YYYY-MM-DD' strings as local dates to match preset calculations
+        const [startYear, startMonth, startDay] = customStart.split('-').map(Number);
+        const [endYear, endMonth, endDay] = customEnd.split('-').map(Number);
+        // Shift back one year for year-over-year comparison
+        start = new Date(startYear - 1, startMonth - 1, startDay);
+        end = new Date(endYear - 1, endMonth - 1, endDay);
+      } else {
+        // Fallback to previous year
+        start = new Date(now.getFullYear() - 1, 0, 1);
+        end = new Date(now.getFullYear() - 1, 11, 31);
+      }
       break;
+    }
+    case 'ytd':
+    default: {
+      // YTD compares to same period last year
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      break;
+    }
   }
   
   return { start, end };
@@ -326,7 +387,7 @@ export async function getLeaderboardData(
     const dateRange = getDateRangeForTimeframe(timeframe, filters?.startDate, filters?.endDate);
     const startDate = dateRange.start;
     const endDate = dateRange.end;
-    const prevPeriod = getPreviousPeriodRange(timeframe);
+    const prevPeriod = getPreviousPeriodRange(timeframe, filters?.startDate, filters?.endDate);
     
     // Build WHERE clause for filters
     const conditions: string[] = [];
@@ -359,12 +420,28 @@ export async function getLeaderboardData(
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
         ) as loans_closed,
-        -- Total volume for period
+        -- Total volume for period (sum of loan amounts)
         COALESCE(SUM(l.loan_amount) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
         ), 0) as total_volume,
+        -- Total revenue: Base Buy ($) + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
+        COALESCE(SUM(
+          COALESCE(
+            CASE 
+              WHEN l.rate_lock_buy_side_base_price_rate IS NOT NULL AND l.rate_lock_buy_side_base_price_rate != 0 
+              THEN ROUND(((l.rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * l.loan_amount, 2)
+              ELSE 0 
+            END, 0) +
+          COALESCE(l.orig_fee_borr_pd, 0) + 
+          COALESCE(l.orig_fees_seller, 0) - 
+          COALESCE(l.cd_lender_credits, 0)
+        ) FILTER (
+          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+        ), 0) as total_revenue,
         -- Cycle time: App date to Closing/Funding date
         AVG(CASE 
           WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
@@ -476,6 +553,7 @@ export async function getLeaderboardData(
         loansClosed: currentLoans,
         loansStarted: parseInt(row.loans_started) || 0,
         totalVolume: parseFloat(row.total_volume) || 0,
+        totalRevenue: parseFloat(row.total_revenue) || 0,
         avgCycleTime: Math.round(parseFloat(row.avg_cycle_time) || 0),
         pullThroughRate: Math.round(parseFloat(row.pull_through_rate) || 0),
         delta,

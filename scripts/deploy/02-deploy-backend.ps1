@@ -82,6 +82,17 @@ if ($ALERT_EMAIL) {
     $params += "ParameterKey=AlertEmail,ParameterValue=$ALERT_EMAIL"
 }
 
+# Cognito SSO parameters (optional - SSO disabled if not provided)
+if ($COGNITO_USER_POOL_ID) {
+    Write-Status "Cognito SSO enabled for $ENVIRONMENT environment"
+    $params += "ParameterKey=CognitoUserPoolId,ParameterValue=$COGNITO_USER_POOL_ID"
+    $params += "ParameterKey=CognitoClientId,ParameterValue=$COGNITO_CLIENT_ID"
+    $params += "ParameterKey=CognitoClientSecret,ParameterValue=$COGNITO_CLIENT_SECRET"
+    $params += "ParameterKey=CognitoDomain,ParameterValue=$COGNITO_DOMAIN"
+} else {
+    Write-Status "Cognito SSO not configured for $ENVIRONMENT - skipping" "Yellow"
+}
+
 # ============================================================================
 # PHASE 1: Deploy CloudFormation with DesiredCount=0 (creates ECR, no tasks)
 # ============================================================================
@@ -240,6 +251,16 @@ if ($ECS_SG -and (Test-StackExists $STACK_AURORA_MGMT)) {
         Write-Status "Aurora update failed: $phase4Err" "Red"
         Write-Status "You may need to manually add ECS SG ($ECS_SG) to Aurora SG for port 5432." "Yellow"
     }
+}
+
+# ============================================================================
+# PHASE 5: Update Cognito SSO callback URLs for this environment
+# ============================================================================
+if ($COGNITO_USER_POOL_ID -and $COGNITO_CLIENT_ID) {
+    Write-Status "Phase 5: Updating Cognito SSO callback URLs..." "Magenta"
+    Update-CognitoCallbackUrls
+} else {
+    Write-Status "Phase 5: Skipping Cognito (not configured)" "Yellow"
 }
 
 # ============================================================================

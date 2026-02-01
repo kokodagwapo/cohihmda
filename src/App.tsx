@@ -15,6 +15,7 @@ import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
+import SSOCallback from "./pages/SSOCallback";
 import Loans from "./pages/Loans";
 import MyDashboard from "./pages/MyDashboard";
 import MyDashboardLegacy from "./pages/MyDashboardLegacy";
@@ -80,6 +81,7 @@ const App = () => (
               {/* Public routes */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/auth/sso/callback" element={<SSOCallback />} />
               
               {/* Protected routes - require authentication */}
                 <Route path="/insights" element={

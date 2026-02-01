@@ -1,15 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
-import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Grid3X3 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ChannelSelector } from "@/components/dashboard/ChannelSelector";
+import { TenantSelector } from "@/components/dashboard/TenantSelector";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
 
@@ -94,7 +94,10 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   const { selectedChannel, setSelectedChannel } = useChannelStore();
   
   // Global tenant selection from store (for super_admin viewing other tenants)
-  const { selectedTenantId } = useTenantStore();
+  const { selectedTenantId, setSelectedTenantId } = useTenantStore();
+  
+  // Check if user is a platform admin (can view other tenants)
+  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
   
   const isDashboard = location.pathname === '/insights';
   const isWorkbench = location.pathname === '/my-dashboard' || location.pathname.startsWith('/workbench');
@@ -103,14 +106,11 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   // Dropdown state
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [topTieringOpen, setTopTieringOpen] = useState(false);
-  const [allPagesOpen, setAllPagesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const insightsRef = useRef<HTMLDivElement>(null);
   const topTieringRef = useRef<HTMLDivElement>(null);
-  const allPagesRef = useRef<HTMLDivElement>(null);
   const insightsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const topTieringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const allPagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Keyboard navigation state
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
@@ -141,9 +141,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       if (topTieringRef.current && !topTieringRef.current.contains(event.target as Node)) {
         setTopTieringOpen(false);
         setFocusedIndex(-1);
-      }
-      if (allPagesRef.current && !allPagesRef.current.contains(event.target as Node)) {
-        setAllPagesOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -322,6 +319,21 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       </SheetHeader>
       
       <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+        {/* Tenant Selector - Mobile (collapsible section) */}
+        {isPlatformAdmin && (
+          <div className="pb-4 border-b border-slate-200 dark:border-slate-700">
+            <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Building2 className="w-3.5 h-3.5" />
+              Tenant Context
+            </div>
+            <TenantSelector
+              selectedTenantId={selectedTenantId}
+              onTenantChange={setSelectedTenantId}
+              compact={true}
+            />
+          </div>
+        )}
+
         {/* Insights Section */}
         <div>
           <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
@@ -530,20 +542,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           </button>
         </div>
 
-        {/* All Pages Summary */}
-        <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-          <div className="px-2 py-1.5 text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <Grid3X3 className="w-3.5 h-3.5" />
-            All Pages
-          </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 px-2">
-            {dashboardSectionsConfig.length + 
-              topTieringMenuGroups.coreAnalytics.items.length + 
-              topTieringMenuGroups.performance.items.length + 
-              topTieringMenuGroups.sales.items.length + 
-              topTieringMenuGroups.operations.items.length + 2} pages available
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -964,282 +962,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 )}
               </button>
 
-              {/* All Pages Dropdown */}
-              <div 
-                ref={allPagesRef}
-                className="relative"
-                onMouseEnter={() => {
-                  if (allPagesTimeoutRef.current) clearTimeout(allPagesTimeoutRef.current);
-                  setAllPagesOpen(true);
-                }}
-                onMouseLeave={() => {
-                  allPagesTimeoutRef.current = setTimeout(() => setAllPagesOpen(false), 150);
-                }}
-              >
-                <button
-                  onClick={() => setAllPagesOpen(!allPagesOpen)}
-                  aria-haspopup="true"
-                  aria-expanded={allPagesOpen}
-                  aria-label="All pages menu"
-                  className={cn(
-                    "relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 group",
-                    allPagesOpen
-                      ? "bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-lg shadow-purple-500/30 dark:shadow-purple-500/20 scale-105"
-                      : "text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-purple-50 hover:to-violet-50 dark:hover:from-purple-950/30 dark:hover:to-violet-950/30 hover:text-purple-700 dark:hover:text-purple-400 hover:shadow-md hover:shadow-purple-500/10 dark:hover:shadow-purple-500/5"
-                  )}
-                >
-                  <Grid3X3 className={cn(
-                    "w-4 h-4 transition-all duration-300",
-                    allPagesOpen 
-                      ? "text-white" 
-                      : "text-slate-500 dark:text-slate-400 group-hover:text-purple-600 dark:group-hover:text-purple-400 group-hover:scale-110"
-                  )} />
-                  <span>All Pages</span>
-                  <ChevronDown className={cn(
-                    "w-3.5 h-3.5 transition-all duration-300",
-                    allPagesOpen && "rotate-180",
-                    allPagesOpen 
-                      ? "text-white" 
-                      : "text-slate-400 dark:text-slate-500 group-hover:text-purple-600 dark:group-hover:text-purple-400"
-                  )} />
-                  {allPagesOpen && (
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-white/80 shadow-lg" />
-                  )}
-                </button>
-
-                <AnimatePresence>
-                  {allPagesOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute top-full right-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden z-50 w-[780px] backdrop-blur-sm"
-                      role="menu"
-                      aria-label="All pages submenu"
-                    >
-                      <div className="p-4 bg-gradient-to-br from-purple-50/50 to-white dark:from-purple-900/20 dark:to-slate-900 border-b border-slate-100 dark:border-slate-800">
-                        <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                          <Grid3X3 className="w-3.5 h-3.5" />
-                          All Pages Overview
-                        </div>
-                      </div>
-                      <div className="p-5 grid grid-cols-3 gap-4">
-                        {/* Insights Column */}
-                        <div>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
-                            Insights
-                          </div>
-                          <div className="space-y-1.5">
-                            {dashboardSectionsConfig.map((section) => {
-                              const Icon = section.icon;
-                              return (
-                                <button
-                                  key={section.id}
-                                  onClick={() => {
-                                    scrollToSection(section.id);
-                                    setAllPagesOpen(false);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-slate-700 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 border border-transparent hover:border-blue-200 dark:hover:border-blue-800"
-                                  role="menuitem"
-                                >
-                                  <Icon className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-slate-400" />
-                                  <span className="text-left whitespace-nowrap">{section.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Top Tiering Column */}
-                        <div>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <div className="w-1 h-4 bg-gradient-to-b from-emerald-500 to-teal-500 rounded-full" />
-                            Top Tiering
-                          </div>
-                          <div className="space-y-1.5">
-                            {topTieringMenuGroups.coreAnalytics.items.map((item) => {
-                              const Icon = item.icon;
-                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                              const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
-                              return (
-                                <button
-                                  key={item.id}
-                                  onClick={() => {
-                                    handleTopTieringClick(item.id);
-                                    setAllPagesOpen(false);
-                                  }}
-                                  className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
-                                    isItemActive
-                                      ? "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
-                                      : "text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 hover:text-emerald-700 dark:hover:text-emerald-300 border-transparent hover:border-emerald-200 dark:hover:border-emerald-800"
-                                  )}
-                                  role="menuitem"
-                                >
-                                  <div className={cn("w-6 h-6 rounded flex items-center justify-center flex-shrink-0", style.bg)}>
-                                    <Icon className={cn("w-3.5 h-3.5", style.icon)} />
-                                  </div>
-                                  <span className="text-left whitespace-nowrap">{item.label}</span>
-                                </button>
-                              );
-                            })}
-                            {/* Financial Modeling */}
-                            {topTieringMenuGroups.performance.items.map((item) => {
-                              const Icon = item.icon;
-                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                              const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
-                              return (
-                                <button
-                                  key={item.id}
-                                  onClick={() => {
-                                    handleTopTieringClick(item.id);
-                                    setAllPagesOpen(false);
-                                  }}
-                                  className={cn(
-                                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
-                                    isItemActive
-                                      ? "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
-                                      : "text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 hover:text-emerald-700 dark:hover:text-emerald-300 border-transparent hover:border-emerald-200 dark:hover:border-emerald-800"
-                                  )}
-                                  role="menuitem"
-                                >
-                                  <div className={cn("w-6 h-6 rounded flex items-center justify-center flex-shrink-0", style.bg)}>
-                                    <Icon className={cn("w-3.5 h-3.5", style.icon)} />
-                                  </div>
-                                  <span className="text-left whitespace-nowrap">{item.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Sales, Operations & Other Column */}
-                        <div className="space-y-4">
-                          {/* Sales */}
-                          <div>
-                            <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                              <Users className="w-3.5 h-3.5" />
-                              Sales
-                            </div>
-                            <div className="space-y-1">
-                              {topTieringMenuGroups.sales.items.map((item) => {
-                                const Icon = item.icon;
-                                const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                const itemRoute = routeMap[item.id];
-                                const isItemActive = itemRoute && location.pathname === itemRoute;
-                                return (
-                                  <button
-                                    key={item.id}
-                                    onClick={() => {
-                                      handleTopTieringClick(item.id);
-                                      setAllPagesOpen(false);
-                                    }}
-                                    className={cn(
-                                      "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
-                                      isItemActive
-                                        ? "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800"
-                                        : "text-slate-700 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 border-transparent hover:border-blue-200 dark:hover:border-blue-800"
-                                    )}
-                                    role="menuitem"
-                                  >
-                                    <div className={cn("w-6 h-6 rounded flex items-center justify-center flex-shrink-0", style.bg)}>
-                                      <Icon className={cn("w-3.5 h-3.5", style.icon)} />
-                                    </div>
-                                    <span className="text-left whitespace-nowrap">{item.label}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* Operations */}
-                          <div>
-                            <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                              <Settings className="w-3.5 h-3.5" />
-                              Operations
-                            </div>
-                            <div className="space-y-1">
-                              {topTieringMenuGroups.operations.items.map((item) => {
-                                const Icon = item.icon;
-                                const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                const itemRoute = routeMap[item.id];
-                                const isItemActive = itemRoute && location.pathname === itemRoute;
-                                return (
-                                  <button
-                                    key={item.id}
-                                    onClick={() => {
-                                      handleTopTieringClick(item.id);
-                                      setAllPagesOpen(false);
-                                    }}
-                                    className={cn(
-                                      "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
-                                      isItemActive
-                                        ? "text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800"
-                                        : "text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 hover:text-indigo-700 dark:hover:text-indigo-300 border-transparent hover:border-indigo-200 dark:hover:border-indigo-800"
-                                    )}
-                                    role="menuitem"
-                                  >
-                                    <div className={cn("w-6 h-6 rounded flex items-center justify-center flex-shrink-0", style.bg)}>
-                                      <Icon className={cn("w-3.5 h-3.5", style.icon)} />
-                                    </div>
-                                    <span className="text-left whitespace-nowrap">{item.label}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* Other */}
-                          <div>
-                            <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                              <LayoutGrid className="w-3.5 h-3.5" />
-                              Other
-                            </div>
-                            <div className="space-y-1">
-                              <button
-                                onClick={() => {
-                                  navigate('/my-dashboard');
-                                  setAllPagesOpen(false);
-                                }}
-                                className={cn(
-                                  "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
-                                  isActive('/my-dashboard')
-                                    ? "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
-                                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent hover:border-slate-200 dark:hover:border-slate-700"
-                                )}
-                                role="menuitem"
-                              >
-                                <LayoutDashboard className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-slate-400" />
-                                <span className="text-left">My Workbench</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  navigate('/data-chat');
-                                  setAllPagesOpen(false);
-                                }}
-                                className={cn(
-                                  "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
-                                  isActive('/data-chat')
-                                    ? "text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800"
-                                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent hover:border-slate-200 dark:hover:border-slate-700"
-                                )}
-                                role="menuitem"
-                              >
-                                <Sparkles className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-slate-400" />
-                                <span className="text-left">Data Chat</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
             </div>
           )}
 
@@ -1273,9 +995,20 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
             )}
 
+            {/* Tenant Selector - Compact in header (visible for admins) */}
+            {isAuthenticated && !isAdminPage && (
+              <div className="hidden md:flex items-center">
+                <TenantSelector
+                  selectedTenantId={selectedTenantId}
+                  onTenantChange={setSelectedTenantId}
+                  compact={true}
+                />
+              </div>
+            )}
+
             {/* Channel Selector - Compact in header (hidden on admin pages) */}
             {isAuthenticated && !isAdminPage && (
-              <div className="hidden sm:flex items-center">
+              <div className="hidden lg:flex items-center">
                 <ChannelSelector
                   selectedChannel={selectedChannel}
                   onChannelChange={setSelectedChannel}
@@ -1285,8 +1018,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 />
               </div>
             )}
-
-            <ThemeIconToggle />
 
             {isAuthenticated ? (
               <UserMenu

@@ -29,9 +29,11 @@ import {
   Loader2,
   Settings2,
   PlusCircle,
-  Database
+  Database,
+  Sparkles
 } from 'lucide-react';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
+import { FieldMappingWizardDialog } from '@/components/encompass/FieldMappingWizard';
 import { AdditionalFieldsTab } from './AdditionalFieldsTab';
 import { FieldPopulationStats } from '@/components/admin/FieldPopulationStats';
 import { useToast } from '@/hooks/use-toast';
@@ -51,6 +53,7 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
     losConnections.length > 0 ? losConnections[0].id : null
   );
   const [activeSubTab, setActiveSubTab] = useState<'default' | 'additional' | 'population'>('default');
+  const [showWizard, setShowWizard] = useState(false);
 
   // Get the selected connection
   const selectedConnection = losConnections.find(c => c.id === selectedConnectionId);
@@ -182,6 +185,14 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                       : 'Never'}
                   </div>
                 </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowWizard(true)}
+                  className="shrink-0"
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Setup Wizard
+                </Button>
               </div>
             )}
 
@@ -228,6 +239,26 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
               </Tabs>
             )}
           </div>
+        )}
+
+        {/* Field Mapping Wizard Dialog */}
+        {selectedConnectionId && selectedTenantId && (
+          <FieldMappingWizardDialog
+            open={showWizard}
+            onOpenChange={setShowWizard}
+            losConnectionId={selectedConnectionId}
+            tenantId={selectedTenantId}
+            connectionName={selectedConnection?.name}
+            onComplete={() => {
+              setShowWizard(false);
+              onRefresh();
+              toast({
+                title: 'Wizard Complete',
+                description: 'Field mappings have been configured',
+              });
+            }}
+            onCancel={() => setShowWizard(false)}
+          />
         )}
       </CardContent>
     </Card>

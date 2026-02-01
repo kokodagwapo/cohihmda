@@ -60,7 +60,6 @@ import { ExportModal } from '@/components/dashboard/modals/ExportModal';
 import { ShareModal } from '@/components/dashboard/modals/ShareModal';
 import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
 import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
-import { TenantSelector } from '@/components/dashboard/TenantSelector';
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 
@@ -99,20 +98,21 @@ const Dashboard = () => {
   // User state for greeting - derive from AuthContext user
   const [displayName, setDisplayName] = useState<string | null>(null);
   
-  // Tenant selection state for admins - uses global store (shared with Navigation header)
-  // For tenant_admin users, this is automatically set to their tenant_id
-  const isTenantAdmin = user?.role === 'tenant_admin';
-  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
+  // Tenant selection from global store (shared with Navigation header)
   const { selectedTenantId, setSelectedTenantId } = useTenantStore();
   
   // Track user ID to detect user changes and reset state
-  const [prevUserId, setPrevUserId] = useState<string | null>(null);
+  // Initialize with current user ID to avoid resetting on first mount
+  const [prevUserId, setPrevUserId] = useState<string | null>(() => user?.id || null);
   
-  // Reset tenant selection when user changes (login/logout/switch)
+  // Reset tenant selection only when user actually changes (login/logout/switch)
+  // This preserves tenant selection during normal navigation
   useEffect(() => {
     const currentUserId = user?.id || null;
     
-    if (currentUserId !== prevUserId) {
+    // Only trigger when there's an actual user change (not on first mount)
+    // prevUserId being different AND currentUserId being set means user changed
+    if (prevUserId !== null && currentUserId !== null && currentUserId !== prevUserId) {
       console.log('[Dashboard] User changed, resetting tenant selection', { 
         from: prevUserId, 
         to: currentUserId,
@@ -123,9 +123,14 @@ const Dashboard = () => {
       if (user?.role === 'tenant_admin' && user?.tenant_id) {
         setSelectedTenantId(user.tenant_id);
       } else {
+        // For platform admins, don't reset - let them keep their selection
+        // Only reset if switching from one user to another
         setSelectedTenantId(null);
       }
-      
+    }
+    
+    // Always track current user ID
+    if (currentUserId !== prevUserId) {
       setPrevUserId(currentUserId);
     }
   }, [user?.id, user?.role, user?.tenant_id, prevUserId, setSelectedTenantId]);
@@ -971,18 +976,6 @@ const Dashboard = () => {
         onReportClick={handleReportClick}
         onSectionClick={scrollToSection}
         visitorFirstName={displayName}
-        headerContent={
-          isPlatformAdmin ? (
-            <div className="flex items-center gap-4 flex-wrap">
-              {/* Only show tenant selector for platform admins (super_admin, platform_admin) */}
-              <TenantSelector
-                selectedTenantId={selectedTenantId}
-                onTenantChange={setSelectedTenantId}
-                compact={true}
-              />
-            </div>
-          ) : undefined
-        }
       >
         {/* Report Modal */}
         <ReportModal open={reportModalOpen} onClose={() => {
@@ -1075,13 +1068,13 @@ const Dashboard = () => {
             {/* Mortgage News - Second */}
             {dashboardVisibility.industryNews && <div id="industryNews" className="section-industry-news"><IndustryNewsCard /></div>}
             
-            {/* Leaderboard - Third */}
-            {dashboardVisibility.leaderboard && <div id="leaderboard" className="section-leaderboard mt-12 sm:mt-16"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
-            
             {/* Dashboards Section */}
-            {(dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast) && (
+            {(dashboardVisibility.leaderboard || dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast) && (
               <div className="section-dashboards mt-12 sm:mt-16 w-full">
                 <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">Dashboards</h2>
+                
+                {/* Leaderboard - First under Dashboards heading */}
+                {dashboardVisibility.leaderboard && <div id="leaderboard" className="section-leaderboard mb-8"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
                 
                 {/* Business Overview */}
                 {dashboardVisibility.executiveDashboard && <div id="executiveDashboard" className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}

@@ -404,7 +404,7 @@ export function PlatformTeamSection() {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[9999]">
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="platform_admin">Platform Admin</SelectItem>
                   <SelectItem value="support">Support</SelectItem>
@@ -454,7 +454,7 @@ export function PlatformTeamSection() {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[9999]">
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="platform_admin">Platform Admin</SelectItem>
                   <SelectItem value="support">Support</SelectItem>

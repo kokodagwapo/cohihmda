@@ -14,7 +14,8 @@ export interface LeaderboardLeader {
   loansStarted?: number;
   pullThru: number;
   cycleTime: number;
-  revenue: string;
+  volume: string;   // Total loan amount funded
+  revenue: string;  // Estimated commission/income (~1% of volume)
   badges: string[];
   streakDays: number;
 }
@@ -102,7 +103,14 @@ export const useLeaderboardData = (
             loansStarted: emp.loansStarted || 0,
             pullThru: Math.round(emp.pullThroughRate || 0),
             cycleTime: Math.round(emp.avgCycleTime || 0),
-            revenue: emp.totalVolume ? `$${(emp.totalVolume / 1000000).toFixed(1)}M` : '$0M',
+            // Volume = total loan amount funded
+            volume: emp.totalVolume ? `$${(emp.totalVolume / 1000000).toFixed(1)}M` : '$0M',
+            // Revenue = actual revenue from API (Base Buy + Orig Fees - Lender Credits)
+            revenue: emp.totalRevenue 
+              ? (emp.totalRevenue >= 1000000 
+                  ? `$${(emp.totalRevenue / 1000000).toFixed(1)}M` 
+                  : `$${(emp.totalRevenue / 1000).toFixed(0)}K`)
+              : '$0K',
             badges: generateBadges(emp),
             streakDays: 0
           }));

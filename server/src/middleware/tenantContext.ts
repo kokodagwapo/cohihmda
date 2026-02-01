@@ -49,11 +49,14 @@ export async function attachTenantContext(
     
     console.log('[TenantContext] Using JWT data:', { userId: req.userId, userRole, jwtTenantId, queryTenantId });
 
-    // If queryTenantId is provided and user is admin/platform staff, use it
+    // Only platform staff can use the tenant_id query param to select different tenants
+    // Tenant admins and regular users always use their JWT tenant (security: prevents cross-tenant access)
     const isPlatformStaff = ['super_admin', 'platform_admin', 'support'].includes(userRole);
     let tenantId: string | null = null;
-    if (queryTenantId && (isPlatformStaff || userRole === 'tenant_admin')) {
-      console.log('[TenantContext] Admin user selecting tenant:', { userId: req.userId, userRole, queryTenantId });
+    
+    if (queryTenantId && isPlatformStaff) {
+      // Platform staff can select any tenant
+      console.log('[TenantContext] Platform staff selecting tenant:', { userId: req.userId, userRole, queryTenantId });
       // Verify tenant exists
       const tenantCheck = await managementPool.query(
         `SELECT id FROM coheus_tenants WHERE id = $1 AND status = 'active'`,
@@ -66,8 +69,10 @@ export async function attachTenantContext(
         console.warn('[TenantContext] Tenant not found or inactive:', queryTenantId);
         return res.status(404).json({ error: 'Tenant not found or inactive' });
       }
-    } else if (queryTenantId) {
-      console.warn('[TenantContext] Non-admin user attempted to use tenant_id query param:', { userId: req.userId, userRole, queryTenantId });
+    } else if (queryTenantId && !isPlatformStaff) {
+      // Non-platform users cannot use tenant_id query param - silently ignore it
+      // Their tenant comes from JWT (secure, cannot be tampered)
+      console.warn('[TenantContext] Non-platform user attempted to use tenant_id query param (ignored):', { userId: req.userId, userRole, queryTenantId });
     }
 
     // If no query tenant, use tenant_id from JWT (for tenant users)

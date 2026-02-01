@@ -1,161 +1,169 @@
 # ============================================================================
-# Run Database Migrations
+# Run Database Migrations via ECS Exec
 # ============================================================================
-# This script runs database migrations against Aurora PostgreSQL.
-# 
+# This script runs database migrations inside an ECS task using ECS Exec.
+# The task is already in the VPC and can reach Aurora directly.
+#
 # Prerequisites:
-# - Aurora cluster deployed (01-deploy-aurora.ps1)
-# - Backend deployed (02-deploy-backend.ps1) - for getting database credentials
-# - Network access to Aurora (via bastion or VPN)
+# - Backend deployed (02-deploy-backend.ps1)
+# - AWS Session Manager plugin installed
+#   https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
 #
 # Options:
 # -DryRun           Preview migrations without applying
-# -TenantSlug       Run migrations for a specific tenant
-# -AllTenants       Run migrations for all active tenants
-# -CreateSuperAdmin Create initial super admin user
+# -Interactive      Open interactive shell in container (for manual commands)
 # ============================================================================
 
 param(
     [switch]$DryRun,
-    [string]$TenantSlug,
-    [switch]$AllTenants,
-    [switch]$CreateSuperAdmin,
-    [string]$SuperAdminEmail,
-    [string]$SuperAdminPassword,
-    [string]$SuperAdminName = "Super Admin"
+    [switch]$Interactive,
+    [switch]$EnableExec
 )
 
 # Load configuration
 . "$PSScriptRoot/config.ps1"
 
-Write-Status "Database Migration Runner" "Magenta"
+Write-Status "Database Migration Runner (via ECS Exec)" "Magenta"
 
 # ============================================================================
-# Get Aurora Connection Info from Secrets Manager
+# Get ECS Task Info
 # ============================================================================
-Write-Status "Retrieving database credentials..."
+$ECS_CLUSTER = Get-StackOutput $STACK_BACKEND "ECSClusterName"
+$ECS_SERVICE = Get-StackOutput $STACK_BACKEND "ECSServiceName"
 
-$SECRET_ARN = Get-StackOutput $STACK_AURORA_MGMT "SecretArn"
-$CLUSTER_ENDPOINT = Get-StackOutput $STACK_AURORA_MGMT "ClusterEndpoint"
-
-if (-not $SECRET_ARN) {
-    Write-Status "ERROR: Aurora management stack not found. Deploy it first with 01-deploy-aurora.ps1" "Red"
+if (-not $ECS_CLUSTER) {
+    Write-Status "ERROR: Backend stack not found. Deploy backend first!" "Red"
     exit 1
 }
 
-Write-Status "Cluster: $CLUSTER_ENDPOINT"
+Write-Status "Cluster: $ECS_CLUSTER"
+Write-Status "Service: $ECS_SERVICE"
 
-# Get credentials from Secrets Manager
-$secretJson = aws secretsmanager get-secret-value `
-    --secret-id $SECRET_ARN `
+# ============================================================================
+# Enable ECS Exec (if requested or first time)
+# ============================================================================
+if ($EnableExec) {
+    Write-Status "Enabling ECS Exec on service..."
+    
+    aws ecs update-service `
+        --cluster $ECS_CLUSTER `
+        --service $ECS_SERVICE `
+        --enable-execute-command `
+        --profile $env:AWS_PROFILE `
+        --region $env:AWS_REGION `
+        --output text > $null
+    
+    Write-Status "Forcing new deployment to apply ECS Exec..."
+    aws ecs update-service `
+        --cluster $ECS_CLUSTER `
+        --service $ECS_SERVICE `
+        --force-new-deployment `
+        --profile $env:AWS_PROFILE `
+        --region $env:AWS_REGION `
+        --output text > $null
+    
+    Write-Status "Waiting for deployment to stabilize (this may take a few minutes)..."
+    aws ecs wait services-stable `
+        --cluster $ECS_CLUSTER `
+        --services $ECS_SERVICE `
+        --profile $env:AWS_PROFILE `
+        --region $env:AWS_REGION
+    
+    Write-Status "ECS Exec enabled!" "Green"
+}
+
+# ============================================================================
+# Check if ECS Exec is enabled
+# ============================================================================
+$execEnabled = aws ecs describe-services `
+    --cluster $ECS_CLUSTER `
+    --services $ECS_SERVICE `
     --profile $env:AWS_PROFILE `
     --region $env:AWS_REGION `
-    --query 'SecretString' `
+    --query 'services[0].enableExecuteCommand' `
     --output text
 
-$credentials = $secretJson | ConvertFrom-Json
-
-# Set environment variables for the migration runner
-$env:DB_HOST = $CLUSTER_ENDPOINT
-$env:DB_PORT = "5432"
-$env:DB_USER = $credentials.username
-$env:DB_PASSWORD = $credentials.password
-$env:MANAGEMENT_DB_NAME = "coheus_management"
-
-Write-Status "Database: coheus_management @ $CLUSTER_ENDPOINT"
+if ($execEnabled -ne "True") {
+    Write-Status "ECS Exec is not enabled on this service." "Yellow"
+    Write-Status "Run: .\06-run-migrations.ps1 -EnableExec" "Cyan"
+    Write-Status "This will enable ECS Exec and redeploy the service (takes ~2-3 minutes)." "Gray"
+    exit 1
+}
 
 # ============================================================================
-# Check if we can connect
+# Get Running Task
 # ============================================================================
-Write-Status "Testing database connectivity..."
+Write-Status "Finding running task..."
 
-# Note: This requires psql or a Node.js test script
-# For now, we'll proceed and let the migration script handle connection errors
+$TASK_ARN = aws ecs list-tasks `
+    --cluster $ECS_CLUSTER `
+    --service-name $ECS_SERVICE `
+    --desired-status RUNNING `
+    --profile $env:AWS_PROFILE `
+    --region $env:AWS_REGION `
+    --query 'taskArns[0]' `
+    --output text
+
+if (-not $TASK_ARN -or $TASK_ARN -eq "None") {
+    Write-Status "ERROR: No running tasks found. Is the service running?" "Red"
+    exit 1
+}
+
+$TASK_ID = $TASK_ARN.Split('/')[-1]
+Write-Status "Task: $TASK_ID" "Green"
 
 # ============================================================================
-# Run Migrations
+# Run Migration Command
 # ============================================================================
+$CONTAINER_NAME = "coheus-backend"
 
-$serverDir = Join-Path $PSScriptRoot "../../server"
-
-Push-Location $serverDir
-
-try {
-    # Build arguments
-    $migrationArgs = @()
+if ($Interactive) {
+    Write-Status "Opening interactive shell in container..."
+    Write-Host ""
+    Write-Host "You're now inside the container. Run migrations with:" -ForegroundColor Cyan
+    Write-Host "  cd /app/server && npx tsx src/migrations/cli.ts up --verbose" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Type 'exit' to leave the container." -ForegroundColor Yellow
+    Write-Host ""
     
-    if ($TenantSlug) {
-        $migrationArgs += "tenant"
-        $migrationArgs += $TenantSlug
-    } elseif ($AllTenants) {
-        $migrationArgs += "all"
-    } else {
-        $migrationArgs += "up"
-    }
+    aws ecs execute-command `
+        --cluster $ECS_CLUSTER `
+        --task $TASK_ARN `
+        --container $CONTAINER_NAME `
+        --interactive `
+        --command "/bin/sh" `
+        --profile $env:AWS_PROFILE `
+        --region $env:AWS_REGION
+} else {
+    # Build migration command
+    $migrationCmd = "cd /app/server && npx tsx src/migrations/cli.ts up --verbose"
     
     if ($DryRun) {
-        $migrationArgs += "--dry-run"
+        $migrationCmd = "cd /app/server && npx tsx src/migrations/cli.ts up --dry-run --verbose"
         Write-Status "DRY RUN MODE - No changes will be made" "Yellow"
     }
     
-    $migrationArgs += "--verbose"
-    
-    Write-Status "Running migrations..."
-    Write-Host "  Command: npx tsx src/migrations/cli.ts $($migrationArgs -join ' ')" -ForegroundColor Gray
+    Write-Status "Running migrations inside ECS task..."
+    Write-Host "  Command: $migrationCmd" -ForegroundColor Gray
     Write-Host ""
     
-    # Run the migration CLI
-    npx tsx src/migrations/cli.ts @migrationArgs
+    # Use a here-string to avoid PowerShell escaping issues
+    $shellCmd = "/bin/sh -c '$migrationCmd'"
+    
+    aws ecs execute-command `
+        --cluster $ECS_CLUSTER `
+        --task $TASK_ARN `
+        --container $CONTAINER_NAME `
+        --interactive `
+        --command $shellCmd `
+        --profile $env:AWS_PROFILE `
+        --region $env:AWS_REGION
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Status "Migration failed!" "Red"
+        Write-Status "Migration may have failed. Check output above." "Yellow"
         exit 1
     }
-    
-    # ============================================================================
-    # Create Super Admin (if requested)
-    # ============================================================================
-    if ($CreateSuperAdmin) {
-        Write-Host ""
-        Write-Status "Creating Super Admin..."
-        
-        if (-not $SuperAdminEmail) {
-            $SuperAdminEmail = Read-Host "Enter super admin email"
-        }
-        
-        if (-not $SuperAdminPassword) {
-            $SuperAdminPassword = Read-Host "Enter super admin password" -AsSecureString
-            $SuperAdminPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SuperAdminPassword))
-        }
-        
-        # Set environment variables for seeding script
-        $env:SEED_SUPER_ADMIN_EMAIL = $SuperAdminEmail
-        $env:SEED_SUPER_ADMIN_PASSWORD = $SuperAdminPassword
-        $env:SEED_SUPER_ADMIN_NAME = $SuperAdminName
-        
-        npx tsx scripts/seed-super-admin.ts
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Status "Super admin created: $SuperAdminEmail" "Green"
-        } else {
-            Write-Status "Failed to create super admin" "Red"
-        }
-        
-        # Clear sensitive env vars
-        $env:SEED_SUPER_ADMIN_PASSWORD = ""
-    }
-    
-} finally {
-    Pop-Location
 }
 
 Write-Host ""
-Write-Status "Migration Complete!" "Green"
-Write-Host ""
-Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Create a super admin (if not done):" -ForegroundColor Gray
-Write-Host "     .\06-run-migrations.ps1 -CreateSuperAdmin" -ForegroundColor Gray
-Write-Host ""
-Write-Host "  2. Provision your first tenant:" -ForegroundColor Gray
-Write-Host "     .\05-deploy-tenant-provisioning.ps1" -ForegroundColor Gray
-Write-Host ""
+Write-Status "Done!" "Green"

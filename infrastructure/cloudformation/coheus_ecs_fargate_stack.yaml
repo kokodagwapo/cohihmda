@@ -148,10 +148,33 @@ Parameters:
     Default: ''
     Description: Email for alerts (optional)
 
+  # Cognito SSO Configuration
+  CognitoUserPoolId:
+    Type: String
+    Default: ''
+    Description: Cognito User Pool ID for SSO authentication
+
+  CognitoClientId:
+    Type: String
+    Default: ''
+    Description: Cognito App Client ID
+
+  CognitoClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Cognito App Client Secret
+
+  CognitoDomain:
+    Type: String
+    Default: ''
+    Description: Cognito domain (e.g., your-app.auth.us-east-2.amazoncognito.com)
+
 Conditions:
   CreateNewVPC: !Equals [!Ref NetworkMode, 'new']
   HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, '']]
 
 Rules:
   ExistingVPCRequiresSubnets:
@@ -663,6 +686,17 @@ Resources:
               Value: !Ref AWS::Region
             - Name: JWT_SECRET
               Value: !Ref JwtSecret
+            # Cognito SSO Configuration (optional)
+            - Name: COGNITO_USER_POOL_ID
+              Value: !If [HasCognito, !Ref CognitoUserPoolId, '']
+            - Name: COGNITO_CLIENT_ID
+              Value: !If [HasCognito, !Ref CognitoClientId, '']
+            - Name: COGNITO_CLIENT_SECRET
+              Value: !If [HasCognito, !Ref CognitoClientSecret, '']
+            - Name: COGNITO_REGION
+              Value: !If [HasCognito, !Ref AWS::Region, '']
+            - Name: COGNITO_DOMAIN
+              Value: !If [HasCognito, !Ref CognitoDomain, '']
           Secrets:
             - Name: DB_USER
               ValueFrom: !Sub '${AuroraSecretArn}:username::'
