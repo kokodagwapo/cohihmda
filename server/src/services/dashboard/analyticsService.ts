@@ -11,6 +11,7 @@ import {
   clearCache as clearInsightsCache,
 } from "../insights/index.js";
 import type { GeneratedInsight } from "../insights/index.js";
+import { REVENUE_SQL_EXPRESSION } from "../../utils/scorecard-utils.js";
 
 /**
  * Analytics Service
@@ -472,18 +473,8 @@ export async function getLeaderboardData(
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
         ), 0) as total_volume,
-        -- Total revenue: Base Buy ($) + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
-        COALESCE(SUM(
-          COALESCE(
-            CASE 
-              WHEN l.rate_lock_buy_side_base_price_rate IS NOT NULL AND l.rate_lock_buy_side_base_price_rate != 0 
-              THEN ROUND(((l.rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * l.loan_amount, 2)
-              ELSE 0 
-            END, 0) +
-          COALESCE(l.orig_fee_borr_pd, 0) + 
-          COALESCE(l.orig_fees_seller, 0) - 
-          COALESCE(l.cd_lender_credits, 0)
-        ) FILTER (
+        -- Total revenue: Using shared REVENUE_SQL_EXPRESSION from scorecard-utils.ts
+        COALESCE(SUM(${REVENUE_SQL_EXPRESSION}) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
