@@ -1,2324 +1,0 @@
-ScriptLine,QsdaVersion,MetaId
-"///$tab Performance (only section in Prod)",3.4.5,
-"/*******************************",3.4.5,
-"TW 10/25",3.4.5,
-"Dynamicaly sets the app testing or production",3.4.5,
-"If statment is modifiable to to use Wildmatch or Match ",3.4.5,
-"********************************/",3.4.5,
-"let Compname = ComputerName();",3.4.5,
-"trace $(Compname);",3.4.5,
-"",3.4.5,
-"IF ComputerName() = 'EC2AMAZ-CI31P0L' THEN",3.4.5,
-"    SET vUseDEVAPI = 1;",3.4.5,
-"    SET vEnvironment = 'Development';",3.4.5,
-"    LET vSectionAccess = 'No';",3.4.5,
-"ELSE",3.4.5,
-"    SET vUseDEVAPI = 0;",3.4.5,
-"    SET vEnvironment = 'Production';",3.4.5,
-"    LET vSectionAccess = 'Yes';",3.4.5,
-"ENDIF",3.4.5,
-"",3.4.5,
-"SET vBuilderVersion = 'v2'; // Created for testing new updates to the builder",3.4.5,
-"LET vQVDPrefix = 'lib://QlikData/$(vEnvironment)/qvd-transform/tvd-coheus-inc-builder/$(vBuilderVersion)' & Pick(vUseDEVAPI + 1, '', '/DEV');",3.4.5,
-"SET vConfigLocale = 'lib://QlikData/$(vEnvironment)/tvd-coheus-git/v1/CoheusConfigs';",3.4.5,
-"SET vDefaultConfigLocale = '$(vConfigLocale)/DefaultFiles/default_config.xml';",3.4.5,
-"SET vSharedData = 'lib://QlikData/$(vEnvironment)/tvd-coheus-git/v1/SharedData';",3.4.5,
-"SET vRoot = 'lib://QlikData/$(vEnvironment)/tvd-coheus-performance-qlik';",3.4.5,
-"SET vAppScripts = '$(vRoot)/Scripts';",3.4.5,
-"/************************",3.4.5,
-"TW 0/25 These 3 lines are replaced by the if statement above.",3.4.5,
-"//SET vUseDEVAPI = 1; // 1 = Dev Setup Tool XML AND QVDs; 0 = Prod Setup Tool XML AND QVDs",3.4.5,
-"//SET vEnvironment = 'Development'; // Comment for production migration",3.4.5,
-"// SET vEnvironment = 'Production'; // Uncomment for production migration",3.4.5,
-"**********************/",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//////////////////////////",3.4.5,
-"///////////////TW 10/25 The following must include scripts build the connection strings for the Rest connections. ",3.4.5,
-"//////////////////////////",3.4.5,
-"$(Must_Include=$(vAppScripts)/AutoConfig.qvs);",3.4.5,
-"",3.4.5,
-"//  // USE THESE VARIABLES IF WORKING ON APP IN WORK STREAM TO OVERRIDE/BYPASS VARIABLES SET IN THE MUST_INCLUDE SCRIPT ABOVE.",3.4.5,
-"/*------------ OVERRIDE VARIABLES ------------*/",3.4.5,
-"",3.4.5,
-"// LET vSectionAccess = 'Yes';",3.4.5,
-"// LET vSectionAccess = 'No';",3.4.5,
-"LET vSource = 'HFM';",3.4.5,
-"",3.4.5,
-"/*-------------------------------------------*/",3.4.5,
-"",3.4.5,
-"/*---------- Demo Assigning ---------*/",3.4.5,
-"//To anonymize data run the Client Anonymizer app in 2 - Coheus Demo https://tvlabs.teraverde.com/tvma/dataloadeditor/app/59e2be90-985f-45bc-a667-d28be6ef52df",3.4.5,
-"//Use START HERE Section line 11 to set Source. Must be listed in ODAG Config file. Saves anonmyized L2 QlikShare/QVD/Demo/$(vSource)",3.4.5,
-"",3.4.5,
-"Let vIsDemoApp = 'No';",3.4.5,
-"",3.4.5,
-"//Reference vAnonClient to get which client is used for Demo. See externalized $(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ODAG Loan Data.qvs);",3.4.5,
-"//$(Must_Include=$(vRoot)/Performance.qvs); // <--------------- MAIN PERFORMANCE SCRIPT The body is present below. The script has been commented out and each script is present in this app. ",3.4.5,
-"",3.4.5,
-"// $(Must_Include=$(vAppScripts)/START HERE.qvs); ///// Consolidating script with Main",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Main.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/CCA for TVI.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Versioning.qvs); //////Should be deleted from ",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Mapping.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/ODAG LoanData.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Variables.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Configuration Data.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/REVENUE.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/TPO Variables.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Script Additions Ranges.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Calendar-Sub.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Calendar-Link.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Calendar-3vue Sub.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/Calendar-Periods for TTS.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/TTS + Staffing Variables.qvs);",3.4.5,
-"// $(Must_Include=$(vAppScripts)/QSS Files.qvs);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"///$tab START HERE",3.4.5,
-"//Be sure to move Section Access script above Exit Script section when publishing to production. Moved below Exit Script when developing.",3.4.5,
-"",3.4.5,
-"/*---------- Application Naming ------*/",3.4.5,
-"//Be sure to name the application as in this example below",3.4.5,
-"//Taylor Morrison_Performance_1.0.0",3.4.5,
-"//vAppName in variables section Line 87 creates App Name used '_' delimeter to extract Performance to be used in App Name on top menu.",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/*---------- Load TPO or Retail data based on Consolidated Channel Logic ----------*/",3.4.5,
-"//2024-04-02 BH Added: set to TPO to load ONLY Banked - Wholesale & Correspondent Channels OR set to Retail to load Banked - Retail & Brokered",3.4.5,
-"",3.4.5,
-"/***************************************",3.4.5,
-"TW 10/25 Moved these 2 lines To Main script",3.4.5,
-"Start here only contained these 2",3.4.5,
-"",3.4.5,
-"***************************************/",3.4.5,
-"",3.4.5,
-"//SET vConsolidatedChannels = 'TPO';",3.4.5,
-"//SET vConsolidatedChannels = 'Retail';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/*--------- Set Source/client in ODAG LoanData Script ----------------*/",3.4.5,
-"/*--------- REPLACE LoanData base script --------*/",3.4.5,
-"",3.4.5,
-"// vCCA_ScriptPath is set on the script tab named ""CCA for TVI""",3.4.5,
-"",3.4.5,
-"/*2024-04-03 BH Noted that the ODAG LoanData Section is still using ODAG Config file.",3.4.5,
-"$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ODAG Loan Data.qvs);",3.4.5,
-"MUST ENSURE each client is listed and Source column is updated and matchs SQL Clients.",3.4.5,
-"This needs to be retired",3.4.5,
-"*/",3.4.5,
-"// DGHELA 05/21/25 - Place client QVD folder name in this variable",3.4.5,
-"// SET vSource = '';",3.4.5,
-"",3.4.5,
-"// Test for PROD:",3.4.5,
-"//		LET vClient = PurgeChar( replace ( DocumentTitle(), ' Performance ', '') , '1234567890.'  ) ;",3.4.5,
-"///$tab Main",3.4.5,
-"SET ThousandSep=',';",3.4.5,
-"SET DecimalSep='.';",3.4.5,
-"SET MoneyThousandSep=',';",3.4.5,
-"SET MoneyDecimalSep='.';",3.4.5,
-"SET MoneyFormat='$#,##0.00;-$#,##0.00';",3.4.5,
-"SET TimeFormat='h:mm:ss TT';",3.4.5,
-"SET DateFormat='M/D/YYYY';",3.4.5,
-"SET TimestampFormat='M/D/YYYY h:mm:ss[.fff] TT';",3.4.5,
-"SET FirstWeekDay=6;",3.4.5,
-"SET BrokenWeeks=1;",3.4.5,
-"SET ReferenceDay=0;",3.4.5,
-"SET FirstMonthOfYear=1;",3.4.5,
-"SET CollationLocale='en-US';",3.4.5,
-"SET CreateSearchIndexOnReload=0; ///// TW 10/25 set this to 0 up coming sections also change it from 1 to 0 no need to do it multiple times",3.4.5,
-"SET MonthNames='Jan;Feb;Mar;Apr;May;Jun;Jul;Aug;Sep;Oct;Nov;Dec';",3.4.5,
-"SET LongMonthNames='January;February;March;April;May;June;July;August;September;October;November;December';",3.4.5,
-"SET DayNames='Mon;Tue;Wed;Thu;Fri;Sat;Sun';",3.4.5,
-"SET LongDayNames='Monday;Tuesday;Wednesday;Thursday;Friday;Saturday;Sunday';",3.4.5,
-"SET NumericalAbbreviation='3:k;6:M;9:B;12:T;15:P;18:E;21:Z;24:Y;-3:m;-6:μ;-9:n;-12:p;-15:f;-18:a;-21:z;-24:y';",3.4.5,
-"Let vShow3.0.0Items = 0;",3.4.5,
-"",3.4.5,
-"/***************************************",3.4.5,
-"TW 10/25 Moved these 2 lines from Start Here script",3.4.5,
-"Start here only contained these 2",3.4.5,
-"",3.4.5,
-"***************************************/",3.4.5,
-"//SET vConsolidatedChannels = 'TPO';",3.4.5,
-"SET vConsolidatedChannels = 'Retail';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/********************************************",3.4.5,
-"TW 10/25",3.4.5,
-"Moved everything below this Comment to the Operations Mapping script. ",3.4.5,
-"Keeping inline and Papping tables in a central place. ",3.4.5,
-"",3.4.5,
-"********************************************/",3.4.5,
-"// For t = 1 to 25",3.4.5,
-"",3.4.5,
-"// LET vTurnTime$(t) ='Turn Time $(t)';// '$(vTurnTime$(t))';",3.4.5,
-"// LET vStart$(t) =;// '$(vStart$(t))';",3.4.5,
-"// LET vEnd$(t) =;// '$(vEnd$(t))';",3.4.5,
-"",3.4.5,
-"// Next t;",3.4.5,
-"",3.4.5,
-"// TurnTimeList:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// TurnTime",3.4.5,
-"// 'TurnTime 1'",3.4.5,
-"// 'TurnTime 2'",3.4.5,
-"// 'TurnTime 3'",3.4.5,
-"// 'TurnTime 4'",3.4.5,
-"// 'TurnTime 5'",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"///$tab CCA for TVI",3.4.5,
-"// CCA = Coheus Component Architecture",3.4.5,
-"// 2024-01-11 JRR added this script tab to make TVI calculations consistent accross different apps.",3.4.5,
-"//	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"",3.4.5,
-"SET vScriptPath ='lib://QlikShare/Include/';",3.4.5,
-"",3.4.5,
-"/***********************",3.4.5,
-"TW 010/25",3.4.5,
-"Consolidated this variable to be set Dynamicly based on running environment in opening Section",3.4.5,
-"***********************/",3.4.5,
-"",3.4.5,
-"	SET vCCA_TestMode = 0;		// PROD, not DEV or TEST",3.4.5,
-"//	SET vCCA_TestMode = 1;			// DEV or TEST",3.4.5,
-"",3.4.5,
-"//SET vCCA_TestMode = $(vUseDEVAPI);",3.4.5,
-"  ",3.4.5,
-"  ",3.4.5,
-"  ",3.4.5,
-"IF $(vCCA_TestMode) = 1 THEN ",3.4.5,
-"	Trace 'vCCA_TestMode = 1, running in Test Mode.';",3.4.5,
-"    set vCCA_ScriptPath='lib://QlikShare/DEV/JRR/TSEEQ/Source Documents/CCA/Include/';",3.4.5,
-"//	set vCCA_ScriptPath='lib://QlikShare/Include/TSEEQ/Source Documents/CCA/Include/';",3.4.5,
-"//    SET vCCA_TestFilePostfix = '';",3.4.5,
-"    SET vCCA_TestFilePostfix = '_JRR_test_88'; ///This file is not there ",3.4.5,
-"    //         SET vCCA_TestFilePostfix = '_with_variable_load';",3.4.5,
-"	SET vCCA_TestClient   = 'Meridian';",3.4.5,
-"	SET vCCA_TestAppName = 'Contr 1.6.0';",3.4.5,
-"	//		SET vCCA_TestAppName = 'Exec 3.2.0_small';",3.4.5,
-"    //     SET vCCA_TestAppName = '_Ops';  ",3.4.5,
-"ElseIF $(vCCA_TestMode) = 0 THEN",3.4.5,
-"	Trace 'vCCA_TestMode = 0, running in PROD mode.';",3.4.5,
-"	set vCCA_ScriptPath='lib://QlikShare/Include/TSEEQ/Source Documents/CCA/Include/';",3.4.5,
-"	SET vCCA_TestFilePostfix = '';",3.4.5,
-"    SET vCCA_TestClient=;",3.4.5,
-"    set vCCA_TestAppName=;",3.4.5,
-"    SET vCCA_TestMode =;",3.4.5,
-"   ",3.4.5,
-"EndIf",3.4.5,
-"/*************",3.4.5,
-"TW 10/25 ",3.4.5,
-"Can these variables be off loaded into opening section for each app.",3.4.5,
-"This would maintian the function while elimintating possible misdeclaring issues",3.4.5,
-"",3.4.5,
-"*************/",3.4.5,
-"// CCA will use, where possible, general-purpose code shared by muliple apps via INCLUDE statements.",3.4.5,
-"// vCCA_App can be used in this general-purpose code where app-specific behavior is required, for example, where ",3.4.5,
-"// behavior for EXEC should differ for behavior from OPS:",3.4.5,
-"//  SET vCCA_App = 'Exec';",3.4.5,
-"//	SET vCCA_App = 'Contribution';",3.4.5,
-"//   SET vCCA_App = 'Contribution';",3.4.5,
-"//   SET vCCA_App = 'Sales';",3.4.5,
-"	SET vCCA_App = 'Performance';",3.4.5,
-"    ",3.4.5,
-"   ",3.4.5,
-"",3.4.5,
-"// Include file for all apps (Exec, Sales, Ops, Contribution):",3.4.5,
-"$(Must_Include=$(vCCA_ScriptPath)CCA_AppInclude$(vCCA_TestFilePostfix).qvs);",3.4.5,
-"/*************",3.4.5,
-"Tw 10/25 Added script for Prod CCA_PerformanceAppInclude.qvs",3.4.5,
-"This section loads the Script Sub routine for loading variables form excel list ",3.4.5,
-"Contains additional enviroment testing that is redunant. Scrit sould be merged with the actiual call to load the variable files. ",3.4.5,
-"*************/",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"Trace 'Entering Include File: CCA_AppInclude$(vCCA_TestFilePostfix).qvs under $(vCCA_ScriptPath)';",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"/**********************************************************************************************************************************************************",3.4.5,
-"	File:		CCA_AppInclude.txt",3.4.5,
-"	Purpose:	Load TVI calculations from the CCA (Coheus Component Architecture)",3.4.5,
-"	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"	Author:		Jeff R. Robbins",3.4.5,
-"	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"	Version:	1.0.0",3.4.5,
-"	Date:		2024-01-11",3.4.5,
-"**********************************************************************************************************************************************************/",3.4.5,
-"IF vCCA_TestMode = 1 THEN	// we are running in TEST or DEV, not PROD",3.4.5,
-"    //	Don't waste time with indexing:",3.4.5,
-"//     SET CreateSearchIndexOnReload=0;	",3.4.5,
-"	// Use fast-loading test QVDs previously created by the QVD ExtraQtor:",3.4.5,
-"	//    NoConcatenate	LOAD * FROm [lib://JRR Test/ExtraQted02/Meridian/Exec 3.2.0/*.qvd] (qvd);",3.4.5,
-"	NoConcatenate	LOAD * FROm [lib://JRR Test/ExtraQted02/$(vCCA_TestClient)/$(vCCA_TestAppName)/*.qvd] (qvd);",3.4.5,
-"	//	NoConcatenate	LOAD * FROm [lib://JRR Test/ExtraQted02/Sales 1.6.1/*.qvd] (qvd);",3.4.5,
-"	// set dates as needed for testing:",3.4.5,
-"	Let vCurrentDate = makedate(2024, 1, 13);",3.4.5,
-"	Let vCurrentDateAsDate = Date(vCurrentDate, 'M/D/YYYY');",3.4.5,
-"End If",3.4.5,
-"",3.4.5,
-"SET vCommonScriptPath='lib://QlikShare/Include/TSEEQ/Source Documents/Common/Include/';",3.4.5,
-"SET vCCA_VariablePath='lib://QlikShare/Include/TSEEQ/Source Documents/CCA/Variables/';",3.4.5,
-"/**************************************************************************************************************************************",3.4.5,
-"	Include 2 files containing functions to read externalized variables:",3.4.5,
-"   TW Script intentionally left out of script model",3.4.5,
-"***************************************************************************************************************************************/",3.4.5,
-"$(must_Include=$(vCommonScriptPath)Load Variables From Resident.txt);",3.4.5,
-"$(must_Include=$(vCommonScriptPath)Load Variables From XLS.txt);",3.4.5,
-"",3.4.5,
-"if WildMatch(DocumentTitle(), '*Sales*') > 0 THEN",3.4.5,
-"	Trace '------------------------------------------------------------------------';",3.4.5,
-"	Trace 'Starting Load of $(vCCA_VariablePath)CCA Variables v6.xls';",3.4.5,
-"	Trace '------------------------------------------------------------------------';",3.4.5,
-"	call Load_Variables_from_XLS ('$(vCCA_VariablePath)CCA Variables v6.xls', 'Sheet1', 'KEEP');",3.4.5,
-"	Trace '------------------------------------------------------------------------';",3.4.5,
-"	Trace 'Finished Load of $(vCCA_VariablePath)CCA Variables v6.xls';",3.4.5,
-"	Trace '------------------------------------------------------------------------';",3.4.5,
-"EndIf	",3.4.5,
-"",3.4.5,
-"IF vCCA_TestMode = 1 THEN",3.4.5,
-"	Trace '**************************************************************************************';",3.4.5,
-"	Trace 'vCCA_TestMode = 1, exiting...';",3.4.5,
-"	Trace '**************************************************************************************';",3.4.5,
-"	Trace 'Exiting Include File: CCA_AppInclude$(vCCA_TestFilePostfix).qvs';",3.4.5,
-"	Trace '**************************************************************************************';",3.4.5,
-"	exit Script;		//	Test data was already loaded on the NOCONCATENATE... line above",3.4.5,
-"Else",3.4.5,
-"	Trace 'vCCA_TestMode is undefined or 0, proceeding with script as normal...';",3.4.5,
-"	SET vCCA_VisibleTag=;",3.4.5,
-"EndIf    ",3.4.5,
-"// SET vCommonScriptPath='';",3.4.5,
-"// SET vCCA_VariablePath='';",3.4.5,
-"Trace 'Exiting Include File: CCA_AppInclude.qvs';",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting Include File: CCA_AppInclude$(vCCA_TestFilePostfix).qvs under $(vCCA_ScriptPath)';",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"",3.4.5,
-"/////////////////////script end",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// Include file for just Exec (vCCA_App was set to Exec above):",3.4.5,
-"$(Must_Include=$(vCCA_ScriptPath)CCA_$(vCCA_App)AppInclude.qvs);",3.4.5,
-"/*************",3.4.5,
-"Tw 10/25 Added script for Prod CCA_PerformanceAppInclude.qvs",3.4.5,
-"*************/",3.4.5,
-"",3.4.5,
-"Trace '------------------------------------------------------------------------';",3.4.5,
-"Trace 'Entering Include File: CCA_$(vCCA_App)Include.qvs under $(vCCA_ScriptPath)' ;",3.4.5,
-"Trace '------------------------------------------------------------------------';",3.4.5,
-"/**********************************************************************************************************************************************************",3.4.5,
-"	File:		CCA_PerformanceAppInclude.qvs",3.4.5,
-"	Purpose:	Standard-ize  TVI (and therefore associated QSS.qvs) across Sales, Exec, Ops and Contribution apps",3.4.5,
-"	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"	Author:		Jeff R. Robbins",3.4.5,
-"	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"	Version:	2.0.0",3.4.5,
-"	Date:		2025-03-07",3.4.5,
-"**********************************************************************************************************************************************************/",3.4.5,
-"// Add script as neeed herein:",3.4.5,
-"",3.4.5,
-"	IF len(trim(vLVR_VariableDefinition)) > 0 THEN		",3.4.5,
-"		// vLVR_VariableDefinition should not defined at this point, but if it is defined and contains ",3.4.5,
-"		// unbalanced parens, quotes or brackets, it will cause problems in the subsequent calls to ",3.4.5,
-"		// the Load_Variable subroutines.",3.4.5,
-"		SET vLVR_VariableDefinition=;",3.4.5,
-"	ENDIF",3.4.5,
-"	",3.4.5,
-"",3.4.5,
-"call Load_Variables_from_XLS ('$(vCCA_VariablePath)CCA Variables v6.xls', 'Sheet1', 'KEEP');",3.4.5,
-"",3.4.5,
-"call Load_Variables_from_XLS ('$(vCCA_VariablePath)CCA Variables v6_master for Ops.xls', 'Sheet1', 'KEEP');",3.4.5,
-"",3.4.5,
-"call Load_Variables_from_XLS ('$(vCCA_VariablePath)CCA CP Variables.xls', 'Sheet1', 'KEEP');",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"Trace '------------------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting Include File: CCA_$(vCCA_App)Include.qvs under $(vCCA_ScriptPath)';",3.4.5,
-"Trace '------------------------------------------------------------------------';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"////End must include script ",3.4.5,
-"//2024-04-03 BH Added to overwrite VCCA_ChannelGroup variable set in CCA to Retail to use vConsolidatedChannels",3.4.5,
-"SET vCCA_ChannelGroup ='$(vConsolidatedChannels)';",3.4.5,
-"///$tab Versioning (Should be deleted)",3.4.5,
-"//Please add versioning here.",3.4.5,
-"",3.4.5,
-"LET vVersion = '",3.4.5,
-"Version 1.1.0, Version Date MM/DD/2025",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"';",3.4.5,
-"",3.4.5,
-"TRACE $(vVersion);",3.4.5,
-"",3.4.5,
-"//Move old versioning info into this variable to hide from UI",3.4.5,
-"LET vVersionArchive = '",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"';",3.4.5,
-"",3.4.5,
-"TRACE $(vVersionArchive);",3.4.5,
-"",3.4.5,
-"///$tab Mapping",3.4.5,
-"//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce",3.4.5,
-"//on-going maintenance effort.  ",3.4.5,
-"//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI",3.4.5,
-"",3.4.5,
-"// The original script from the Mapping tab of the Operations apps now support this app, Performance, as well:",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/OperationsMapping.qvs); ///////TW 10/25 Commented out ",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// //vScriptPath and vCCA_ScriptPath were set on the script tab named ""CCA for TVI"".SET vOpsScorecardWeightPath='lib://QlikShare/SharedData/Include Files/OpsScorecardWeights.qss';",3.4.5,
-"/*****************************",3.4.5,
-"TW 10/25 must include script added ",3.4.5,
-"Changes made include",3.4.5,
-"Grouped Mapping tables at the top",3.4.5,
-"Added Dynamic build of the Turn Time table",3.4.5,
-"Created Excel work book that contains inline table data",3.4.5,
-"Added load list from excel tables (place holder file loaction used). ",3.4.5,
-"",3.4.5,
-"*****************************/",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"Trace 'Entering Include File: OperationsMapping.qvs under $(vScriptPath)';",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"/**********************************************************************************************************************************************************",3.4.5,
-"	File:		OperationsMapping.qvs",3.4.5,
-"	Purpose:	Externalized script for TVI calculations from the CCA (Coheus Component Architecture) ",3.4.5,
-"	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"	Author:		Jeff R. Robbins",3.4.5,
-"	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"	Version:	1.0.0",3.4.5,
-"	Date:		2024-01-08",3.4.5,
-"**********************************************************************************************************************************************************/",3.4.5,
-"//////",3.4.5,
-"//Mapping tables TW 10/25",3.4.5,
-"/////",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"USRegionMap:",3.4.5,
-"MAPPING LOAD",3.4.5,
-"    UPPER(SourceName) as SourceName,",3.4.5,
-"    TransformName",3.4.5,
-"FROM [lib://QlikShare/SharedData\Misc. Data\DEMO\Coheus_2.0\Coheus2019_2.0_Mapping_20190218.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is USRegion);",3.4.5,
-"",3.4.5,
-"//Mapping of State Abbreviation to State Name",3.4.5,
-"$(Must_Include=[lib://QlikShare/SharedData/Include Files/StateNameMapping.qss]);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"ActiveAgingSort:",3.4.5,
-"Mapping Load * Inline [",3.4.5,
-"ActiveAgingRange, ActiveAgingRangeSort",3.4.5,
-"'0-15', 1",3.4.5,
-"'16-30',2",3.4.5,
-"'31-45',3",3.4.5,
-"'46-60', 4",3.4.5,
-"'61-90',5",3.4.5,
-"'> 90',6",3.4.5,
-"];",3.4.5,
-"",3.4.5,
-"ActiveAgingGreater90Sort:",3.4.5,
-"Mapping Load * Inline [",3.4.5,
-"ActiveAgingGreater90, ActiveAgingGreater90Sort",3.4.5,
-"'91-120', 1",3.4.5,
-"'121-150', 2",3.4.5,
-"'151-180', 3",3.4.5,
-"'181-210', 4",3.4.5,
-"'211-240', 5",3.4.5,
-"'241-270', 6",3.4.5,
-"'> 270', 7",3.4.5,
-"];",3.4.5,
-"",3.4.5,
-"ClosingProjectionGroupList:",3.4.5,
-"Mapping Load * Inline [",3.4.5,
-"ClosingProjectionGroup, ClosingProjectionGroupSort",3.4.5,
-"'Funded', 1",3.4.5,
-"'CTC', 2",3.4.5,
-"'Approved', 3",3.4.5,
-"'Conditional Approved', 4",3.4.5,
-"'Locked', 5",3.4.5,
-"'In Processing', 6",3.4.5,
-"'Not Yet In Processing', 7",3.4.5,
-"];",3.4.5,
-"",3.4.5,
-"//////////////////////////////////",3.4.5,
-"//////////////TW 10/2025 These In line tables become Island tables.",3.4.5,
-"///////////// common fields need to be found to create link tables or to create these field list with in the fact table ",3.4.5,
-"/////////////////////////////////",3.4.5,
-"For t = 1 to 25",3.4.5,
-"",3.4.5,
-"LET vTurnTime$(t) ='Turn Time $(t)';// '$(vTurnTime$(t))';",3.4.5,
-"LET vStart$(t) =;// '$(vStart$(t))';",3.4.5,
-"LET vEnd$(t) =;// '$(vEnd$(t))';",3.4.5,
-"",3.4.5,
-"Next t;",3.4.5,
-"/********************************************",3.4.5,
-"TW 10/25",3.4.5,
-"Dynamicly created this TurnTimeList. Code can be updated for more rows as needed. ",3.4.5,
-"",3.4.5,
-"********************************************/",3.4.5,
-"",3.4.5,
-"TurnTimeList:",3.4.5,
-"LOAD 'Turn Time ' & RecNo() AS TurnTime",3.4.5,
-"AUTOGENERATE 5;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"Trace --------Table build from Excel file start----------;",3.4.5,
-"KPI_ClosingProjections:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet3);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// KPI_ClosingProjections:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// KPI_ClosingProjections, Sort",3.4.5,
-"// 'Closed Current Month Units', 1",3.4.5,
-"// 'Closed Current Month Volume', 2",3.4.5,
-"// 'Clear to Close Units', 3",3.4.5,
-"// 'Clear to Close Volume', 4",3.4.5,
-"// 'Estimated to Close Units', 5",3.4.5,
-"// 'Estimated to Close Volume', 6",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"ScorecardActors:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet4);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// ScorecardActors:",3.4.5,
-"// Load * Inline [ ",3.4.5,
-"// ScorecardActors",3.4.5,
-"// Processors",3.4.5,
-"// Processor Units",3.4.5,
-"// Processor Volume",3.4.5,
-"// Processor Turn Times",3.4.5,
-"// Processor Min TVI",3.4.5,
-"// Processor Max TVI",3.4.5,
-"// Underwriters",3.4.5,
-"// Underwriter Units",3.4.5,
-"// Underwriter Volume",3.4.5,
-"// Underwriter Avg Conditions",3.4.5,
-"// Underwriter % Approved",3.4.5,
-"// Underwriter % Denied",3.4.5,
-"// Underwriter Turn Times",3.4.5,
-"// Underwriter Min TVI",3.4.5,
-"// Underwriter Max TVI",3.4.5,
-"// Closers",3.4.5,
-"// Closer Units",3.4.5,
-"// Closer Volume",3.4.5,
-"// Closer Turn Times",3.4.5,
-"// Closer Min TVI",3.4.5,
-"// Closer Max TVI",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"ScorecardCalcs:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet5);",3.4.5,
-"",3.4.5,
-"// ScorecardCalcs:",3.4.5,
-"// Load * Inline [ ",3.4.5,
-"// ScorecardCalcs",3.4.5,
-"// Processors",3.4.5,
-"// Underwriters",3.4.5,
-"// Closers",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"ClosingProjDims:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet6);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// ClosingProjDims:",3.4.5,
-"// Load * Inline [ ",3.4.5,
-"// ClosingProjDims",3.4.5,
-"// Projected To Close",3.4.5,
-"// Funded",3.4.5,
-"// Remaining To Close",3.4.5,
-"// CTC",3.4.5,
-"// Approved",3.4.5,
-"// Conditional Approved",3.4.5,
-"// Locked",3.4.5,
-"// In Processing",3.4.5,
-"// Not Yet In Processing",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"NewOpportunityDimensions:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet7);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// NewOpportunityDimensions:",3.4.5,
-"// load * inline [",3.4.5,
-"// OpportunityBuckets",3.4.5,
-"// Credit Pull",3.4.5,
-"// Apps Taken",3.4.5,
-"// LE Sent",3.4.5,
-"// Appraisals Received",3.4.5,
-"// Submission to Underwriting",3.4.5,
-"// Conditional Approval",3.4.5,
-"// Final Approvals",3.4.5,
-"// CTC",3.4.5,
-"// CD Sent",3.4.5,
-"// CD Received",3.4.5,
-"// Funded",3.4.5,
-"// Investor Purchase",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"KPI_TimeRange:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet8);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// KPI_TimeRange:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// KPI_TimeRange",3.4.5,
-"// 'Month to Date'",3.4.5,
-"// 'Quarter to Date'",3.4.5,
-"// 'Year to Date'",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting Include File: OperationsMapping.qvs under $(vScriptPath)';",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"",3.4.5,
-"///$tab ODAG Loan Data",3.4.5,
-"/*** ODAG LoanData Script ***/",3.4.5,
-"/*** REPLACE LoanData base script ***/",3.4.5,
-"",3.4.5,
-"// vCCA_ScriptPath is set on the script tab named ""CCA for TVI""",3.4.5,
-"",3.4.5,
-"//$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ODAG Loan Data.qvs);  ///TW 10/25 Commented out ",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"///////////////////////////////////// TW 10/25 added Must include code start",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"Trace 'Entering Include File: ODAG Loan Data.qvs under $(vCCA_ScriptPath)/Script Tabs/Front-end Dashboards/';",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"/**********************************************************************************************************************************************************",3.4.5,
-"	File:		ODAG Loan Data.qvs",3.4.5,
-"	Purpose:	Standard-ize  TVI (and therefore associated ODAG Loan Data script) across Sales, Exec, Ops and Contribution apps",3.4.5,
-"	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"	Author:		Jeff R. Robbins",3.4.5,
-"	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"	Version:	1.0.0",3.4.5,
-"	Date:		2024-01-11",3.4.5,
-"**********************************************************************************************************************************************************/",3.4.5,
-"/*** ODAG LoanData Script ***/",3.4.5,
-"/*** REPLACE LoanData base script ***/",3.4.5,
-"",3.4.5,
-"// QVDMetadata:",3.4.5,
-"// LOAD * INLINE [",3.4.5,
-"// Source File Name,Source File Time,Source Record Count",3.4.5,
-"// ];",3.4.5,
-"// SET vReadLibraryFolder = 'lib://QlikShare/QVD/Demo/Gold/L2';",3.4.5,
-"// SET vSource = 'Demo';",3.4.5,
-"// SET vReadTableName = 'Coheus_Input';",3.4.5,
-"",3.4.5,
-"/***********************************************",3.4.5,
-"Source list table pulls the client name information that is used to populate variables ",3.4.5,
-"used later to build table names and limits on data.",3.4.5,
-"",3.4.5,
-"************************************************/",3.4.5,
-"SourceList:",3.4.5,
-"LOAD",3.4.5,
-"	Enabled,",3.4.5,
-"    Client,",3.4.5,
-"    ClientID,",3.4.5,
-"	[App Name],",3.4.5,
-"    Source,",3.4.5,
-"	[Read Table Name], //// TW 10/25 Fact table name comes form this field ",3.4.5,
-"    [Write Table Name],",3.4.5,
-"    [Read Library Folder],",3.4.5,
-"    [VP Prefix]",3.4.5,
-"FROM [lib://QlikShare - SharedData/ETLMC/ODAG Config.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is [Load])",3.4.5,
-"where Source = '$(vSource)'",3.4.5,
-"and Enabled = 'Yes';",3.4.5,
-"",3.4.5,
-"LET vSourceCount = NoOfRows('SourceList');",3.4.5,
-"TRACE Source Count: $(vSourceCount);",3.4.5,
-"",3.4.5,
-"for i = 0 to $(vSourceCount) - 1",3.4.5,
-"	LET vEnabled = peek('Enabled', $(i),'SourceList');",3.4.5,
-"	LET vClient = peek('Client', $(i),'SourceList');",3.4.5,
-"	LET vClientID = peek('ClientID', $(i),'SourceList');",3.4.5,
-"	LET vSource = peek('Source', $(i),'SourceList');",3.4.5,
-"	LET vReadTableName = peek('Read Table Name', $(i),'SourceList');",3.4.5,
-"	LET vWriteTableName = peek('Write Table Name', $(i),'SourceList');",3.4.5,
-"	LET vReadLibraryFolder = peek('Read Library Folder', $(i),'SourceList');",3.4.5,
-"	LET vFieldCountPath = peek('Read Library Folder', $(i),'SourceList');		// this line originaly in Sales, Exec and Ops but not Contribution",3.4.5,
-"	LET vSchedulingServer = peek('Scheduling Server', $(i),'SourceList');",3.4.5,
-"	LET vSchedulingFrequency = peek('Scheduling Frequency', $(i),'SourceList');",3.4.5,
-"	LET vPrefix = peek('VP Prefix', $(i),'SourceList');",3.4.5,
-"	LET vAnonClient = peek('Client', $(i),'SourceList');",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/**********************************************   ",3.4.5,
-"TW 10/25 this section starts the data pull from the L2 Fact QVD.",3.4.5,
-"if statement to determine if the App is loading for production or Demo. ",3.4.5,
-"***********************************************/",3.4.5,
-"	If '$(vIsDemoApp)'='Yes' Then",3.4.5,
-"		LET vMainFilePath = '$(vQVDPrefix)/Demo/$(vSource)/$(vSource).$(vReadTableName).Anonymized.qvd';",3.4.5,
-"		SET vClient = 'Demo';",3.4.5,
-"	Else",3.4.5,
-"		LET vMainFilePath = '$(vReadLibraryFolder)/$(vSource).$(vReadTableName).L2.qvd';",3.4.5,
-"	End If;",3.4.5,
-"",3.4.5,
-"	TRACE $(i) | $(vSource) | $(vWriteTableName);",3.4.5,
-"",3.4.5,
-"/*******",3.4.5,
-"TW 10/25",3.4.5,
-"This should be an optimized load with no transformations ",3.4.5,
-"Only firlds that are needed should be pulled in ",3.4.5,
-"Transformations and data exclustion from where clause should be done in a resident load. ",3.4.5,
-"********/	",3.4.5,
-"         ",3.4.5,
-"",3.4.5,
-"$(vWriteTableName)_temp:",3.4.5,
-"LOAD *",3.4.5,
-"FROM [$(vMainFilePath)] (qvd);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"	IF IsNull(TableNumber('$(vWriteTableName)')) THEN",3.4.5,
-"		$(vWriteTableName):",3.4.5,
-"		LOAD * INLINE [",3.4.5,
-"		$(vWriteTableName)",3.4.5,
-"		];",3.4.5,
-"	End If",3.4.5,
-"",3.4.5,
-"    CONCATENATE ($(vWriteTableName))",3.4.5,
-"	LOAD *",3.4.5,
-"	//	2024-01-11 JRR added the following line for CCA TVI consistency effort:",3.4.5,
-"		, Revenue_Exec as Revenue_CCA_TVI		//	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	resident $(vWriteTableName)_temp;",3.4.5,
-"	//		Where NOT WildMatch(Channel,'*Corresp*');		// this line was originally *only* in Contribution",3.4.5,
-"	$(vOLD_Script_WriteTableNameWhereClause)   				// this variable will be set in Contribution but not other apps",3.4.5,
-"	;",3.4.5,
-"",3.4.5,
-"Drop table $(vWriteTableName)_temp;",3.4.5,
-"",3.4.5,
-"	IF FieldNumber('$(vWriteTableName)', '$(vWriteTableName)') > 0 THEN",3.4.5,
-"		TRACE Dropped field $(vWriteTableName);",3.4.5,
-"		DROP FIELD [$(vWriteTableName)] FROM [$(vWriteTableName)];",3.4.5,
-"	END IF",3.4.5,
-"	;",3.4.5,
-"Next",3.4.5,
-"",3.4.5,
-"Let vSetupToolFlag = Peek('Coheus Setup Flag',0,'$(vWriteTableName)');//2022 Release Changes",3.4.5,
-"",3.4.5,
-"//Prior Instance Check",3.4.5,
-"Let vPriorInstance=if(FileSize('$(vReadLibraryFolder)/$(vSource).Prior_Instance.L2.qvd')>0,1,0);",3.4.5,
-"",3.4.5,
-"IF '$(vPriorInstance)'=1 THEN",3.4.5,
-"	CONCATENATE ($(vWriteTableName))",3.4.5,
-"	LOAD *",3.4.5,
-"	FROM [$(vReadLibraryFolder)/$(vSource).Prior_Instance.L2.qvd] (qvd)",3.4.5,
-"	Where [Started Date] >= MonthStart(Today(), -36) AND Not Exists(GUID);",3.4.5,
-"",3.4.5,
-"	Drop Field RowNo;",3.4.5,
-"	Rename Table $(vWriteTableName) To $(vWriteTableName).Temp;",3.4.5,
-"",3.4.5,
-"	NoConcatenate",3.4.5,
-"	$(vWriteTableName):",3.4.5,
-"	Load RowNo() as RowNo,",3.4.5,
-"		*",3.4.5,
-"	Resident $(vWriteTableName).Temp;",3.4.5,
-"	Drop Table $(vWriteTableName).Temp;",3.4.5,
-"Else",3.4.5,
-"	TRACE 'No Prior Instance Found';",3.4.5,
-"END IF;",3.4.5,
-"// Linked System Check",3.4.5,
-"LET vLinkedSystemCheck = if(FileSize('$(vReadLibraryFolder)/$(vSource).$(vReadTableName).Combined.qvd')>0,1,0);",3.4.5,
-"",3.4.5,
-"IF $(vLinkedSystemCheck)=1 THEN",3.4.5,
-"	If '$(vIsDemoApp)'='Yes' Then",3.4.5,
-"    	LET vMainFilePath = '$(vQVDPrefix)/Demo/$(vSource)/$(vSource).$(vReadTableName).Anonymized.qvd';",3.4.5,
-"    Else",3.4.5,
-"    	vMainFilePath = '$(vReadLibraryFolder)/$(vSource).$(vReadTableName).Combined.qvd';",3.4.5,
-"    End If;",3.4.5,
-"    ",3.4.5,
-"		NoConcatenate",3.4.5,
-"        $(vWriteTableName).Combined:",3.4.5,
-"		LOAD *",3.4.5,
-"		FROM [$(vMainFilePath)] (qvd);",3.4.5,
-"		Drop Table $(vWriteTableName);",3.4.5,
-"		Rename Table $(vWriteTableName).Combined To $(vWriteTableName);",3.4.5,
-"Else ",3.4.5,
-"End If;",3.4.5,
-"LET vTotalRecordCount = NoOfRows('$(vWriteTableName)');",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting Include File: ODAG Loan Data.qvs  under $(vCCA_ScriptPath)/Script Tabs/Front-end Dashboards/';",3.4.5,
-"Trace '--------------------------------------------------------------------------------------';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/////////////TW End Must include",3.4.5,
-"/*********************************************************",3.4.5,
-"This code filters data by channel type (Retail or TPO)",3.4.5,
-"based on vConsolidatedChannels variable set in START HERE.qvs",3.4.5,
-"**********************************************************/",3.4.5,
-"",3.4.5,
-"Trace '----------------------------------------------------------------------------------------------------------------------------------------------';",3.4.5,
-"Trace 'Entering script to filter data by channel type using [Consolidated Channels]';",3.4.5,
-"Trace 'vConsolidatedChannels: $(vConsolidatedChannels)';",3.4.5,
-"Trace '----------------------------------------------------------------------------------------------------------------------------------------------';",3.4.5,
-"",3.4.5,
-"NoConcatenate",3.4.5,
-"[$(vWriteTableName).Temp]:",3.4.5,
-"LOAD *",3.4.5,
-"Resident [$(vWriteTableName)]",3.4.5,
-"WHERE WildMatch([Consolidated Channels], '*$(vConsolidatedChannels)*') > 0;",3.4.5,
-"",3.4.5,
-"Drop Tables [$(vWriteTableName)];",3.4.5,
-"",3.4.5,
-"Rename Tables [$(vWriteTableName).Temp] to [$(vWriteTableName)];",3.4.5,
-"",3.4.5,
-"Trace '---------------------------------------------------------------------------------------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting script - data filtered by channel type: $(vConsolidatedChannels)';",3.4.5,
-"Trace '---------------------------------------------------------------------------------------------------------------------------------------------';",3.4.5,
-"///$tab Variables",3.4.5,
-"$(must_include=lib://QlikShare - SharedData/Include Files/Global.FederalHolidays.qss);",3.4.5,
-"",3.4.5,
-"/*********************************************************",3.4.5,
-"TW 10/25",3.4.5,
-"UPdated ",3.4.5,
-"Any variable that is being set to a literal string value to use SET ",3.4.5,
-"Made several changes in this script ",3.4.5,
-"Several Variables are set to the dame value. These need to be evaluated and updated. ",3.4.5,
-"Should explore moving this section to an excel table and loading the table",3.4.5,
-"*********************************************************/",3.4.5,
-"",3.4.5,
-"/*",3.4.5,
-"1.REVENUE[wip]",3.4.5,
-"2.Ad Hoc | Turn Times | Self Serv",3.4.5,
-"3.Data Dictionary Addons",3.4.5,
-"4.Ranges",3.4.5,
-"5.Section Access",3.4.5,
-"",3.4.5,
-"Look over field count",3.4.5,
-"*/",3.4.5,
-"LET vCurrentSetupFlag = Peek('Coheus Setup Flag',0,'$(vWriteTableName)');",3.4.5,
-"If $(vCurrentSetupFlag) = 1 Then",3.4.5,
-"	",3.4.5,
-"    LET vXMLName = '30'&Text(Num(Replace('$(vClientID)','BE',''),00000000));",3.4.5,
-"     ",3.4.5,
-"    EncInstances:",3.4.5,
-"	Load distinct [Encompass Instance]",3.4.5,
-"	Resident [$(vWriteTableName)];",3.4.5,
-"	",3.4.5,
-"    Let vNumofInstances = NoOfRows('EncInstances')-1;",3.4.5,
-"	For vInstanceRecord = 0 To $(vNumofInstances)",3.4.5,
-"		Let vFileName$(vInstanceRecord) = 'lib://QlikShare/CoheusConfigs/30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000))&'_cohuessetup.xml';",3.4.5,
-"        Let vEncInstance$(vInstanceRecord) = '30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000));",3.4.5,
-"	Next vInstanceRecord; Drop Table EncInstances;",3.4.5,
-"    ",3.4.5,
-"	SET vFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_cohuessetup.xml';",3.4.5,
-"    SET vConfigDictionary = 'Setup/DataDictionary/Field';",3.4.5,
-"    SET vConfigAdHoc = 'Setup/CoheusConfig/AdHoc/Field';",3.4.5,
-"    SET vConfigTurnTimes = 'Setup/CoheusConfig/TurnTimes/Field';",3.4.5,
-"    SET vRevFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_profit_config.xml';",3.4.5,
-"    SET vConfigProfitDictionary = 'ProfitabilityConfig/Dictionary/Field';",3.4.5,
-"    SET vConfigProfitSwap = 'Setup/ProfitabilityConfig/FieldSwap/Field';",3.4.5,
-"    SET vConfigSwap = 'Setup/CoheusConfig/FieldSwap/Field';",3.4.5,
-"    SET vConfigRange = 'Setup/CoheusConfig/FieldRanges/Range';",3.4.5,
-"    SET vLevelOneEntry = 'Setup/CoheusConfig/SectionAccess/LevelOne/Entry';",3.4.5,
-"    SET vLevelOneAccess = 'Setup/CoheusConfig/SectionAccess/LevelOne';",3.4.5,
-"    SET vLevelTwoEntry = 'Setup/CoheusConfig/SectionAccess/LevelTwo/Entry';",3.4.5,
-"    SET vLevelTwoAccess = 'Setup/CoheusConfig/SectionAccess/LevelTwo';",3.4.5,
-"    SET vLevelThreeEntry = 'Setup/CoheusConfig/SectionAccess/LevelThree/Entry';",3.4.5,
-"    SET vLevelThreeAccess = 'Setup/CoheusConfig/SectionAccess/LevelThree';",3.4.5,
-"    ",3.4.5,
-"    Drop Fields Revenue_Exec,Revenue_Sales,Revenue_Contribution,Revenue;",3.4.5,
-"    Rename Field Revenue_Ops To Revenue;",3.4.5,
-"",3.4.5,
-"ELSE",3.4.5,
-"	LET vXMLName = '30'&Text(Num(Replace('$(vClientID)','BE',''),00000000));",3.4.5,
-"    ",3.4.5,
-"    EncInstances:",3.4.5,
-"	Load distinct [Encompass Instance]",3.4.5,
-"	Resident [$(vWriteTableName)];",3.4.5,
-"",3.4.5,
-"	Let vNumofInstances = NoOfRows('EncInstances')-1;",3.4.5,
-"	For vInstanceRecord = 0 To $(vNumofInstances)",3.4.5,
-"		Let vFileName$(vInstanceRecord) = 'lib://QlikShare/CoheusConfigs/30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000))&'_config.xml';",3.4.5,
-"        Let vEncInstance$(vInstanceRecord) = '30'&Text(Num(Replace(Peek('Encompass Instance',$(vInstanceRecord),'EncInstances'),'BE',''),00000000));",3.4.5,
-"	Next vInstanceRecord; Drop Table EncInstances;",3.4.5,
-"    ",3.4.5,
-"	SET vFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_config.xml';",3.4.5,
-"    SET vConfigDictionary = 'CoheusConfig/Dictionary/Field';",3.4.5,
-"    SET vConfigAdHoc = 'CoheusConfig/AdHoc/Field';",3.4.5,
-"    SET vConfigTurnTimes = 'CoheusConfig/TurnTimes/Field';",3.4.5,
-"    SET vRevFileName='lib://QlikShare/CoheusConfigs/$(vXMLName)_profit_config.xml';",3.4.5,
-"    SET vConfigProfitDictionary = 'ProfitabilityConfig/Dictionary/Field';",3.4.5,
-"    SET vConfigProfitSwap = 'ProfitabilityConfig/FieldSwap/Field';",3.4.5,
-"    SET vConfigSwap = 'CoheusConfig/FieldSwap/Field';",3.4.5,
-"    SET vConfigRange = 'CoheusConfig/FieldRanges/Range';",3.4.5,
-"    SET vLevelOneEntry = 'CoheusConfig/SectionAccess/LevelOne/Entry';",3.4.5,
-"    SET vLevelOneAccess = 'CoheusConfig/SectionAccess/LevelOne';",3.4.5,
-"    SET vLevelTwoEntry = 'CoheusConfig/SectionAccess/LevelTwo/Entry';",3.4.5,
-"    SET vLevelTwoAccess = 'CoheusConfig/SectionAccess/LevelTwo';",3.4.5,
-"    SET vLevelThreeEntry = 'CoheusConfig/SectionAccess/LevelThree/Entry';",3.4.5,
-"    SET vLevelThreeAccess = 'CoheusConfig/SectionAccess/LevelThree';",3.4.5,
-"End If;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//Variables for App Information Tooltips & Coheus Logo",3.4.5,
-"//create variable to capture App Name to use for app name in app/on sheets",3.4.5,
-"// LET vAppName=SubField(DocumentTitle(),chr(32),2); 						",3.4.5,
-"LET vAppName=SubField(DocumentTitle(),'_',2) & chr(32) & '$(vConsolidatedChannels)';",3.4.5,
-"",3.4.5,
-"Trace '------------------------------------------';",3.4.5,
-"Trace vAppName: $(vAppName);",3.4.5,
-"Trace '------------------------------------------';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//create variable to capture app id/guid to resolve sheet menu not dynamically assigning the app ID/guid to Coheus logo file. ",3.4.5,
-"LET vAppID=DocumentName(); 							",3.4.5,
-"SET vCopyright='© TVMA, Inc. All rights reserved.';",3.4.5,
-"SET vLogoPath = '../content/coheus/Coheus Logo (transparent)_small.png';",3.4.5,
-"",3.4.5,
-"//Variables for selector buttions/dropdowns",3.4.5,
-"SET vEstFallout = '';",3.4.5,
-"SET vEstBps = '';",3.4.5,
-"SET vMeasure='Units';								//added 2/5/2020 for use in Measure selector buttons",3.4.5,
-"SET vDimension='Branch'; 							//added 2/7/2020 for use in Dimension selector buttons",3.4.5,
-"SET vStratDim='[Current Loan Status]'; 				//added 2/11/2020 for use as dimension selector on strats sheet",3.4.5,
-"SET vAllLoans='Exclude Out of Range Loans'; 		//added 2/16/2020 to toggle btw ALL Loans vs Loans excluding Out of Range Values",3.4.5,
-"SET vOverviewDim='Credit Pulls';					//added 3/2/2020 to toggle charts on Overview",3.4.5,
-"SET vOverviewMeasure='';							",3.4.5,
-"",3.4.5,
-"// LET vToDate='YTDFlag';								//BH 1/23/24 - commented & moved to Calendar | Link to make dynamic and set to Last Year if in beginning of year.",3.4.5,
-"",3.4.5,
-"SET vOutOfRange='[FICO Range_Std]';",3.4.5,
-"SET vStratToggle=0;",3.4.5,
-"SET vDateSelect = 'Application';",3.4.5,
-"SET vProjection=1;",3.4.5,
-"SET vActor='Processor';",3.4.5,
-"",3.4.5,
-"SET vOrigScore=0;",3.4.5,
-"SET vInvStatToggle=0;",3.4.5,
-"SET vDateToggle1='Funding';",3.4.5,
-"SET vTurnTimeFormat='Number';",3.4.5,
-"SET vFieldType = 'Crucial Fields';",3.4.5,
-"SET vSwapFieldType = 'Standard';//Profitability",3.4.5,
-"//Variable for Navigation. Not deployed in Gold 2020 apps.",3.4.5,
-"SET vNavSheetActive = '';",3.4.5,
-"SET vNavFirstSheet = 'Company Overview: Final Disposition';",3.4.5,
-"SET vNavLastSheet = 'Loan Stratification';",3.4.5,
-"SET vStratTableView = 'Summary';",3.4.5,
-"",3.4.5,
-"/*********",3.4.5,
-"tw 10/25 3 variables = ''Volume' could be 1 variable vVolumeTag = 'Volume'",3.4.5,
-"Call it what it needs to be on the front end. ",3.4.5,
-"Branch, 'Units','Loan Officer','Application'",3.4.5,
-"**********/",3.4.5,
-"SET vLoanMixMeasure='Volume';",3.4.5,
-"SET vOverviewToggle='Volume';",3.4.5,
-"SET vOrigScoreMeaure='Volume';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//2024-04-03 BH modified to load for TPO or Retail based on vConsolidatedChannels variable set in Main",3.4.5,
-"",3.4.5,
-"if  '$(vConsolidatedChannels)' = 'Retail' THEN",3.4.5,
-"",3.4.5,
-"//Sets for Retail",3.4.5,
-"SET vScorecard='Branch';",3.4.5,
-"SET vScorecardActor='Loan Officer';",3.4.5,
-"SET vScorecardList='Branch|Investor';",3.4.5,
-"SET vScorecardActorList='Loan Officer|Underwriter';",3.4.5,
-"",3.4.5,
-"ELSEIF '$(vConsolidatedChannels)' = 'TPO' THEN",3.4.5,
-"",3.4.5,
-"//Sets for TPO",3.4.5,
-"SET vScorecard='Account Executive';",3.4.5,
-"SET vScorecardActor='Broker Lender Name';",3.4.5,
-"SET vScorecardList='Account Executive|Investor';",3.4.5,
-"SET vScorecardActorList='Broker Lender Name|Loan Officer|Underwriter';",3.4.5,
-"",3.4.5,
-"END IF",3.4.5,
-"",3.4.5,
-"//Sets Channel Variables based on '$(vConsolidatedChannels)' set in Main",3.4.5,
-"//These are the same can we reduce them to 1 ",3.4.5,
-"SET vChannel='$(vConsolidatedChannels)';",3.4.5,
-"SET vChannelGroup='$(vConsolidatedChannels)';",3.4.5,
-"",3.4.5,
-"//BH added 1-12-2024 for show/hide TopTiering containers",3.4.5,
-"SET vTopTieringShow = 1;	",3.4.5,
-"",3.4.5,
-"//BH added 12-3-2023 for ability to adjust time range for short term flags in Sales scorecard. Could be used in other places.",3.4.5,
-"SET vScorecardShortTermRange = 4; //In Months. Needs a Rolling Flag dimension to work",3.4.5,
-"",3.4.5,
-"//Formula Toggle",3.4.5,
-"SET vActionItemsFormula='Avg';",3.4.5,
-"",3.4.5,
-"//Milestones",3.4.5,
-"SET vMilestoneProcess = 'Individual';//or workflow",3.4.5,
-"SET vMilestoneDateType = 'Range';//or calendar",3.4.5,
-"SET vMilestoneActor = 'Loan Officer';",3.4.5,
-"",3.4.5,
-"SET vOpsScorecardActor = 'Underwriter';",3.4.5,
-"SET vOpsScorecardMeasure = 'Units';",3.4.5,
-"SET vOpsScorecardView = 'Scorecard';",3.4.5,
-"",3.4.5,
-"//*** NEW - Company Scorecard ***",3.4.5,
-"SET vCompanyScorecardShowHide = 0; //'Funded';	//set default to Funded Scorecard BH commmented out 12-11-2023 and changed to binary flag",3.4.5,
-"SET vCompanyScorecardDim = 'Branch';",3.4.5,
-"SET vCompanyScorecardDateType = 'Application';",3.4.5,
-"SET vCompanyScorecardActor = 'Loan Officer';",3.4.5,
-"SET vCompanyScorecardChannel = '*';",3.4.5,
-"",3.4.5,
-"SET vSize = Div(Log10(fabs($1)),3);",3.4.5,
-"SET vAutoDollars = Dual(Num($1/Pow(10,3*$(vSize($1))),'$#,##0.00;($#,##0.00)')&Pick($(vSize($1)),'k','M','B','T'),$1);",3.4.5,
-"SET vAuto = Dual(Num($1/Pow(10,3*$(vSize($1))),'#,##0;(#,##0)')&Pick($(vSize($1)),'k','M','B','T'),$1);",3.4.5,
-"//variable to toggle second dimension on Closing Projections Summary pivot table",3.4.5,
-"SET vCPDim='[Loan Purpose]';		",3.4.5,
-"",3.4.5,
-"/************************",3.4.5,
-"TW 10/25 Grouped Visual mechanism Variables together",3.4.5,
-"************************/",3.4.5,
-"//Colors - Credit Box Color Gradient 2020 - added 3/20/2020 ",3.4.5,
-"LET vColorMixDark = RGB(6,43,45);",3.4.5,
-"LET vColorMixLight = RGB(255,255,0);",3.4.5,
-"LET vColorMixMiddle = RGB(101,211,218);",3.4.5,
-"//Colors - Teraverde and Headers",3.4.5,
-"LET vTVGreen = RGB(76,140,43); //#4C8C2B",3.4.5,
-"LET vTVBlue = RGB(14,108,139); //#0e6c8b",3.4.5,
-"LET vTVBlueLight = RGB(208,239,251); //#d0effb",3.4.5,
-"LET vTVAccent = RGB(173,220,145); //#addc91",3.4.5,
-"LET vTVAccentLight = RGB(240, 249, 236); //#f0f9ec",3.4.5,
-"LET vErrorLightRed = RGB(255,199,206);",3.4.5,
-"//Blue Hover Color in Tables",3.4.5,
-"SET vTVBlueHover = '#e7f0f3';",3.4.5,
-"",3.4.5,
-"//Red/Green indicator colors",3.4.5,
-"SET vErrorColor='#B00020'; //Red text",3.4.5,
-"SET vErrorColorBKGD='#F7E6E9'; //Red background",3.4.5,
-"SET vMatchColor='#007500'; //Green text",3.4.5,
-"SET vMatchColorBKGD='#E2F1E2'; //Green background",3.4.5,
-"",3.4.5,
-"//Variables for alternative method to dynamically resize fonts when resizing browser window. NOT DEPLOYED IN GOLD 2020 apps.",3.4.5,
-"SET vSheetWidth = 1920;",3.4.5,
-"SET vSheetHeight = 1080;",3.4.5,
-"//Adjust the baseline to your targeted screen resolution.",3.4.5,
-"SET vSheetWidthBaseline = 1920;",3.4.5,
-"SET vSheetHeightBaseline = 1080;",3.4.5,
-"SET vScalingFactor = '=pow((vSheetWidth * vSheetHeight),0.5) / pow((vSheetWidthBaseline*vSheetHeightBaseline), 0.5)';",3.4.5,
-"//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE",3.4.5,
-"Let vQVDReloadTime = Num(QvdCreateTime('$(vMainFilePath)'));",3.4.5,
-"",3.4.5,
-"Trace vQVDReloadTime: $(vQVDReloadTime);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//REVISE IN TEMPLATE APPS TO REFERENCE CONFIGURATION VARIABLES -Revised for Jan 2022 Release for Demo client.",3.4.5,
-"//Creates variable to presen datetime of Last qvd reload - USES ODAG CONFIGURATION FILE",3.4.5,
-"DateList:",3.4.5,
-"Load",3.4.5,
-"	If('$(vClient)'='Demo',AddYears($(vQVDReloadTime),-5),If(Len(Trim(Min(""Last Modified Date"")))=0,AddYears(Today(),-5),Min(""Last Modified Date""))) as MinDate,",3.4.5,
-"    If('$(vClient)'='Demo',$(vQVDReloadTime),If(Len(Trim(Max(""Last Modified Date"")))=0,Today(),Max(""Last Modified Date""))) as MaxDate",3.4.5,
-"FROM [$(vMainFilePath)] (qvd);",3.4.5,
-"",3.4.5,
-"Let vMinDate = Num(Peek('MinDate', 0, 'MinMax')); ",3.4.5,
-"Let vMaxDate = Num(Peek('MaxDate', 0, 'MinMax'));",3.4.5,
-"",3.4.5,
-"Let vCurrentDate = Num(Peek('MaxDate', 0, 'MinMax'));",3.4.5,
-"Let vCurrentDateAsDate = Date(vCurrentDate, 'M/D/YYYY');",3.4.5,
-"Let vCurrentYearMonth = Year(vCurrentDate)&'-'&Month(vCurrentDate);",3.4.5,
-"",3.4.5,
-"Trace vCurrentDate: $(vCurrentDate);",3.4.5,
-"Trace vCurrentDateAsDate: $(vCurrentDateAsDate);",3.4.5,
-"Trace vMaxDate: $(vMaxDate);",3.4.5,
-"Trace vCurrentYearMonth: $(vCurrentYearMonth);",3.4.5,
-"",3.4.5,
-"DROP TABLE DateList;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"ClosingProj:",3.4.5,
-"Load [Closing Projection Status],",3.4.5,
-"	Min(RowNo) as RowSort",3.4.5,
-"Resident [$(vWriteTableName)] ",3.4.5,
-"Where Len(Trim([Closing Projection Status]))>0",3.4.5,
-"Group By [Closing Projection Status];",3.4.5,
-"Let vClosingProjColor=;",3.4.5,
-"",3.4.5,
-"For i=0 to NoOfRows('ClosingProj')-1",3.4.5,
-"Let vClosingProjColor='$(vClosingProjColor)'&'|'&Peek('Closing Projection Status',$(i),'ClosingProj');",3.4.5,
-"Next i;",3.4.5,
-"Drop Table ClosingProj;",3.4.5,
-"",3.4.5,
-"//BH added 12-3-2023 for sales scorecard",3.4.5,
-"SET vCurrentProduction = '*';",3.4.5,
-"",3.4.5,
-"ChannelList:",3.4.5,
-"Load",3.4.5,
-"	Concat(DISTINCT Channel,'|') as ChannelList_Temp",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"WHERE WildMatch(Channel,'Corresp*')=0;",3.4.5,
-"",3.4.5,
-"Let vChannelList=Peek('ChannelList_Temp', 0, 'ChannelList');",3.4.5,
-"",3.4.5,
-"Drop Table ChannelList;",3.4.5,
-"",3.4.5,
-"ChannelGroupList:",3.4.5,
-"Load",3.4.5,
-"	Concat(DISTINCT [Consolidated Channels],'|') as ConsolidatedChannelList_Temp",3.4.5,
-"Resident $(vWriteTableName);",3.4.5,
-"",3.4.5,
-"Let vChannelGroupList=Peek('ConsolidatedChannelList_Temp', 0, 'ChannelGroupList');",3.4.5,
-"",3.4.5,
-"Drop Table ChannelGroupList;",3.4.5,
-"",3.4.5,
-"//==============================================",3.4.5,
-"// TopTiering Variables",3.4.5,
-"// BH added 2024-01-02",3.4.5,
-"//==============================================",3.4.5,
-"// Let vParetoDim = 'Branch';",3.4.5,
-"SET vParetoMeasure = 'Loan Amount';",3.4.5,
-"Let vParetoMeasureLabel = 'pick(Match(vParetoMeasure,'& CHR(39) &'Loan Amount'& CHR(39) &','& CHR(39) &'Branch Concession ($)'& CHR(39) &'),'& CHR(39) &'Volume'& CHR(39) &','& CHR(39) &'Concessions'& CHR(39) &')';",3.4.5,
-"// Let vParetoDimLabel = 'pick(Match(vParetoDim,'& CHR(39) &'Branch'& CHR(39) &','& CHR(39) &'Mortgage Loan Officer (MLO)'& CHR(39) &','& CHR(39) &'Loan Program'& CHR(39) &'),'& CHR(39) &'Branch'& CHR(39) &','& CHR(39) &'Loan Officer'& CHR(39) &','& CHR(39) &'Loan Program'& CHR(39) &')';",3.4.5,
-"// Let vParetoDimChartTitleLabel = 'pick(Match(vParetoDim,'& CHR(39) &'Branch'& CHR(39) &','& CHR(39) &'Mortgage Loan Officer (MLO)'& CHR(39) &','& CHR(39) &'Loan Program'& CHR(39) &'),'& CHR(39) &'Branches'& CHR(39) &','& CHR(39) &'Loan Officers'& CHR(39) &','& CHR(39) &'Loan Programs'& CHR(39) &')';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//===================================================================",3.4.5,
-"// BH added 02-28-2024 derived date functions for adding date flags",3.4.5,
-"// ==================================================================",3.4.5,
-"LET fMTD = 'If(InMonthToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';",3.4.5,
-"LET fQTD = 'If(InQuarterToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';",3.4.5,
-"LET fYTD = 'If(InYearToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', 0), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';",3.4.5,
-"",3.4.5,
-"LET fMTDPrevious = 'If(InMonthToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';",3.4.5,
-"LET fQTDPrevious = 'If(InQuarterToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';",3.4.5,
-"LET fYTDPrevious = 'If(InYearToDate($1, ' & CHR(39) & '$(vMaxDate)' & CHR(39) & ', -1), ' & CHR(39) & 'Yes' & CHR(39) & ', ' & CHR(39) & 'No' & CHR(39) & ')';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"///$tab Front end Variables",3.4.5,
-"",3.4.5,
-"///$tab Configuration Data",3.4.5,
-"LET vSetupURL =  Pick(vUseDEVAPI + 1, 'https://api.coheus1.com/config/$(vXMLName)/fullxml', 'https://dev-api.coheus1.com/config/$(vXMLName)/fullxml');",3.4.5,
-"",3.4.5,
-"TRACE vSetupURL: $(vSetupURL);",3.4.5,
-"",3.4.5,
-"Set ErrorMode = 0;",3.4.5,
-"ConfigurationData:",3.4.5,
-"LOAD",3.4.5,
-"    Concat(""@1:n"",'',RecNo()) as full_xml",3.4.5,
-"FROM [lib://Web Setup XML V2 (azure_devang.ghela@3vuellc.com)]",3.4.5,
-"(URL is [$(vSetupURL)],fix, codepage is 1252, no labels)",3.4.5,
-";",3.4.5,
-"",3.4.5,
-"Set ErrorMode = 1;",3.4.5,
-"Let vFileExists = if( NoOfRows('ConfigurationData') > 0, 1, 0);",3.4.5,
-"///$tab revenue",3.4.5,
-"//BH revised script 12-1-2023 to point to Revenue_Contribution for scorecards",3.4.5,
-"",3.4.5,
-"For x=1 to 20",3.4.5,
-"Let RevField$(x) =;",3.4.5,
-"Let RevFieldName$(x) =;",3.4.5,
-"Next x;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//Test Fulton who has revenue",3.4.5,
-"",3.4.5,
-"IF Peek('RevenueConfiguredFlag',0,'LoanData') = 1 THEN ",3.4.5,
-"		",3.4.5,
-"        ContributionRevCheck:",3.4.5,
-"		LOAD",3.4.5,
-"    		Formula as ContributionRevCheck",3.4.5,
-"		From_Field(ConfigurationData,full_xml)",3.4.5,
-"		(XmlSimple, table is [Setup/CoheusConfig/Revenue/CoheusConfigRevenue])",3.4.5,
-"        Where Name = 'Revenue_Contribution';",3.4.5,
-"        ",3.4.5,
-"        DefaultRevCheck:",3.4.5,
-"		LOAD",3.4.5,
-"    		Formula as DefaultRevCheck",3.4.5,
-"		From_Field(ConfigurationData,full_xml)",3.4.5,
-"		(XmlSimple, table is [Setup/CoheusConfig/Revenue/CoheusConfigRevenue])",3.4.5,
-"        Where Name = 'Default';",3.4.5,
-"        ",3.4.5,
-"        LET vRevBucketCheck = If(Len(Trim(Peek('ContributionRevCheck',0,'ContributionRevCheck'))) > 0, 'Revenue_Contribution', 'Default');",3.4.5,
-"        Drop Tables ContributionRevCheck,DefaultRevCheck;",3.4.5,
-"        ",3.4.5,
-"		RevenueFields: //Client passing Revenue calculation through setup tool",3.4.5,
-"		Load",3.4.5,
-"			PurgeChar(RevenueFields,'[') as RevenueFields //removing left bracket",3.4.5,
-"		Where Not IsNull(RevenueFields);",3.4.5,
-"		Load",3.4.5,
-"			Right(Trim(RevenueFields),Len(Trim(RevenueFields))-1) as RevenueFields //removes operators (+/-)",3.4.5,
-"		;",3.4.5,
-"		LOAD",3.4.5,
-"    		If(Len(Formula)>0,SubField(Trim(Formula),']'),SubField('[Base Buy ($)]+[Orig Fee Borr Pd]+[Orig Fees Seller]-[CD Lender Credits]',']')) as RevenueFields //removes right bracket",3.4.5,
-"		From_Field(ConfigurationData,full_xml)",3.4.5,
-"		(XmlSimple, table is [Setup/CoheusConfig/Revenue/CoheusConfigRevenue])",3.4.5,
-"        Where Name = '$(vRevBucketCheck)';",3.4.5,
-"",3.4.5,
-"		For r=1 to NoOfRows('RevenueFields')",3.4.5,
-"		Let RevField$(r) = Trim(Peek('RevenueFields',$(r)-1,'RevenueFields')); //fix to remove any leading spaces remaining",3.4.5,
-"		Let RevFieldName$(r) = 'RevField$(r)';",3.4.5,
-"		Next r;",3.4.5,
-"",3.4.5,
-"//Check if revenue was calculated on client side",3.4.5,
-"		RevCalc:",3.4.5,
-"		LOAD",3.4.5,
-"    		Formula as RevenueFormula",3.4.5,
-"		From_Field(ConfigurationData,full_xml)",3.4.5,
-"		(XmlSimple, table is [Setup/CoheusConfig/Revenue/CoheusConfigRevenue])",3.4.5,
-"        Where Name = '$(vRevBucketCheck)';",3.4.5,
-"",3.4.5,
-"		Let vRevCalcCheck = If(Len(Trim(Peek('RevenueFormula',0,'RevCalc')))=0,0,1);",3.4.5,
-"		Let vRevenueFormula = Peek('RevenueFormula',0,'RevCalc'); //tooltip in Margin Dashboard",3.4.5,
-"ELSE",3.4.5,
-"//Use default revenue calculation if client does not pass Revenue through setup tool",3.4.5,
-"		RevenueFields:",3.4.5,
-"		Load",3.4.5,
-"			PurgeChar(RevenueFields,'[') as RevenueFields",3.4.5,
-"		Where Not IsNull(RevenueFields);",3.4.5,
-"		Load",3.4.5,
-"			Right(Trim(RevenueFields),Len(Trim(RevenueFields))-1) as RevenueFields",3.4.5,
-"		;",3.4.5,
-"		LOAD",3.4.5,
-"    		SubField('[Base Buy ($)]+[Orig Fee Borr Pd]+[Orig Fees Seller]-[CD Lender Credits]',']') as RevenueFields",3.4.5,
-"		AutoGenerate 1;",3.4.5,
-"",3.4.5,
-"		For r=1 to NoOfRows('RevenueFields')",3.4.5,
-"		Let RevField$(r) = Peek('RevenueFields',$(r)-1,'RevenueFields');",3.4.5,
-"		Let RevFieldName$(r) = 'RevField$(r)';",3.4.5,
-"		Next r;",3.4.5,
-"",3.4.5,
-"		Let vRevCalcCheck = 0;",3.4.5,
-"END If;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"///$tab TPO Variables",3.4.5,
-"//** NEW VARIABLES **/////////////////////////////////////////",3.4.5,
-"",3.4.5,
-"//TPO Check Flag",3.4.5,
-"NoConcatenate",3.4.5,
-"TPOSort:",3.4.5,
-"Load [TPO Check]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Order By [TPO Check] asc",3.4.5,
-";",3.4.5,
-"",3.4.5,
-"LET vTPOCheck= Peek('TPO Check',0,'TPOSort');",3.4.5,
-"Drop Table TPOSort;",3.4.5,
-"",3.4.5,
-"//Actor List used on Actors Sheet/////////////////////////////",3.4.5,
-"/* Set vActorList based on vTPOCheck. Thus, load list for TPO clients and separate list for Retail Only clients */",3.4.5,
-"// $(vTPOCheck) /*-1=True (multi-channel); 0=False (Retail ONLY)*/",3.4.5,
-"",3.4.5,
-"If $(vTPOCheck)=-1 then",3.4.5,
-"// Actor List for multi-channel clients",3.4.5,
-"SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Account Executive|Account Manager|Broker Lender Name|Branch|TPO Company Name|Investor|Retail Branch ID|Retail LO|Originator Loan Officer Name|Originator Loan Processor Name|Correspondent Sales Rep/AE|Correspondent Lender Name|Sales Rep/AE|Warehouse Co Name|Warehouse Bank Name';",3.4.5,
-"Rename Field [Sale Rep/AE] TO [Sales Rep/AE];",3.4.5,
-"else",3.4.5,
-"// Actor list for Retail Only clients",3.4.5,
-"SET vActorList='Channel|Processor|Closer|Underwriter|Loan Officer|Branch|Investor|Warehouse Co Name';",3.4.5,
-"end if",3.4.5,
-"",3.4.5,
-"/***************************",3.4.5,
-"TW 10/25",3.4.5,
-"This code is producing the actor list 4 more times WHY?",3.4.5,
-"should be removed. ",3.4.5,
-"****************************/",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//Actor List Variables",3.4.5,
-"For i = 1 to 4",3.4.5,
-"//LET vActor$(i)='';",3.4.5,
-"LET vActorList$(i)='$(vActorList)';",3.4.5,
-"Next i;",3.4.5,
-"/***************************",3.4.5,
-"TW Changed LET to SET",3.4.5,
-"These 3 of these variable values are also created in Varaibles section ",3.4.5,
-"They can be condolidated.",3.4.5,
-"****************************/",3.4.5,
-"//Actor Picker Variables ",3.4.5,
-"SET vActor1='Loan Officer';",3.4.5,
-"SET vActor2='Processor';",3.4.5,
-"SET vActor3='Underwriter';",3.4.5,
-"SET vActor4='Closer';",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"///$tab Script Additions Ranges",3.4.5,
-"//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce",3.4.5,
-"//on-going maintenance effort.  ",3.4.5,
-"//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI",3.4.5,
-"",3.4.5,
-"//$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/Script Additions Ranges.qvs);",3.4.5,
-"//vScriptPath was set on the script tab named ""CCA for TVI"".",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//////////////////////////////////TW added Must include Start",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"Trace 'Entering Include File: Script Additions Ranges.qvs under $(vScriptPath)/Script Tabs/Front-end Dashboards';",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"/**********************************************************************************************************************************************************",3.4.5,
-"	File:		Script Additions Ranges.qvs",3.4.5,
-"	Purpose:	Externalized script for TVI calculations from the CCA (Coheus Component Architecture) ",3.4.5,
-"	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"	Author:		Jeff R. Robbins",3.4.5,
-"	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"	Version:	1.0.0",3.4.5,
-"	Date:		2024-01-08",3.4.5,
-"**********************************************************************************************************************************************************/",3.4.5,
-"//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce",3.4.5,
-"//on-going maintenance effort.  ",3.4.5,
-"//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/*",3.4.5,
-"Questions for Rob:",3.4.5,
-"1. Are the Range names fixed or can they change client to client?",3.4.5,
-"2. Is it possible for a client to create a new range without us being made aware?",3.4.5,
-"*/",3.4.5,
-"Set ErrorMode = 0;",3.4.5,
-"Drop Table ConfigurationData;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"ConfigurationData:",3.4.5,
-"LOAD",3.4.5,
-"    Concat(""@1:n"",'',RecNo()) as full_xml",3.4.5,
-"FROM [lib://Web Setup XML V2 (azure_devang.ghela@3vuellc.com)]",3.4.5,
-"(URL is [$(vSetupURL)],fix, codepage is 1252, no labels)",3.4.5,
-";",3.4.5,
-"",3.4.5,
-"Set ErrorMode = 1;",3.4.5,
-"",3.4.5,
-"/******",3.4.5,
-"TW 10/25 Changed from LET to SET",3.4.5,
-"These could be off loaded to a file so if values can be changed with out touching the code.",3.4.5,
-"These 6 variables are duplicated with actual values later in code. They can be removed ",3.4.5,
-"******/",3.4.5,
-"",3.4.5,
-"SET vFICOCreditMax =;",3.4.5,
-"SET vFICOCreditMin =;",3.4.5,
-"",3.4.5,
-"SET vLTVCreditMax =;",3.4.5,
-"SET vLTVCreditMin =;",3.4.5,
-"",3.4.5,
-"SET vDTICreditMax =;",3.4.5,
-"SET vDTICreditMin =;",3.4.5,
-"",3.4.5,
-"If '$(vFileExists)'=1 THEN",3.4.5,
-"",3.4.5,
-"CreditRanges:",3.4.5,
-"LOAD",3.4.5,
-"    Name,",3.4.5,
-"    ""Max"",",3.4.5,
-"    ""Min""",3.4.5,
-"From_Field(ConfigurationData,full_xml)",3.4.5,
-"(XmlSimple, table is [$(vConfigRange)]);",3.4.5,
-"",3.4.5,
-"Let vCreditRangeRows = NoOfRows('CreditRanges');",3.4.5,
-"",3.4.5,
-"Else",3.4.5,
-"",3.4.5,
-"SET vCreditRangeRows = 0;",3.4.5,
-"",3.4.5,
-"End If;",3.4.5,
-"",3.4.5,
-"If $(vCreditRangeRows) = 0 Then",3.4.5,
-"",3.4.5,
-"/******",3.4.5,
-"TW 10/25 Changed from LET to SET",3.4.5,
-"These could be off loaded to a file so if values can be changed with out touching the code.",3.4.5,
-"******/",3.4.5,
-"SET vFICOCreditMax = 580;",3.4.5,
-"SET vFICOCreditMin = 350;",3.4.5,
-"",3.4.5,
-"SET vLTVCreditMax = 97;",3.4.5,
-"SET vLTVCreditMin = 0;",3.4.5,
-"",3.4.5,
-"SET vDTICreditMax = 70;",3.4.5,
-"SET vDTICreditMin = 50;",3.4.5,
-"",3.4.5,
-"Else",3.4.5,
-"",3.4.5,
-"For r = 0 to NoOfRows('CreditRanges')-1",3.4.5,
-"",3.4.5,
-"Let vCreditRange = Peek('Name',$(i),'CreditRanges');",3.4.5,
-"",3.4.5,
-"Let v$(vCreditRange)CreditMax = Peek('Max',$(i),'CreditRanges');",3.4.5,
-"Let v$(vCreditRange)CreditMin = Peek('Min',$(i),'CreditRanges');",3.4.5,
-"",3.4.5,
-"Next r;",3.4.5,
-"",3.4.5,
-"End If;",3.4.5,
-"",3.4.5,
-"Let vFICOCreditMax = If(Len(Trim('$(vFICOCreditMax)'))=0,580,$(vFICOCreditMax));",3.4.5,
-"Let vFICOCreditMin = If(Len(Trim('$(vFICOCreditMin)'))=0,350,$(vFICOCreditMin));",3.4.5,
-"",3.4.5,
-"Let vLTVCreditMax = If(Len(Trim('$(vLTVCreditMax)'))=0,97,$(vLTVCreditMax));",3.4.5,
-"Let vLTVCreditMin = If(Len(Trim('$(vLTVCreditMin)'))=0,0,$(vLTVCreditMin));",3.4.5,
-"",3.4.5,
-"Let vDTICreditMax = If(Len(Trim('$(vDTICreditMax)'))=0,70,$(vDTICreditMax));",3.4.5,
-"Let vDTICreditMin = If(Len(Trim('$(vDTICreditMin)'))=0,50,$(vDTICreditMin));",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/////////////////////////////////Eventually incorporate Logic from Editor/////////////////////////////////",3.4.5,
-"/******",3.4.5,
-"TW 10/25 Changed from LET to SET",3.4.5,
-"These could be off loaded to a file so if values can be changed with out touching the code.",3.4.5,
-"******/",3.4.5,
-"SET vFICOMax = 900;",3.4.5,
-"SET vFICOMin = 350;",3.4.5,
-"",3.4.5,
-"SET vLTVMax = 110;",3.4.5,
-"SET vLTVMin = 0;",3.4.5,
-"",3.4.5,
-"SET vDTIMax = 70;",3.4.5,
-"SET vDTIMin = 0;",3.4.5,
-"",3.4.5,
-"SET vInterestMax = 15;",3.4.5,
-"SET vInterestMin = 0;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//Creates Current Production Flag ",3.4.5,
-"//Criteria actor has taken an application OR funded in a loan within last 30 days",3.4.5,
-"Processor_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Processor],",3.4.5,
-"'Yes' as [Processor_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"Underwriter_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Underwriter],",3.4.5,
-"'Yes' as [Underwriter_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"Closer_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Closer],",3.4.5,
-"'Yes' as [Closer_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"/******",3.4.5,
-"TW 10/25 Added In line tables to Excel file ",3.4.5,
-"These could be off loaded to a file so if values can be changed with out touching the code.",3.4.5,
-"added tables to Excel work book that contains inline table data",3.4.5,
-"Added load list from excel tables (place holder file loaction used).",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"******/",3.4.5,
-"",3.4.5,
-"FunnelStages:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet9);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//BH added 12-7-2023 script additions section for Loan Funnel",3.4.5,
-"// FunnelStages:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// Funnel Stage, FunnelStageSortOrder",3.4.5,
-"// Started, 1",3.4.5,
-"// RESPA Application, 2",3.4.5,
-"// Originated Loans, 3",3.4.5,
-"// Fallout - Withdrawn, 4",3.4.5,
-"// Fallout - Denied, 5",3.4.5,
-"// '', 6",3.4.5,
-"// Originated Revenue, 7",3.4.5,
-"// Lost Opportunities Pro forma Revenue,8",3.4.5,
-"// Costs, 9",3.4.5,
-"// Profit, 10",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"FunnelStagesShort:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet10);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//BH added 2024-04-15 script additions section for Loan Funnel No Revenue",3.4.5,
-"// FunnelStagesShort:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// Funnel Stage Short, FunnelStageShortSortOrder",3.4.5,
-"// Started, 1",3.4.5,
-"// RESPA Application, 2",3.4.5,
-"// Originated Loans, 3",3.4.5,
-"// Fallout - Withdrawn, 4",3.4.5,
-"// Fallout - Denied, 5",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"ApplicationWaterfall:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet11);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//BH added 3-8-2024 New Waterfall Stage - Loans Started with Credit Report Pulled",3.4.5,
-"// ApplicationWaterfall:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// Waterfall Stage, WaterfallStageSortOrder",3.4.5,
-"// Loans Started, 1",3.4.5,
-"// Loans Started with Credit Report Pulled, 2",3.4.5,
-"// Loans with No RESPA Applications, 3",3.4.5,
-"// Loans with RESPA Applications, 4",3.4.5,
-"// Total Loans with Final RESPA Status, 5",3.4.5,
-"// Originated Loans, 6",3.4.5,
-"// Fallout - Withdrawn, 7",3.4.5,
-"// Fallout - Denied, 8",3.4.5,
-"// '', 9",3.4.5,
-"// Loans Still Active, 10",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"ApplicationWaterfall_FeeLeakage:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet12);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//BH added 3-8-2024 New Waterfall Stage_FeeLeakage Dimension ",3.4.5,
-"// ApplicationWaterfall_FeeLeakage:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// Waterfall Stage Fee Leakage, WaterfallStageFeeLeakageSortOrder",3.4.5,
-"// Loans Started, 1",3.4.5,
-"// Loans with No RESPA Applications, 2",3.4.5,
-"// Loans with RESPA Applications, 3",3.4.5,
-"// Total Loans with Final RESPA Status, 4",3.4.5,
-"// Originated Loans, 5",3.4.5,
-"// Fallout - Withdrawn, 6",3.4.5,
-"// Fallout - Denied, 7",3.4.5,
-"// '', 8",3.4.5,
-"// Loans Still Active, 9",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"ApplicationWaterfallShort:",3.4.5,
-"Load",3.4.5,
-"*",3.4.5,
-"FROM [lib://QlikShare/Include/Script Tabs/Front-end Dashboards/PerformanceInlineTables.xlsx]",3.4.5,
-"(ooxml, embedded labels, table is Sheet13);",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// ApplicationWaterfallShort:",3.4.5,
-"// Load * Inline [",3.4.5,
-"// Waterfall Stage Short, WaterfallStageShortSortOrder",3.4.5,
-"// Loans Started, 1",3.4.5,
-"// Loans with No RESPA Applications, 2",3.4.5,
-"// Loans with RESPA Applications, 3",3.4.5,
-"// Originated Loans, 4",3.4.5,
-"// Fallout - Withdrawn, 5",3.4.5,
-"// Fallout - Denied, 6",3.4.5,
-"// Loans Still Active, 7",3.4.5,
-"// ];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//Fallout, 7",3.4.5,
-"",3.4.5,
-"//Load Flags onto Fact Table",3.4.5,
-"RangesLoanData:",3.4.5,
-"Load *",3.4.5,
-"	//BH added 02-29-2024 to create consistency in TVI Scores across flagship apps. JRR identified logic was missing",3.4.5,
-"    ,If([Branch] = '99-Missing' OR IsNull([Branch]) Or [Branch]='No Branch Found',1,0) as [Branch Missing]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-28-2024 Build MTD flags for Operations Scorecard Dates",3.4.5,
-"    ,[End Date to indicate Loan Closed/Funded] as [End Date]",3.4.5,
-"    ",3.4.5,
-"    ,$(fMTD([Sent To Underwriting])) as [Sent To Underwriting MTD]",3.4.5,
-"    ,$(fYTD([Sent To Underwriting])) as [Sent To Underwriting YTD]",3.4.5,
-"    ,$(fQTD([Sent To Underwriting])) as [Sent To Underwriting QTD]",3.4.5,
-"",3.4.5,
-"    ,$(fMTD([Sent To Closing])) as [Sent To Closing MTD]",3.4.5,
-"    ,$(fYTD([Sent To Closing])) as [Sent To Closing YTD]",3.4.5,
-"    ,$(fQTD([Sent To Closing])) as [Sent To Closing QTD]",3.4.5,
-"",3.4.5,
-"    ,$(fMTD([End Date to indicate Loan Closed/Funded])) as [End Date MTD]",3.4.5,
-"    ,$(fYTD([End Date to indicate Loan Closed/Funded])) as [End Date YTD]",3.4.5,
-"    ,$(fQTD([End Date to indicate Loan Closed/Funded])) as [End Date QTD]",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"    //BH added 02-28-2024 Build Previous MTD flags for Operations Scorecard Dates",3.4.5,
-"    ,$(fMTDPrevious([Sent To Underwriting])) as [Sent To Underwriting Previous MTD]",3.4.5,
-"    ,$(fYTDPrevious([Sent To Underwriting])) as [Sent To Underwriting Previous YTD]",3.4.5,
-"    ,$(fQTDPrevious([Sent To Underwriting])) as [Sent To Underwriting Previous QTD]",3.4.5,
-"",3.4.5,
-"    ,$(fMTDPrevious([Sent To Closing])) as [Sent To Closing Previous MTD]",3.4.5,
-"    ,$(fYTDPrevious([Sent To Closing])) as [Sent To Closing Previous YTD]",3.4.5,
-"    ,$(fQTDPrevious([Sent To Closing])) as [Sent To Closing Previous QTD]",3.4.5,
-"",3.4.5,
-"    ,$(fMTDPrevious([End Date to indicate Loan Closed/Funded])) as [End Date Previous MTD]",3.4.5,
-"    ,$(fYTDPrevious([End Date to indicate Loan Closed/Funded])) as [End Date Previous YTD]",3.4.5,
-"    ,$(fQTDPrevious([End Date to indicate Loan Closed/Funded])) as [End Date Previous QTD]",3.4.5,
-"    ",3.4.5,
-"	//BH added 02-16-2024 to transform Property State abbreviation to Property State Long Name",3.4.5,
-"    ,ApplyMap('StateMap',[Property State]) as [Property State Name]",3.4.5,
-"    ",3.4.5,
-"	//BH Added 12-7-2023 to section for Loan Funnel",3.4.5,
-"    ,if(Len(Trim([Application Date]))>0,'Yes','No') as [RESPA App Status]",3.4.5,
-"    ,If(Len(Trim([Credit Pull Date]))>0,'Yes','No') as [Credit Pull Flag]",3.4.5,
-"    ,Num(if([Branch Concession]=0 OR len(trim([Branch Concession]))=0 OR IsNull([Branch Concession]), 0, Round((([Branch Concession])/100) * [Loan Amount],.01)),'#,##0.00;(#,##0.00)') as [Branch Concession ($)]",3.4.5,
-"	,if(Len(Trim([Appraisal Received Date]))>0,'Yes','No') as [Appraisal Received Flag]",3.4.5,
-"    ",3.4.5,
-"	// BH Added 12-7-2023 for Company Scorecard to match LVPAM and TopTiering",3.4.5,
-"    ,If([Mortgage Loan Officer (MLO)] = '99-Missing' OR IsNull([Mortgage Loan Officer (MLO)]),1,0) as [Mortgage Loan Officer (MLO) Missing]",3.4.5,
-"",3.4.5,
-"	,ApplyMap('ClosingProjectionGroupList',[Closing Projection Group]) as [Closing Projection Group Sort]",3.4.5,
-"    ,If([Funded Not Purchased Flag] = 'Yes', Floor($(vCurrentDate)-[Funding Date]), Null()) as [Funded Not Purchased Aging]",3.4.5,
-"    ,if([Denied Flag.Temp]=1,[Current Status Date],Null()) as [Denied Date]",3.4.5,
-"    ,if([Withdrawn Flag]=1,[Current Status Date],Null()) as [Withdrawn Date.Temp]",3.4.5,
-"    ",3.4.5,
-"    //BH commented out 12-7-2023",3.4.5,
-"//     ,if([Account Executive]='99-Missing',Null(),[Account Executive]) as [Account Executive.Temp]",3.4.5,
-";",3.4.5,
-"Load *,",3.4.5,
-"",3.4.5,
-"	// BH Added 12-7-2023 for Company Scorecard to match LVPAM and TopTiering",3.4.5,
-"    if([TPO Flag]='Yes',[Account Executive.Temp],[Loan Officer.Temp]) as [Mortgage Loan Officer (MLO)]",3.4.5,
-"    ",3.4.5,
-"	,ApplyMap('Processor_Production',[Processor],'No') as [Processor_Production]",3.4.5,
-"	,ApplyMap('Underwriter_Production',[Underwriter],'No') as [Underwriter_Production]",3.4.5,
-"    ,ApplyMap('Closer_Production',[Closer],'No') as [Closer_Production]",3.4.5,
-"",3.4.5,
-"	,If([FICO Ranges] = 'In Range' AND [DTI Ranges] = 'In Range' AND [LTV Ranges] = 'In Range' AND [Interest Ranges] = 'In Range','All In Range',",3.4.5,
-"    	If([FICO Ranges] = 'Out of Range' AND [DTI Ranges] = 'Out of Range' AND [LTV Ranges] = 'Out of Range' AND [Interest Ranges] = 'Out of Range','All Out of Range',",3.4.5,
-"        	'Partially Out of Range')) as [Global Ranges]",3.4.5,
-"            ",3.4.5,
-"    ,ApplyMap('ActiveAgingSort',[Active Aging Range]) as [Active Aging Range Sort]",3.4.5,
-"    ,ApplyMap('ActiveAgingGreater90Sort',[Active Aging Days > 90]) as [Active Aging Days > 90 Sort]",3.4.5,
-"    ,If(WildMatch([Current Loan Status],'*Originated*','*purchased*')>0,'Yes','No') as [Pull Through Originated Flag]",3.4.5,
-"    ",3.4.5,
-"    ,If(InMonthToDate(""Funding Date"",$(vMaxDate),0),'Funded',",3.4.5,
-"    	if(""Active Loan Flag""='Yes' AND [CTC Flag]='Yes' AND [Funded Flag]='No','CTC',",3.4.5,
-"        	if(""Active Loan Flag""='Yes' AND [Approved Flag]='Yes' AND [CTC Flag]='No' AND [Funded Flag]='No','Approved',",3.4.5,
-"    			if(""Active Loan Flag""='Yes' AND [Conditional Approved Flag]='Yes' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Conditional Approved',",3.4.5,
-"        			if(""Active Loan Flag""='Yes' AND [Locked Flag]='Yes' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No','Locked',",3.4.5,
-"                    	if(""Active Loan Flag""='Yes' AND [Locked Flag]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No' AND Len(Trim([Sent To Processing]))>0,'In Processing',",3.4.5,
-"                        	if(""Active Loan Flag""='Yes' AND [Locked Flag]='No' AND [Conditional Approved Flag]='No' AND [Approved Flag]='No' AND [CTC Flag]='No' AND [Funded Flag]='No' AND Len(Trim([Sent To Processing]))=0,'Not Yet In Processing',",3.4.5,
-"        				Null()",3.4.5,
-"    ))))))) as [Closing Projection Group]",3.4.5,
-"    ",3.4.5,
-"    ",3.4.5,
-"    ",3.4.5,
-"    // Current Loan Status to streamline dimension values displayed in charts, include drill down.",3.4.5,
-"    ,If([Denied Flag.Temp]=1,'Application denied',",3.4.5,
-"      If([Withdrawn Flag]=1,'Application withdrawn',",3.4.5,
-"        If(Wildmatch([Current Loan Status],'*purch*')>0,'Loan purchased by your institution',",3.4.5,
-"          [Current Loan Status]))) as [Current Loan Status Group]",3.4.5,
-";",3.4.5,
-"Load *,",3.4.5,
-"",3.4.5,
-"	// BH Added 12-7-2023 for Company Scorecard to match LVPAM and TopTiering",3.4.5,
-"	If([Loan Officer]='99-Missing', 'No Loan Officer Found', Replace([Loan Officer],CHR(39),'')) as [Loan Officer.Temp],",3.4.5,
-"	If([Account Executive]='99-Missing', 'No Account Executive Found', Replace([Account Executive],CHR(39),'')) as [Account Executive.Temp],",3.4.5,
-"    If([Broker Lender Name]='99-Missing', 'No Broker Lender Found', Replace([Broker Lender Name],CHR(39),'')) as [Broker Lender Name.Temp],",3.4.5,
-"",3.4.5,
-"	If([FICO Score]<$(vFICOMin) OR [FICO Score]>$(vFICOMax),'Out of Range','In Range') as [FICO Ranges],",3.4.5,
-"    If([BE DTI Ratio]<$(vDTIMin) OR [BE DTI Ratio]>$(vDTIMax),'Out of Range','In Range') as [DTI Ranges],",3.4.5,
-"    If([LTV Ratio]<$(vLTVMin) OR [LTV Ratio]>$(vLTVMax),'Out of Range','In Range') as [LTV Ranges],",3.4.5,
-"    If([Interest Rate]<$(vInterestMin) OR [Interest Rate]>$(vInterestMax),'Out of Range','In Range') as [Interest Ranges],",3.4.5,
-"    ",3.4.5,
-"    If(""Loan Amount"" > 50000 AND ""Loan Amount"" <= 750000, ""Original Balance Range"",",3.4.5,
-"    If(""Loan Amount"" < 0, 'Below 0',",3.4.5,
-"    If(""Loan Amount"" <= 10000, '0-10,000',",3.4.5,
-"    If(""Loan Amount"" <= 20000, '10,000.01-20,000',",3.4.5,
-"    If(""Loan Amount"" <= 30000, '20,000.01-30,000',",3.4.5,
-"    If(""Loan Amount"" <= 40000, '30,000.01-40,000',",3.4.5,
-"    If(""Loan Amount"" <= 50000, '40,000.01-50,000',",3.4.5,
-"    ",3.4.5,
-"    If(""Loan Amount"" <= 800000, '750,000.01-800,000',",3.4.5,
-"    If(""Loan Amount"" <= 850000, '800,000.01-850,000',",3.4.5,
-"    If(""Loan Amount"" <= 900000, '850,000.01-900,000',",3.4.5,
-"    If(""Loan Amount"" <= 950000, '900,000.01-950,000',",3.4.5,
-"    If(""Loan Amount"" <= 1000000, '950,000.01-1,000,000',",3.4.5,
-"    '>1,000,000')))))))))))) as [Original Balance Outlier Range]",3.4.5,
-"    ",3.4.5,
-"    ,If([Active Loan Flag] = 'Yes',",3.4.5,
-"       If($(vCurrentDate)-[Application Date]<=15,'0-15',",3.4.5,
-"			If($(vCurrentDate)-[Application Date]<=30,'16-30',",3.4.5,
-"    			If($(vCurrentDate)-[Application Date]<=45,'31-45',",3.4.5,
-"                	If($(vCurrentDate)-[Application Date]<=60,'46-60',",3.4.5,
-"						If($(vCurrentDate)-[Application Date]<=90,'61-90',",3.4.5,
-"    						'> 90'))))),Null()) as [Active Aging Range]",3.4.5,
-"                            ",3.4.5,
-"    ,If([Active Loan Flag] = 'Yes',",3.4.5,
-"       Floor($(vCurrentDate)-[Application Date]),Null()) as [Active Aging Days]",3.4.5,
-"       ",3.4.5,
-"    ,If([Active Loan Flag] = 'Yes',",3.4.5,
-"       If($(vCurrentDate)-[Application Date]>90 AND $(vCurrentDate)-[Application Date]<=120,'91-120',",3.4.5,
-"       	If($(vCurrentDate)-[Application Date]>120 AND $(vCurrentDate)-[Application Date]<=150,'121-150',",3.4.5,
-"        	If($(vCurrentDate)-[Application Date]>150 AND $(vCurrentDate)-[Application Date]<=180,'151-180',",3.4.5,
-"            	If($(vCurrentDate)-[Application Date]>180 AND $(vCurrentDate)-[Application Date]<=210,'181-210',",3.4.5,
-"                	If($(vCurrentDate)-[Application Date]>210 AND $(vCurrentDate)-[Application Date]<=240,'211-240',",3.4.5,
-"                    	If($(vCurrentDate)-[Application Date]>240 AND $(vCurrentDate)-[Application Date]<=270,'241-270',",3.4.5,
-"                        	If($(vCurrentDate)-[Application Date]>270,'> 270',Null()))))))))as [Active Aging Days > 90]   ",3.4.5,
-"    ",3.4.5,
-"    ,If([Processor] = '99-Missing',1,0) as [Processor Missing]",3.4.5,
-"    ,If([Underwriter] = '99-Missing',1,0) as [Underwriter Missing]",3.4.5,
-"    ,If([Closer] = '99-Missing',1,0) as [Closer Missing]",3.4.5,
-"    ",3.4.5,
-"    //BH revised logic 12-11-2023",3.4.5,
-"    ,If(WildMatch([Current Loan Status],'*withdraw*','*not accepted*','*incomp*')>0,1,0) as [Withdrawn Flag]",3.4.5,
-"    ,If(WildMatch([Current Loan Status],'*denied*')>0,1,0) as [Denied Flag.Temp] ",3.4.5,
-"    ",3.4.5,
-"    ,If(Len(Trim([Credit Pull Year]))=0,'Date Missing',[Credit Pull Year]) as [Credit Pull Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Application Year]))=0,'Date Missing',[Application Year]) as [Application Year_Strat]",3.4.5,
-"    ,If(Len(Trim([UW Suspended Year]))=0,'Date Missing',[UW Suspended Year]) as [UW Suspended Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Estimated Closing Year]))=0,'Date Missing',[Estimated Closing Year]) as [Estimated Closing Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Loan Estimate Sent Year]))=0,'Date Missing',[Loan Estimate Sent Year]) as [Loan Estimate Sent Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Loan Estimate Received Year]))=0,'Date Missing',[Loan Estimate Received Year]) as [Loan Estimate Received Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Closing Disclosure Sent Year]))=0,'Date Missing',[Closing Disclosure Sent Year]) as [Closing Disclosure Sent Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Closing Disclosure Received Year]))=0,'Date Missing',[Closing Disclosure Received Year]) as [Closing Disclosure Received Year_Strat]",3.4.5,
-"    ,If(Len(Trim([CTC Year]))=0,'Date Missing',[CTC Year]) as [CTC Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Investor Purchase Year]))=0,'Date Missing',[Investor Purchase Year]) as [Investor Purchase Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Shipped Year]))=0,'Date Missing',[Shipped Year]) as [Shipped Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Funding Year]))=0,'Date Missing',[Funding Year]) as [Funding Year_Strat]",3.4.5,
-"    ",3.4.5,
-"    ,If(Len(Trim([Sent To Processing Year]))=0,'Date Missing',[Sent To Processing Year]) as [Sent To Processing Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Sent To Underwriting Year]))=0,'Date Missing',[Sent To Underwriting Year]) as [Sent To Underwriting Year_Strat]",3.4.5,
-"    ,If(Len(Trim([Sent To Closing Year]))=0,'Date Missing',[Sent To Closing Year]) as [Sent To Closing Year_Strat]",3.4.5,
-"    ",3.4.5,
-"    ",3.4.5,
-"    ,If(Len([Conditional Approval Date])=0, 'No', 'Yes') as [Conditional Approved Flag]  ",3.4.5,
-"    ,Date([Sent To Processing]) as [Sent To Processing Temp]",3.4.5,
-"    ",3.4.5,
-"    ,'Week '&Week([Closing Projection Date]) as [Closing Projection Week]",3.4.5,
-"Resident [$(vWriteTableName)];",3.4.5,
-"Drop Table [$(vWriteTableName)];",3.4.5,
-"Rename Table RangesLoanData To [$(vWriteTableName)];",3.4.5,
-"",3.4.5,
-"Drop Fields ",3.4.5,
-"[Sent To Processing],",3.4.5,
-"[Loan Officer],",3.4.5,
-"[Account Executive],",3.4.5,
-"[Broker Lender Name],",3.4.5,
-"[Denied Flag],",3.4.5,
-"[Withdrawn Date],",3.4.5,
-"",3.4.5,
-"//BH added 02-16-2024 to drop from L2 with goal of optimizing geo data load",3.4.5,
-"[City Zip],",3.4.5,
-"FPCODE.County",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-";",3.4.5,
-"Rename Fields ",3.4.5,
-"[Sent To Processing Temp] To [Sent To Processing],",3.4.5,
-"[Loan Officer.Temp] to [Loan Officer],",3.4.5,
-"[Account Executive.Temp] to [Account Executive],",3.4.5,
-"[Broker Lender Name.Temp] to [Broker Lender Name],",3.4.5,
-"[Denied Flag.Temp] to [Denied Flag],",3.4.5,
-"[Withdrawn Date.Temp] to [Withdrawn Date]",3.4.5,
-";",3.4.5,
-"",3.4.5,
-"//****** BH added 2024-01-08 to build Current Production flags for TopTiering ************************************",3.4.5,
-"//Creates Current Production Flag ",3.4.5,
-"//Criteria actor has taken an application OR funded in a loan within last 30 days",3.4.5,
-"MLO_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Mortgage Loan Officer (MLO)],",3.4.5,
-"'Yes' as [MLO_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"Branch_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Branch],",3.4.5,
-"'Yes' as [Branch_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"Program_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Loan Program],",3.4.5,
-"'Yes' as [Loan Program_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"LO_Production:",3.4.5,
-"Mapping Load Distinct",3.4.5,
-"[Loan Officer],",3.4.5,
-"'Yes' as [Loan Officer_Production]",3.4.5,
-"Resident $(vWriteTableName)",3.4.5,
-"Where ([Active Loan Flag] = 'Yes' AND [Application Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1))) OR [Funding Date]>=Date(AddMonths('$(vCurrentDateAsDate)',-1));",3.4.5,
-"",3.4.5,
-"$(vWriteTableName).Temp:",3.4.5,
-"LOAD *",3.4.5,
-"//BH Added 1-8-2024 to section for TopTiering, flag current production (see lines 118-137)",3.4.5,
-"    ,ApplyMap('MLO_Production',[Mortgage Loan Officer (MLO)],'No') as [Mortgage Loan Officer (MLO)_Production]",3.4.5,
-"    ,ApplyMap('LO_Production',[Loan Officer],'No') as [Loan Officer_Production]",3.4.5,
-"	,ApplyMap('Branch_Production',[Branch],'No') as [Branch_Production]",3.4.5,
-"	,ApplyMap('Program_Production',[Loan Program],'No') as [Loan Program_Production]",3.4.5,
-"Resident $(vWriteTableName);",3.4.5,
-"Drop Table $(vWriteTableName);",3.4.5,
-"Rename Table $(vWriteTableName).Temp to $(vWriteTableName);",3.4.5,
-"",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting Include File: Script Additions Ranges.qvs under $(vScriptPath)/Script Tabs/Front-end Dashboards';",3.4.5,
-"Trace '-------------------------------------------------------------';",3.4.5,
-"///$tab Calendar-Sub",3.4.5,
-"//===================================================",3.4.5,
-"// Subroutine to Generate Calendar. ",3.4.5,
-"//===================================================",3.4.5,
-"SUB CalendarFromField(_field, _calendar, _prefix)",3.4.5,
-"[$(_calendar)]:",3.4.5,
-"// Generate Final Calendar",3.4.5,
-"LOAD",3.4.5,
-"	[$(_field)]",3.4.5,
-"	,year([$(_field)]) as [$(_prefix)Year]",3.4.5,
-"	,month([$(_field)]) as [$(_prefix)Month]",3.4.5,
-"	,day([$(_field)]) as [$(_prefix)Day]",3.4.5,
-"	,weekday([$(_field)]) as [$(_prefix)Weekday]",3.4.5,
-"    ,Dual(Year([$(_field)])&'-'&Month([$(_field)]), monthstart([$(_field)])) as [$(_prefix)YearMonth]",3.4.5,
-"    ,Dual(Year([$(_field)])&'-Q'&Num(Ceil(Num(Month([$(_field)]))/3)),QuarterStart([$(_field)])) as [$(_prefix)YearQuarter]",3.4.5,
-"    ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=AddMonths(MonthEnd($(vMaxDate)),-13,1),'Yes','No')) as [$(_prefix)Rolling13MonthFlag]",3.4.5,
-"    ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=AddMonths(MonthEnd($(vMaxDate)),-4,1),'Yes','No')) as [$(_prefix)Rolling4MonthFlag]",3.4.5,
-"    ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=AddMonths(MonthEnd($(vMaxDate)),-2,1),'Yes','No')) as [$(_prefix)Rolling2MonthFlag]",3.4.5,
-"    ,If([$(_field)]>$(vMaxDate),'No',if([$(_field)]>=Date($(vMaxDate)-30),'Yes','No')) as [$(_prefix)CurrentProductionFlag]",3.4.5,
-"    ,if([$(_field)]>$(vMaxDate),'No', if([$(_field)] >= QuarterStart($(vMaxDate),-4) AND [$(_field)] <= QuarterEnd($(vMaxDate),0), 'Yes', 'No')) as [$(_prefix)Rolling4QtrFlag]",3.4.5,
-"    ",3.4.5,
-"    //BH 12-1-2023 added flags to Commonon Calendar (Calendar | Sub) for Company Scorecard Date Range Dropdown",3.4.5,
-"    ,If(InWeek([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)LastWeekFlag]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare Last Week to 2 Weeks Ago",3.4.5,
-"    ,If(InWeek([$(_field)],$(vMaxDate),-2),'Yes','No') as [$(_prefix)2WeeksAgoFlag]",3.4.5,
-"    ",3.4.5,
-"    ,If(InMonthToDate([$(_field)],$(vMaxDate),0),'Yes','No') as [$(_prefix)MTD]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare MTD to Previous MTD",3.4.5,
-"    ,If(InMonthToDate([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)PreviousMTD]",3.4.5,
-"    ",3.4.5,
-"    ,If(InMonth([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)PreviousMonthFlag]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare Last Month to 2 Months Ago",3.4.5,
-"    ,If(InMonth([$(_field)],$(vMaxDate),-2),'Yes','No') as [$(_prefix)2MonthsAgoFlag]",3.4.5,
-"    ",3.4.5,
-"    ,If(InQuarterToDate([$(_field)],$(vMaxDate),0),'Yes','No') as [$(_prefix)QTD]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare QTD to Previous QTD",3.4.5,
-"    ,If(InQuarterToDate([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)PreviousQTD]",3.4.5,
-"    ",3.4.5,
-"    ,If(InQuarter([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)PreviousQuarterFlag]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare Last Quarter to 2 Quarters Ago",3.4.5,
-"    ,If(InQuarter([$(_field)],$(vMaxDate),-2),'Yes','No') as [$(_prefix)2QuartersAgoFlag]",3.4.5,
-"    ",3.4.5,
-"    ,If(InYearToDate([$(_field)],$(vMaxDate),0),'Yes','No') as [$(_prefix)YTDFlag]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare YTD to Previous YTD",3.4.5,
-"    ,If(InYearToDate([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)PreviousYTDFlag]",3.4.5,
-"    ",3.4.5,
-"    ,If(InYear([$(_field)],$(vMaxDate),-1),'Yes','No') as [$(_prefix)PreviousYearFlag]",3.4.5,
-"    ",3.4.5,
-"    //BH added 02-05-2024 to Common Calendar for Company Performance to compare Previous Year to 2 Years Ago",3.4.5,
-"    ,If(InYear([$(_field)],$(vMaxDate),-2),'Yes','No') as [$(_prefix)2YearsAgoFlag]",3.4.5,
-"    ",3.4.5,
-"    ",3.4.5,
-";",3.4.5,
-"// Generate range of dates between min and max.",3.4.5,
-"LOAD",3.4.5,
-"	date(DateMin + IterNo()) as [$(_field)]		// Link Field",3.4.5,
-"WHILE DateMin + IterNo() <= DateMax	",3.4.5,
-";",3.4.5,
-"// Find min and max of date field values.",3.4.5,
-"LOAD",3.4.5,
-"	min(datefield)-1 as DateMin",3.4.5,
-"	,max(datefield) as DateMax",3.4.5,
-";",3.4.5,
-"// Load date field values.",3.4.5,
-"LOAD ",3.4.5,
-"	FieldValue('$(_field)', RecNo()) as datefield",3.4.5,
-"AutoGenerate FieldValueCount('$(_field)');	",3.4.5,
-"",3.4.5,
-"END SUB",3.4.5,
-"///$tab Calendar-Link",3.4.5,
-"//===================================================",3.4.5,
-"// Collect Fact Dates into a link table.",3.4.5,
-"//===================================================",3.4.5,
-"DateLink:",3.4.5,
-"LOAD 							// Build for Started Loans",3.4.5,
-"	RowNo							// Fact Key",3.4.5,
-"	,[Started Date] as Date			// Fact Date",3.4.5,
-"	,'Started' as DateType			// Fact Type",3.4.5,
-"RESIDENT Coheus_Input				// from Orders",3.4.5,
-";",3.4.5,
-"LOAD 							// Build for Applications",3.4.5,
-"	RowNo							// Fact Key",3.4.5,
-"	,[Application Date] as Date		// Fact Date",3.4.5,
-"	,'Application' as DateType		// Fact Type",3.4.5,
-"RESIDENT Coheus_Input				// from Orders",3.4.5,
-";",3.4.5,
-"LOAD							// Repeat for Closings",3.4.5,
-"	RowNo",3.4.5,
-"	,[Closing Date] as Date",3.4.5,
-"	,'Closing' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Fundings",3.4.5,
-"	RowNo",3.4.5,
-"	,[Funding Date] as Date",3.4.5,
-"	,'Funding' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Investor Purchases",3.4.5,
-"	RowNo",3.4.5,
-"	,[Investor Purchase Date] as Date",3.4.5,
-"	,'Investor Purchase' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Investor Locks",3.4.5,
-"	RowNo",3.4.5,
-"	,[Investor Lock Date] as Date",3.4.5,
-"	,'Investor Lock' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Estimated Closings",3.4.5,
-"	RowNo",3.4.5,
-"	,[Estimated Closing Date] as Date",3.4.5,
-"	,'Estimated Close' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Estimated Closings",3.4.5,
-"	RowNo",3.4.5,
-"	,[Projected Closing Date] as Date",3.4.5,
-"	,'Estimated Closing' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Clear to Close",3.4.5,
-"	RowNo",3.4.5,
-"	,[CTC Date] as Date",3.4.5,
-"	,'CTC' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"LOAD 							// Repeat for Current Status Date to capture when HMDA Status applied",3.4.5,
-"	RowNo",3.4.5,
-"	,[Current Status Date] as Date",3.4.5,
-"	,'HMDA' as DateType",3.4.5,
-"RESIDENT Coheus_Input",3.4.5,
-";",3.4.5,
-"",3.4.5,
-"// Call Calendar Generator for field ""Date""",3.4.5,
-"CALL CalendarFromField('Date', 'CommonCalendar', '');",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"//BH added 12-3-2023",3.4.5,
-"Let vDateTypeList = 'Credit Pull~Credit Pulls|Application~Applications Taken|UW Final Approval~Approved Loans|Investor Lock~Invester Locks|CTC~Cleared to Close|Closing~Closed Loans|Funding~Funded Loans|Investor Purchase~Investor Purchased Loans|Current Status~Withdrawn|Current Status~Denied';",3.4.5,
-"",3.4.5,
-"//BH added 12-7-2023 to Calendar | Link Table script section for Loan Funnel to capture Max Year in data as vMaxYear",3.4.5,
-"YearList:",3.4.5,
-"Load",3.4.5,
-"Concat(DISTINCT Year,'|',Num(Year)*-1) as YearList,",3.4.5,
-"Min(Year) as MinYear,",3.4.5,
-"Max(Year) as MaxYear",3.4.5,
-"Resident CommonCalendar",3.4.5,
-"Where Year>=Year(AddYears(YearStart($(vMaxDate)),-3)) AND Year<=Year($(vMaxDate))",3.4.5,
-";",3.4.5,
-"",3.4.5,
-"Let vYearList=Peek('YearList',0,'YearList');",3.4.5,
-"Let vMinYear=Peek('MinYear',0,'YearList');",3.4.5,
-"Let vMaxYear=Peek('MaxYear',0,'YearList');",3.4.5,
-"Let vYear=if(ceil(month(vMaxDate)/3)=1,$(vMaxYear)-1,$(vMaxYear));",3.4.5,
-"Let vFinalDispositionMaxYear=$(vMaxYear)-3;",3.4.5,
-"",3.4.5,
-"//BH 1/23/24 - moved from Variables Section to make dynamic and set to Last Year if in beginning of year.",3.4.5,
-"LET vToDate=if($(vYear)=$(vMaxYear),'YTDFlag','PreviousYearFlag');	",3.4.5,
-"",3.4.5,
-"Trace vYearList: $(vYearList);",3.4.5,
-"Trace vMinYear: $(vMinYear);",3.4.5,
-"Trace vMaxYear: $(vMaxYear);",3.4.5,
-"Trace vYear: $(vYear);",3.4.5,
-"Trace vFinalDispositionMaxYear: $(vFinalDispositionMaxYear);",3.4.5,
-"Trace vToDate: $(vToDate);",3.4.5,
-"",3.4.5,
-"Drop Table YearList;",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// //Optional: Generate Individual Calendars for each fact date",3.4.5,
-"// CALL CalendarFromField('Application Date', 'ApplicationCalendar', 'Application ');										// Create Calendar for Application Date",3.4.5,
-"// CALL CalendarFromField('Closing Date', 'ClosingCalendar', 'Closing ');													// Create Calendar for Closing Date",3.4.5,
-"// CALL CalendarFromField('Funding Date', 'FundingCalendar', 'Funding ');													// Create Calendar for Funding Date",3.4.5,
-"// CALL CalendarFromField('Investor Purchase Date', 'InvestorPurchaseCalendar', 'Investor Purchase ');						// Create Calendar for Investor Purchase Date",3.4.5,
-"///$tab Calendar-3vue Sub",3.4.5,
-"/// Calendar key generation:",3.4.5,
-"///",3.4.5,
-"set Calendar.Key=floor(num(date($1)));",3.4.5,
-"",3.4.5,
-"/// Calendar date fields:",3.4.5,
-"///",3.4.5,
-"set Calendar.Year=dual(year($1), yearstart($1));",3.4.5,
-"set Calendar.Quarter=dual('Q' & num(ceil(num(month($1))/3)), num(ceil(num(month($1))/3), 00));",3.4.5,
-"set Calendar.Month=month($1);",3.4.5,
-"set Calendar.Week=dual('W' & num(week($1), 00), num(week($1), 00));",3.4.5,
-"set Calendar.Day=day($1);",3.4.5,
-"set Calendar.YearQuarter=dual('Q' & num(ceil(num(month($1))/3)) & ' ' & year($1), quarterstart($1));",3.4.5,
-"set Calendar.YearMonth=dual(year($1) & '-' & month($1), monthstart($1));",3.4.5,
-"set Calendar.YearWeek=dual('Wk ' & Date(weekstart($1), 'MMM-DD-YYYY'), weekstart($1));",3.4.5,
-"set Calendar.Date=date(floor($1));",3.4.5,
-"set Calendar.YearsAgo=num(year(today()) - year($1));",3.4.5,
-"set Calendar.QuartersAgo=num(4 * year(today()) + ceil(month(today())/3) - 4 * year($1) - ceil(month($1)/3));",3.4.5,
-"set Calendar.MonthsAgo=num(12 * (year(today()) - year($1)) + month(today()) - month($1));",3.4.5,
-"set Calendar.WeeksAgo=num((weekstart(today()) - weekstart($1)) / 7);",3.4.5,
-"set Calendar.DaysAgo=num(interval(floor(today()) - floor($1), 'd'));",3.4.5,
-"",3.4.5,
-"sub Calendar.Create(prefix, table, key)",3.4.5,
-"    tempCalendarDates:",3.4.5,
-"    load",3.4.5,
-"        min($(key)) as MIN_DATE,",3.4.5,
-"        max($(key)) as MAX_DATE",3.4.5,
-"    resident [$(table)];",3.4.5,
-"",3.4.5,
-"    let Calendar.Start=num(if(isnull(Peek('MIN_DATE',0,'tempCalendarDates')), Today(), Peek('MIN_DATE',0,'tempCalendarDates')));",3.4.5,
-"    let Calendar.End=num(if(isnull(Peek('MAX_DATE',0,'tempCalendarDates')), Today(), Peek('MAX_DATE',0,'tempCalendarDates')));",3.4.5,
-"",3.4.5,
-"    [$(prefix) Calendar]:",3.4.5,
-"        load",3.4.5,
-"            i                                               as [$(key)],",3.4.5,
-"            $(Calendar.YearsAgo(i))                         as [$(prefix) YearsAgo],",3.4.5,
-"            $(Calendar.MonthsAgo(i))                        as [$(prefix) MonthsAgo],",3.4.5,
-"            $(Calendar.QuartersAgo(i))                      as [$(prefix) QuartersAgo],",3.4.5,
-"            $(Calendar.WeeksAgo(i))                         as [$(prefix) WeeksAgo],",3.4.5,
-"            $(Calendar.DaysAgo(i))                          as [$(prefix) DaysAgo],",3.4.5,
-"            $(Calendar.Year(i))                             as [$(prefix) Year],",3.4.5,
-"            $(Calendar.Quarter(i))                          as [$(prefix) Quarter],",3.4.5,
-"            $(Calendar.Month(i))                            as [$(prefix) Month],",3.4.5,
-"            $(Calendar.Week(i))                             as [$(prefix) Week],",3.4.5,
-"            $(Calendar.Day(i))                              as [$(prefix) Day],",3.4.5,
-"            $(Calendar.YearQuarter(i))                      as [$(prefix) YearQuarter],",3.4.5,
-"            $(Calendar.YearMonth(i))                        as [$(prefix) YearMonth],",3.4.5,
-"            $(Calendar.YearWeek(i))                         as [$(prefix) YearWeek],",3.4.5,
-"            $(Calendar.Date(i))                             as [$(prefix) Calendar];",3.4.5,
-"        /*********************************************/ load",3.4.5,
-"        num(date($(Calendar.Start) + (recno() - 1)))    as i",3.4.5,
-"",3.4.5,
-"    autogenerate ($(Calendar.End) - $(Calendar.Start)) + 1;",3.4.5,
-"",3.4.5,
-"    /// Create Intervals",3.4.5,
-"    [$(prefix) Interval]:",3.4.5,
-"        load",3.4.5,
-"            t                                               as [$(key)],",3.4.5,
-"            t                                               as [$(prefix) Interval];",3.4.5,
-"        load * inline[t]; ////TW 10/25 what is this",3.4.5,
-"",3.4.5,
-"    /// Current Year, Quarter, Month, and Week:",3.4.5,
-"    for each period in 'Year', 'Quarter', 'Month', 'Week'",3.4.5,
-"        concatenate ([$(prefix) Interval])",3.4.5,
-"            load",3.4.5,
-"                [$(key)]                    		        as [$(key)],",3.4.5,
-"                'Current $(period)'					        as [$(prefix) Interval]",3.4.5,
-"            resident [$(prefix) Calendar]",3.4.5,
-"            where [$(prefix) $(period)sAgo] = 0;",3.4.5,
-"    next period;",3.4.5,
-"",3.4.5,
-"    /// Last Year, Quarter, Month, and Week:",3.4.5,
-"    for each period in 'Year', 'Quarter', 'Month', 'Week'",3.4.5,
-"        concatenate ([$(prefix) Interval])",3.4.5,
-"            load",3.4.5,
-"                [$(key)]                    		        as [$(key)],",3.4.5,
-"                'Last $(period)'					        as [$(prefix) Interval]",3.4.5,
-"            resident [$(prefix) Calendar]",3.4.5,
-"            where [$(prefix) $(period)sAgo] = 1;",3.4.5,
-"    next period;",3.4.5,
-"",3.4.5,
-"    /// Rolling ""Last X Months"":",3.4.5,
-"    ///",3.4.5,
-"    for each x in 2, 3, 4, 6, 12, 18, 24",3.4.5,
-"        concatenate ([$(prefix) Interval])",3.4.5,
-"            load",3.4.5,
-"                [$(key)]                    		        as [$(key)],",3.4.5,
-"                'Last $(x) Months'					        as [$(prefix) Interval]",3.4.5,
-"            resident [$(prefix) Calendar]",3.4.5,
-"            where [$(prefix) MonthsAgo] > 0",3.4.5,
-"            and [$(prefix) MonthsAgo] <= $(x);",3.4.5,
-"    next x;",3.4.5,
-"",3.4.5,
-"    /// Last 90 Days:",3.4.5,
-"    concatenate([$(prefix) Interval])",3.4.5,
-"        load",3.4.5,
-"            [$(key)]                                        as [$(key)],",3.4.5,
-"            'Last 90 Days'                                  as [$(prefix) Interval]",3.4.5,
-"        resident [$(prefix) Calendar]",3.4.5,
-"        where [$(prefix) DaysAgo] <= 90",3.4.5,
-"        and [$(prefix) DaysAgo] > 0;",3.4.5,
-"",3.4.5,
-"    // Next 90 Days:",3.4.5,
-"    concatenate([$(prefix) Interval])",3.4.5,
-"        load",3.4.5,
-"            [$(key)]                                        as [$(key)],",3.4.5,
-"            'Next 90 Days'                                  as [$(prefix) Interval]",3.4.5,
-"        resident [$(prefix) Calendar]",3.4.5,
-"        where [$(prefix) DaysAgo] >= -90",3.4.5,
-"        and [$(prefix) DaysAgo] < 0;",3.4.5,
-"",3.4.5,
-"    /// Rolling 5 years",3.4.5,
-"    ///",3.4.5,
-"    concatenate([$(prefix) Interval])",3.4.5,
-"        load",3.4.5,
-"            [$(key)]                                        as [$(key)],",3.4.5,
-"            'Last 5 Years'                                  as [$(prefix) Interval]",3.4.5,
-"        resident [$(prefix) Calendar]",3.4.5,
-"        where [$(prefix) YearsAgo] >= 0",3.4.5,
-"        and [$(prefix) YearsAgo] < 6;",3.4.5,
-"",3.4.5,
-"    drop table tempCalendarDates;",3.4.5,
-"end sub",3.4.5,
-"///$tab Calendar-Periods for TTS",3.4.5,
-"LEFT JOIN([Coheus_Input])",3.4.5,
-"LOAD DISTINCT",3.4.5,
-"	[Sent To Underwriting],",3.4.5,
-"	$(Calendar.Key([Sent To Underwriting]))		AS %STUuid",3.4.5,
-"RESIDENT [Coheus_Input];",3.4.5,
-"",3.4.5,
-"LEFT JOIN([Coheus_Input])",3.4.5,
-"LOAD DISTINCT",3.4.5,
-"	[Sent To Closing],",3.4.5,
-"	$(Calendar.Key([Sent To Closing]))		AS %STCuid",3.4.5,
-"RESIDENT [Coheus_Input];",3.4.5,
-"",3.4.5,
-"LEFT JOIN([Coheus_Input])",3.4.5,
-"LOAD DISTINCT",3.4.5,
-"	[End Date to indicate Loan Closed/Funded],",3.4.5,
-"	$(Calendar.Key([End Date to indicate Loan Closed/Funded]))		AS %EDTCFuid",3.4.5,
-"RESIDENT [Coheus_Input];",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"LEFT JOIN([DateLink])",3.4.5,
-"LOAD DISTINCT",3.4.5,
-"	[Date],",3.4.5,
-"    $(Calendar.Key([Date]))		AS %Dateuid",3.4.5,
-"RESIDENT [DateLink];",3.4.5,
-"",3.4.5,
-"Call Calendar.Create('Processor','Coheus_Input', '%STUuid');",3.4.5,
-"Call Calendar.Create('Underwriter','Coheus_Input', '%STCuid');",3.4.5,
-"Call Calendar.Create('Closer','Coheus_Input', '%EDTCFuid');",3.4.5,
-"Call Calendar.Create('Date','DateLink', '%Dateuid');",3.4.5,
-"",3.4.5,
-"///$tab TTS + Staffing Variables",3.4.5,
-"// Set ErrorMode = 0;",3.4.5,
-"MockConfig:",3.4.5,
-"LOAD",3.4.5,
-"    Concat(""@1:n"",'',RecNo()) as xml",3.4.5,
-"/*",3.4.5,
-"FROM [lib://QlikShare/CoheusConfigs/MockXML2.xml]",3.4.5,
-"(XmlSimple, fix, codepage is 1252, no labels)",3.4.5,
-";",3.4.5,
-"*/",3.4.5,
-"FROM [lib://Web Setup XML (teraverde_dcapone)]",3.4.5,
-"(URL is [$(vSetupURL)],fix, codepage is 1252, no labels)",3.4.5,
-";",3.4.5,
-"// Set ErrorMode = 1;",3.4.5,
-"Let vFileExists = if( NoOfRows('ConfigurationData') > 0, 1, 0);",3.4.5,
-"",3.4.5,
-"TTSVariables:",3.4.5,
-"LOAD",3.4.5,
-"    'Sales'&Name as Variable,",3.4.5,
-"    Value as Weight",3.4.5,
-"From_Field(MockConfig,xml)",3.4.5,
-"(XmlSimple, table is [Setup/ScoreCards/Sales/Weight]);",3.4.5,
-"",3.4.5,
-"Concatenate(TTSVariables)",3.4.5,
-"Load",3.4.5,
-"	'Ops'&Name as Variable,",3.4.5,
-"    Value as Weight",3.4.5,
-"From_Field(MockConfig,xml)",3.4.5,
-"(XmlSimple, table is [Setup/ScoreCards/Operations/Weight]);",3.4.5,
-"",3.4.5,
-"LET vPeekVal = 0;",3.4.5,
-"",3.4.5,
-"FOR EACH vScoreCardWeight in FieldValueList('Variable')",3.4.5,
-"",3.4.5,
-"	TRACE $(vScoreCardWeight);",3.4.5,
-"    ",3.4.5,
-"    LET $(vScoreCardWeight)Weight = Peek('Weight', $(vPeekVal), 'TTSVariables');",3.4.5,
-"    LET vPeekVal = $(vPeekVal) + 1;",3.4.5,
-"",3.4.5,
-"NEXT vScoreCardWeight;",3.4.5,
-"",3.4.5,
-"LET vPeekVal = 0; //tW 10/25 this is duplicated in Line 30 why do we need 2?",3.4.5,
-"LET vScoreCardWeight = Null();",3.4.5,
-"",3.4.5,
-"UnitsComparisonVariables:",3.4.5,
-"NOCONCATENATE",3.4.5,
-"LOAD",3.4.5,
-"	If(WildMatch(Name, '*Processor'), 'Processor', Name)		AS Actor,",3.4.5,
-"    Value													AS Units",3.4.5,
-"From_Field(MockConfig,xml)",3.4.5,
-"(XmlSimple, table is [Setup/StaffingModel/Personas/Persona]);",3.4.5,
-"",3.4.5,
-"FOR EACH vStaffingUnits in FieldValueList('Actor')",3.4.5,
-"",3.4.5,
-"	TRACE $(vStaffingUnits);",3.4.5,
-"    ",3.4.5,
-"    LET $(vStaffingUnits)StaffingUnits = Peek('Units', $(vPeekVal), 'UnitsComparisonVariables');",3.4.5,
-"    LET vPeekVal = $(vPeekVal) + 1;",3.4.5,
-"",3.4.5,
-"NEXT vStaffingUnits;",3.4.5,
-"",3.4.5,
-"LET vPeekVal = Null();",3.4.5,
-"LET vStaffingUnits = Null();",3.4.5,
-"",3.4.5,
-"DROP TABLES [MockConfig], [TTSVariables], [UnitsComparisonVariables];",3.4.5,
-"///$tab QSS Files",3.4.5,
-"//2024-01-08 JRR externalized all script on this tab, in order increase consistency and reduce",3.4.5,
-"//on-going maintenance effort.  ",3.4.5,
-"//Reference https://teraverde.atlassian.net/browse/CRR-37 for CCA (Coheus Component Architecture) TVI",3.4.5,
-"",3.4.5,
-"// Code common to all apps (Exec, Sales, Ops, Contribution):",3.4.5,
-"//$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/QSS.qvs); ///script below",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"////////////////////TW added Script from Must include ",3.4.5,
-"Trace '----------------------------------------------------------------------';",3.4.5,
-"Trace 'Entering Include File: QSS.qvs under $(vScriptPath)';",3.4.5,
-"Trace '----------------------------------------------------------------------';",3.4.5,
-"sleep 7000;",3.4.5,
-"/**********************************************************************************************************************************************************",3.4.5,
-"	File:		QSS.qvs",3.4.5,
-"	Purpose:	Standard-ize  TVI (and therefore associated QSS.qvs) across Sales, Exec, Ops and Contribution apps",3.4.5,
-"	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"	Author:		Jeff R. Robbins",3.4.5,
-"	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"	Version:	1.0.0",3.4.5,
-"	Date:		2024-01-11",3.4.5,
-"**********************************************************************************************************************************************************/",3.4.5,
-"",3.4.5,
-"SET vSalesScorecardWeightPath='lib://QlikShare/SharedData/Include Files/SalesScorecardWeights.qss';",3.4.5,
-"",3.4.5,
-"$(Must_Include=$(vSalesScorecardWeightPath));",3.4.5,
-"",3.4.5,
-"LET vScorecardVolumeWeight = Peek('Volume_Weight',0,'SalesScorecardWeights');",3.4.5,
-"LET vScorecardMarginWeight = Peek('Margin_Weight',0,'SalesScorecardWeights');",3.4.5,
-"LET vScorecardTurnTimeWeight = Peek('TurnTime_Weight',0,'SalesScorecardWeights');",3.4.5,
-"LET vScorecardPullThroughWeight = Peek('PullThrough_Weight',0,'SalesScorecardWeights');",3.4.5,
-"",3.4.5,
-"Drop Table SalesScorecardWeights;",3.4.5,
-"Trace '----------------------------------------------------------------------';",3.4.5,
-"Trace 'Exiting Include File: QSS.qvs under $(vScriptPath)';",3.4.5,
-"Trace '----------------------------------------------------------------------';",3.4.5,
-"",3.4.5,
-"/////////////////////////end script ",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"",3.4.5,
-"// Include file for just Contribution (vCCA_App was set to Contribution on script tab ""CCA for TVI""):",3.4.5,
-"$(Must_Include=$(vCCA_ScriptPath)CCA_$(vCCA_App)AppIncludePostProcessing.qvs); //script below",3.4.5,
-"",3.4.5,
-"////////////////////TW added Script from Must include ????caused error ",3.4.5,
-"// Trace '-------------------------------------------------------------';",3.4.5,
-"// Trace 'Entering Include File: CCA_$(vCCA_App)IncludePostProcessing.qvs under $(vCCA_ScriptPath)';",3.4.5,
-"// Trace '-------------------------------------------------------------';",3.4.5,
-"// /**********************************************************************************************************************************************************",3.4.5,
-"// 	File:		CCA_ExecAppIncludePostProcessing.qvs",3.4.5,
-"// 	Purpose:	Standard-ize  TVI (and therefore associated QSS.qvs) across Sales, Exec, Ops and Contribution apps",3.4.5,
-"// 	Reference:	https://teraverde.atlassian.net/browse/CRR-37",3.4.5,
-"	",3.4.5,
-"// 	Author:		Jeff R. Robbins",3.4.5,
-"// 	Email:		jrobbins@teraverde.com",3.4.5,
-"	",3.4.5,
-"// 	Version:	1.0.0",3.4.5,
-"// 	Date:		2024-01-11",3.4.5,
-"// **********************************************************************************************************************************************************/",3.4.5,
-"// // Add script as neeed herein:",3.4.5,
-"",3.4.5,
-"// // 2024-03-04 BEGIN BLOCK added by JRR for https://teraverde.atlassian.net/browse/TVCR-349",3.4.5,
-"// Coheus_Input_Final:",3.4.5,
-"// Load  *,",3.4.5,
-"// 	    If([Branch] = '99-Missing' OR IsNull([Branch]) Or [Branch]='No Branch Found',1,0) as [Branch Missing]",3.4.5,
-"// Resident Coheus_Input;",3.4.5,
-"",3.4.5,
-"// DROP Table Coheus_Input;",3.4.5,
-"",3.4.5,
-"// Rename Table Coheus_Input_Final to Coheus_Input;",3.4.5,
-"// // 2024-03-04 END BLOCK added by JRR for https://teraverde.atlassian.net/browse/TVCR-349",3.4.5,
-"",3.4.5,
-"// Trace '-------------------------------------------------------------';",3.4.5,
-"// Trace 'Exiting Include File: CCA_$(vCCA_App)IncludePostProcessing.qvs under $(vCCA_ScriptPath)';",3.4.5,
-"// Trace '-------------------------------------------------------------';",3.4.5,
-"/////////////////////////end script ",3.4.5,
-"",3.4.5,
-"//vScriptPath and vCCA_ScriptPath were set on the script tab named ""CCA for TVI"".",3.4.5,
-"",3.4.5,
-"// Weights pulled from the Setup Tool XML (divided by 10 to maintain the current production trait of the weights being out of 10.)",3.4.5,
-"LET vScorecardVolumeWeight = $(SalesVolumeWeight) / 10;",3.4.5,
-"LET vScorecardMarginWeight = $(SalesMarginWeight) / 10;",3.4.5,
-"LET vScorecardTurnTimeWeight = $(SalesTurnTimeWeight) / 10;",3.4.5,
-"LET vScorecardPullThroughWeight = $(SalesPullThroughWeight) / 10;",3.4.5,
-"LET vScorecardUnitWeight = $(SalesUnitWeight) / 10;",3.4.5,
-"LET vScorecardConcessionWeight = $(SalesConcessionsWeight) / 10;",3.4.5,
-"LET vScorecardOpsUnitWeight = $(OpsUnitWeight) / 10;",3.4.5,
-"LET vScorecardOpsTurnTimeWeight = $(OpsTurnTimeWeight) / 10;",3.4.5,
-"LET vScorecardOpsComplexityWeight = $(OpsComplexityWeight) / 10;",3.4.5,
-"",3.4.5,
-"IF Match(vSectionAccess, 'Yes') THEN",3.4.5,
-"    TRACE Running SectionAccess Script.;",3.4.5,
-"    $(Must_Include=$(vAppScripts)/SectionAccess.qvs);",3.4.5,
-"ELSEIF Match(vSectionAccess, 'No') THEN",3.4.5,
-"    TRACE Skipping SectionAccess Script.;",3.4.5,
-"END IF",3.4.5,
-,3.4.5,

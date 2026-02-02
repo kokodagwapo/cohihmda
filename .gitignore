@@ -194,3 +194,6 @@ coverage/
 .temp/
 tmp/
 temp/
+
+# Qlik documentation (large, not needed in repo)
+QlikAppsAndLogicDictionaryDocs/
