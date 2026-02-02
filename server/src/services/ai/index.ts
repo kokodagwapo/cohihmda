@@ -3,5 +3,34 @@
  * Exports all AI-related services
  */
 
-export * from './dataChatService.js';
-export * from './queryBuilderService.js';
+// Export types from dataChatService
+export type {
+  ChatContext,
+  UserPermissions,
+  RowFilter,
+  DataChatMessage,
+  VisualizationConfig,
+} from "./dataChatService.js";
+
+// Export functions from dataChatService
+export {
+  processDataQuestion,
+  refineQuery,
+} from "./dataChatService.js";
+
+// Export types from queryBuilderService (excluding duplicates already exported)
+export type {
+  QueryContext,
+  FilterOperator,
+  DynamicSource,
+  SecureQueryResult,
+} from "./queryBuilderService.js";
+
+// Export functions from queryBuilderService
+export {
+  getUserPermissions,
+  buildSecureQuery,
+  checkSectionAccess,
+  checkFieldAccess,
+  getAccessibleFields,
+} from "./queryBuilderService.js";

@@ -289,7 +289,7 @@ export async function saveBoard(req: AuthRequest, res: Response) {
  */
 export async function getColumns(req: AuthRequest, res: Response) {
   try {
-    const { boardId } = req.params;
+    const boardId = req.params.boardId as string;
     const tenantId = await getTenantId(req.userId!);
 
     // Verify board belongs to tenant

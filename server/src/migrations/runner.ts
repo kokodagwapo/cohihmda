@@ -347,15 +347,20 @@ export function createPool(config: {
   database: string;
   user: string;
   password: string;
-  ssl?: boolean;
+  ssl?: boolean | { rejectUnauthorized: boolean };
 }): pg.Pool {
+  // Normalize ssl config - if it's an object, use it directly; if boolean true, create object
+  const sslConfig = config.ssl 
+    ? (typeof config.ssl === 'object' ? config.ssl : { rejectUnauthorized: false })
+    : false;
+  
   return new Pool({
     host: config.host,
     port: config.port,
     database: config.database,
     user: config.user,
     password: config.password,
-    ssl: config.ssl ? { rejectUnauthorized: false } : false,
+    ssl: sslConfig,
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,

@@ -296,13 +296,13 @@ function buildFilterClause(
       return { sql: `${field} != $${paramIndex}`, nextParamIndex: paramIndex + 1 };
 
     case 'in':
-      if (!Array.isArray(value)) value = [value];
-      params.push(value);
+      const inValues = Array.isArray(value) ? value : [value];
+      params.push(inValues);
       return { sql: `${field} = ANY($${paramIndex})`, nextParamIndex: paramIndex + 1 };
 
     case 'not_in':
-      if (!Array.isArray(value)) value = [value];
-      params.push(value);
+      const notInValues = Array.isArray(value) ? value : [value];
+      params.push(notInValues);
       return { sql: `${field} != ALL($${paramIndex})`, nextParamIndex: paramIndex + 1 };
 
     case 'contains':

@@ -1,14 +1,22 @@
-import pg from 'pg';
-import { queryMetrics, DateRange, type MetricQueryOptions } from '../metrics/metricsService.js';
-import { collectInsightMetrics, generateLLMInsights, clearCache as clearInsightsCache } from '../insights/index.js';
-import type { GeneratedInsight } from '../insights/index.js';
-import type { LoanAccessFilter } from '../userLoanAccessService.js';
+import pg from "pg";
+import {
+  queryMetrics,
+  DateRange,
+  type MetricQueryOptions,
+} from "../metrics/metricsService.js";
+import type { LoanAccessFilter } from "../userLoanAccessService.js";
+import {
+  collectInsightMetrics,
+  generateLLMInsights,
+  clearCache as clearInsightsCache,
+} from "../insights/index.js";
+import type { GeneratedInsight } from "../insights/index.js";
 
 /**
  * Analytics Service
  * Contains business logic for dashboard analytics endpoints
  * Uses tenant database pools (no tenant_id columns in tenant DBs)
- * 
+ *
  * Note: Functions in this service that query loans should accept an optional
  * userAccessFilter parameter to support user-level loan access filtering.
  * When the filter is provided, it should be applied to all loan queries.
@@ -137,7 +145,8 @@ export async function getFunnelData(
       [parseInt(year)]
     );
 
-    const pullThroughRate = parseFloat(pullThroughResult.rows[0]?.pull_through_rate) || 0;
+    const pullThroughRate =
+      parseFloat(pullThroughResult.rows[0]?.pull_through_rate) || 0;
 
     const funnelData: FunnelData = {
       year: parseInt(year),
@@ -164,7 +173,7 @@ export async function getFunnelData(
     return funnelData;
   } catch (dbError: any) {
     // If loans table doesn't exist, return empty structure
-    if (dbError.code === '42P01') {
+    if (dbError.code === "42P01") {
       return {
         year: parseInt(year),
         loansStarted: { units: 0, volume: 0, conversionRate: 0 },
@@ -180,61 +189,77 @@ export async function getFunnelData(
 }
 
 // Extended timeframe types
-type ExtendedTimeframe = 'wtd' | 'mtd' | 'qtd' | 'ytd' | 'lm' | 'lq' | 'ly' | 'custom';
+type ExtendedTimeframe =
+  | "wtd"
+  | "mtd"
+  | "qtd"
+  | "ytd"
+  | "lw"
+  | "lm"
+  | "lq"
+  | "ly"
+  | "custom";
 
 /**
  * Calculate date range based on timeframe
  * Returns { start, end } for all timeframes
  */
-function getDateRangeForTimeframe(timeframe: ExtendedTimeframe, customStart?: string, customEnd?: string): { start: Date; end: Date } {
+function getDateRangeForTimeframe(
+  timeframe: ExtendedTimeframe,
+  customStart?: string,
+  customEnd?: string
+): { start: Date; end: Date } {
   const now = new Date();
   let start: Date;
   let end: Date = new Date(); // Default end is today
-  
+
   switch (timeframe) {
-    case 'wtd':
+    case "wtd":
       // Week-to-date: Start of current week to today
       start = new Date(now);
       start.setDate(now.getDate() - now.getDay());
       start.setHours(0, 0, 0, 0);
       break;
-    case 'mtd':
+    case "mtd":
       // Month-to-date: Start of current month to today
       start = new Date(now.getFullYear(), now.getMonth(), 1);
       break;
-    case 'qtd':
+    case "qtd":
       // Quarter-to-date: Start of current quarter to today
       const quarter = Math.floor(now.getMonth() / 3);
       start = new Date(now.getFullYear(), quarter * 3, 1);
       break;
-    case 'ytd':
+    case "ytd":
       // Year-to-date: Start of current year to today
       start = new Date(now.getFullYear(), 0, 1);
       break;
-    case 'lm':
+    case "lm":
       // Last Month: Full previous month
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       end = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of prev month
       break;
-    case 'lq':
+    case "lq":
       // Last Quarter: Full previous quarter
       const currentQuarter = Math.floor(now.getMonth() / 3);
       const prevQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
-      const prevQuarterYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const prevQuarterYear =
+        currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
       start = new Date(prevQuarterYear, prevQuarter * 3, 1);
       end = new Date(prevQuarterYear, prevQuarter * 3 + 3, 0); // Last day of prev quarter
       break;
-    case 'ly':
+    case "ly":
       // Last Year: Full previous year
       start = new Date(now.getFullYear() - 1, 0, 1);
       end = new Date(now.getFullYear() - 1, 11, 31);
       break;
-    case 'custom':
+    case "custom":
       // Custom date range - parse as local dates (not UTC)
       if (customStart && customEnd) {
         // Parse 'YYYY-MM-DD' strings as local dates to match preset calculations
-        const [startYear, startMonth, startDay] = customStart.split('-').map(Number);
-        const [endYear, endMonth, endDay] = customEnd.split('-').map(Number);
+        const [startYear, startMonth, startDay] = customStart
+          .split("-")
+          .map(Number);
+        const [endYear, endMonth, endDay] = customEnd.split("-").map(Number);
         start = new Date(startYear, startMonth - 1, startDay);
         end = new Date(endYear, endMonth - 1, endDay);
       } else {
@@ -245,34 +270,34 @@ function getDateRangeForTimeframe(timeframe: ExtendedTimeframe, customStart?: st
     default:
       start = new Date(now.getFullYear(), now.getMonth(), 1);
   }
-  
+
   return { start, end };
 }
 
 /**
  * Calculate date range for previous period (for delta calculation)
- * 
+ *
  * Comparison strategy:
  * - For "to-date" periods (WTD, MTD, QTD, YTD): Compare to previous equivalent period
  * - For "last" periods (LW, LM, LQ, LY): Compare to the period before that
  * - For custom: Compare to same period one year prior (year-over-year)
  */
 function getPreviousPeriodRange(
-  timeframe: ExtendedTimeframe, 
-  customStart?: string, 
+  timeframe: ExtendedTimeframe,
+  customStart?: string,
   customEnd?: string
 ): { start: Date; end: Date } {
   const now = new Date();
   let start: Date;
   let end: Date;
-  
+
   // Helper to get quarter info
   const getQuarterInfo = (date: Date) => {
     const quarter = Math.floor(date.getMonth() / 3); // 0-3
     const year = date.getFullYear();
     return { quarter, year };
   };
-  
+
   // Helper to get previous quarter
   const getPrevQuarter = (quarter: number, year: number) => {
     if (quarter === 0) {
@@ -280,9 +305,9 @@ function getPreviousPeriodRange(
     }
     return { quarter: quarter - 1, year };
   };
-  
+
   switch (timeframe) {
-    case 'wtd': {
+    case "wtd": {
       // WTD compares to previous week (same days)
       const weekStart = new Date(now);
       weekStart.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
@@ -294,22 +319,32 @@ function getPreviousPeriodRange(
       end = prevWeekEnd;
       break;
     }
-    case 'mtd': {
+    case "mtd": {
       // MTD compares to previous month (same days into the month)
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      end = new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), new Date(now.getFullYear(), now.getMonth(), 0).getDate()));
+      end = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        Math.min(
+          now.getDate(),
+          new Date(now.getFullYear(), now.getMonth(), 0).getDate()
+        )
+      );
       break;
     }
-    case 'qtd': {
+    case "qtd": {
       // QTD compares to previous quarter (same days into the quarter)
       const { quarter: currQ, year: currY } = getQuarterInfo(now);
       const { quarter: prevQ, year: prevY } = getPrevQuarter(currQ, currY);
-      const daysIntoQuarter = Math.floor((now.getTime() - new Date(currY, currQ * 3, 1).getTime()) / (1000 * 60 * 60 * 24));
+      const daysIntoQuarter = Math.floor(
+        (now.getTime() - new Date(currY, currQ * 3, 1).getTime()) /
+          (1000 * 60 * 60 * 24)
+      );
       start = new Date(prevY, prevQ * 3, 1);
       end = new Date(prevY, prevQ * 3, 1 + daysIntoQuarter);
       break;
     }
-    case 'lw': {
+    case "lw": {
       // Last Week compares to the week before that
       const lastWeekStart = new Date(now);
       lastWeekStart.setDate(now.getDate() - now.getDay() - 7); // Start of last week
@@ -320,13 +355,13 @@ function getPreviousPeriodRange(
       end.setDate(end.getDate() + 6);
       break;
     }
-    case 'lm': {
+    case "lm": {
       // Last Month compares to the month before that
       start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
       end = new Date(now.getFullYear(), now.getMonth() - 1, 0); // Last day of 2 months ago
       break;
     }
-    case 'lq': {
+    case "lq": {
       // Last Quarter compares to the quarter before that
       const { quarter: currQ, year: currY } = getQuarterInfo(now);
       const { quarter: lastQ, year: lastY } = getPrevQuarter(currQ, currY); // Last Quarter
@@ -335,18 +370,20 @@ function getPreviousPeriodRange(
       end = new Date(prevY, prevQ * 3 + 3, 0); // Last day of that quarter
       break;
     }
-    case 'ly': {
+    case "ly": {
       // Last Year compares to the year before that
       start = new Date(now.getFullYear() - 2, 0, 1);
       end = new Date(now.getFullYear() - 2, 11, 31);
       break;
     }
-    case 'custom': {
+    case "custom": {
       // Custom date range compares to same period one year prior (year-over-year)
       if (customStart && customEnd) {
         // Parse 'YYYY-MM-DD' strings as local dates to match preset calculations
-        const [startYear, startMonth, startDay] = customStart.split('-').map(Number);
-        const [endYear, endMonth, endDay] = customEnd.split('-').map(Number);
+        const [startYear, startMonth, startDay] = customStart
+          .split("-")
+          .map(Number);
+        const [endYear, endMonth, endDay] = customEnd.split("-").map(Number);
         // Shift back one year for year-over-year comparison
         start = new Date(startYear - 1, startMonth - 1, startDay);
         end = new Date(endYear - 1, endMonth - 1, endDay);
@@ -357,7 +394,7 @@ function getPreviousPeriodRange(
       }
       break;
     }
-    case 'ytd':
+    case "ytd":
     default: {
       // YTD compares to same period last year
       start = new Date(now.getFullYear() - 1, 0, 1);
@@ -365,7 +402,7 @@ function getPreviousPeriodRange(
       break;
     }
   }
-  
+
   return { start, end };
 }
 
@@ -375,33 +412,42 @@ function getPreviousPeriodRange(
  */
 export async function getLeaderboardData(
   tenantPool: pg.Pool,
-  timeframe: ExtendedTimeframe = 'mtd',
-  filters?: { 
-    branch?: string; 
-    scope?: 'all' | 'branch' | 'team';
+  timeframe: ExtendedTimeframe = "mtd",
+  filters?: {
+    branch?: string;
+    scope?: "all" | "branch" | "team";
     startDate?: string; // For custom date range
-    endDate?: string;   // For custom date range
+    endDate?: string; // For custom date range
   }
 ): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string }> {
   try {
-    const dateRange = getDateRangeForTimeframe(timeframe, filters?.startDate, filters?.endDate);
+    const dateRange = getDateRangeForTimeframe(
+      timeframe,
+      filters?.startDate,
+      filters?.endDate
+    );
     const startDate = dateRange.start;
     const endDate = dateRange.end;
-    const prevPeriod = getPreviousPeriodRange(timeframe, filters?.startDate, filters?.endDate);
-    
+    const prevPeriod = getPreviousPeriodRange(
+      timeframe,
+      filters?.startDate,
+      filters?.endDate
+    );
+
     // Build WHERE clause for filters
     const conditions: string[] = [];
     const params: any[] = [startDate, endDate];
     let paramIndex = 3;
-    
+
     // Branch filter
     if (filters?.branch) {
       conditions.push(`l.branch = $${paramIndex}`);
       params.push(filters.branch);
       paramIndex++;
     }
-    
-    const branchFilter = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
+
+    const branchFilter =
+      conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
 
     // Query performance metrics grouped by loan_officer name
     // This works even if employees table doesn't exist
@@ -505,10 +551,10 @@ export async function getLeaderboardData(
     // params is [startDate, endDate, ...branchFilter], so slice(2) gets just the branch filter params
     const prevParams = [prevPeriod.start, prevPeriod.end, ...params.slice(2)];
     let prevParamIndex = 3;
-    const prevBranchFilter = filters?.branch 
-      ? `AND l.branch = $${prevParamIndex}` 
-      : '';
-    
+    const prevBranchFilter = filters?.branch
+      ? `AND l.branch = $${prevParamIndex}`
+      : "";
+
     const prevPeriodResult = await tenantPool.query(
       `SELECT 
         l.loan_officer as name,
@@ -527,44 +573,46 @@ export async function getLeaderboardData(
 
     // Create lookup for previous period data
     const prevPeriodMap = new Map<string, number>();
-    prevPeriodResult.rows.forEach(row => {
+    prevPeriodResult.rows.forEach((row) => {
       prevPeriodMap.set(row.name, parseInt(row.loans_closed) || 0);
     });
 
     // Transform results with delta calculation
-    const leaderboard: LeaderboardEntry[] = leaderboardResult.rows.map((row, index) => {
-      const currentLoans = parseInt(row.loans_closed) || 0;
-      const prevLoans = prevPeriodMap.get(row.name) || 0;
-      
-      // Calculate delta percentage (change from previous period)
-      let delta = 0;
-      if (prevLoans > 0) {
-        delta = Math.round(((currentLoans - prevLoans) / prevLoans) * 100);
-      } else if (currentLoans > 0) {
-        delta = 100; // New performer (wasn't in previous period)
-      }
+    const leaderboard: LeaderboardEntry[] = leaderboardResult.rows.map(
+      (row, index) => {
+        const currentLoans = parseInt(row.loans_closed) || 0;
+        const prevLoans = prevPeriodMap.get(row.name) || 0;
 
-      return {
-        rank: index + 1,
-        employeeId: `lo-${index + 1}`, // Generate placeholder ID since we're using name
-        name: row.name || 'Unknown',
-        role: 'Loan Officer', // Default role (could be enhanced with employees table lookup)
-        branch: row.branch || 'Unknown',
-        loansClosed: currentLoans,
-        loansStarted: parseInt(row.loans_started) || 0,
-        totalVolume: parseFloat(row.total_volume) || 0,
-        totalRevenue: parseFloat(row.total_revenue) || 0,
-        avgCycleTime: Math.round(parseFloat(row.avg_cycle_time) || 0),
-        pullThroughRate: Math.round(parseFloat(row.pull_through_rate) || 0),
-        delta,
-      };
-    });
+        // Calculate delta percentage (change from previous period)
+        let delta = 0;
+        if (prevLoans > 0) {
+          delta = Math.round(((currentLoans - prevLoans) / prevLoans) * 100);
+        } else if (currentLoans > 0) {
+          delta = 100; // New performer (wasn't in previous period)
+        }
+
+        return {
+          rank: index + 1,
+          employeeId: `lo-${index + 1}`, // Generate placeholder ID since we're using name
+          name: row.name || "Unknown",
+          role: "Loan Officer", // Default role (could be enhanced with employees table lookup)
+          branch: row.branch || "Unknown",
+          loansClosed: currentLoans,
+          loansStarted: parseInt(row.loans_started) || 0,
+          totalVolume: parseFloat(row.total_volume) || 0,
+          totalRevenue: parseFloat(row.total_revenue) || 0,
+          avgCycleTime: Math.round(parseFloat(row.avg_cycle_time) || 0),
+          pullThroughRate: Math.round(parseFloat(row.pull_through_rate) || 0),
+          delta,
+        };
+      }
+    );
 
     return { leaderboard, timeframe };
   } catch (dbError: any) {
-    console.error('[Leaderboard] Error:', dbError.message);
+    console.error("[Leaderboard] Error:", dbError.message);
     // If loans table doesn't exist, return empty array
-    if (dbError.code === '42P01') {
+    if (dbError.code === "42P01") {
       return { leaderboard: [], timeframe };
     }
     throw dbError;
@@ -586,7 +634,7 @@ export async function getTopTieringRankings(
         AND table_name = 'employees'
       )
     `);
-    
+
     if (!tableCheck.rows[0]?.exists) {
       return { rankings: [] };
     }
@@ -634,55 +682,64 @@ export async function getTopTieringRankings(
       const avgLoanAmount = parseFloat(row.avg_loan_amount) || 0;
       const fundedCount = parseInt(row.funded_count) || 0;
       const loanTypesHandled = parseInt(row.loan_types_handled) || 0;
-      
+
       // Complexity calculations based on FICO, DTI, LTV
       const avgFico = parseFloat(row.avg_fico) || 0;
       const avgDti = parseFloat(row.avg_dti) || 0;
       const avgLtv = parseFloat(row.avg_ltv) || 0;
-      
+
       // FICO Complexity: < 640 = 3, < 680 = 2, < 720 = 1, else 0
-      const ficoComplexity = avgFico < 640 ? 3 : avgFico < 680 ? 2 : avgFico < 720 ? 1 : 0;
-      
+      const ficoComplexity =
+        avgFico < 640 ? 3 : avgFico < 680 ? 2 : avgFico < 720 ? 1 : 0;
+
       // DTI Complexity: > 45 = 3, > 40 = 2, > 35 = 1, else 0
-      const dtiComplexity = avgDti > 45 ? 3 : avgDti > 40 ? 2 : avgDti > 35 ? 1 : 0;
-      
+      const dtiComplexity =
+        avgDti > 45 ? 3 : avgDti > 40 ? 2 : avgDti > 35 ? 1 : 0;
+
       // LTV Complexity: > 90 = 3, > 80 = 2, > 70 = 1, else 0
-      const ltvComplexity = avgLtv > 90 ? 3 : avgLtv > 80 ? 2 : avgLtv > 70 ? 1 : 0;
-      
+      const ltvComplexity =
+        avgLtv > 90 ? 3 : avgLtv > 80 ? 2 : avgLtv > 70 ? 1 : 0;
+
       // Loan Complexity Score: Sum of all three
-      const loanComplexityScore = ficoComplexity + dtiComplexity + ltvComplexity;
-      
+      const loanComplexityScore =
+        ficoComplexity + dtiComplexity + ltvComplexity;
+
       // Risk Factor: Weighted combination
-      const riskFactor = loanComplexityScore * 0.4 + ficoComplexity * 0.3 + dtiComplexity * 0.2 + ltvComplexity * 0.1;
+      const riskFactor =
+        loanComplexityScore * 0.4 +
+        ficoComplexity * 0.3 +
+        dtiComplexity * 0.2 +
+        ltvComplexity * 0.1;
 
       // Productivity Score (0-100)
       // Factors: loans closed (40%), cycle time efficiency (30%), pull-through rate (30%)
-      const cycleTimeEfficiency = avgCycleTime > 0 ? Math.max(0, 100 - (avgCycleTime - 20) * 2) : 50; // Target: 20 days
-      const productivityScore = 
-        (loansClosed * 2) + // Up to 40 points for volume
-        (cycleTimeEfficiency * 0.3) + // Up to 30 points for speed
-        (pullThroughRate * 0.3); // Up to 30 points for conversion
+      const cycleTimeEfficiency =
+        avgCycleTime > 0 ? Math.max(0, 100 - (avgCycleTime - 20) * 2) : 50; // Target: 20 days
+      const productivityScore =
+        loansClosed * 2 + // Up to 40 points for volume
+        cycleTimeEfficiency * 0.3 + // Up to 30 points for speed
+        pullThroughRate * 0.3; // Up to 30 points for conversion
 
       // Profitability Score (0-100)
       // Factors: total volume (50%), revenue per loan (30%), funded count (20%)
       const revenuePerLoan = avgLoanAmount * 0.01; // Estimate 1% revenue
-      const profitabilityScore = 
+      const profitabilityScore =
         Math.min(50, (totalVolume / 1000000) * 5) + // Up to 50 points for volume
         Math.min(30, (revenuePerLoan / 1000) * 3) + // Up to 30 points for margin
-        (fundedCount * 2); // Up to 20 points for funded loans
+        fundedCount * 2; // Up to 20 points for funded loans
 
       // Complexity Score (0-100)
       // Factors: complexity score (40%), loan types (30%), risk factor (30%)
-      const complexityScore = 
-        (loanComplexityScore * 4) + // Up to 40 points (0-9 scale * 4 = 0-36)
-        (loanTypesHandled * 10) + // Up to 30 points (3+ types)
-        (riskFactor * 3); // Up to 30 points (0-10 scale * 3 = 0-30)
+      const complexityScore =
+        loanComplexityScore * 4 + // Up to 40 points (0-9 scale * 4 = 0-36)
+        loanTypesHandled * 10 + // Up to 30 points (3+ types)
+        riskFactor * 3; // Up to 30 points (0-10 scale * 3 = 0-30)
 
       // Composite Score (weighted average)
-      const compositeScore = 
-        (productivityScore * 0.4) +
-        (profitabilityScore * 0.4) +
-        (complexityScore * 0.2);
+      const compositeScore =
+        productivityScore * 0.4 +
+        profitabilityScore * 0.4 +
+        complexityScore * 0.2;
 
       return {
         employeeId: row.employee_id,
@@ -714,12 +771,12 @@ export async function getTopTieringRankings(
     // Add rank
     const rankedResults = rankings.map((ranking, index) => ({
       ...ranking,
-      rank: index + 1
+      rank: index + 1,
     }));
 
     return { rankings: rankedResults };
   } catch (dbError: any) {
-    if (dbError.code === '42P01') {
+    if (dbError.code === "42P01") {
       return { rankings: [] };
     }
     throw dbError;
@@ -733,74 +790,78 @@ export async function getTopTieringRankings(
 export async function getBusinessOverviewMetrics(
   tenantPool: pg.Pool,
   year: string,
-  dateFilter: 'today' | 'mtd' | 'ytd' | 'custom' = 'ytd',
+  dateFilter: "today" | "mtd" | "ytd" | "custom" = "ytd",
   customDateRange?: { start: Date; end: Date }
 ): Promise<BusinessOverviewMetrics> {
   try {
     // Convert dateFilter to date range
     let dateRange: DateRange | undefined;
-    
-    if (dateFilter === 'custom' && customDateRange) {
+
+    if (dateFilter === "custom" && customDateRange) {
+      const formatDate = (d: Date) => d.toISOString().split("T")[0];
       dateRange = {
-        start: customDateRange.start,
-        end: customDateRange.end
+        start: formatDate(customDateRange.start),
+        end: formatDate(customDateRange.end),
       };
     } else {
       // Calculate date range based on filter
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+      const formatDate = (d: Date) => d.toISOString().split("T")[0];
+
       switch (dateFilter) {
-        case 'today':
-          dateRange = { 
-            start: new Date(today), 
-            end: new Date(today.getTime() + 24 * 60 * 60 * 1000) // End of day
+        case "today":
+          dateRange = {
+            start: formatDate(today),
+            end: formatDate(new Date(today.getTime() + 24 * 60 * 60 * 1000)), // End of day
           };
           break;
-        case 'mtd':
-          dateRange = { 
-            start: new Date(today.getFullYear(), today.getMonth(), 1), 
-            end: today 
+        case "mtd":
+          dateRange = {
+            start: formatDate(
+              new Date(today.getFullYear(), today.getMonth(), 1)
+            ),
+            end: formatDate(today),
           };
           break;
-        case 'ytd':
-          dateRange = { 
-            start: new Date(today.getFullYear(), 0, 1), 
-            end: today 
+        case "ytd":
+          dateRange = {
+            start: formatDate(new Date(today.getFullYear(), 0, 1)),
+            end: formatDate(today),
           };
           break;
         default:
           // Default to YTD if unknown
-          dateRange = { 
-            start: new Date(today.getFullYear(), 0, 1), 
-            end: today 
+          dateRange = {
+            start: formatDate(new Date(today.getFullYear(), 0, 1)),
+            end: formatDate(today),
           };
       }
     }
-    
+
     // Query all 6 KPIs using metrics service
     const metricIds = [
-      'active_loans',
-      'closed_loans',
-      'locked_loans',
-      'avg_cycle_time',
-      'pull_through_rate',
-      'credit_pulls'
+      "active_loans",
+      "closed_loans",
+      "locked_loans",
+      "avg_cycle_time",
+      "pull_through_rate",
+      "credit_pulls",
     ];
-    
+
     const results = await queryMetrics(tenantPool, metricIds, { dateRange });
-    
+
     return {
       year: parseInt(year),
-      activeLoans: results.active_loans?.value as number || 0,
-      closedLoans: results.closed_loans?.value as number || 0,
-      lockedLoans: results.locked_loans?.value as number || 0,
-      avgCycleTime: results.avg_cycle_time?.value as number || 0,
-      pullThroughRate: results.pull_through_rate?.value as number || 0,
-      creditPulls: results.credit_pulls?.value as number || 0,
+      activeLoans: (results.active_loans?.value as number) || 0,
+      closedLoans: (results.closed_loans?.value as number) || 0,
+      lockedLoans: (results.locked_loans?.value as number) || 0,
+      avgCycleTime: (results.avg_cycle_time?.value as number) || 0,
+      pullThroughRate: (results.pull_through_rate?.value as number) || 0,
+      creditPulls: (results.credit_pulls?.value as number) || 0,
     };
   } catch (dbError: any) {
-    if (dbError.code === '42P01') {
+    if (dbError.code === "42P01") {
       return {
         year: parseInt(year),
         activeLoans: 0,
@@ -846,7 +907,8 @@ export interface ClosingFalloutForecast {
 
 export async function getClosingFalloutForecast(
   tenantPool: pg.Pool,
-  dateFilter: 'today' | 'mtd' | 'ytd' | 'custom' = 'ytd'
+  dateFilter: "today" | "mtd" | "ytd" | "custom" = "ytd",
+  options: { userAccessFilter?: LoanAccessFilter } = {}
 ): Promise<ClosingFalloutForecast> {
   try {
     // Calculate date range
@@ -854,15 +916,15 @@ export async function getClosingFalloutForecast(
     const endDate = new Date();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     switch (dateFilter) {
-      case 'today':
+      case "today":
         startDate = today;
         break;
-      case 'mtd':
+      case "mtd":
         startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
         break;
-      case 'ytd':
+      case "ytd":
         startDate = new Date(endDate.getFullYear(), 0, 1);
         break;
       default:
@@ -939,7 +1001,7 @@ export async function getClosingFalloutForecast(
 
     // Calculate forecasted closings based on historical pull-through rates
     const pullThroughByLoanType = pullThroughResult.rows.map((row: any) => ({
-      loanType: row.loan_type || 'Unknown',
+      loanType: row.loan_type || "Unknown",
       pullThroughRate: parseFloat(row.pull_through_rate) || 0,
       historicalCount: parseInt(row.historical_count) || 0,
     }));
@@ -970,56 +1032,76 @@ export async function getClosingFalloutForecast(
     );
 
     // Forecast closings for next 30, 60, 90 days
-    const forecastedClosings = ['30 days', '60 days', '90 days'].map((timeframe) => {
-      const days = parseInt(timeframe);
-      let projectedUnits = 0;
-      let projectedVolume = 0;
+    const forecastedClosings = ["30 days", "60 days", "90 days"].map(
+      (timeframe) => {
+        const days = parseInt(timeframe);
+        let projectedUnits = 0;
+        let projectedVolume = 0;
 
-      activeByTypeResult.rows.forEach((row: any) => {
-        const loanType = row.loan_type || 'Unknown';
-        const activeCount = parseInt(row.active_count) || 0;
-        const activeVolume = parseFloat(row.active_volume) || 0;
-        
-        // Find pull-through rate for this loan type
-        const pullThrough = pullThroughByLoanType.find(pt => pt.loanType === loanType);
-        if (pullThrough && pullThrough.historicalCount >= 10) { // Need at least 10 historical loans for confidence
-          // Estimate closings based on pull-through rate and aging days
-          // Loans closer to typical cycle time are more likely to close
-          const estimatedClosings = Math.round(activeCount * (pullThrough.pullThroughRate / 100) * (days / 90));
-          projectedUnits += estimatedClosings;
-          projectedVolume += (activeVolume / activeCount) * estimatedClosings;
-        }
-      });
+        activeByTypeResult.rows.forEach((row: any) => {
+          const loanType = row.loan_type || "Unknown";
+          const activeCount = parseInt(row.active_count) || 0;
+          const activeVolume = parseFloat(row.active_volume) || 0;
 
-      // Confidence based on historical data availability
-      const confidence = pullThroughByLoanType.length > 0 
-        ? Math.min(95, 50 + (pullThroughByLoanType.filter(pt => pt.historicalCount >= 10).length * 10))
-        : 30;
+          // Find pull-through rate for this loan type
+          const pullThrough = pullThroughByLoanType.find(
+            (pt) => pt.loanType === loanType
+          );
+          if (pullThrough && pullThrough.historicalCount >= 10) {
+            // Need at least 10 historical loans for confidence
+            // Estimate closings based on pull-through rate and aging days
+            // Loans closer to typical cycle time are more likely to close
+            const estimatedClosings = Math.round(
+              activeCount * (pullThrough.pullThroughRate / 100) * (days / 90)
+            );
+            projectedUnits += estimatedClosings;
+            projectedVolume += (activeVolume / activeCount) * estimatedClosings;
+          }
+        });
 
-      return {
-        timeframe,
-        projectedUnits: Math.round(projectedUnits),
-        projectedVolume: Math.round(projectedVolume),
-        confidence,
-      };
-    });
+        // Confidence based on historical data availability
+        const confidence =
+          pullThroughByLoanType.length > 0
+            ? Math.min(
+                95,
+                50 +
+                  pullThroughByLoanType.filter((pt) => pt.historicalCount >= 10)
+                    .length *
+                    10
+              )
+            : 30;
+
+        return {
+          timeframe,
+          projectedUnits: Math.round(projectedUnits),
+          projectedVolume: Math.round(projectedVolume),
+          confidence,
+        };
+      }
+    );
 
     // Forecast fallout (withdrawn + denied)
-    const forecastedFallout = ['30 days', '60 days', '90 days'].map((timeframe) => {
-      const days = parseInt(timeframe);
-      // Estimate fallout based on historical patterns (typically 5-15% of active loans)
-      const estimatedFalloutRate = 0.10; // 10% average fallout rate
-      const projectedUnits = Math.round(activeCount * estimatedFalloutRate * (days / 90));
-      const projectedVolume = Math.round((activeVolume / activeCount) * projectedUnits);
-      const lostRevenue = projectedVolume * 0.01; // 1% revenue estimate
+    const forecastedFallout = ["30 days", "60 days", "90 days"].map(
+      (timeframe) => {
+        const days = parseInt(timeframe);
+        // Estimate fallout based on historical patterns (typically 5-15% of active loans)
+        const estimatedFalloutRate = 0.1; // 10% average fallout rate
+        const projectedUnits = Math.round(
+          activeCount * estimatedFalloutRate * (days / 90)
+        );
+        const projectedVolume = Math.round(
+          (activeVolume / activeCount) * projectedUnits
+        );
+        const lostRevenue = projectedVolume * 0.01; // 1% revenue estimate
 
-      return {
-        timeframe,
-        projectedUnits,
-        projectedVolume,
-        lostRevenue: Math.round(lostRevenue),
-      };
-    });
+        return {
+          timeframe,
+          projectedUnits,
+          projectedVolume,
+          lostRevenue: Math.round(lostRevenue),
+        };
+      }
+    );
 
     return {
       activeLoans: {
@@ -1032,7 +1114,7 @@ export async function getClosingFalloutForecast(
       forecastedFallout,
     };
   } catch (dbError: any) {
-    if (dbError.code === '42P01') {
+    if (dbError.code === "42P01") {
       return {
         activeLoans: { units: 0, volume: 0, avgAgingDays: 0 },
         pullThroughByLoanType: [],
@@ -1047,7 +1129,7 @@ export async function getClosingFalloutForecast(
 /**
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
  * Uses LLM-based dynamic insights with fallback to rule-based system
- * 
+ *
  * @param tenantPool - Tenant database connection pool
  * @param dateFilter - Date filter ('today', 'mtd', 'ytd', 'rolling_90_days', 'rolling_13_months')
  * @param authHeader - Optional auth header for external API calls
@@ -1055,12 +1137,13 @@ export async function getClosingFalloutForecast(
  */
 export async function getInsights(
   tenantPool: pg.Pool,
-  dateFilter: string = 'ytd',
+  dateFilter: string = "ytd",
   authHeader?: string,
   options: {
     useLLM?: boolean;
     tenantId?: string;
     forceRefresh?: boolean;
+    userAccessFilter?: LoanAccessFilter;
   } = {}
 ): Promise<{
   insights: Insight[];
@@ -1084,38 +1167,49 @@ export async function getInsights(
   };
 }> {
   const { useLLM = true, tenantId, forceRefresh = false } = options;
-  
+
   // Try LLM-based insights first if enabled
   if (useLLM) {
     try {
-      console.log(`[Insights] Attempting LLM-based insight generation (dateFilter: ${dateFilter}, tenantId: ${tenantId || 'default'})`);
-      
+      console.log(
+        `[Insights] Attempting LLM-based insight generation (dateFilter: ${dateFilter}, tenantId: ${
+          tenantId || "default"
+        })`
+      );
+
       // Clear cache if force refresh
       if (forceRefresh) {
         clearInsightsCache(tenantId);
       }
-      
+
       // Collect metrics from all sources
-      const metricsPayload = await collectInsightMetrics(tenantPool, dateFilter);
-      
+      const metricsPayload = await collectInsightMetrics(
+        tenantPool,
+        dateFilter
+      );
+
       // Generate insights via LLM
       const llmResult = await generateLLMInsights(metricsPayload, tenantId, {
         useCache: !forceRefresh,
-        cacheTtlSeconds: 3600 // 1 hour cache
+        cacheTtlSeconds: 3600, // 1 hour cache
       });
-      
+
       // Convert LLM insights to the expected Insight format
-      const insights: Insight[] = llmResult.insights.map((insight: GeneratedInsight) => ({
-        type: insight.type,
-        message: insight.message,
-        priority: insight.priority,
-        reasoning: insight.reasoning,
-        source: insight.source as Insight['source'],
-        forPodcast: insight.forPodcast
-      }));
-      
-      console.log(`[Insights] LLM generated ${insights.length} insights successfully`);
-      
+      const insights: Insight[] = llmResult.insights.map(
+        (insight: GeneratedInsight) => ({
+          type: insight.type,
+          message: insight.message,
+          priority: insight.priority,
+          reasoning: insight.reasoning,
+          source: insight.source as Insight["source"],
+          forPodcast: insight.forPodcast,
+        })
+      );
+
+      console.log(
+        `[Insights] LLM generated ${insights.length} insights successfully`
+      );
+
       return {
         insights,
         generatedAt: new Date().toISOString(),
@@ -1123,71 +1217,99 @@ export async function getInsights(
         usedLLM: true,
         summaryForPodcast: llmResult.summaryForPodcast,
         summary: {
-          totalLoans: metricsPayload.pipeline.activeLoans + metricsPayload.pipeline.closedLoans,
+          totalLoans:
+            metricsPayload.pipeline.activeLoans +
+            metricsPayload.pipeline.closedLoans,
           revenue: metricsPayload.performance.revenueYTD,
-          pullThroughRate: metricsPayload.performance.pullThroughRolling90D.toFixed(1),
+          pullThroughRate:
+            metricsPayload.performance.pullThroughRolling90D.toFixed(1),
           avgCycleTime: Math.round(metricsPayload.performance.avgCycleTime),
           totalInsights: insights.length,
           bySource: {
-            business_overview: insights.filter(i => ['performance', 'pipeline'].includes(i.source)).length,
+            business_overview: insights.filter((i) =>
+              ["performance", "pipeline"].includes(i.source)
+            ).length,
             leaderboard: 0,
             industry_news: 0,
-            loan_funnel: insights.filter(i => i.source === 'lost_opportunity').length,
-            predictions: insights.filter(i => i.source === 'predictions').length
-          }
-        }
+            loan_funnel: insights.filter((i) => i.source === "lost_opportunity")
+              .length,
+            predictions: insights.filter((i) => i.source === "predictions")
+              .length,
+          },
+        },
       };
     } catch (llmError) {
-      console.error('[Insights] LLM insight generation failed, falling back to rule-based:', llmError);
+      console.error(
+        "[Insights] LLM insight generation failed, falling back to rule-based:",
+        llmError
+      );
       // Continue to rule-based fallback below
     }
   }
-  
+
   // FALLBACK: Rule-based insight generation (existing logic)
-  console.log(`[Insights] Using rule-based insight generation (dateFilter: ${dateFilter})`);
-  
+  console.log(
+    `[Insights] Using rule-based insight generation (dateFilter: ${dateFilter})`
+  );
+
   // Calculate date range for metrics
-  let startDate: Date | null = null;
+  const formatDate = (d: Date) => d.toISOString().split("T")[0];
+  let startDateStr: string | null = null;
   const endDate = new Date();
+  const endDateStr = formatDate(endDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
   switch (dateFilter) {
-    case 'today':
-      startDate = today;
+    case "today":
+      startDateStr = formatDate(today);
       break;
-    case 'mtd':
-      startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    case "mtd":
+      startDateStr = formatDate(
+        new Date(endDate.getFullYear(), endDate.getMonth(), 1)
+      );
       break;
-    case 'ytd':
-      startDate = new Date(endDate.getFullYear(), 0, 1);
+    case "ytd":
+      startDateStr = formatDate(new Date(endDate.getFullYear(), 0, 1));
       break;
     // Rolling 90 days: appropriate for pull-through metrics where loans take 30-45+ days to close
-    case 'rolling_90_days':
-      startDate = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
+    case "rolling_90_days":
+      startDateStr = formatDate(
+        new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000)
+      );
       break;
     // Rolling 13 months: matches Qlik TTS scorecard timeframe (MonthEnd - 13 months)
-    case 'rolling_13_months':
-      const monthEnd = new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0);
-      startDate = new Date(monthEnd.getFullYear(), monthEnd.getMonth() - 12, 1);
+    case "rolling_13_months":
+      const monthEnd = new Date(
+        endDate.getFullYear(),
+        endDate.getMonth() + 1,
+        0
+      );
+      startDateStr = formatDate(
+        new Date(monthEnd.getFullYear(), monthEnd.getMonth() - 12, 1)
+      );
       break;
     default:
-      startDate = null;
+      startDateStr = null;
   }
 
-  const dateRange: DateRange = { start: startDate, end: endDate };
+  const dateRange: DateRange = { start: startDateStr, end: endDateStr };
 
   // Get metrics from the centralized metrics catalog
-  const metricsResult = await queryMetrics(tenantPool, [
-    'active_loans',
-    'closed_loans', 
-    'locked_loans',
-    'avg_cycle_time',
-    'pull_through_rate',
-    'total_volume',
-    'funded_volume',
-    'active_volume'
-  ], { dateRange });
+  const metricsResult = await queryMetrics(
+    tenantPool,
+    [
+      "active_loans",
+      "closed_loans",
+      "locked_loans",
+      "avg_cycle_time",
+      "pull_through_rate",
+      "total_volume",
+      "funded_volume",
+      "active_volume",
+    ],
+    { dateRange }
+  );
 
   // Extract metric values
   const activeLoansCount = Number(metricsResult.active_loans?.value || 0);
@@ -1200,8 +1322,11 @@ export async function getInsights(
 
   // Calculate Rolling 90-Day Pull-Through Rate for insights
   // This is the industry-standard methodology - MTD/YTD is inappropriate since loans take 30-45+ days to close
-  const rolling90DaysStart = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
-  const rolling90DayPullThroughResult = await tenantPool.query(`
+  const rolling90DaysStart = new Date(
+    endDate.getTime() - 90 * 24 * 60 * 60 * 1000
+  );
+  const rolling90DayPullThroughResult = await tenantPool.query(
+    `
     SELECT 
       COUNT(CASE 
         WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
@@ -1215,19 +1340,24 @@ export async function getInsights(
     FROM public.loans l
     WHERE l.application_date >= $1
       AND l.application_date <= $2
-  `, [rolling90DaysStart, endDate]);
-  
-  const pullThroughRateRolling90D = parseFloat(rolling90DayPullThroughResult.rows[0]?.pull_through_rate) || 0;
+  `,
+    [rolling90DaysStart, endDate]
+  );
+
+  const pullThroughRateRolling90D =
+    parseFloat(rolling90DayPullThroughResult.rows[0]?.pull_through_rate) || 0;
 
   // Get loan count for summary
-  const countResult = await tenantPool.query('SELECT COUNT(*) as total FROM public.loans');
-  const totalLoans = parseInt(countResult.rows[0]?.total || '0');
+  const countResult = await tenantPool.query(
+    "SELECT COUNT(*) as total FROM public.loans"
+  );
+  const totalLoans = parseInt(countResult.rows[0]?.total || "0");
 
   // Calculate revenue from funded volume (1% estimate)
   const calculatedRevenue = fundedVolume * 0.01;
 
   // Get basic loan data for insight generation (simpler query)
-  const loansQuery = startDate
+  const loansQuery = startDateStr
     ? `SELECT 
         l.loan_id, l.loan_amount, l.loan_type, l.current_loan_status as status,
         l.application_date, l.closing_date, l.lock_date, l.funding_date,
@@ -1250,7 +1380,7 @@ export async function getInsights(
 
   const loansResult = await tenantPool.query(
     loansQuery,
-    startDate ? [startDate] : []
+    startDateStr ? [startDateStr] : []
   );
 
   const loans = loansResult.rows;
@@ -1259,103 +1389,127 @@ export async function getInsights(
   if (loans.length === 0) {
     const demoInsights: Insight[] = [
       {
-        type: 'info',
-        message: 'YTD revenue reached $2.4M, up 18% versus last year — strong momentum continues.',
-        priority: 'high',
-        reasoning: 'Revenue trajectory shows consistent growth. At current velocity, you\'re positioned for a strong quarter.',
-        source: 'business_overview',
-        forPodcast: true
+        type: "info",
+        message:
+          "YTD revenue reached $2.4M, up 18% versus last year — strong momentum continues.",
+        priority: "high",
+        reasoning:
+          "Revenue trajectory shows consistent growth. At current velocity, you're positioned for a strong quarter.",
+        source: "business_overview",
+        forPodcast: true,
       },
       {
-        type: 'info',
-        message: 'Active pipeline: 185 loans, $78.2M in process — strong pipeline depth.',
-        priority: 'medium',
-        reasoning: 'Pipeline health indicates future revenue potential. Monitor conversion rates closely.',
-        source: 'business_overview',
-        forPodcast: true
+        type: "info",
+        message:
+          "Active pipeline: 185 loans, $78.2M in process — strong pipeline depth.",
+        priority: "medium",
+        reasoning:
+          "Pipeline health indicates future revenue potential. Monitor conversion rates closely.",
+        source: "business_overview",
+        forPodcast: true,
       },
       {
-        type: 'success',
-        message: 'Average cycle time: 28 days — excellent performance, industry-leading.',
-        priority: 'medium',
-        reasoning: 'Each day saved in cycle time recovers approximately $180 in carry cost per loan. At your volume, improvements compound significantly.',
-        source: 'business_overview',
-        forPodcast: false
+        type: "success",
+        message:
+          "Average cycle time: 28 days — excellent performance, industry-leading.",
+        priority: "medium",
+        reasoning:
+          "Each day saved in cycle time recovers approximately $180 in carry cost per loan. At your volume, improvements compound significantly.",
+        source: "business_overview",
+        forPodcast: false,
       },
       {
-        type: 'success',
-        message: 'Top performer: Sarah Chen with $4.2M YTD — 42 loans closed, 87.5% pull-through (R90D, excludes active) — retention priority.',
-        priority: 'high',
-        reasoning: 'Top performers drive disproportionate value. Pull-through uses rolling 90 days and excludes active loans for accuracy.',
-        source: 'leaderboard',
-        forPodcast: true
+        type: "success",
+        message:
+          "Top performer: Sarah Chen with $4.2M YTD — 42 loans closed, 87.5% pull-through (R90D, excludes active) — retention priority.",
+        priority: "high",
+        reasoning:
+          "Top performers drive disproportionate value. Pull-through uses rolling 90 days and excludes active loans for accuracy.",
+        source: "leaderboard",
+        forPodcast: true,
       },
       {
-        type: 'info',
-        message: 'Performance gap: Top performer leads by $1.8M (75%) — opportunity to replicate top-tier playbook across team.',
-        priority: 'medium',
-        reasoning: 'Identifying and scaling top performer strategies could lift overall team performance by 8-12%.',
-        source: 'leaderboard',
-        forPodcast: true
+        type: "info",
+        message:
+          "Performance gap: Top performer leads by $1.8M (75%) — opportunity to replicate top-tier playbook across team.",
+        priority: "medium",
+        reasoning:
+          "Identifying and scaling top performer strategies could lift overall team performance by 8-12%.",
+        source: "leaderboard",
+        forPodcast: true,
       },
       {
-        type: 'info',
-        message: 'Team performance: Top 3 LOs generated 48% of total volume — consider expanding their workflow patterns.',
-        priority: 'medium',
-        reasoning: 'Concentrated performance suggests opportunity for knowledge transfer and process standardization.',
-        source: 'leaderboard',
-        forPodcast: false
+        type: "info",
+        message:
+          "Team performance: Top 3 LOs generated 48% of total volume — consider expanding their workflow patterns.",
+        priority: "medium",
+        reasoning:
+          "Concentrated performance suggests opportunity for knowledge transfer and process standardization.",
+        source: "leaderboard",
+        forPodcast: false,
       },
       {
-        type: 'info',
-        message: 'Industry trend: Mortgage rates stabilizing around 6.5% — refinance activity expected to increase 15-20% in Q2.',
-        priority: 'medium',
-        reasoning: 'Rate stabilization typically triggers refinance demand. Prepare pipeline capacity accordingly.',
-        source: 'industry_news',
-        forPodcast: true
+        type: "info",
+        message:
+          "Industry trend: Mortgage rates stabilizing around 6.5% — refinance activity expected to increase 15-20% in Q2.",
+        priority: "medium",
+        reasoning:
+          "Rate stabilization typically triggers refinance demand. Prepare pipeline capacity accordingly.",
+        source: "industry_news",
+        forPodcast: true,
       },
       {
-        type: 'warning',
-        message: 'Market update: FHA loan volume up 22% nationwide — ensure your team is optimized for government lending.',
-        priority: 'high',
-        reasoning: 'FHA loans require specialized expertise. Training investment now pays dividends as market shifts.',
-        source: 'industry_news',
-        forPodcast: true
+        type: "warning",
+        message:
+          "Market update: FHA loan volume up 22% nationwide — ensure your team is optimized for government lending.",
+        priority: "high",
+        reasoning:
+          "FHA loans require specialized expertise. Training investment now pays dividends as market shifts.",
+        source: "industry_news",
+        forPodcast: true,
       },
       {
-        type: 'info',
-        message: 'Industry insight: Digital closing adoption accelerated 35% — early adopters seeing 12% cycle time reduction.',
-        priority: 'medium',
-        reasoning: 'Technology adoption in lending is accelerating. Early investment in digital tools provides competitive advantage.',
-        source: 'industry_news',
-        forPodcast: false
+        type: "info",
+        message:
+          "Industry insight: Digital closing adoption accelerated 35% — early adopters seeing 12% cycle time reduction.",
+        priority: "medium",
+        reasoning:
+          "Technology adoption in lending is accelerating. Early investment in digital tools provides competitive advantage.",
+        source: "industry_news",
+        forPodcast: false,
       },
       {
-        type: 'success',
-        message: 'Loan funnel: 350 loans started, 185 still active, 165 originated — 47% pull-through (R90D, excludes active), above industry average.',
-        priority: 'high',
-        reasoning: 'Pull-through uses rolling 90 days and excludes active loans for accuracy. Strong rate indicates effective pipeline management.',
-        source: 'loan_funnel',
-        forPodcast: true
+        type: "success",
+        message:
+          "Loan funnel: 350 loans started, 185 still active, 165 originated — 47% pull-through (R90D, excludes active), above industry average.",
+        priority: "high",
+        reasoning:
+          "Pull-through uses rolling 90 days and excludes active loans for accuracy. Strong rate indicates effective pipeline management.",
+        source: "loan_funnel",
+        forPodcast: true,
       },
       {
-        type: 'warning',
-        message: 'Funnel alert: 28 loans withdrawn (8% fallout) — review withdrawal reasons to identify improvement opportunities.',
-        priority: 'medium',
-        reasoning: 'Understanding withdrawal drivers helps prevent future fallout and improves conversion rates.',
-        source: 'loan_funnel',
-        forPodcast: true
+        type: "warning",
+        message:
+          "Funnel alert: 28 loans withdrawn (8% fallout) — review withdrawal reasons to identify improvement opportunities.",
+        priority: "medium",
+        reasoning:
+          "Understanding withdrawal drivers helps prevent future fallout and improves conversion rates.",
+        source: "loan_funnel",
+        forPodcast: true,
       },
       {
-        type: 'info',
-        message: 'Conversion analysis: Lock-to-close rate at 92% — strong execution in final stages of pipeline.',
-        priority: 'medium',
-        reasoning: 'High lock-to-close rate indicates effective underwriting and closing coordination.',
-        source: 'loan_funnel',
-        forPodcast: false
-      }
+        type: "info",
+        message:
+          "Conversion analysis: Lock-to-close rate at 92% — strong execution in final stages of pipeline.",
+        priority: "medium",
+        reasoning:
+          "High lock-to-close rate indicates effective underwriting and closing coordination.",
+        source: "loan_funnel",
+        forPodcast: false,
+      },
     ];
-    
+
     return {
       insights: demoInsights,
       generatedAt: new Date().toISOString(),
@@ -1363,7 +1517,7 @@ export async function getInsights(
       summary: {
         totalLoans: 0,
         revenue: 0,
-        pullThroughRate: '0.0',
+        pullThroughRate: "0.0",
         avgCycleTime: 0,
         totalInsights: demoInsights.length,
         bySource: {
@@ -1371,16 +1525,23 @@ export async function getInsights(
           leaderboard: 3,
           industry_news: 3,
           loan_funnel: 3,
-        }
-      }
+        },
+      },
     };
   }
 
   // Metrics already calculated from the metrics catalog above
   // Now categorize loans for insights generation
-  const withdrawnLoans = loans.filter(l => ['Withdrawn', 'Cancelled'].includes(l.status));
-  const deniedLoans = loans.filter(l => ['Denied', 'Declined'].includes(l.status));
-  const lostRevenue = (withdrawnLoans.length + deniedLoans.length) * (totalVolume / Math.max(loans.length, 1)) * 0.01;
+  const withdrawnLoans = loans.filter((l) =>
+    ["Withdrawn", "Cancelled"].includes(l.status)
+  );
+  const deniedLoans = loans.filter((l) =>
+    ["Denied", "Declined"].includes(l.status)
+  );
+  const lostRevenue =
+    (withdrawnLoans.length + deniedLoans.length) *
+    (totalVolume / Math.max(loans.length, 1)) *
+    0.01;
 
   // Business overview data already calculated from metrics catalog
   const businessOverviewData = {
@@ -1390,14 +1551,14 @@ export async function getInsights(
     avgCycleTime: Math.round(avgCycleTime),
     activeVolume: activeVolume,
     totalVolume: totalVolume,
-    total: totalLoans
+    total: totalLoans,
   };
-  
+
   // Fetch additional data sources for comprehensive insights
   let leaderboardData: any = null;
   let industryNewsData: any = null;
   let funnelData: any = null;
-  
+
   // Query Leaderboard data directly from database
   try {
     // Check if employees table exists
@@ -1408,7 +1569,7 @@ export async function getInsights(
         AND table_name = 'employees'
       )
     `);
-    
+
     let leaderboardResult;
     if (tableCheck.rows[0]?.exists) {
       // Pull-through calculation: excludes active loans from both numerator and denominator
@@ -1437,16 +1598,16 @@ export async function getInsights(
           END), 0) * 100 as pull_through_rate
          FROM public.employees e
          LEFT JOIN public.loans l ON e.id::TEXT = l.loan_officer_id
-           ${startDate ? 'AND l.application_date >= $1' : ''}
+           ${startDateStr ? "AND l.application_date >= $1" : ""}
          GROUP BY e.id, e.first_name, e.last_name, e.role, e.branch
          ORDER BY loans_closed DESC, total_volume DESC
          LIMIT 10`,
-        startDate ? [startDate] : []
+        startDateStr ? [startDateStr] : []
       );
     } else {
       leaderboardResult = { rows: [] };
     }
-    
+
     leaderboardData = {
       leaderboard: leaderboardResult.rows.map((row, index) => ({
         rank: index + 1,
@@ -1459,32 +1620,35 @@ export async function getInsights(
         avgCycleTime: parseFloat(row.avg_cycle_time) || 0,
         pullThroughRate: parseFloat(row.pull_through_rate) || 0,
       })),
-      timeframe: dateFilter
+      timeframe: dateFilter,
     };
   } catch (error: any) {
-    if (error.code !== '42P01') {
-      console.error('Error fetching leaderboard:', error);
+    if (error.code !== "42P01") {
+      console.error("Error fetching leaderboard:", error);
     }
     leaderboardData = { leaderboard: [], timeframe: dateFilter };
   }
-  
+
   // Fetch Industry News data (external API)
   try {
-    const newsResponse = await fetch(`${process.env.API_URL || 'http://localhost:3001'}/api/news`, {
-      headers: {
-        'Authorization': authHeader || ''
+    const newsResponse = await fetch(
+      `${process.env.API_URL || "http://localhost:3001"}/api/news`,
+      {
+        headers: {
+          Authorization: authHeader || "",
+        },
       }
-    });
+    );
     if (newsResponse.ok) {
       industryNewsData = await newsResponse.json();
     }
   } catch (error) {
-    console.error('Error fetching industry news:', error);
+    console.error("Error fetching industry news:", error);
   }
-  
+
   // Query Loan Funnel data directly from database
   try {
-    const funnelQuery = startDate
+    const funnelQuery = startDateStr
       ? `SELECT 
           COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN 1 END) as loans_started,
           SUM(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
@@ -1510,285 +1674,384 @@ export async function getInsights(
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
           SUM(CASE WHEN current_loan_status IN ('denied', 'declined') THEN loan_amount ELSE 0 END) as fallout_denied_volume
          FROM public.loans`;
-    
-    const funnelResult = await tenantPool.query(funnelQuery, startDate ? [startDate] : []);
+
+    const funnelResult = await tenantPool.query(
+      funnelQuery,
+      startDateStr ? [startDateStr] : []
+    );
     if (funnelResult.rows.length > 0) {
       const row = funnelResult.rows[0];
       funnelData = {
         loansStarted: {
           units: parseInt(row.loans_started) || 0,
-          volume: parseFloat(row.loans_started_volume) || 0
+          volume: parseFloat(row.loans_started_volume) || 0,
         },
         stillActive: {
           units: parseInt(row.still_active) || 0,
-          volume: parseFloat(row.still_active_volume) || 0
+          volume: parseFloat(row.still_active_volume) || 0,
         },
         originated: {
           units: parseInt(row.originated) || 0,
-          volume: parseFloat(row.originated_volume) || 0
+          volume: parseFloat(row.originated_volume) || 0,
         },
         falloutWithdrawn: {
           units: parseInt(row.fallout_withdrawn) || 0,
-          volume: parseFloat(row.fallout_withdrawn_volume) || 0
+          volume: parseFloat(row.fallout_withdrawn_volume) || 0,
         },
         falloutDenied: {
           units: parseInt(row.fallout_denied) || 0,
-          volume: parseFloat(row.fallout_denied_volume) || 0
-        }
+          volume: parseFloat(row.fallout_denied_volume) || 0,
+        },
       };
     }
   } catch (error) {
-    console.error('Error fetching funnel data:', error);
+    console.error("Error fetching funnel data:", error);
   }
-  
+
   // Generate insights based on actual data
   const insights: Insight[] = [];
-  
+
   // ========== BUSINESS OVERVIEW INSIGHTS (3 prompts) ==========
   const businessOverviewInsights: Insight[] = [];
-  
+
   if (businessOverviewData) {
-    // 1. Revenue Performance 
+    // 1. Revenue Performance
     if (calculatedRevenue > 0 || businessOverviewData.totalVolume) {
-      const revenueToUse = calculatedRevenue > 0 ? calculatedRevenue : businessOverviewData.totalVolume * 0.01;
-      const revenueFormatted = revenueToUse >= 1000000 
-        ? `$${(revenueToUse / 1000000).toFixed(2)}M`
-        : `$${(revenueToUse / 1000).toFixed(0)}K`;
-      const seed = new Date().toISOString().split('T')[0].split('-').reduce((sum, n) => sum + parseInt(n), 0);
-      const growthRate = dateFilter === 'ytd' ? ((seed % 20) + 10) : ((seed % 15) + 5);
-      
+      const revenueToUse =
+        calculatedRevenue > 0
+          ? calculatedRevenue
+          : businessOverviewData.totalVolume * 0.01;
+      const revenueFormatted =
+        revenueToUse >= 1000000
+          ? `$${(revenueToUse / 1000000).toFixed(2)}M`
+          : `$${(revenueToUse / 1000).toFixed(0)}K`;
+      const seed = new Date()
+        .toISOString()
+        .split("T")[0]
+        .split("-")
+        .reduce((sum, n) => sum + parseInt(n), 0);
+      const growthRate =
+        dateFilter === "ytd" ? (seed % 20) + 10 : (seed % 15) + 5;
+
       businessOverviewInsights.push({
-        type: 'success',
-        message: `${dateFilter === 'today' ? 'Today' : dateFilter === 'mtd' ? 'MTD' : 'YTD'} total revenue reached ${revenueFormatted}${dateFilter === 'ytd' ? `, up ${growthRate}% versus last year` : ''} — strong momentum continues.`,
-        priority: 'high',
+        type: "success",
+        message: `${
+          dateFilter === "today"
+            ? "Today"
+            : dateFilter === "mtd"
+            ? "MTD"
+            : "YTD"
+        } total revenue reached ${revenueFormatted}${
+          dateFilter === "ytd" ? `, up ${growthRate}% versus last year` : ""
+        } — strong momentum continues.`,
+        priority: "high",
         reasoning: `Revenue trajectory shows consistent growth. At current velocity, you're positioned for a strong quarter.`,
-        source: 'business_overview',
-        forPodcast: businessOverviewInsights.length < 2
+        source: "business_overview",
+        forPodcast: businessOverviewInsights.length < 2,
       });
     }
-    
+
     // 2. Active Pipeline Health
     if (businessOverviewData.active) {
       const activeVolume = businessOverviewData.activeVolume || 0;
-      const activeVolumeFormatted = activeVolume >= 1000000
-        ? `$${(activeVolume / 1000000).toFixed(2)}M`
-        : `$${(activeVolume / 1000).toFixed(0)}K`;
-      
+      const activeVolumeFormatted =
+        activeVolume >= 1000000
+          ? `$${(activeVolume / 1000000).toFixed(2)}M`
+          : `$${(activeVolume / 1000).toFixed(0)}K`;
+
       businessOverviewInsights.push({
-        type: 'info',
-        message: `Active pipeline (current): ${businessOverviewData.active} loans, ${activeVolumeFormatted} in process — ${businessOverviewData.active >= 50 ? 'strong' : 'moderate'} pipeline depth.`,
-        priority: 'medium',
+        type: "info",
+        message: `Active pipeline (current): ${
+          businessOverviewData.active
+        } loans, ${activeVolumeFormatted} in process — ${
+          businessOverviewData.active >= 50 ? "strong" : "moderate"
+        } pipeline depth.`,
+        priority: "medium",
         reasoning: `Shows current snapshot of all active loans. Pipeline health indicates future revenue potential.`,
-        source: 'business_overview',
-        forPodcast: businessOverviewInsights.length < 2
+        source: "business_overview",
+        forPodcast: businessOverviewInsights.length < 2,
       });
     }
-    
+
     // 3. Cycle Time Performance (App-Close)
     // Updated thresholds: ≤28 days excellent, 29-35 days good, >35 days needs improvement
-    const cycleTimeToUse = avgCycleTime > 0 ? avgCycleTime : businessOverviewData.avgCycleTime;
+    const cycleTimeToUse =
+      avgCycleTime > 0 ? avgCycleTime : businessOverviewData.avgCycleTime;
     if (cycleTimeToUse) {
-      const cycleStatus = cycleTimeToUse <= 28 ? 'excellent' : cycleTimeToUse <= 35 ? 'good' : 'needs improvement';
-      const cycleType = cycleTimeToUse <= 28 ? 'success' : cycleTimeToUse <= 35 ? 'info' : 'warning';
-      
+      const cycleStatus =
+        cycleTimeToUse <= 28
+          ? "excellent"
+          : cycleTimeToUse <= 35
+          ? "good"
+          : "needs improvement";
+      const cycleType =
+        cycleTimeToUse <= 28
+          ? "success"
+          : cycleTimeToUse <= 35
+          ? "info"
+          : "warning";
+
       businessOverviewInsights.push({
         type: cycleType,
-        message: `Average cycle time: ${Math.round(cycleTimeToUse)} days — ${cycleStatus} performance${cycleTimeToUse <= 28 ? ', industry-leading' : ''}.`,
-        priority: 'medium',
+        message: `Average cycle time: ${Math.round(
+          cycleTimeToUse
+        )} days — ${cycleStatus} performance${
+          cycleTimeToUse <= 28 ? ", industry-leading" : ""
+        }.`,
+        priority: "medium",
         reasoning: `Each day saved in cycle time recovers approximately $180 in carry cost per loan. At your volume, improvements compound significantly.`,
-        source: 'business_overview',
-        forPodcast: false
+        source: "business_overview",
+        forPodcast: false,
       });
     }
-    
+
     // 4. Pull-through Rate (Rolling 90 Days, excludes active loans)
     // Using rolling 90 days because MTD/YTD is inappropriate for loans that take 30-45+ days to close
     // Updated thresholds: 72%+ excellent, 60-71% good, <60% needs attention (industry benchmarks)
     if (pullThroughRateRolling90D > 0) {
-      const pullThroughStatus = pullThroughRateRolling90D >= 72 ? 'excellent' : pullThroughRateRolling90D >= 60 ? 'good' : pullThroughRateRolling90D >= 55 ? 'moderate' : 'needs attention';
-      const pullThroughType = pullThroughRateRolling90D >= 72 ? 'success' : pullThroughRateRolling90D >= 60 ? 'info' : 'warning';
-      
+      const pullThroughStatus =
+        pullThroughRateRolling90D >= 72
+          ? "excellent"
+          : pullThroughRateRolling90D >= 60
+          ? "good"
+          : pullThroughRateRolling90D >= 55
+          ? "moderate"
+          : "needs attention";
+      const pullThroughType =
+        pullThroughRateRolling90D >= 72
+          ? "success"
+          : pullThroughRateRolling90D >= 60
+          ? "info"
+          : "warning";
+
       businessOverviewInsights.push({
         type: pullThroughType,
-        message: `Pull-through rate: ${pullThroughRateRolling90D.toFixed(1)}% (Rolling 90D) — ${pullThroughStatus} conversion${pullThroughRateRolling90D >= 72 ? ', above industry average' : ''}.`,
-        priority: 'high',
+        message: `Pull-through rate: ${pullThroughRateRolling90D.toFixed(
+          1
+        )}% (Rolling 90D) — ${pullThroughStatus} conversion${
+          pullThroughRateRolling90D >= 72 ? ", above industry average" : ""
+        }.`,
+        priority: "high",
         reasoning: `Uses rolling 90 days and excludes active loans (industry standard). Average is 60-70%; top performers achieve 72%+.`,
-        source: 'business_overview',
-        forPodcast: businessOverviewInsights.length < 2
+        source: "business_overview",
+        forPodcast: businessOverviewInsights.length < 2,
       });
     }
   }
-  
+
   insights.push(...businessOverviewInsights);
-  
+
   // ========== LEADERBOARD INSIGHTS (3 prompts) ==========
   const leaderboardInsights: Insight[] = [];
-  
+
   if (leaderboardData?.leaderboard && leaderboardData.leaderboard.length > 0) {
     const topPerformer = leaderboardData.leaderboard[0];
     const secondPerformer = leaderboardData.leaderboard[1];
-    
+
     // 1. Top Performer Recognition
     if (topPerformer) {
-      const topVolumeFormatted = topPerformer.totalVolume >= 1000000
-        ? `$${(topPerformer.totalVolume / 1000000).toFixed(2)}M`
-        : `$${(topPerformer.totalVolume / 1000).toFixed(0)}K`;
-      
-      const periodLabel = dateFilter === 'ytd' ? 'YTD' : dateFilter === 'mtd' ? 'MTD' : dateFilter === 'rolling_90_days' ? 'R90D' : 'period';
+      const topVolumeFormatted =
+        topPerformer.totalVolume >= 1000000
+          ? `$${(topPerformer.totalVolume / 1000000).toFixed(2)}M`
+          : `$${(topPerformer.totalVolume / 1000).toFixed(0)}K`;
+
+      const periodLabel =
+        dateFilter === "ytd"
+          ? "YTD"
+          : dateFilter === "mtd"
+          ? "MTD"
+          : dateFilter === "rolling_90_days"
+          ? "R90D"
+          : "period";
       leaderboardInsights.push({
-        type: 'success',
+        type: "success",
         message: `Top performer: ${topPerformer.name} with ${topVolumeFormatted} ${periodLabel} — ${topPerformer.loansClosed} loans closed — retention priority.`,
-        priority: 'high',
+        priority: "high",
         reasoning: `Top performers drive disproportionate value. Retention focus on top tier is critical.`,
-        source: 'leaderboard',
-        forPodcast: leaderboardInsights.length < 2
+        source: "leaderboard",
+        forPodcast: leaderboardInsights.length < 2,
       });
     }
-    
+
     // 2. Performance Gap Analysis
     if (topPerformer && secondPerformer) {
       const volumeGap = topPerformer.totalVolume - secondPerformer.totalVolume;
-      const gapPercent = ((volumeGap / secondPerformer.totalVolume) * 100).toFixed(0);
-      const gapFormatted = volumeGap >= 1000000
-        ? `$${(volumeGap / 1000000).toFixed(2)}M`
-        : `$${(volumeGap / 1000).toFixed(0)}K`;
-      
+      const gapPercent = (
+        (volumeGap / secondPerformer.totalVolume) *
+        100
+      ).toFixed(0);
+      const gapFormatted =
+        volumeGap >= 1000000
+          ? `$${(volumeGap / 1000000).toFixed(2)}M`
+          : `$${(volumeGap / 1000).toFixed(0)}K`;
+
       leaderboardInsights.push({
-        type: 'info',
+        type: "info",
         message: `Performance gap: Top performer leads by ${gapFormatted} (${gapPercent}%) — opportunity to replicate top-tier playbook across team.`,
-        priority: 'medium',
+        priority: "medium",
         reasoning: `Identifying and scaling top performer strategies could lift overall team performance by 8-12%.`,
-        source: 'leaderboard',
-        forPodcast: leaderboardInsights.length < 2
+        source: "leaderboard",
+        forPodcast: leaderboardInsights.length < 2,
       });
     }
-    
+
     // 3. Team Performance Distribution
     if (leaderboardData.leaderboard.length >= 3) {
-      const top3Volume = leaderboardData.leaderboard.slice(0, 3).reduce((sum: number, emp: any) => sum + (emp.totalVolume || 0), 0);
-      const totalVolume = leaderboardData.leaderboard.reduce((sum: number, emp: any) => sum + (emp.totalVolume || 0), 0);
-      const top3Percent = totalVolume > 0 ? ((top3Volume / totalVolume) * 100).toFixed(0) : '0';
-      
+      const top3Volume = leaderboardData.leaderboard
+        .slice(0, 3)
+        .reduce((sum: number, emp: any) => sum + (emp.totalVolume || 0), 0);
+      const totalVolume = leaderboardData.leaderboard.reduce(
+        (sum: number, emp: any) => sum + (emp.totalVolume || 0),
+        0
+      );
+      const top3Percent =
+        totalVolume > 0 ? ((top3Volume / totalVolume) * 100).toFixed(0) : "0";
+
       leaderboardInsights.push({
-        type: top3Percent >= '50' ? 'warning' : 'info',
-        message: `Top 3 performers account for ${top3Percent}% of total volume — ${top3Percent >= '50' ? 'high concentration risk' : 'balanced distribution'}.`,
-        priority: 'medium',
-        reasoning: `${top3Percent >= '50' ? 'High concentration requires retention focus. ' : ''}Consider coaching middle-tier performers to reduce dependency on top tier.`,
-        source: 'leaderboard',
-        forPodcast: false
+        type: top3Percent >= "50" ? "warning" : "info",
+        message: `Top 3 performers account for ${top3Percent}% of total volume — ${
+          top3Percent >= "50"
+            ? "high concentration risk"
+            : "balanced distribution"
+        }.`,
+        priority: "medium",
+        reasoning: `${
+          top3Percent >= "50"
+            ? "High concentration requires retention focus. "
+            : ""
+        }Consider coaching middle-tier performers to reduce dependency on top tier.`,
+        source: "leaderboard",
+        forPodcast: false,
       });
     }
   }
-  
+
   insights.push(...leaderboardInsights);
-  
+
   // ========== INDUSTRY NEWS INSIGHTS (3 prompts) ==========
   const industryNewsInsights: Insight[] = [];
-  
+
   if (industryNewsData?.newsFeed && industryNewsData.newsFeed.length > 0) {
-    const allNewsItems = industryNewsData.newsFeed.flatMap((source: any) => 
-      (source.items || []).map((item: any) => ({ ...item, source: source.source }))
+    const allNewsItems = industryNewsData.newsFeed.flatMap((source: any) =>
+      (source.items || []).map((item: any) => ({
+        ...item,
+        source: source.source,
+      }))
     );
-    
+
     if (allNewsItems.length > 0) {
       // 1. Market Rate Trends
-      const rateNews = allNewsItems.find((item: any) => 
-        (item.title || '').toLowerCase().includes('rate') || 
-        (item.title || '').toLowerCase().includes('interest')
+      const rateNews = allNewsItems.find(
+        (item: any) =>
+          (item.title || "").toLowerCase().includes("rate") ||
+          (item.title || "").toLowerCase().includes("interest")
       );
       if (rateNews) {
         industryNewsInsights.push({
-          type: 'info',
+          type: "info",
           message: `Industry intelligence: ${rateNews.title} — monitor rate movements for impact on borrower behavior and application volume.`,
-          priority: 'high',
+          priority: "high",
           reasoning: `Rate trends directly affect application volume and refinance activity. Strategic positioning requires real-time market awareness.`,
-          source: 'industry_news',
-          forPodcast: industryNewsInsights.length < 2
+          source: "industry_news",
+          forPodcast: industryNewsInsights.length < 2,
         });
       }
-      
+
       // 2. Regulatory Updates
-      const regulatoryNews = allNewsItems.find((item: any) => 
-        (item.title || '').toLowerCase().includes('regulation') || 
-        (item.title || '').toLowerCase().includes('compliance') ||
-        (item.title || '').toLowerCase().includes('policy')
+      const regulatoryNews = allNewsItems.find(
+        (item: any) =>
+          (item.title || "").toLowerCase().includes("regulation") ||
+          (item.title || "").toLowerCase().includes("compliance") ||
+          (item.title || "").toLowerCase().includes("policy")
       );
       if (regulatoryNews) {
         industryNewsInsights.push({
-          type: 'warning',
+          type: "warning",
           message: `Regulatory update: ${regulatoryNews.title} — review compliance workflows and process updates required.`,
-          priority: 'high',
+          priority: "high",
           reasoning: `Regulatory changes can impact operations, compliance costs, and competitive positioning. Early adaptation is critical.`,
-          source: 'industry_news',
-          forPodcast: industryNewsInsights.length < 2
+          source: "industry_news",
+          forPodcast: industryNewsInsights.length < 2,
         });
       }
-      
+
       // 3. Market Forecast
-      const forecastNews = allNewsItems.find((item: any) => 
-        (item.title || '').toLowerCase().includes('forecast') || 
-        (item.title || '').toLowerCase().includes('outlook') ||
-        (item.title || '').toLowerCase().includes('trend')
+      const forecastNews = allNewsItems.find(
+        (item: any) =>
+          (item.title || "").toLowerCase().includes("forecast") ||
+          (item.title || "").toLowerCase().includes("outlook") ||
+          (item.title || "").toLowerCase().includes("trend")
       );
       if (forecastNews) {
         industryNewsInsights.push({
-          type: 'info',
+          type: "info",
           message: `Market forecast: ${forecastNews.title} — align strategy with projected market conditions.`,
-          priority: 'medium',
+          priority: "medium",
           reasoning: `Market forecasts inform strategic planning and resource allocation. Use insights to optimize timing and positioning.`,
-          source: 'industry_news',
-          forPodcast: false
+          source: "industry_news",
+          forPodcast: false,
         });
       }
     }
   }
-  
+
   insights.push(...industryNewsInsights);
-  
+
   // ========== LOAN FUNNEL INSIGHTS (3 prompts) ==========
   const funnelInsights: Insight[] = [];
-  
+
   if (funnelData) {
     // Note: Removed the funnel summary insight because the query logic is flawed:
     // - "loansStarted" only counts loans with status 'inquiry'/'started', not all loans that entered pipeline
     // - Funded loans have different status so aren't counted in "loansStarted"
     // - This made the funnel percentages meaningless
     // Pull-through (Rolling 90D) in Business Overview is the proper conversion metric.
-    
+
     // Fallout Analysis - only show if there's actual fallout to report
-    const totalFallout = (funnelData.falloutWithdrawn?.units || 0) + (funnelData.falloutDenied?.units || 0);
-    const totalFalloutVolume = (funnelData.falloutWithdrawn?.volume || 0) + (funnelData.falloutDenied?.volume || 0);
-    
+    const totalFallout =
+      (funnelData.falloutWithdrawn?.units || 0) +
+      (funnelData.falloutDenied?.units || 0);
+    const totalFalloutVolume =
+      (funnelData.falloutWithdrawn?.volume || 0) +
+      (funnelData.falloutDenied?.volume || 0);
+
     if (totalFallout > 0) {
       const lostRevenue = totalFalloutVolume * 0.01;
-      const lostRevenueFormatted = lostRevenue >= 1000000
-        ? `$${(lostRevenue / 1000000).toFixed(2)}M`
-        : `$${(lostRevenue / 1000).toFixed(0)}K`;
-      
+      const lostRevenueFormatted =
+        lostRevenue >= 1000000
+          ? `$${(lostRevenue / 1000000).toFixed(2)}M`
+          : `$${(lostRevenue / 1000).toFixed(0)}K`;
+
       funnelInsights.push({
-        type: 'warning',
-        message: `Funnel fallout: ${totalFallout} loans (${lostRevenueFormatted} lost revenue) — ${funnelData.falloutWithdrawn?.units || 0} withdrawn, ${funnelData.falloutDenied?.units || 0} denied — optimization opportunity.`,
-        priority: 'high',
+        type: "warning",
+        message: `Funnel fallout: ${totalFallout} loans (${lostRevenueFormatted} lost revenue) — ${
+          funnelData.falloutWithdrawn?.units || 0
+        } withdrawn, ${
+          funnelData.falloutDenied?.units || 0
+        } denied — optimization opportunity.`,
+        priority: "high",
         reasoning: `Analyzing fallout patterns could identify root causes and recover 30-40% of this opportunity.`,
-        source: 'loan_funnel',
-        forPodcast: funnelInsights.length < 2
+        source: "loan_funnel",
+        forPodcast: funnelInsights.length < 2,
       });
     }
-    
+
     // Note: Pipeline conversion removed - it's redundant with Pull-through (Rolling 90D) which uses
     // the proper methodology. The funnel data filters by application_date, so "originated" only counts
     // loans that started AND funded within the period - misleadingly low due to 30-45 day loan cycles.
   }
-  
+
   insights.push(...funnelInsights);
 
   // Date-based seed for randomization (ensures different insights each day)
-  const todayStr = new Date().toISOString().split('T')[0];
-  const seed = todayStr.split('-').reduce((sum, n) => sum + parseInt(n), 0);
-  
+  const todayStr = new Date().toISOString().split("T")[0];
+  const seed = todayStr.split("-").reduce((sum, n) => sum + parseInt(n), 0);
+
   // Shuffle insights based on date seed to ensure different order each day
-  const shuffled = insights.sort(() => (seed % 2 === 0 ? 1 : -1) * (Math.random() - 0.5));
-  
+  const shuffled = insights.sort(
+    () => (seed % 2 === 0 ? 1 : -1) * (Math.random() - 0.5)
+  );
+
   return {
     insights: shuffled,
     generatedAt: new Date().toISOString(),
@@ -1801,12 +2064,15 @@ export async function getInsights(
       avgCycleTime: Math.round(avgCycleTime),
       totalInsights: insights.length,
       bySource: {
-        business_overview: insights.filter(i => i.source === 'business_overview').length,
-        leaderboard: insights.filter(i => i.source === 'leaderboard').length,
-        industry_news: insights.filter(i => i.source === 'industry_news').length,
-        loan_funnel: insights.filter(i => i.source === 'loan_funnel').length,
-      }
-    }
+        business_overview: insights.filter(
+          (i) => i.source === "business_overview"
+        ).length,
+        leaderboard: insights.filter((i) => i.source === "leaderboard").length,
+        industry_news: insights.filter((i) => i.source === "industry_news")
+          .length,
+        loan_funnel: insights.filter((i) => i.source === "loan_funnel").length,
+      },
+    },
   };
 }
 
@@ -1858,43 +2124,46 @@ export interface DashboardOverview {
  * Get consolidated dashboard overview data
  * PERFORMANCE: Runs multiple queries in parallel and returns combined result in single response
  * This reduces frontend API calls from 4 to 1, improving initial page load
- * 
+ *
  * @param tenantPool - Tenant database connection pool
  * @param period - Period filter ('all' | 'mtd' | 'ytd' | 'last_month' | 'last_year' | year string)
  */
 export async function getDashboardOverview(
   tenantPool: pg.Pool,
-  period: string = 'all'
+  period: string = "all",
+  options: { userAccessFilter?: LoanAccessFilter } = {}
 ): Promise<DashboardOverview> {
   try {
     // Calculate date range based on period
     let startDate: Date | null = null;
     const now = new Date();
-    
+
     switch (period) {
-      case 'mtd':
+      case "mtd":
         startDate = new Date(now.getFullYear(), now.getMonth(), 1);
         break;
-      case 'ytd':
+      case "ytd":
         startDate = new Date(now.getFullYear(), 0, 1);
         break;
-      case 'last_month':
+      case "last_month":
         startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         break;
-      case 'last_year':
+      case "last_year":
         startDate = new Date(now.getFullYear() - 1, 0, 1);
         break;
       default:
         if (/^\d{4}$/.test(period)) {
           startDate = new Date(parseInt(period), 0, 1);
         }
-        // 'all' or invalid = null (no date filter)
+      // 'all' or invalid = null (no date filter)
     }
 
     // PERFORMANCE: Run all queries in parallel
-    const [statsResult, funnelResult, criticalLoansResult, predictionsResult] = await Promise.all([
-      // Stats query
-      tenantPool.query(`
+    const [statsResult, funnelResult, criticalLoansResult, predictionsResult] =
+      await Promise.all([
+        // Stats query
+        tenantPool.query(
+          `
         SELECT 
           COUNT(*) as total,
           COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL THEN 1 END) as active,
@@ -1907,11 +2176,14 @@ export async function getDashboardOverview(
           COUNT(CASE WHEN funding_date IS NOT NULL THEN 1 END)::float / NULLIF(COUNT(*), 0) * 100 as pull_through_rate,
           COUNT(CASE WHEN credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls
         FROM public.loans
-        ${startDate ? 'WHERE application_date >= $1' : ''}
-      `, startDate ? [startDate] : []),
+        ${startDate ? "WHERE application_date >= $1" : ""}
+      `,
+          startDate ? [startDate] : []
+        ),
 
-      // Funnel query
-      tenantPool.query(`
+        // Funnel query
+        tenantPool.query(
+          `
         SELECT 
           COUNT(CASE WHEN application_date IS NOT NULL THEN 1 END) as loans_started,
           SUM(CASE WHEN application_date IS NOT NULL THEN loan_amount ELSE 0 END) as loans_started_volume,
@@ -1924,11 +2196,14 @@ export async function getDashboardOverview(
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
           SUM(CASE WHEN current_loan_status IN ('denied', 'declined') THEN loan_amount ELSE 0 END) as fallout_denied_volume
         FROM public.loans
-        ${startDate ? 'WHERE application_date >= $1' : ''}
-      `, startDate ? [startDate] : []),
+        ${startDate ? "WHERE application_date >= $1" : ""}
+      `,
+          startDate ? [startDate] : []
+        ),
 
-      // Critical loans query (high risk active loans, limited to 50)
-      tenantPool.query(`
+        // Critical loans query (high risk active loans, limited to 50)
+        tenantPool.query(
+          `
         SELECT 
           loan_id,
           loan_amount,
@@ -1955,39 +2230,50 @@ export async function getDashboardOverview(
         FROM public.loans
         WHERE current_loan_status = 'Active Loan'
           AND application_date IS NOT NULL
-          ${startDate ? 'AND application_date >= $1' : ''}
+          ${startDate ? "AND application_date >= $1" : ""}
         ORDER BY risk_score DESC, loan_amount DESC
         LIMIT 50
-      `, startDate ? [startDate] : []),
+      `,
+          startDate ? [startDate] : []
+        ),
 
-      // Predictions query (count by predicted outcome from loan_predictions table if exists)
-      tenantPool.query(`
+        // Predictions query (count by predicted outcome from loan_predictions table if exists)
+        tenantPool
+          .query(
+            `
         SELECT 
           COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as likely_withdraw,
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as likely_decline
         FROM public.loans
         WHERE current_loan_status = 'Active Loan'
-          ${startDate ? 'AND application_date >= $1' : ''}
-      `, startDate ? [startDate] : []).catch(() => ({ rows: [{ likely_withdraw: 0, likely_decline: 0 }] }))
-    ]);
+          ${startDate ? "AND application_date >= $1" : ""}
+      `,
+            startDate ? [startDate] : []
+          )
+          .catch(() => ({ rows: [{ likely_withdraw: 0, likely_decline: 0 }] })),
+      ]);
 
     // Process stats
     const stats = statsResult.rows[0];
-    
+
     // Process funnel
     const funnel = funnelResult.rows[0];
-    
+
     // Process critical loans with risk assessment
     const criticalLoans = criticalLoansResult.rows.map((loan: any) => {
       const riskScore = parseInt(loan.risk_score) || 50;
-      const riskLevel = riskScore >= 70 ? 'Very High' : riskScore >= 50 ? 'Medium' : 'Low';
-      
+      const riskLevel =
+        riskScore >= 70 ? "Very High" : riskScore >= 50 ? "Medium" : "Low";
+
       // Generate reason based on metrics
       const reasons: string[] = [];
-      if (loan.fico_score && loan.fico_score < 680) reasons.push(`Low FICO (${loan.fico_score})`);
-      if (loan.ltv_ratio && loan.ltv_ratio > 85) reasons.push(`High LTV (${loan.ltv_ratio}%)`);
-      if (loan.dti_ratio && loan.dti_ratio > 43) reasons.push(`High DTI (${loan.dti_ratio}%)`);
-      
+      if (loan.fico_score && loan.fico_score < 680)
+        reasons.push(`Low FICO (${loan.fico_score})`);
+      if (loan.ltv_ratio && loan.ltv_ratio > 85)
+        reasons.push(`High LTV (${loan.ltv_ratio}%)`);
+      if (loan.dti_ratio && loan.dti_ratio > 43)
+        reasons.push(`High DTI (${loan.dti_ratio}%)`);
+
       return {
         loanId: loan.loan_id,
         loanAmount: parseFloat(loan.loan_amount) || 0,
@@ -2000,7 +2286,7 @@ export async function getDashboardOverview(
         applicationDate: loan.application_date,
         riskScore,
         riskLevel,
-        reason: reasons.length > 0 ? reasons.join(', ') : 'Standard processing'
+        reason: reasons.length > 0 ? reasons.join(", ") : "Standard processing",
       };
     });
 
@@ -2016,41 +2302,45 @@ export async function getDashboardOverview(
         activeVolume: parseFloat(stats.active_volume) || 0,
         closedVolume: parseFloat(stats.closed_volume) || 0,
         avgCycleTime: Math.round(parseFloat(stats.avg_cycle_time) || 0),
-        pullThroughRate: parseFloat(parseFloat(stats.pull_through_rate || '0').toFixed(1)),
-        creditPulls: parseInt(stats.credit_pulls) || 0
+        pullThroughRate: parseFloat(
+          parseFloat(stats.pull_through_rate || "0").toFixed(1)
+        ),
+        creditPulls: parseInt(stats.credit_pulls) || 0,
       },
       funnel: {
         loansStarted: {
           units: parseInt(funnel.loans_started) || 0,
-          volume: parseFloat(funnel.loans_started_volume) || 0
+          volume: parseFloat(funnel.loans_started_volume) || 0,
         },
         stillActive: {
           units: parseInt(funnel.still_active) || 0,
-          volume: parseFloat(funnel.still_active_volume) || 0
+          volume: parseFloat(funnel.still_active_volume) || 0,
         },
         originated: {
           units: parseInt(funnel.originated) || 0,
-          volume: parseFloat(funnel.originated_volume) || 0
+          volume: parseFloat(funnel.originated_volume) || 0,
         },
         falloutWithdrawn: {
           units: parseInt(funnel.fallout_withdrawn) || 0,
-          volume: parseFloat(funnel.fallout_withdrawn_volume) || 0
+          volume: parseFloat(funnel.fallout_withdrawn_volume) || 0,
         },
         falloutDenied: {
           units: parseInt(funnel.fallout_denied) || 0,
-          volume: parseFloat(funnel.fallout_denied_volume) || 0
-        }
+          volume: parseFloat(funnel.fallout_denied_volume) || 0,
+        },
       },
       criticalLoans,
       predictions: {
         likelyWithdraw: parseInt(predictions.likely_withdraw) || 0,
         likelyDecline: parseInt(predictions.likely_decline) || 0,
-        predictedFalloutTotal: (parseInt(predictions.likely_withdraw) || 0) + (parseInt(predictions.likely_decline) || 0)
-      }
+        predictedFalloutTotal:
+          (parseInt(predictions.likely_withdraw) || 0) +
+          (parseInt(predictions.likely_decline) || 0),
+      },
     };
   } catch (dbError: any) {
     // Handle table not found gracefully
-    if (dbError.code === '42P01') {
+    if (dbError.code === "42P01") {
       return {
         stats: {
           total: 0,
@@ -2061,21 +2351,21 @@ export async function getDashboardOverview(
           closedVolume: 0,
           avgCycleTime: 0,
           pullThroughRate: 0,
-          creditPulls: 0
+          creditPulls: 0,
         },
         funnel: {
           loansStarted: { units: 0, volume: 0 },
           stillActive: { units: 0, volume: 0 },
           originated: { units: 0, volume: 0 },
           falloutWithdrawn: { units: 0, volume: 0 },
-          falloutDenied: { units: 0, volume: 0 }
+          falloutDenied: { units: 0, volume: 0 },
         },
         criticalLoans: [],
         predictions: {
           likelyWithdraw: 0,
           likelyDecline: 0,
-          predictedFalloutTotal: 0
-        }
+          predictedFalloutTotal: 0,
+        },
       };
     }
     throw dbError;

@@ -4,10 +4,10 @@
  * Each lender/client has their own database with complete data isolation
  */
 
-import pg from 'pg';
-import { pool as managementPool } from './managementDatabase.js';
-import { decryptField } from '../services/encryption.js';
-import { createTenantDatabaseSchema } from './tenantDatabaseSchema.js';
+import pg from "pg";
+import { pool as managementPool } from "./managementDatabase.js";
+import { decryptField } from "../services/encryption.js";
+import { createTenantDatabaseSchema } from "./tenantDatabaseSchema.js";
 
 const { Pool } = pg;
 
@@ -42,12 +42,18 @@ class TenantDatabaseManager {
    * Accepts either tenant UUID or slug
    * Includes retry logic for transient connection failures
    */
-  async getTenantConfig(tenantIdOrSlug: string, retries = 2): Promise<TenantDatabaseConfig> {
+  async getTenantConfig(
+    tenantIdOrSlug: string,
+    retries = 2
+  ): Promise<TenantDatabaseConfig> {
     let lastError: Error | null = null;
-    
+
     // Determine if this is a UUID or a slug
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantIdOrSlug);
-    
+    const isUUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        tenantIdOrSlug
+      );
+
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         // Query by ID if UUID, otherwise by slug
@@ -56,18 +62,20 @@ class TenantDatabaseManager {
             id, name, slug, database_name, database_host, database_port,
             database_user, database_password_encrypted, status, deployment_type
           FROM coheus_tenants 
-          WHERE ${isUUID ? 'id' : 'slug'} = $1 AND status = 'active'`,
+          WHERE ${isUUID ? "id" : "slug"} = $1 AND status = 'active'`,
           [tenantIdOrSlug]
         );
 
         if (result.rows.length === 0) {
-          throw new Error(`Tenant ${tenantId} not found or inactive`);
+          throw new Error(`Tenant ${tenantIdOrSlug} not found or inactive`);
         }
 
         const tenant = result.rows[0];
-        
+
         // Decrypt password
-        const password = await decryptField(tenant.database_password_encrypted) || tenant.database_password_encrypted;
+        const password =
+          (await decryptField(tenant.database_password_encrypted)) ||
+          tenant.database_password_encrypted;
 
         return {
           id: tenant.id,
@@ -83,27 +91,37 @@ class TenantDatabaseManager {
         };
       } catch (err: any) {
         lastError = err;
-        
+
         // Check if this is a connection error worth retrying
-        const isConnectionError = 
-          err.code === 'ECONNREFUSED' ||
-          err.code === 'ECONNRESET' ||
-          err.code === 'ETIMEDOUT' ||
-          err.message?.includes('timeout') ||
-          err.message?.includes('Connection terminated');
-        
+        const isConnectionError =
+          err.code === "ECONNREFUSED" ||
+          err.code === "ECONNRESET" ||
+          err.code === "ETIMEDOUT" ||
+          err.message?.includes("timeout") ||
+          err.message?.includes("Connection terminated");
+
         if (isConnectionError && attempt < retries) {
-          console.warn(`[TenantDB] Connection error getting tenant config (attempt ${attempt + 1}/${retries + 1}):`, err.message);
+          console.warn(
+            `[TenantDB] Connection error getting tenant config (attempt ${
+              attempt + 1
+            }/${retries + 1}):`,
+            err.message
+          );
           // Brief delay before retry with exponential backoff
-          await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
+          await new Promise((resolve) =>
+            setTimeout(resolve, 500 * Math.pow(2, attempt))
+          );
           continue;
         }
-        
+
         throw err;
       }
     }
-    
-    throw lastError || new Error(`Failed to get tenant config for ${tenantIdOrSlug}`);
+
+    throw (
+      lastError ||
+      new Error(`Failed to get tenant config for ${tenantIdOrSlug}`)
+    );
   }
 
   /**
@@ -116,20 +134,24 @@ class TenantDatabaseManager {
     // (input could be either slug or ID)
     const config = await this.getTenantConfig(tenantIdOrSlug);
     const tenantId = config.id; // Always use the actual UUID for caching
-    
+
     // Check cache using the actual tenant ID
     const cached = this.tenantPools.get(tenantId);
     if (cached) {
       // Validate the connection is still healthy
       const isHealthy = await this.validatePoolHealth(cached.pool, tenantId);
-      
+
       if (!isHealthy) {
         cached.failureCount++;
-        console.warn(`[TenantDB] Pool health check failed for tenant ${tenantId} (failure ${cached.failureCount}/${this.maxFailureCount})`);
-        
+        console.warn(
+          `[TenantDB] Pool health check failed for tenant ${tenantId} (failure ${cached.failureCount}/${this.maxFailureCount})`
+        );
+
         // If too many failures, evict and recreate
         if (cached.failureCount >= this.maxFailureCount) {
-          console.log(`[TenantDB] Evicting unhealthy pool for tenant ${tenantId}`);
+          console.log(
+            `[TenantDB] Evicting unhealthy pool for tenant ${tenantId}`
+          );
           await this.evictPool(tenantId);
           // Fall through to create new pool
         } else {
@@ -141,13 +163,13 @@ class TenantDatabaseManager {
         // Reset failure count on success
         cached.failureCount = 0;
         cached.lastAccessed = Date.now();
-        
+
         // Ensure schema is applied (only once per pool lifecycle)
         if (!cached.schemaEnsured) {
           await this.ensureSchema(cached.pool, tenantId);
           cached.schemaEnsured = true;
         }
-        
+
         return cached.pool;
       }
     }
@@ -158,10 +180,11 @@ class TenantDatabaseManager {
     }
 
     // Determine SSL requirement
-    const isLocalHost = config.database_host === 'localhost' || 
-                       config.database_host === '127.0.0.1' ||
-                       config.database_host.startsWith('172.') ||
-                       config.database_host.startsWith('10.');
+    const isLocalHost =
+      config.database_host === "localhost" ||
+      config.database_host === "127.0.0.1" ||
+      config.database_host.startsWith("172.") ||
+      config.database_host.startsWith("10.");
     const sslEnabled = !isLocalHost;
 
     // Create pool for tenant database with balanced settings
@@ -180,35 +203,47 @@ class TenantDatabaseManager {
     });
 
     // Handle pool errors - mark for eviction on critical errors
-    pool.on('error', (err: any) => {
+    pool.on("error", (err: any) => {
       console.error(`[TenantDB] Pool error for tenant ${tenantId}:`, {
         message: err.message,
         code: err.code,
         database: config.database_name,
       });
-      
+
       // Increment failure count for connection-related errors
       const cached = this.tenantPools.get(tenantId);
-      if (cached && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT')) {
+      if (
+        cached &&
+        (err.code === "ECONNREFUSED" ||
+          err.code === "ECONNRESET" ||
+          err.code === "ETIMEDOUT")
+      ) {
         cached.failureCount++;
       }
     });
 
     // Set timezone on connection
-    pool.on('connect', async (client) => {
+    pool.on("connect", async (client) => {
       try {
-        await client.query('SET timezone = UTC');
+        await client.query("SET timezone = UTC");
       } catch (err) {
-        console.warn(`[TenantDB] Failed to set timezone for tenant ${tenantId}:`, err);
+        console.warn(
+          `[TenantDB] Failed to set timezone for tenant ${tenantId}:`,
+          err
+        );
       }
     });
 
     // Test the connection before caching
     const isHealthy = await this.validatePoolHealth(pool, tenantId);
     if (!isHealthy) {
-      console.error(`[TenantDB] Failed to establish initial connection for tenant ${tenantId}`);
+      console.error(
+        `[TenantDB] Failed to establish initial connection for tenant ${tenantId}`
+      );
       await pool.end().catch(() => {});
-      throw new Error(`Failed to connect to tenant database ${config.database_name}`);
+      throw new Error(
+        `Failed to connect to tenant database ${config.database_name}`
+      );
     }
 
     // Ensure schema is up to date (creates tables if missing)
@@ -222,7 +257,9 @@ class TenantDatabaseManager {
       failureCount: 0,
     });
 
-    console.log(`[TenantDB] Created pool for tenant ${tenantId} (${config.database_name})`);
+    console.log(
+      `[TenantDB] Created pool for tenant ${tenantId} (${config.database_name})`
+    );
     return pool;
   }
 
@@ -230,23 +267,26 @@ class TenantDatabaseManager {
    * Validate pool health with a simple query
    * Returns true if the connection is healthy, false otherwise
    */
-  private async validatePoolHealth(pool: pg.Pool, tenantId: string): Promise<boolean> {
+  private async validatePoolHealth(
+    pool: pg.Pool,
+    tenantId: string
+  ): Promise<boolean> {
     try {
       // Use a very short timeout for health check (2 seconds)
       const client = await Promise.race([
         pool.connect(),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Health check timeout')), 2000)
-        )
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Health check timeout")), 2000)
+        ),
       ]);
-      
+
       try {
         // Quick ping query
         await Promise.race([
-          client.query('SELECT 1'),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Query timeout')), 1000)
-          )
+          client.query("SELECT 1"),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Query timeout")), 1000)
+          ),
         ]);
         return true;
       } finally {
@@ -254,8 +294,11 @@ class TenantDatabaseManager {
       }
     } catch (error: any) {
       // Only log if it's not a routine timeout (reduce noise)
-      if (!error.message?.includes('timeout')) {
-        console.warn(`[TenantDB] Health check failed for tenant ${tenantId}:`, error.message);
+      if (!error.message?.includes("timeout")) {
+        console.warn(
+          `[TenantDB] Health check failed for tenant ${tenantId}:`,
+          error.message
+        );
       }
       return false;
     }
@@ -270,7 +313,10 @@ class TenantDatabaseManager {
       try {
         await cached.pool.end();
       } catch (err) {
-        console.warn(`[TenantDB] Error closing pool for tenant ${tenantId}:`, err);
+        console.warn(
+          `[TenantDB] Error closing pool for tenant ${tenantId}:`,
+          err
+        );
       }
       this.tenantPools.delete(tenantId);
       console.log(`[TenantDB] Evicted pool for tenant ${tenantId}`);
@@ -287,7 +333,10 @@ class TenantDatabaseManager {
       await createTenantDatabaseSchema(pool);
       console.log(`[TenantDB] Schema ensured for tenant ${tenantId}`);
     } catch (error: any) {
-      console.error(`[TenantDB] Error ensuring schema for tenant ${tenantId}:`, error.message);
+      console.error(
+        `[TenantDB] Error ensuring schema for tenant ${tenantId}:`,
+        error.message
+      );
       // Don't throw - we still want to return the pool even if schema update fails
       // The schema updates use IF NOT EXISTS so failures usually mean partial success
     }
@@ -322,7 +371,10 @@ class TenantDatabaseManager {
           await cached.pool.end();
           console.log(`[TenantDB] Closed pool for tenant ${tenantId}`);
         } catch (err) {
-          console.warn(`[TenantDB] Error closing pool for tenant ${tenantId}:`, err);
+          console.warn(
+            `[TenantDB] Error closing pool for tenant ${tenantId}:`,
+            err
+          );
         }
       }
     );
@@ -340,14 +392,19 @@ class TenantDatabaseManager {
 
     for (const [tenantId, cached] of this.tenantPools.entries()) {
       // Evict if idle for too long or has too many failures
-      if (now - cached.lastAccessed > this.poolIdleTimeout || cached.failureCount >= this.maxFailureCount) {
+      if (
+        now - cached.lastAccessed > this.poolIdleTimeout ||
+        cached.failureCount >= this.maxFailureCount
+      ) {
         tenantsToEvict.push(tenantId);
       }
     }
 
     for (const tenantId of tenantsToEvict) {
       await this.evictPool(tenantId);
-      console.log(`[TenantDB] Cleaned up idle/unhealthy pool for tenant ${tenantId}`);
+      console.log(
+        `[TenantDB] Cleaned up idle/unhealthy pool for tenant ${tenantId}`
+      );
     }
   }
 
@@ -363,7 +420,12 @@ class TenantDatabaseManager {
   /**
    * Get pool stats for debugging
    */
-  getPoolStats(): { tenantId: string; lastAccessed: number; failureCount: number; age: number }[] {
+  getPoolStats(): {
+    tenantId: string;
+    lastAccessed: number;
+    failureCount: number;
+    age: number;
+  }[] {
     const now = Date.now();
     return Array.from(this.tenantPools.entries()).map(([tenantId, cached]) => ({
       tenantId,
@@ -380,7 +442,7 @@ class TenantDatabaseManager {
     // First check management DB for user's tenant association
     // Users table might be in management DB or we need to check tenant DBs
     // For now, we'll need to check profiles in management DB or tenant DBs
-    
+
     // TODO: This needs to be implemented based on where user data is stored
     // For now, return null and let the caller handle it
     return null;
@@ -391,10 +453,10 @@ class TenantDatabaseManager {
 export const tenantDbManager = new TenantDatabaseManager();
 
 // Cleanup idle/unhealthy pools every 5 minutes
-if (typeof setInterval !== 'undefined') {
+if (typeof setInterval !== "undefined") {
   setInterval(() => {
     tenantDbManager.cleanupIdlePools().catch((err) => {
-      console.warn('[TenantDB] Error cleaning up idle pools:', err);
+      console.warn("[TenantDB] Error cleaning up idle pools:", err);
     });
   }, 5 * 60 * 1000); // 5 minutes
 
@@ -403,9 +465,13 @@ if (typeof setInterval !== 'undefined') {
     const stats = tenantDbManager.getPoolStats();
     if (stats.length > 0) {
       console.log(`[TenantDB] Pool stats: ${stats.length} pools cached`);
-      stats.forEach(s => {
+      stats.forEach((s) => {
         if (s.failureCount > 0 || s.age > 10 * 60 * 1000) {
-          console.log(`  - ${s.tenantId}: age=${Math.round(s.age / 1000)}s, failures=${s.failureCount}`);
+          console.log(
+            `  - ${s.tenantId}: age=${Math.round(s.age / 1000)}s, failures=${
+              s.failureCount
+            }`
+          );
         }
       });
     }

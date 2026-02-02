@@ -55,7 +55,7 @@ router.get('/catalog', authenticateToken, apiLimiter, async (req: AuthRequest, r
       name: m.name,
       description: m.description,
       category: m.category,
-      qlikFormula: m.qlikFormula,
+      formula: m.formula,
       sqlQuery: m.sqlQuery,
       defaultDateField: m.defaultDateField
     }));
@@ -75,7 +75,7 @@ router.get('/catalog', authenticateToken, apiLimiter, async (req: AuthRequest, r
  */
 router.get('/:metricId', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    const { metricId } = req.params;
+    const metricId = req.params.metricId as string;
     const tenantPool = getTenantContext(req).tenantPool;
     
     // Get user's loan access context
@@ -201,7 +201,7 @@ router.post('/query', authenticateToken, attachTenantContext, apiLimiter, async 
  */
 router.get('/category/:category', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    const { category } = req.params;
+    const category = req.params.category as string;
     const tenantPool = getTenantContext(req).tenantPool;
     
     // Get user's loan access context

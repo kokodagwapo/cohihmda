@@ -132,7 +132,7 @@ function categorizeColumn(columnName: string): string {
 router.get('/distinct-values/:column', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const tenantPool = getTenantContext(req).tenantPool;
-    const { column } = req.params;
+    const column = req.params.column as string;
     
     // Whitelist of columns that can be queried for distinct values (prevent SQL injection)
     const allowedColumns = [
@@ -4953,7 +4953,7 @@ router.get('/sales-trends', authenticateToken, attachTenantContext, apiLimiter, 
 router.get('/sales-trends/drilldown/:loName', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const tenantPool = getTenantContext(req).tenantPool;
-    const { loName } = req.params;
+    const loName = req.params.loName as string;
     const decodedLoName = decodeURIComponent(loName);
     
     const dateRange = (req.query.date_range as string) || '3-months';
@@ -6084,7 +6084,7 @@ Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
     throw new Error(`OpenAI API error: ${response.status}`);
   }
 
-  const data = await response.json();
+  const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const content = data.choices?.[0]?.message?.content || '[]';
   
   try {

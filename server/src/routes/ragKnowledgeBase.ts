@@ -274,7 +274,7 @@ router.post('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequ
  */
 router.put('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const updates = updateKnowledgeEntrySchema.parse(req.body);
 
     // Check if entry exists
@@ -353,7 +353,7 @@ router.put('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRe
  */
 router.delete('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     // Check if entry exists
     const existingResult = await pool.query(
