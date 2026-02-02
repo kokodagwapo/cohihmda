@@ -10,10 +10,11 @@
 #   - Backend:  only runs when server/, Dockerfile.backend* change
 #   - Infrastructure: only runs when infrastructure/cloudformation/ changes
 #
-# Required Repository Variables (shared):
-#   - AWS_ACCESS_KEY_ID
-#   - AWS_SECRET_ACCESS_KEY
-#   - AWS_DEFAULT_REGION (us-east-2)
+# Authentication: AWS OIDC (no static credentials needed)
+#
+# Required Repository Variables:
+#   - AWS_ROLE_ARN                 - IAM role ARN for OIDC (e.g., arn:aws:iam::339712788893:role/BitbucketOIDC-Coheus)
+#   - AWS_REGION                   - AWS region (default: us-east-2)
 #
 # Required Deployment Variables (per environment: dev, production):
 #   - S3_BUCKET                    - Frontend S3 bucket name
@@ -38,6 +39,29 @@ definitions:
   services:
     docker:
       memory: 3072
+
+  scripts:
+    # OIDC authentication setup script
+    setup-oidc: &setup-oidc |
+      echo "Setting up AWS credentials using OIDC..."
+      echo $BITBUCKET_STEP_OIDC_TOKEN > /tmp/oidc-token
+      chmod 600 /tmp/oidc-token
+
+      # Validate AWS_ROLE_ARN is set
+      if [ -z "$AWS_ROLE_ARN" ]; then
+        echo "ERROR: AWS_ROLE_ARN repository variable is not set"
+        echo "Please set AWS_ROLE_ARN to your IAM role ARN (e.g., arn:aws:iam::123456789:role/BitbucketOIDC-Coheus)"
+        exit 1
+      fi
+
+      # Configure AWS SDK to use OIDC token
+      export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/oidc-token
+      export AWS_ROLE_SESSION_NAME="bitbucket-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-build}-${BITBUCKET_BUILD_NUMBER}"
+      export AWS_REGION="${AWS_REGION:-us-east-2}"
+
+      echo "Using AWS Role: $AWS_ROLE_ARN"
+      echo "AWS Region: $AWS_REGION"
+      echo "Session Name: $AWS_ROLE_SESSION_NAME"
 
   steps:
     # ========================================================================
@@ -78,20 +102,24 @@ definitions:
     # ========================================================================
     - step: &deploy-frontend-dev
         name: Deploy Frontend to Dev
+        oidc: true
         deployment: dev
         caches:
           - npm
         script:
+          - *setup-oidc
           - chmod +x ./scripts/bitbucket/deploy-frontend.sh
           - ./scripts/bitbucket/deploy-frontend.sh
 
     - step: &deploy-frontend-prod
         name: Deploy Frontend to Prod
+        oidc: true
         deployment: production
         trigger: manual
         caches:
           - npm
         script:
+          - *setup-oidc
           - chmod +x ./scripts/bitbucket/deploy-frontend.sh
           - ./scripts/bitbucket/deploy-frontend.sh
 
@@ -100,17 +128,20 @@ definitions:
     # ========================================================================
     - step: &deploy-backend-dev
         name: Deploy Backend to Dev
+        oidc: true
         deployment: dev
         services:
           - docker
         caches:
           - docker
         script:
+          - *setup-oidc
           - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
           - ./scripts/bitbucket/deploy-backend-ecs.sh
 
     - step: &deploy-backend-prod
         name: Deploy Backend to Prod
+        oidc: true
         deployment: production
         trigger: manual
         services:
@@ -118,6 +149,7 @@ definitions:
         caches:
           - docker
         script:
+          - *setup-oidc
           - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
           - ./scripts/bitbucket/deploy-backend-ecs.sh
 
@@ -126,24 +158,22 @@ definitions:
     # ========================================================================
     - step: &deploy-infrastructure-dev
         name: Deploy Infrastructure to Dev
+        oidc: true
         deployment: dev
         script:
-          - echo "Infrastructure changes detected"
-          - echo "CloudFormation templates should be deployed manually or via AWS CLI"
-          - echo "Templates changed - review infrastructure/cloudformation/"
-          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh 2>/dev/null || true
-          - ./scripts/bitbucket/deploy-infrastructure.sh 2>/dev/null || echo "No infrastructure deployment script found - deploy manually"
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
 
     - step: &deploy-infrastructure-prod
         name: Deploy Infrastructure to Prod
+        oidc: true
         deployment: production
         trigger: manual
         script:
-          - echo "Infrastructure changes detected"
-          - echo "CloudFormation templates should be deployed manually or via AWS CLI"
-          - echo "Templates changed - review infrastructure/cloudformation/"
-          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh 2>/dev/null || true
-          - ./scripts/bitbucket/deploy-infrastructure.sh 2>/dev/null || echo "No infrastructure deployment script found - deploy manually"
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
 
 # ============================================================================
 # Pipeline Definitions
@@ -341,3 +371,53 @@ pipelines:
       - step:
           <<: *deploy-infrastructure-prod
           trigger: automatic
+
+    # Database migrations (manual trigger only)
+    run-migrations-dev:
+      - step:
+          name: Run Migrations (Dev)
+          oidc: true
+          deployment: dev
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-dev-dry-run:
+      - step:
+          name: Dry Run Migrations (Dev)
+          oidc: true
+          deployment: dev
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - export DRY_RUN=true
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-prod:
+      - step:
+          name: Run Migrations (Prod)
+          oidc: true
+          deployment: production
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-prod-dry-run:
+      - step:
+          name: Dry Run Migrations (Prod)
+          oidc: true
+          deployment: production
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - export DRY_RUN=true
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh

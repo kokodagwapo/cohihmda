@@ -72,34 +72,63 @@ Before configuring the pipeline, ensure you have:
    - ECR repository for backend images
    - ECS cluster and service (per environment)
 
-2. An IAM user or role with the following permissions:
-   - S3: `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket`
-   - CloudFront: `cloudfront:CreateInvalidation`
-   - ECR: `ecr:GetAuthorizationToken`, `ecr:BatchCheckLayerAvailability`, `ecr:GetDownloadUrlForLayer`, `ecr:BatchGetImage`, `ecr:PutImage`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`
-   - ECS: `ecs:UpdateService`, `ecs:DescribeServices`, `ecs:DescribeClusters`
-   - STS: `sts:GetCallerIdentity`
+2. Your Bitbucket workspace UUID and name (for OIDC authentication setup)
 
 ## Configuration Steps
 
-### Step 1: Enable Pipelines
+### Step 1: Deploy the OIDC IAM Role (One-Time Setup)
+
+The pipeline uses **OIDC (OpenID Connect)** for secure AWS authentication - no static credentials needed.
+
+#### Get Values from Bitbucket
+
+1. Go to **Repository Settings** → **Pipelines** → **OpenID Connect**
+2. Copy these two values exactly as shown:
+   - **Identity provider URL** (e.g., `https://api.bitbucket.org/2.0/workspaces/teraverde/pipelines-config/identity/oidc`)
+   - **Audience** (e.g., `ari:cloud:bitbucket::workspace/{c69f10ea-4cb5-40a2-b147-34fc30a667c7}`)
+
+#### Deploy the CloudFormation Stack
+
+```bash
+# Deploy the OIDC role stack (paste your values from Bitbucket)
+aws cloudformation deploy \
+  --template-file infrastructure/cloudformation/bitbucket-oidc-role.yaml \
+  --stack-name bitbucket-oidc-coheus \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    IdentityProviderURL='https://api.bitbucket.org/2.0/workspaces/teraverde/pipelines-config/identity/oidc' \
+    Audience='ari:cloud:bitbucket::workspace/{c69f10ea-4cb5-40a2-b147-34fc30a667c7}' \
+  --region us-east-2
+
+# Get the role ARN (copy this for Step 3)
+aws cloudformation describe-stacks \
+  --stack-name bitbucket-oidc-coheus \
+  --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' \
+  --output text
+```
+
+> **Important**: Copy the exact values from Bitbucket's OpenID Connect page. Don't modify them.
+
+### Step 2: Enable Pipelines
 
 1. Go to your Bitbucket repository
 2. Navigate to **Repository settings** → **Pipelines** → **Settings**
 3. Enable Pipelines
 
-### Step 2: Configure Repository Variables
+### Step 3: Configure Repository Variables
 
 Go to **Repository settings** → **Pipelines** → **Repository variables**
 
-Add the following **secured** variables (these are shared across all environments):
+Add the following variables (these are shared across all environments):
 
-| Variable                | Description            | Example     |
-| ----------------------- | ---------------------- | ----------- |
-| `AWS_ACCESS_KEY_ID`     | AWS IAM access key     | `AKIA...`   |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM secret key     | `wJalr...`  |
-| `AWS_DEFAULT_REGION`    | AWS region for ECS/ECR | `us-east-2` |
+| Variable       | Description              | Example                                               |
+| -------------- | ------------------------ | ----------------------------------------------------- |
+| `AWS_ROLE_ARN` | IAM role ARN from Step 1 | `arn:aws:iam::339712788893:role/BitbucketOIDC-Coheus` |
+| `AWS_REGION`   | AWS region for ECS/ECR   | `us-east-2`                                           |
 
-### Step 3: Configure Deployment Environments
+> **Note**: No AWS access keys are needed - OIDC handles authentication securely using temporary credentials.
+
+### Step 5: Configure Deployment Environments
 
 Go to **Repository settings** → **Pipelines** → **Deployments**
 
@@ -134,7 +163,7 @@ Go to **Repository settings** → **Pipelines** → **Deployments**
 | `ECS_SERVICE`                | ECS service name                     | `coheus-prod-backend`                                      |
 | `VITE_API_URL`               | Backend API URL (for frontend build) | `https://api.coheus1.com`                                  |
 
-### Step 4: Getting Your AWS Resource Values
+### Step 6: Getting Your AWS Resource Values
 
 #### S3 Bucket Name
 
@@ -283,9 +312,21 @@ export AWS_DEFAULT_REGION="us-east-2"
 ./scripts/bitbucket/deploy-backend-ecs.sh
 ```
 
-## IAM Policy Example
+## IAM Role and Permissions
 
-Here's a minimal IAM policy for the deployment user:
+The OIDC IAM role is created automatically by the CloudFormation template in Step 1. The template includes all necessary permissions for:
+
+- S3 frontend deployment
+- CloudFront cache invalidation
+- ECR image push
+- ECS service updates
+- CloudFormation template validation
+
+If you need to customize permissions, edit `infrastructure/cloudformation/bitbucket-oidc-role.yaml`.
+
+### Manual IAM Policy (Alternative to OIDC)
+
+If you prefer static credentials instead of OIDC, here's the required IAM policy:
 
 ```json
 {
