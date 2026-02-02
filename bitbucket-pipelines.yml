@@ -72,7 +72,7 @@ definitions:
           - server/node_modules/**
           - server/package.json
 
-    # Deploy steps
+    # Deploy steps with automatic change detection
     - step: &deploy-dev
         name: Deploy to Dev
         oidc: true
@@ -81,10 +81,30 @@ definitions:
           - docker
         script:
           - *setup-oidc
-          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
-          - ./scripts/bitbucket/deploy-frontend.sh
-          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
-          - ./scripts/bitbucket/deploy-backend-ecs.sh
+          # Check what changed in this commit
+          - |
+            FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
+            BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
+            echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
+            echo "Backend changed: ${BACKEND_CHANGED:-none}"
+          # Deploy frontend if changed
+          - |
+            if [ -n "$FRONTEND_CHANGED" ]; then
+              echo ">>> Deploying Frontend..."
+              chmod +x ./scripts/bitbucket/deploy-frontend.sh
+              ./scripts/bitbucket/deploy-frontend.sh
+            else
+              echo ">>> Skipping Frontend (no changes)"
+            fi
+          # Deploy backend if changed
+          - |
+            if [ -n "$BACKEND_CHANGED" ]; then
+              echo ">>> Deploying Backend..."
+              chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+              ./scripts/bitbucket/deploy-backend-ecs.sh
+            else
+              echo ">>> Skipping Backend (no changes)"
+            fi
 
     - step: &deploy-prod
         name: Deploy to Production
@@ -95,10 +115,30 @@ definitions:
           - docker
         script:
           - *setup-oidc
-          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
-          - ./scripts/bitbucket/deploy-frontend.sh
-          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
-          - ./scripts/bitbucket/deploy-backend-ecs.sh
+          # Check what changed in this commit
+          - |
+            FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
+            BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
+            echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
+            echo "Backend changed: ${BACKEND_CHANGED:-none}"
+          # Deploy frontend if changed
+          - |
+            if [ -n "$FRONTEND_CHANGED" ]; then
+              echo ">>> Deploying Frontend..."
+              chmod +x ./scripts/bitbucket/deploy-frontend.sh
+              ./scripts/bitbucket/deploy-frontend.sh
+            else
+              echo ">>> Skipping Frontend (no changes)"
+            fi
+          # Deploy backend if changed
+          - |
+            if [ -n "$BACKEND_CHANGED" ]; then
+              echo ">>> Deploying Backend..."
+              chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+              ./scripts/bitbucket/deploy-backend-ecs.sh
+            else
+              echo ">>> Skipping Backend (no changes)"
+            fi
 
     # Individual deploy steps for custom pipelines
     - step: &deploy-frontend-dev
