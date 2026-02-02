@@ -109,7 +109,8 @@ router.get(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      const tenant = await getTenant(req.params.id);
+      const id = req.params.id as string;
+      const tenant = await getTenant(id);
       if (!tenant) {
         return res.status(404).json({ error: 'Tenant not found' });
       }
@@ -132,7 +133,8 @@ router.get(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      const tenant = await getTenantBySlug(req.params.slug);
+      const slug = req.params.slug as string;
+      const tenant = await getTenantBySlug(slug);
       if (!tenant) {
         return res.status(404).json({ error: 'Tenant not found' });
       }
@@ -155,12 +157,13 @@ router.patch(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
+      const id = req.params.id as string;
       const schema = z.object({
         status: z.enum(['active', 'suspended', 'deleted', 'provisioning']),
       });
 
       const validated = schema.parse(req.body);
-      await updateTenantStatus(req.params.id, validated.status);
+      await updateTenantStatus(id, validated.status);
       res.json({ message: 'Tenant status updated' });
     } catch (error: any) {
       console.error('[Tenants] Error updating tenant status:', error);
@@ -183,7 +186,8 @@ router.delete(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      await deleteTenant(req.params.id);
+      const id = req.params.id as string;
+      await deleteTenant(id);
       res.json({ message: 'Tenant deleted' });
     } catch (error: any) {
       console.error('[Tenants] Error deleting tenant:', error);

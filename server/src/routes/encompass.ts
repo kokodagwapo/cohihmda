@@ -180,7 +180,7 @@ router.get('/fields/:connectionId', (req, res, next) => {
   
   try {
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
 
     console.log('[Fields GET] Request received:', { tenantId, losConnectionId, userId: req.userId });
 
@@ -270,7 +270,7 @@ router.get('/fields/:connectionId', (req, res, next) => {
     console.log('[Folders GET] Request received');
     try {
       const tenantId = req.query.tenant_id as string | undefined;
-      const losConnectionId = req.params.connectionId;
+      const losConnectionId = req.params.connectionId as string;
 
       console.log('[Folders GET] Request received:', { tenantId, losConnectionId, userId: req.userId });
 
@@ -367,7 +367,7 @@ router.get('/field-swaps/:connectionId', (req, res, next) => {
   
   try {
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
 
     console.log('[Field Swaps GET] Request received:', { tenantId, losConnectionId, userId: req.userId });
 
@@ -456,7 +456,7 @@ router.delete('/field-swaps/:connectionId', authenticateToken, apiLimiter, async
 
     const body = schema.parse(req.body);
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
 
     if (!tenantId) {
       return res.status(400).json({ error: 'tenant_id query parameter is required' });
@@ -526,7 +526,7 @@ router.get('/discovery/fields/:connectionId', authenticateToken, apiLimiter, asy
   console.log('[Discovery Fields] Request received');
   try {
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
     const useCache = req.query.use_cache !== 'false';
 
     if (!tenantId) {
@@ -572,7 +572,7 @@ router.post('/discovery/analyze/:connectionId', authenticateToken, apiLimiter, a
   console.log('[Discovery Analyze] Request received');
   try {
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
 
     const schema = z.object({
       sampleSize: z.number().int().min(10).max(200).optional().default(50),
@@ -630,7 +630,7 @@ router.get('/discovery/suggestions/:connectionId', authenticateToken, apiLimiter
   console.log('[Discovery Suggestions] Request received');
   try {
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
     const runAnalysis = req.query.run_analysis !== 'false';
     const sampleSize = parseInt(req.query.sample_size as string) || 50;
 
@@ -680,7 +680,7 @@ router.post('/discovery/apply/:connectionId', authenticateToken, apiLimiter, asy
   console.log('[Discovery Apply] Request received');
   try {
     const tenantId = req.query.tenant_id as string | undefined;
-    const losConnectionId = req.params.connectionId;
+    const losConnectionId = req.params.connectionId as string;
 
     const schema = z.object({
       suggestions: z.array(z.object({
@@ -714,7 +714,8 @@ router.post('/discovery/apply/:connectionId', authenticateToken, apiLimiter, asy
     const discoveryService = new EncompassFieldDiscoveryService(tenantPool, apiServer);
 
     console.log(`[Discovery Apply] Applying ${body.suggestions.length} suggestions...`);
-    const result = await discoveryService.applySuggestions(losConnectionId, body.suggestions);
+    const suggestions = body.suggestions as Array<{ coheusAlias: string; fieldId: string }>;
+    const result = await discoveryService.applySuggestions(losConnectionId, suggestions);
 
     res.json({
       success: true,

@@ -322,7 +322,7 @@ router.get('/additional-fields', authenticateToken, attachTenantContext, async (
 router.get('/additional-fields/:id', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     const service = new AdditionalFieldService(tenantPool);
     const field = await service.getFieldDefinitionById(id);
@@ -415,7 +415,7 @@ router.post('/additional-fields', authenticateToken, attachTenantContext, requir
 router.put('/additional-fields/:id', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     const schema = z.object({
       displayName: z.string().min(1).max(255).optional(),
@@ -460,7 +460,7 @@ router.put('/additional-fields/:id', authenticateToken, attachTenantContext, req
 router.delete('/additional-fields/:id', authenticateToken, attachTenantContext, requireRole('tenant_admin', 'super_admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     const service = new AdditionalFieldService(tenantPool);
     const success = await service.deleteField(id, req.userId);
@@ -516,7 +516,7 @@ router.post('/additional-fields/validate', authenticateToken, attachTenantContex
 router.get('/additional-fields/:id/audit', authenticateToken, attachTenantContext, async (req: AuthRequest, res: Response) => {
   try {
     const { tenantPool } = getTenantContext(req);
-    const { id } = req.params;
+    const id = req.params.id as string;
     const limit = parseInt(req.query.limit as string) || 50;
     
     const service = new AdditionalFieldService(tenantPool);

@@ -760,7 +760,7 @@ router.get('/operations', authenticateToken, attachTenantContext, apiLimiter, as
 
       // TTS Score (70/15/15)
       const ttsScore = (
-        (unitRating * weightConfig.unit) +
+        (unitRating * weightConfig.units) +
         (turnTimeRating * weightConfig.turnTime) +
         (complexityRating * weightConfig.complexity)
       );
@@ -1265,7 +1265,7 @@ router.get('/sales-trends', authenticateToken, attachTenantContext, apiLimiter, 
 router.get('/sales-trends/drilldown/:loName', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const tenantPool = getTenantContext(req).tenantPool;
-    const { loName } = req.params;
+    const loName = req.params.loName as string;
     const decodedLoName = decodeURIComponent(loName);
     
     const dateRange = (req.query.date_range as string) || '3-months';

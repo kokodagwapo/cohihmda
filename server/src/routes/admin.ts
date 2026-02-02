@@ -198,7 +198,7 @@ router.get(
   requireRole("super_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id: tenantId } = req.params;
+    const tenantId = req.params.id as string;
 
     // Get tenant database pool
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -273,7 +273,7 @@ router.get(
   } catch (error: any) {
       logError("Error fetching tenant metrics", error, {
         userId: req.userId,
-        tenantId: req.params.id,
+        tenantId: req.params.id as string,
       });
       res
         .status(500)
@@ -448,7 +448,7 @@ router.post(
     auditLog({
       userId: req.userId!,
         action: "create_user",
-        resourceType: "user",
+        resource: "user",
       resourceId: newUser.id,
       metadata: { email: validated.email, role: validated.role },
     });
@@ -482,7 +482,7 @@ router.put(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const validated = updateUserSchema.parse(req.body);
     
     const updates: string[] = [];
@@ -546,7 +546,7 @@ router.put(
     auditLog({
       userId: req.userId!,
         action: "update_user",
-        resourceType: "user",
+        resource: "user",
       resourceId: id,
       metadata: validated,
     });
@@ -560,7 +560,7 @@ router.put(
     } else {
         logError("Error updating user", error, {
           userId: req.userId,
-          userToUpdate: req.params.id,
+          userToUpdate: req.params.id as string,
         });
         res
           .status(500)
@@ -580,7 +580,7 @@ router.delete(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     // Don't allow deleting yourself
     if (id === req.userId) {
@@ -601,7 +601,7 @@ router.delete(
     auditLog({
       userId: req.userId!,
         action: "delete_user",
-        resourceType: "user",
+        resource: "user",
       resourceId: id,
       metadata: { email: result.rows[0].email },
     });
@@ -610,7 +610,7 @@ router.delete(
   } catch (error: any) {
       logError("Error deleting user", error, {
         userId: req.userId,
-        userToDelete: req.params.id,
+        userToDelete: req.params.id as string,
       });
       res
         .status(500)
@@ -732,7 +732,7 @@ router.put(
   requireRole("super_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const schema = z.object({
       email: z.string().min(1).optional(),
       password: z.string().min(6).optional(),
@@ -812,7 +812,7 @@ router.delete(
   requireRole("super_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     if (id === req.userId) {
         return res
@@ -857,7 +857,7 @@ router.get(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = req.params.tenantId as string;
     
     // Tenant admins can only access their own tenant's users
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -901,7 +901,7 @@ router.get(
   } catch (error: any) {
       logError("Error fetching tenant users", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
@@ -923,7 +923,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = req.params.tenantId as string;
     
     // Tenant admins can only create users in their own tenant
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -997,7 +997,7 @@ router.post(
     } else {
         logError("Error creating tenant user", error, {
           userId: req.userId,
-          tenantId: req.params.tenantId,
+          tenantId: req.params.tenantId as string,
         });
         res
           .status(500)
@@ -1020,7 +1020,8 @@ router.put(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId, userId } = req.params;
+    const tenantId = req.params.tenantId as string;
+    const userId = req.params.userId as string;
     
     // Tenant admins can only update users in their own tenant
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -1107,7 +1108,7 @@ router.put(
   } catch (error: any) {
       logError("Error updating tenant user", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
@@ -1129,7 +1130,8 @@ router.delete(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId, userId } = req.params;
+    const tenantId = req.params.tenantId as string;
+    const userId = req.params.userId as string;
     
     // Tenant admins can only delete users in their own tenant
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -1160,7 +1162,7 @@ router.delete(
   } catch (error: any) {
       logError("Error deleting tenant user", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
@@ -1398,7 +1400,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { encompassUserId } = req.params;
+      const encompassUserId = req.params.encompassUserId as string;
       const { los_connection_id, role, invite_method, password, tenant_id } =
         req.body;
 
@@ -1559,7 +1561,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
       const { encompass_user_id, los_connection_id } = req.body;
 
       if (!encompass_user_id || !los_connection_id) {
@@ -1641,7 +1643,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
 
       const tenantSlug = req.tenantSlug;
       if (!tenantSlug) {
@@ -1749,7 +1751,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
 
       // Resolve tenant context - platform admins can pass tenant_id, tenant admins use their own
       const tenantContext = await resolveTenantContext(
@@ -1807,7 +1809,7 @@ router.get(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
       const { limit } = req.query;
 
       const tenantSlug = req.tenantSlug;
@@ -1854,7 +1856,7 @@ router.get(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
 
       const tenantSlug = req.tenantSlug;
       if (!tenantSlug) {

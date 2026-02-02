@@ -148,7 +148,8 @@ export async function attachTenantContext(
         console.log('[TenantContext] Tenant verified, using query tenant:', tenantId);
       } else {
         console.warn('[TenantContext] Tenant not found or inactive:', queryTenantId);
-        return res.status(404).json({ error: 'Tenant not found or inactive' });
+        res.status(404).json({ error: 'Tenant not found or inactive' });
+        return;
       }
     } else if (queryTenantId && !isPlatformStaff) {
       // Non-platform users cannot use tenant_id query param - silently ignore it
@@ -167,14 +168,16 @@ export async function attachTenantContext(
       // They just need to select a tenant in the UI
       if (userRole === 'super_admin' || userRole === 'platform_admin' || userRole === 'support') {
         console.log('[TenantContext] Platform user without tenant selected:', { userId: req.userId, userRole });
-        return res.status(400).json({ 
+        res.status(400).json({ 
           error: 'No tenant selected', 
           message: 'Please select a tenant to view data',
           requiresTenantSelection: true
         });
+        return;
       }
       console.warn('[TenantContext] No tenant found for user:', { userId: req.userId, userRole, queryTenantId });
-      return res.status(403).json({ error: 'Tenant not found for user' });
+      res.status(403).json({ error: 'Tenant not found for user' });
+      return;
     }
 
     console.log('[TenantContext] Using tenant:', { userId: req.userId, tenantId, userRole });
@@ -206,7 +209,8 @@ export async function attachTenantContext(
     next();
   } catch (error: any) {
     console.error('[TenantContext] Error attaching tenant context:', error);
-    return res.status(500).json({ error: 'Failed to attach tenant context' });
+    res.status(500).json({ error: 'Failed to attach tenant context' });
+    return;
   }
 }
 
