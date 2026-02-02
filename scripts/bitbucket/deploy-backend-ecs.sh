@@ -4,13 +4,18 @@
 # ============================================================================
 # Builds Docker image, pushes to ECR, and updates ECS service
 #
+# Authentication: Uses AWS OIDC (credentials set up by pipeline before this script)
+#
 # Required Environment Variables (set in Bitbucket Deployment Variables):
-#   - AWS_ACCESS_KEY_ID        - AWS credentials (repository variable)
-#   - AWS_SECRET_ACCESS_KEY    - AWS credentials (repository variable)
-#   - AWS_DEFAULT_REGION       - AWS region (repository variable, e.g., us-east-2)
+#   - AWS_ROLE_ARN             - IAM role ARN for OIDC (repository variable)
+#   - AWS_REGION               - AWS region (repository variable, e.g., us-east-2)
 #   - ECR_REPOSITORY_URI       - Full ECR repository URI (e.g., 123456789.dkr.ecr.us-east-2.amazonaws.com/repo)
 #   - ECS_CLUSTER              - ECS cluster name
 #   - ECS_SERVICE              - ECS service name
+#
+# OIDC Environment (set by pipeline setup-oidc script):
+#   - AWS_WEB_IDENTITY_TOKEN_FILE - Path to OIDC token
+#   - AWS_ROLE_SESSION_NAME    - Session name for assume role
 # ============================================================================
 
 set -euo pipefail
@@ -29,17 +34,19 @@ IMAGE_TAG="${BITBUCKET_COMMIT:-latest}-$(date +%Y%m%d%H%M%S)"
 validate_env_vars() {
     local missing_vars=()
     
-    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-        missing_vars+=("AWS_ACCESS_KEY_ID")
+    # Check for OIDC authentication
+    if [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        echo "ERROR: No AWS credentials found."
+        echo "Ensure OIDC is configured (AWS_WEB_IDENTITY_TOKEN_FILE) or static credentials (AWS_ACCESS_KEY_ID)."
+        exit 1
     fi
     
-    if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-        missing_vars+=("AWS_SECRET_ACCESS_KEY")
+    if [ -z "${AWS_ROLE_ARN:-}" ] && [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        missing_vars+=("AWS_ROLE_ARN")
     fi
     
-    if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
-        missing_vars+=("AWS_DEFAULT_REGION")
-    fi
+    # Use AWS_REGION or AWS_DEFAULT_REGION
+    export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
     
     if [ -z "${ECR_REPOSITORY_URI:-}" ]; then
         missing_vars+=("ECR_REPOSITORY_URI")
@@ -64,6 +71,11 @@ validate_env_vars() {
     fi
     
     echo "Environment variables validated."
+    if [ -n "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ]; then
+        echo "Authentication: OIDC"
+    else
+        echo "Authentication: Static credentials"
+    fi
 }
 
 # ============================================================================

@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  IAM Role for Bitbucket Pipelines OIDC Authentication (uses existing OIDC provider)
+
+Parameters:
+  ExistingOIDCProviderArn:
+    Type: String
+    Description: ARN of existing Bitbucket OIDC provider (get from aws iam list-open-id-connect-providers)
+    Default: arn:aws:iam::339712788893:oidc-provider/api.bitbucket.org/2.0/workspaces/teraverde/pipelines-config/identity/oidc
+
+  Audience:
+    Type: String
+    Description: Bitbucket Audience value
+    Default: ari:cloud:bitbucket::workspace/c69f10ea-4cb5-40a2-b147-34fc30a667c7
+
+  RoleName:
+    Type: String
+    Default: BitbucketOIDC-Coheus
+    Description: Name for the IAM role
+
+Resources:
+  # IAM Role that Bitbucket Pipelines will assume
+  BitbucketOIDCRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: IAM role for Bitbucket Pipelines to deploy Coheus application
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref ExistingOIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                api.bitbucket.org/2.0/workspaces/teraverde/pipelines-config/identity/oidc:aud: !Ref Audience
+      Tags:
+        - Key: Purpose
+          Value: Bitbucket Pipelines Deployment
+        - Key: Application
+          Value: Coheus
+
+  # Deployment policy
+  DeploymentPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CoheusDeploymentPolicy
+      Roles:
+        - !Ref BitbucketOIDCRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # S3 frontend deployment
+          - Sid: S3Access
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:DeleteObject
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - arn:aws:s3:::coheus-*
+              - arn:aws:s3:::coheus-*/*
+
+          # CloudFront cache invalidation
+          - Sid: CloudFrontAccess
+            Effect: Allow
+            Action:
+              - cloudfront:CreateInvalidation
+              - cloudfront:GetInvalidation
+              - cloudfront:ListInvalidations
+            Resource: "*"
+
+          # ECR authentication
+          - Sid: ECRAuth
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+
+          # ECR repository access
+          - Sid: ECRRepository
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+            Resource: !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/coheus-*
+
+          # ECS deployment
+          - Sid: ECSAccess
+            Effect: Allow
+            Action:
+              - ecs:UpdateService
+              - ecs:DescribeServices
+              - ecs:DescribeClusters
+              - ecs:ListServices
+              - ecs:DescribeTaskDefinition
+              - ecs:ListTaskDefinitions
+              - ecs:ListClusters
+              - ecs:ListTasks
+              - ecs:DescribeTasks
+              - ecs:ExecuteCommand
+            Resource: "*"
+
+          # SSM for ECS Exec (required for running migrations)
+          - Sid: SSMForECSExec
+            Effect: Allow
+            Action:
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+            Resource: "*"
+
+          # ECS task role pass
+          - Sid: IAMPassRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/*
+            Condition:
+              StringEquals:
+                iam:PassedToService: ecs-tasks.amazonaws.com
+
+          # CloudFormation template validation
+          - Sid: CloudFormationValidate
+            Effect: Allow
+            Action:
+              - cloudformation:ValidateTemplate
+            Resource: "*"
+
+          # STS for identity verification
+          - Sid: STSAccess
+            Effect: Allow
+            Action:
+              - sts:GetCallerIdentity
+            Resource: "*"
+
+Outputs:
+  RoleArn:
+    Description: Set this as AWS_ROLE_ARN in Bitbucket Repository Variables
+    Value: !GetAtt BitbucketOIDCRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-RoleArn
+
+  RoleName:
+    Description: Name of the IAM role
+    Value: !Ref BitbucketOIDCRole

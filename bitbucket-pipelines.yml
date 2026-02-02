@@ -1,0 +1,423 @@
+# ============================================================================
+# Bitbucket Pipelines Configuration for Coheus
+# ============================================================================
+# Deployment triggers:
+#   - dev branch   → Deploy to dev environment
+#   - main branch  → Deploy to production environment
+#
+# Conditional execution:
+#   - Frontend: only runs when src/, public/, index.html, package.json change
+#   - Backend:  only runs when server/, Dockerfile.backend* change
+#   - Infrastructure: only runs when infrastructure/cloudformation/ changes
+#
+# Authentication: AWS OIDC (no static credentials needed)
+#
+# Required Repository Variables:
+#   - AWS_ROLE_ARN                 - IAM role ARN for OIDC (e.g., arn:aws:iam::339712788893:role/BitbucketOIDC-Coheus)
+#   - AWS_REGION                   - AWS region (default: us-east-2)
+#
+# Required Deployment Variables (per environment: dev, production):
+#   - S3_BUCKET                    - Frontend S3 bucket name
+#   - CLOUDFRONT_DISTRIBUTION_ID   - For cache invalidation
+#   - ECR_REPOSITORY_URI           - ECR repository for backend images
+#   - ECS_CLUSTER                  - ECS cluster name
+#   - ECS_SERVICE                  - ECS service name
+#   - VITE_API_URL                 - Backend API URL for frontend build
+# ============================================================================
+
+image: node:20
+
+options:
+  docker: true
+  size: 2x # Double resources for faster builds
+
+definitions:
+  caches:
+    npm: ~/.npm
+    server-npm: server/node_modules
+
+  services:
+    docker:
+      memory: 3072
+
+  scripts:
+    # OIDC authentication setup script
+    setup-oidc: &setup-oidc |
+      echo "Setting up AWS credentials using OIDC..."
+      echo $BITBUCKET_STEP_OIDC_TOKEN > /tmp/oidc-token
+      chmod 600 /tmp/oidc-token
+
+      # Validate AWS_ROLE_ARN is set
+      if [ -z "$AWS_ROLE_ARN" ]; then
+        echo "ERROR: AWS_ROLE_ARN repository variable is not set"
+        echo "Please set AWS_ROLE_ARN to your IAM role ARN (e.g., arn:aws:iam::123456789:role/BitbucketOIDC-Coheus)"
+        exit 1
+      fi
+
+      # Configure AWS SDK to use OIDC token
+      export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/oidc-token
+      export AWS_ROLE_SESSION_NAME="bitbucket-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-build}-${BITBUCKET_BUILD_NUMBER}"
+      export AWS_REGION="${AWS_REGION:-us-east-2}"
+
+      echo "Using AWS Role: $AWS_ROLE_ARN"
+      echo "AWS Region: $AWS_REGION"
+      echo "Session Name: $AWS_ROLE_SESSION_NAME"
+
+  steps:
+    # ========================================================================
+    # Build Steps
+    # ========================================================================
+    - step: &build-frontend
+        name: Build Frontend
+        caches:
+          - npm
+        script:
+          - echo "Building frontend..."
+          - npm ci
+          - npm run build
+          - echo "Frontend build complete"
+          - ls -la docs/
+        artifacts:
+          - docs/**
+
+    - step: &build-backend
+        name: Build Backend
+        caches:
+          - server-npm
+        script:
+          - echo "Building backend..."
+          - cd server
+          - npm ci
+          - npm run build
+          - echo "Backend build complete"
+          - ls -la dist/
+        artifacts:
+          - server/dist/**
+          - server/node_modules/**
+          - server/package.json
+          - server/package-lock.json
+
+    # ========================================================================
+    # Frontend Deployment Steps
+    # ========================================================================
+    - step: &deploy-frontend-dev
+        name: Deploy Frontend to Dev
+        oidc: true
+        deployment: dev
+        caches:
+          - npm
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+
+    - step: &deploy-frontend-prod
+        name: Deploy Frontend to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        caches:
+          - npm
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+
+    # ========================================================================
+    # Backend Deployment Steps
+    # ========================================================================
+    - step: &deploy-backend-dev
+        name: Deploy Backend to Dev
+        oidc: true
+        deployment: dev
+        services:
+          - docker
+        caches:
+          - docker
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
+    - step: &deploy-backend-prod
+        name: Deploy Backend to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        services:
+          - docker
+        caches:
+          - docker
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
+    # ========================================================================
+    # Infrastructure Deployment Steps
+    # ========================================================================
+    - step: &deploy-infrastructure-dev
+        name: Deploy Infrastructure to Dev
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+
+    - step: &deploy-infrastructure-prod
+        name: Deploy Infrastructure to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+
+# ============================================================================
+# Pipeline Definitions
+# ============================================================================
+pipelines:
+  # Branch-based deployments with conditional execution
+  branches:
+    # Dev branch: auto-deploy to dev environment (only changed components)
+    dev:
+      # Frontend: only if frontend files changed
+      - step:
+          <<: *build-frontend
+          condition:
+            changesets:
+              includePaths:
+                - "src/**"
+                - "public/**"
+                - "index.html"
+                - "package.json"
+                - "package-lock.json"
+                - "vite.config.ts"
+                - "tailwind.config.ts"
+                - "tsconfig*.json"
+                - "postcss.config.js"
+      - step:
+          <<: *deploy-frontend-dev
+          condition:
+            changesets:
+              includePaths:
+                - "src/**"
+                - "public/**"
+                - "index.html"
+                - "package.json"
+                - "package-lock.json"
+                - "vite.config.ts"
+                - "tailwind.config.ts"
+                - "tsconfig*.json"
+                - "postcss.config.js"
+
+      # Backend: only if backend files changed
+      - step:
+          <<: *build-backend
+          condition:
+            changesets:
+              includePaths:
+                - "server/**"
+                - "Dockerfile.backend"
+                - "Dockerfile.backend.prod"
+      - step:
+          <<: *deploy-backend-dev
+          condition:
+            changesets:
+              includePaths:
+                - "server/**"
+                - "Dockerfile.backend"
+                - "Dockerfile.backend.prod"
+
+      # Infrastructure: only if CloudFormation templates changed
+      - step:
+          <<: *deploy-infrastructure-dev
+          condition:
+            changesets:
+              includePaths:
+                - "infrastructure/cloudformation/**"
+
+    # Main branch: deploy to production (only changed components, manual approval)
+    main:
+      # Frontend: only if frontend files changed
+      - step:
+          <<: *build-frontend
+          condition:
+            changesets:
+              includePaths:
+                - "src/**"
+                - "public/**"
+                - "index.html"
+                - "package.json"
+                - "package-lock.json"
+                - "vite.config.ts"
+                - "tailwind.config.ts"
+                - "tsconfig*.json"
+                - "postcss.config.js"
+      - step:
+          <<: *deploy-frontend-prod
+          condition:
+            changesets:
+              includePaths:
+                - "src/**"
+                - "public/**"
+                - "index.html"
+                - "package.json"
+                - "package-lock.json"
+                - "vite.config.ts"
+                - "tailwind.config.ts"
+                - "tsconfig*.json"
+                - "postcss.config.js"
+
+      # Backend: only if backend files changed
+      - step:
+          <<: *build-backend
+          condition:
+            changesets:
+              includePaths:
+                - "server/**"
+                - "Dockerfile.backend"
+                - "Dockerfile.backend.prod"
+      - step:
+          <<: *deploy-backend-prod
+          condition:
+            changesets:
+              includePaths:
+                - "server/**"
+                - "Dockerfile.backend"
+                - "Dockerfile.backend.prod"
+
+      # Infrastructure: only if CloudFormation templates changed
+      - step:
+          <<: *deploy-infrastructure-prod
+          condition:
+            changesets:
+              includePaths:
+                - "infrastructure/cloudformation/**"
+
+  # Pull request builds (validation only, conditional)
+  pull-requests:
+    "**":
+      - step:
+          <<: *build-frontend
+          condition:
+            changesets:
+              includePaths:
+                - "src/**"
+                - "public/**"
+                - "index.html"
+                - "package.json"
+                - "package-lock.json"
+                - "vite.config.ts"
+      - step:
+          <<: *build-backend
+          condition:
+            changesets:
+              includePaths:
+                - "server/**"
+                - "Dockerfile.backend"
+                - "Dockerfile.backend.prod"
+
+  # Custom pipelines for manual triggers (always run, ignore conditions)
+  custom:
+    # Full deployment (force all components)
+    deploy-all-dev:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+      - parallel:
+          - step: *deploy-frontend-dev
+          - step: *deploy-backend-dev
+
+    deploy-all-prod:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+      - parallel:
+          - step:
+              <<: *deploy-frontend-prod
+              trigger: automatic
+          - step:
+              <<: *deploy-backend-prod
+              trigger: automatic
+
+    # Individual component deployments
+    frontend-only-dev:
+      - step: *build-frontend
+      - step: *deploy-frontend-dev
+
+    frontend-only-prod:
+      - step: *build-frontend
+      - step:
+          <<: *deploy-frontend-prod
+          trigger: automatic
+
+    backend-only-dev:
+      - step: *build-backend
+      - step: *deploy-backend-dev
+
+    backend-only-prod:
+      - step: *build-backend
+      - step:
+          <<: *deploy-backend-prod
+          trigger: automatic
+
+    infrastructure-dev:
+      - step: *deploy-infrastructure-dev
+
+    infrastructure-prod:
+      - step:
+          <<: *deploy-infrastructure-prod
+          trigger: automatic
+
+    # Database migrations (manual trigger only)
+    run-migrations-dev:
+      - step:
+          name: Run Migrations (Dev)
+          oidc: true
+          deployment: dev
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-dev-dry-run:
+      - step:
+          name: Dry Run Migrations (Dev)
+          oidc: true
+          deployment: dev
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - export DRY_RUN=true
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-prod:
+      - step:
+          name: Run Migrations (Prod)
+          oidc: true
+          deployment: production
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-prod-dry-run:
+      - step:
+          name: Dry Run Migrations (Prod)
+          oidc: true
+          deployment: production
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - export DRY_RUN=true
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
