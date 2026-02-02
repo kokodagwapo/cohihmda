@@ -1,20 +1,26 @@
-import { useEffect, useState, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  Newspaper, 
-  Building2, 
-  TrendingUp, 
-  BarChart3, 
-  Activity, 
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { motion } from "framer-motion";
+import {
+  Newspaper,
+  Building2,
+  TrendingUp,
+  BarChart3,
+  Activity,
   AlertTriangle,
   Settings,
   Check,
   X,
   Zap,
-  ExternalLink
-} from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { api } from '@/lib/api';
+  ExternalLink,
+  Loader2,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { api } from "@/lib/api";
 
 /**
  * Industry News Card Component
@@ -31,21 +37,41 @@ export const IndustryNewsCard = () => {
     source: any;
   } | null>(null);
   const [showSourceSelector, setShowSourceSelector] = useState(false);
-  // Initialize with all available sources by default
-  const defaultSources = ['MBA', 'Fannie Mae', 'Freddie Mac'];
-  const [selectedSources, setSelectedSources] = useState<string[]>(defaultSources);
+
+  // AI-powered insights state
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insights, setInsights] = useState<{
+    insights: Array<{
+      type: string;
+      label: string;
+      content: string;
+      color: string;
+    }>;
+    clientDataSummary?: string;
+    error?: string;
+  } | null>(null);
+  // Initialize with government/GSE sources enabled by default
+  // RSS feed sources (National Mortgage News, etc.) are disabled by default
+  const defaultSources = ["MBA", "Fannie Mae", "Freddie Mac", "CFPB", "FHFA"];
+  const [selectedSources, setSelectedSources] =
+    useState<string[]>(defaultSources);
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
 
   // Load user preferences from database
   const loadUserPreferences = async () => {
     try {
-      const preference = await api.request<{ preference_value: string[] }>('/api/user/preferences/selectedNewsSources');
+      const preference = await api.request<{ preference_value: string[] }>(
+        "/api/user/preferences/selectedNewsSources"
+      );
       if (preference?.preference_value) {
         setSelectedSources(preference.preference_value);
-        localStorage.setItem('selectedNewsSources', JSON.stringify(preference.preference_value));
+        localStorage.setItem(
+          "selectedNewsSources",
+          JSON.stringify(preference.preference_value)
+        );
       } else {
         // Fallback to localStorage
-        const saved = localStorage.getItem('selectedNewsSources');
+        const saved = localStorage.getItem("selectedNewsSources");
         if (saved) {
           const parsed = JSON.parse(saved);
           setSelectedSources(parsed);
@@ -59,18 +85,27 @@ export const IndustryNewsCard = () => {
       }
     } catch (error: any) {
       // For timeout errors, log as warning since we have localStorage fallback
-      if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
-        console.warn('User preferences request timed out, using localStorage fallback:', error.message);
+      if (
+        error.message?.includes("timed out") ||
+        error.message?.includes("timeout")
+      ) {
+        console.warn(
+          "User preferences request timed out, using localStorage fallback:",
+          error.message
+        );
       } else {
-        console.error('Error loading user preferences:', error);
+        console.error("Error loading user preferences:", error);
       }
       // Fallback to localStorage if not authenticated or preference not found
-      const saved = localStorage.getItem('selectedNewsSources');
+      const saved = localStorage.getItem("selectedNewsSources");
       if (saved) {
         setSelectedSources(JSON.parse(saved));
       } else {
         setSelectedSources(defaultSources);
-        localStorage.setItem('selectedNewsSources', JSON.stringify(defaultSources));
+        localStorage.setItem(
+          "selectedNewsSources",
+          JSON.stringify(defaultSources)
+        );
       }
     } finally {
       setIsLoadingPreferences(false);
@@ -81,25 +116,25 @@ export const IndustryNewsCard = () => {
   const saveUserPreferences = async (sources: string[]) => {
     try {
       // Save to localStorage immediately for instant access
-      localStorage.setItem('selectedNewsSources', JSON.stringify(sources));
+      localStorage.setItem("selectedNewsSources", JSON.stringify(sources));
 
       // Save to database via API
       try {
-        await api.request('/api/user/preferences/selectedNewsSources', {
-          method: 'PUT',
+        await api.request("/api/user/preferences/selectedNewsSources", {
+          method: "PUT",
           body: JSON.stringify({ preference_value: sources }),
         });
       } catch (error: any) {
         // If not authenticated, just use localStorage
-        if (error.message?.includes('Unauthorized')) {
+        if (error.message?.includes("Unauthorized")) {
           return;
         }
         throw error;
       }
     } catch (error) {
-      console.error('Error saving user preferences:', error);
+      console.error("Error saving user preferences:", error);
       // Still save to localStorage even if database save fails
-      localStorage.setItem('selectedNewsSources', JSON.stringify(sources));
+      localStorage.setItem("selectedNewsSources", JSON.stringify(sources));
     }
   };
 
@@ -108,150 +143,102 @@ export const IndustryNewsCard = () => {
     loadUserPreferences();
   }, []);
 
-  // Available news sources
-  const availableSources = [{
-    source: 'MBA',
-    icon: Building2,
-    color: 'text-blue-600 dark:text-blue-400',
-    bg: 'bg-blue-50 dark:bg-blue-950/20',
-    summary: 'The Mortgage Bankers Association (MBA) is the leading trade association representing the real estate finance industry. MBA provides market analysis, economic forecasts, and industry insights that help lenders make informed decisions about mortgage rates, application volumes, and market trends.',
-    items: [{
-      title: 'Mortgage applications rise 2.3% week-over-week as rates stabilize',
-      time: '2h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.mba.org/news-and-research/newsroom'
-    }, {
-      title: 'Refinance activity increases 15% month-over-month',
-      time: '5h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.mba.org/news-and-research/newsroom'
-    }]
-  }, {
-    source: 'Fannie Mae',
-    icon: TrendingUp,
-    color: 'text-purple-600 dark:text-purple-400',
-    bg: 'bg-purple-50 dark:bg-purple-950/20',
-    summary: 'Fannie Mae provides comprehensive housing market research and economic forecasts. Their insights help lenders understand home price trends, housing supply dynamics, and consumer sentiment that directly impact mortgage origination strategies.',
-    items: [{
-      title: 'Home price expectations remain positive through Q1 2026',
-      time: '3h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.fanniemae.com/newsroom'
-    }, {
-      title: 'Housing supply constraints easing in key markets',
-      time: '6h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.fanniemae.com/newsroom'
-    }]
-  }, {
-    source: 'Freddie Mac',
-    icon: BarChart3,
-    color: 'text-indigo-600 dark:text-indigo-400',
-    bg: 'bg-indigo-50 dark:bg-indigo-950/20',
-    summary: 'Freddie Mac provides market insights, economic research, and policy updates critical for mortgage lenders. Stay informed about GSE guidelines, market trends, and regulatory changes affecting loan origination and servicing.',
-    items: [{
-      title: 'Mortgage rates continue to stabilize',
-      time: '1h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.freddiemac.com/news'
-    }, {
-      title: 'Housing market outlook remains positive',
-      time: '4h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.freddiemac.com/news'
-    }]
-  }, {
-    source: 'CFPB',
-    icon: AlertTriangle,
-    color: 'text-rose-600 dark:text-rose-400',
-    bg: 'bg-rose-50 dark:bg-rose-950/20',
-    summary: 'The Consumer Financial Protection Bureau (CFPB) issues regulations and enforcement actions that directly impact mortgage lending operations. Critical for compliance and risk management.',
-    items: [{
-      title: 'New compliance guidelines released',
-      time: '2h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.consumerfinance.gov/about-us/newsroom/'
-    }, {
-      title: 'Enforcement actions update',
-      time: '5h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.consumerfinance.gov/about-us/newsroom/'
-    }]
-  }, {
-    source: 'FHFA',
-    icon: Activity,
-    color: 'text-emerald-600 dark:text-emerald-400',
-    bg: 'bg-emerald-50 dark:bg-emerald-950/20',
-    summary: 'The Federal Housing Finance Agency (FHFA) regulates Fannie Mae, Freddie Mac, and the Federal Home Loan Banks. Their policy updates directly affect mortgage lending standards and market operations.',
-    items: [{
-      title: 'GSE policy updates announced',
-      time: '3h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.fhfa.gov/Media'
-    }, {
-      title: 'Market analysis report published',
-      time: '6h ago',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      link: 'https://www.fhfa.gov/Media'
-    }]
-  }];
+  // Available news sources - Government/GSE sites (enabled by default) + RSS feeds (disabled by default)
+  const availableSources = [
+    // Government/GSE sources - enabled by default
+    {
+      source: "MBA",
+      icon: Building2,
+      color: "text-blue-600 dark:text-blue-400",
+      bg: "bg-blue-50 dark:bg-blue-950/20",
+      summary:
+        "The Mortgage Bankers Association (MBA) is the leading trade association representing the real estate finance industry. MBA provides market analysis, economic forecasts, and industry insights.",
+      items: [],
+    },
+    {
+      source: "Fannie Mae",
+      icon: TrendingUp,
+      color: "text-purple-600 dark:text-purple-400",
+      bg: "bg-purple-50 dark:bg-purple-950/20",
+      summary:
+        "Fannie Mae provides comprehensive housing market research and economic forecasts. Their insights help lenders understand home price trends and housing supply dynamics.",
+      items: [],
+    },
+    {
+      source: "Freddie Mac",
+      icon: BarChart3,
+      color: "text-indigo-600 dark:text-indigo-400",
+      bg: "bg-indigo-50 dark:bg-indigo-950/20",
+      summary:
+        "Freddie Mac provides market insights, economic research, and policy updates critical for mortgage lenders. Stay informed about GSE guidelines and market trends.",
+      items: [],
+    },
+    {
+      source: "CFPB",
+      icon: AlertTriangle,
+      color: "text-rose-600 dark:text-rose-400",
+      bg: "bg-rose-50 dark:bg-rose-950/20",
+      summary:
+        "The Consumer Financial Protection Bureau (CFPB) issues regulations and enforcement actions that directly impact mortgage lending operations. Critical for compliance.",
+      items: [],
+    },
+    {
+      source: "FHFA",
+      icon: Activity,
+      color: "text-emerald-600 dark:text-emerald-400",
+      bg: "bg-emerald-50 dark:bg-emerald-950/20",
+      summary:
+        "The Federal Housing Finance Agency (FHFA) regulates Fannie Mae, Freddie Mac, and the Federal Home Loan Banks. Their policy updates affect mortgage lending standards.",
+      items: [],
+    },
+    // RSS feed sources - disabled by default
+    {
+      source: "National Mortgage News",
+      icon: Newspaper,
+      color: "text-orange-600 dark:text-orange-400",
+      bg: "bg-orange-50 dark:bg-orange-950/20",
+      summary:
+        "National Mortgage News provides breaking news and analysis on mortgage rates, regulations, compliance, and industry trends that directly impact lending operations.",
+      items: [],
+    },
+    {
+      source: "Mortgage News Daily",
+      icon: Newspaper,
+      color: "text-cyan-600 dark:text-cyan-400",
+      bg: "bg-cyan-50 dark:bg-cyan-950/20",
+      summary:
+        "Mortgage News Daily offers daily mortgage rate updates, MBS market commentary, and industry news essential for understanding market movements and rate trends.",
+      items: [],
+    },
+    {
+      source: "MND Rate Watch",
+      icon: BarChart3,
+      color: "text-pink-600 dark:text-pink-400",
+      bg: "bg-pink-50 dark:bg-pink-950/20",
+      summary:
+        "Mortgage rate analysis and daily rate movements from Mortgage News Daily, helping lenders stay informed on rate lock timing and market volatility.",
+      items: [],
+    },
+  ];
 
   // Default news feed structure (fallback) - filtered by selected sources
   const getDefaultNewsFeed = () => {
-    return availableSources.filter(source => selectedSources.includes(source.source));
+    return availableSources.filter((source) =>
+      selectedSources.includes(source.source)
+    );
   };
 
   // Fetch news from API
   const fetchNews = async () => {
     // Check if user has a valid token before making API call
-    const token = localStorage.getItem('auth_token');
+    const token = localStorage.getItem("auth_token");
     if (!token) {
       // No token - use default news feed without making API call
       setNewsFeed(getDefaultNewsFeed());
       setNewsLoading(false);
       return;
     }
-    
+
     try {
       setNewsLoading(true);
       setNewsError(null);
@@ -263,48 +250,65 @@ export const IndustryNewsCard = () => {
         Newspaper,
         TrendingUp,
         BarChart3,
-        Activity
+        Activity,
+        AlertTriangle,
       };
+
+      // Use the API response directly - it has real news from RSS feeds
       const mappedNewsFeed = response.newsFeed.map((source: any) => ({
         ...source,
-        icon: iconMap[source.icon] || Newspaper
+        icon: iconMap[source.icon] || Newspaper,
       }));
 
-      // Fetch ALL sources from API, not just selected ones
-      // This ensures all sources are scraped and available
-      const allSourcesFromAPI = mappedNewsFeed;
-      
-      // Merge with available sources to ensure all are present
-      const defaultFeed = availableSources;
-      const finalFeed = availableSources.map(defaultSource => {
-        const apiSource = allSourcesFromAPI.find((s: any) => s.source === defaultSource.source);
-        // Use API data if available, otherwise use default
-        return apiSource || defaultSource;
+      // Log for debugging
+      console.log("[News] Fetched from API:", {
+        sources: mappedNewsFeed.map((s: any) => s.source),
+        firstItems: mappedNewsFeed.map(
+          (s: any) => s.items?.[0]?.title?.substring(0, 40) + "..."
+        ),
       });
-      
-      // Set all sources in feed (not just selected ones)
-      setNewsFeed(finalFeed);
+
+      // Set all sources directly from API
+      setNewsFeed(mappedNewsFeed);
       setLastNewsUpdate(new Date());
+
+      // Update selectedSources if the API returned different sources than expected
+      const apiSourceNames = mappedNewsFeed.map((s: any) => s.source);
+      const validSelectedSources = selectedSources.filter((s) =>
+        apiSourceNames.includes(s)
+      );
+      if (validSelectedSources.length === 0 && apiSourceNames.length > 0) {
+        // If no valid selected sources, select all from API
+        setSelectedSources(apiSourceNames);
+      }
+
       if (response.error) {
         setNewsError(response.error);
-        // Silently handle error - no toast notification
       }
     } catch (error: any) {
       // Handle unauthorized errors silently (user not logged in)
-      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+      if (
+        error.message?.includes("Unauthorized") ||
+        error.message?.includes("401")
+      ) {
         // User not authenticated - use default news feed without logging error
         setNewsFeed(getDefaultNewsFeed());
-      } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
+      } else if (
+        error.message?.includes("timed out") ||
+        error.message?.includes("timeout")
+      ) {
         // For timeout errors, log as warning since we have default news feed fallback
-        console.warn('News request timed out, using default news feed fallback:', error.message);
-        setNewsError(error.message || 'Failed to fetch news');
+        console.warn(
+          "News request timed out, using default news feed fallback:",
+          error.message
+        );
+        setNewsError(error.message || "Failed to fetch news");
         setNewsFeed(getDefaultNewsFeed());
       } else {
-        console.error('Error fetching news:', error);
-        setNewsError(error.message || 'Failed to fetch news');
+        console.error("Error fetching news:", error);
+        setNewsError(error.message || "Failed to fetch news");
         setNewsFeed(getDefaultNewsFeed());
       }
-      // Silently fall back to default news - no toast notification
     } finally {
       setNewsLoading(false);
     }
@@ -331,16 +335,21 @@ export const IndustryNewsCard = () => {
     if (newsFeed.length === 0) {
       return getDefaultNewsFeed();
     }
-    return newsFeed.filter((source: any) => selectedSources.includes(source.source));
+    // Filter by selected sources, or show all if none selected match
+    const filtered = newsFeed.filter((source: any) =>
+      selectedSources.includes(source.source)
+    );
+    // If no matches, show all available news (user may have old preferences)
+    return filtered.length > 0 ? filtered : newsFeed;
   }, [newsFeed, selectedSources]);
 
   // Handle source selection - Allow all sources to be selected
   const handleSourceToggle = (sourceName: string) => {
-    setSelectedSources(prev => {
+    setSelectedSources((prev) => {
       if (prev.includes(sourceName)) {
         // Remove if already selected (but keep at least 1 source)
         if (prev.length > 1) {
-          const updated = prev.filter(s => s !== sourceName);
+          const updated = prev.filter((s) => s !== sourceName);
           saveUserPreferences(updated);
           return updated;
         }
@@ -354,21 +363,139 @@ export const IndustryNewsCard = () => {
     });
   };
 
-  // Update news feed when selected sources change
+  // Re-fetch news when selected sources change (to ensure we have latest data)
+  // The filtering is handled by filteredNewsFeed useMemo
   useEffect(() => {
-    // Filter existing news feed by selected sources
-    const filtered = newsFeed.filter((source: any) => selectedSources.includes(source.source));
-
-    // Add any missing sources from availableSources
-    const missingSources = selectedSources.filter(sourceName => !filtered.some((s: any) => s.source === sourceName));
-    if (missingSources.length > 0) {
-      const newSources = availableSources.filter(s => missingSources.includes(s.source));
-      setNewsFeed([...filtered, ...newSources]);
-    } else if (filtered.length !== newsFeed.length) {
-      // Only update if the filtered result is different
-      setNewsFeed(filtered.length > 0 ? filtered : getDefaultNewsFeed());
+    // Only re-fetch if we don't have news yet
+    if (newsFeed.length === 0) {
+      fetchNews();
     }
   }, [selectedSources]);
+
+  // Fetch AI-powered insights when a news item is selected
+  const fetchInsights = useCallback(async (item: any, source: any) => {
+    setInsightsLoading(true);
+    setInsights(null);
+
+    try {
+      const result = await api.getNewsInsights({
+        title: item.title,
+        source: source.source,
+        link: item.link,
+        sourceSummary: source.summary,
+      });
+      setInsights(result);
+    } catch (error: any) {
+      console.error("[News] Failed to fetch insights:", error);
+      // Set default insights on error
+      setInsights({
+        insights: getDefaultInsights(item.title),
+        error: "Could not generate AI insights",
+      });
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, []);
+
+  // Helper to get default insights when AI is unavailable
+  const getDefaultInsights = (title: string) => {
+    const lowerTitle = title.toLowerCase();
+    if (lowerTitle.includes("rate") || lowerTitle.includes("mortgage")) {
+      return [
+        {
+          type: "pipeline",
+          label: "Pipeline Impact",
+          content:
+            "Rate movements may affect application volume and lock timing. Monitor pipeline closely.",
+          color: "blue",
+        },
+        {
+          type: "competitive",
+          label: "Market Opportunity",
+          content:
+            "Consider proactive outreach to borrowers who may benefit from rate changes.",
+          color: "emerald",
+        },
+        {
+          type: "action",
+          label: "Recommended Action",
+          content:
+            "Review rate lock policies and ensure pricing team is aligned.",
+          color: "violet",
+        },
+      ];
+    }
+    if (
+      lowerTitle.includes("compliance") ||
+      lowerTitle.includes("regulation") ||
+      lowerTitle.includes("cfpb")
+    ) {
+      return [
+        {
+          type: "compliance",
+          label: "Compliance Alert",
+          content:
+            "New regulatory guidance may require process updates. Schedule compliance review.",
+          color: "rose",
+        },
+        {
+          type: "action",
+          label: "Immediate Action",
+          content:
+            "Brief compliance team and assess impact on current pipeline.",
+          color: "violet",
+        },
+        {
+          type: "competitive",
+          label: "Positioning",
+          content:
+            "Early adoption of compliance changes can differentiate your organization.",
+          color: "emerald",
+        },
+      ];
+    }
+    return [
+      {
+        type: "market",
+        label: "Market Signal",
+        content:
+          "This development may indicate broader industry trends. Monitor for follow-up.",
+        color: "blue",
+      },
+      {
+        type: "competitive",
+        label: "Strategic Fit",
+        content:
+          "Evaluate how this aligns with your market positioning and growth strategy.",
+        color: "emerald",
+      },
+      {
+        type: "action",
+        label: "Next Steps",
+        content:
+          "Consider discussing implications with leadership team within 48 hours.",
+        color: "violet",
+      },
+    ];
+  };
+
+  // Handle news item click - open dialog and fetch insights
+  const handleNewsItemClick = (item: any, source: any) => {
+    setSelectedNewsItem({ item, source });
+    fetchInsights(item, source);
+  };
+
+  // Get color class for insight
+  const getInsightColor = (color: string) => {
+    const colorMap: Record<string, string> = {
+      blue: "bg-blue-500",
+      emerald: "bg-emerald-500",
+      rose: "bg-rose-500",
+      amber: "bg-amber-500",
+      violet: "bg-violet-500",
+    };
+    return colorMap[color] || "bg-slate-500";
+  };
 
   return (
     <div className="mb-6 sm:mb-10">
@@ -384,7 +511,10 @@ export const IndustryNewsCard = () => {
           <div className="flex items-center gap-2.5 sm:gap-3 md:gap-4 lg:gap-5 flex-1 min-w-0">
             <div className="relative flex-shrink-0">
               <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.25)] dark:shadow-[0_4px_12px_rgba(59,130,246,0.15)]">
-                <Newspaper className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 lg:w-8 lg:h-8 text-white" strokeWidth={1.5} />
+                <Newspaper
+                  className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 lg:w-8 lg:h-8 text-white"
+                  strokeWidth={1.5}
+                />
               </div>
             </div>
             <div className="flex-1 min-w-0">
@@ -402,7 +532,10 @@ export const IndustryNewsCard = () => {
             className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
             aria-label="Select news sources"
           >
-            <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-slate-700 dark:text-slate-300" strokeWidth={1.5} />
+            <Settings
+              className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-slate-700 dark:text-slate-300"
+              strokeWidth={1.5}
+            />
             <span className="text-[10px] sm:text-xs md:text-sm font-light text-slate-700 dark:text-slate-300 tracking-tight whitespace-nowrap">
               Sources ({selectedSources.length}/{availableSources.length})
             </span>
@@ -413,20 +546,26 @@ export const IndustryNewsCard = () => {
         <div
           className={`${
             selectedSources.length >= 4
-              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
-              : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
           } gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 xl:gap-8 items-start`}
         >
           {filteredNewsFeed.map((source: any, sourceIdx: number) => {
             const SourceIcon = source.icon;
             return (
-              <div key={source.source} className="min-w-0 w-full flex flex-col h-full">
+              <div
+                key={source.source}
+                className="min-w-0 w-full flex flex-col h-full"
+              >
                 {/* Header - Fixed height for alignment */}
                 <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3 mb-3 sm:mb-4 md:mb-5 h-8 sm:h-9 md:h-10">
                   <div
                     className={`w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 lg:w-9 lg:h-9 rounded-lg sm:rounded-xl ${source.bg} flex items-center justify-center flex-shrink-0 shadow-sm border border-slate-200/40 dark:border-slate-700/40`}
                   >
-                    <SourceIcon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5 lg:w-5 lg:h-5 ${source.color}`} strokeWidth={1.5} />
+                    <SourceIcon
+                      className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5 lg:w-5 lg:h-5 ${source.color}`}
+                      strokeWidth={1.5}
+                    />
                   </div>
                   <h4 className="text-xs sm:text-sm md:text-base lg:text-lg font-light text-slate-800 dark:text-slate-200 tracking-tight truncate flex-1 min-w-0 leading-tight">
                     {source.source}
@@ -437,9 +576,7 @@ export const IndustryNewsCard = () => {
                   {source.items?.slice(0, 2).map((item: any, idx: number) => (
                     <div
                       key={idx}
-                      onClick={() => {
-                        setSelectedNewsItem({ item, source });
-                      }}
+                      onClick={() => handleNewsItemClick(item, source)}
                       className="group cursor-pointer p-2.5 sm:p-3 md:p-4 lg:p-5 xl:p-6 rounded-md sm:rounded-lg md:rounded-xl lg:rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800/50 transition-all duration-300 active:scale-[0.98] border border-slate-200/60 dark:border-slate-700/40 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md dark:hover:shadow-lg touch-manipulation w-full flex flex-col"
                     >
                       <p className="text-[11px] sm:text-xs md:text-sm lg:text-base xl:text-lg text-slate-900 dark:text-slate-100 leading-[1.4] sm:leading-[1.5] mb-1.5 sm:mb-2 md:mb-2.5 lg:mb-3 group-hover:text-slate-950 dark:group-hover:text-white transition-colors font-light tracking-tight line-clamp-2 break-words min-h-[2.8em] sm:min-h-[3em] md:min-h-[3.2em]">
@@ -447,11 +584,17 @@ export const IndustryNewsCard = () => {
                       </p>
                       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light flex-wrap mt-auto">
                         <span className="truncate">{item.date}</span>
-                        <span className="text-slate-300 dark:text-slate-600 flex-shrink-0">•</span>
+                        <span className="text-slate-300 dark:text-slate-600 flex-shrink-0">
+                          •
+                        </span>
                         <span className="whitespace-nowrap">{item.time}</span>
                       </div>
                     </div>
-                  )) || <p className="text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light">Loading news...</p>}
+                  )) || (
+                    <p className="text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light">
+                      Loading news...
+                    </p>
+                  )}
                 </div>
               </div>
             );
@@ -461,13 +604,16 @@ export const IndustryNewsCard = () => {
 
       {/* Source Selector Dialog */}
       <Dialog open={showSourceSelector} onOpenChange={setShowSourceSelector}>
-        <DialogContent className="max-w-2xl w-full sm:w-[90vw] md:w-[95vw] max-h-[90vh] sm:max-h-[85vh] p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 rounded-none sm:rounded-xl md:rounded-2xl border-0 sm:border border-slate-200/60 dark:border-slate-700/50 shadow-[0_20px_60px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.5)] [&>button]:hidden">
-          <div className="flex flex-col h-full">
+        <DialogContent className="max-w-2xl w-full sm:w-[90vw] md:w-[95vw] h-[85vh] sm:h-auto sm:max-h-[85vh] p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 rounded-none sm:rounded-xl md:rounded-2xl border-0 sm:border border-slate-200/60 dark:border-slate-700/50 shadow-[0_20px_60px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.5)] [&>button]:hidden">
+          <div className="flex flex-col h-full max-h-[85vh]">
             {/* Header - Mobile First */}
-            <div className="flex items-center justify-between px-3 sm:px-4 md:px-5 lg:px-6 py-3 sm:py-4 md:py-5 border-b border-slate-200/60 dark:border-slate-700/50 bg-slate-50/30 dark:bg-slate-800/30 sticky top-0 z-10">
+            <div className="flex-shrink-0 flex items-center justify-between px-3 sm:px-4 md:px-5 lg:px-6 py-3 sm:py-4 md:py-5 border-b border-slate-200/60 dark:border-slate-700/50 bg-slate-50/30 dark:bg-slate-800/30">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm flex-shrink-0">
-                  <Newspaper className="w-4 h-4 sm:w-5 sm:h-5 text-white" strokeWidth={1.5} />
+                  <Newspaper
+                    className="w-4 h-4 sm:w-5 sm:h-5 text-white"
+                    strokeWidth={1.5}
+                  />
                 </div>
                 <div className="min-w-0">
                   <DialogTitle className="text-base sm:text-lg md:text-xl font-extralight text-slate-900 dark:text-white tracking-tight truncate">
@@ -481,12 +627,12 @@ export const IndustryNewsCard = () => {
             </div>
 
             {/* Source List - Mobile First */}
-            <div className="flex-1 overflow-y-auto px-3 sm:px-4 md:px-5 lg:px-6 py-3 sm:py-4 md:py-5 lg:py-6">
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-5 lg:px-6 py-3 sm:py-4 md:py-5 lg:py-6">
               <div className="space-y-2 sm:space-y-3">
-                {availableSources.map(source => {
+                {availableSources.map((source) => {
                   const SourceIcon = source.icon;
                   const isSelected = selectedSources.includes(source.source);
-                  const isDisabled = !isSelected && selectedSources.length >= 5;
+                  const isDisabled = false; // No limit on source selection
                   return (
                     <button
                       key={source.source}
@@ -494,21 +640,31 @@ export const IndustryNewsCard = () => {
                       disabled={isDisabled}
                       className={`w-full flex items-start gap-2.5 sm:gap-3 md:gap-4 p-3 sm:p-4 rounded-lg sm:rounded-xl border transition-all duration-200 text-left touch-manipulation ${
                         isSelected
-                          ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40 shadow-sm'
+                          ? "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40 shadow-sm"
                           : isDisabled
-                          ? 'bg-slate-50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed'
-                          : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600'
+                          ? "bg-slate-50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed"
+                          : "bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600"
                       }`}
                     >
-                      <div className={`w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-lg ${source.bg} flex items-center justify-center flex-shrink-0 border border-slate-200/40 dark:border-slate-700/40`}>
-                        <SourceIcon className={`w-4 h-4 sm:w-4.5 sm:h-4.5 md:w-5 md:h-5 ${source.color}`} strokeWidth={1.5} />
+                      <div
+                        className={`w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-lg ${source.bg} flex items-center justify-center flex-shrink-0 border border-slate-200/40 dark:border-slate-700/40`}
+                      >
+                        <SourceIcon
+                          className={`w-4 h-4 sm:w-4.5 sm:h-4.5 md:w-5 md:h-5 ${source.color}`}
+                          strokeWidth={1.5}
+                        />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
                           <h4 className="text-xs sm:text-sm md:text-base font-light text-slate-900 dark:text-slate-200 tracking-tight truncate">
                             {source.source}
                           </h4>
-                          {isSelected && <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" strokeWidth={2} />}
+                          {isSelected && (
+                            <Check
+                              className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400 flex-shrink-0"
+                              strokeWidth={2}
+                            />
+                          )}
                         </div>
                         <p className="text-[10px] sm:text-xs md:text-sm text-slate-600 dark:text-slate-400 font-light leading-relaxed line-clamp-2 sm:line-clamp-3">
                           {source.summary}
@@ -521,10 +677,11 @@ export const IndustryNewsCard = () => {
             </div>
 
             {/* Footer */}
-            <div className="px-5 sm:px-6 py-4 border-t border-slate-200/60 dark:border-slate-700/50 bg-slate-50/30 dark:bg-slate-800/30">
+            <div className="flex-shrink-0 px-5 sm:px-6 py-4 border-t border-slate-200/60 dark:border-slate-700/50 bg-slate-50/30 dark:bg-slate-800/30">
               <div className="flex items-center justify-between">
                 <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light">
-                  {selectedSources.length} of 5 sources selected
+                  {selectedSources.length} of {availableSources.length} sources
+                  selected
                 </p>
                 <button
                   onClick={() => setShowSourceSelector(false)}
@@ -538,7 +695,10 @@ export const IndustryNewsCard = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedNewsItem} onOpenChange={open => !open && setSelectedNewsItem(null)}>
+      <Dialog
+        open={!!selectedNewsItem}
+        onOpenChange={(open) => !open && setSelectedNewsItem(null)}
+      >
         <DialogContent
           className="
             /* Mobile: true fullscreen, perfectly aligned */
@@ -595,7 +755,12 @@ export const IndustryNewsCard = () => {
                   >
                     {(() => {
                       const Icon = selectedNewsItem.source.icon;
-                      return <Icon className={`w-5 h-5 sm:w-5.5 sm:h-5.5 ${selectedNewsItem.source.color}`} strokeWidth={1.5} />;
+                      return (
+                        <Icon
+                          className={`w-5 h-5 sm:w-5.5 sm:h-5.5 ${selectedNewsItem.source.color}`}
+                          strokeWidth={1.5}
+                        />
+                      );
                     })()}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -603,7 +768,8 @@ export const IndustryNewsCard = () => {
                       {selectedNewsItem.source.source}
                     </p>
                     <p className="text-xs sm:text-xs text-slate-500 dark:text-slate-400 truncate font-light mt-0.5">
-                      {selectedNewsItem.item.date} • {selectedNewsItem.item.time}
+                      {selectedNewsItem.item.date} •{" "}
+                      {selectedNewsItem.item.time}
                     </p>
                   </div>
                 </div>
@@ -627,7 +793,10 @@ export const IndustryNewsCard = () => {
                   "
                   aria-label="Close"
                 >
-                  <X className="w-5 h-5 sm:w-4 sm:h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.5} />
+                  <X
+                    className="w-5 h-5 sm:w-4 sm:h-4 text-slate-500 dark:text-slate-400"
+                    strokeWidth={1.5}
+                  />
                 </button>
               </div>
 
@@ -672,7 +841,7 @@ export const IndustryNewsCard = () => {
                   {selectedNewsItem.source.summary}
                 </p>
 
-                {/* Enhanced Cohi Executive Insights */}
+                {/* Enhanced Cohi Executive Insights - AI Powered */}
                 <div
                   className="
                     rounded-xl sm:rounded-2xl 
@@ -695,7 +864,17 @@ export const IndustryNewsCard = () => {
                         shadow-sm
                       "
                     >
-                      <Zap className="w-4 h-4 sm:w-4 sm:h-4 text-white" strokeWidth={1.5} />
+                      {insightsLoading ? (
+                        <Loader2
+                          className="w-4 h-4 sm:w-4 sm:h-4 text-white animate-spin"
+                          strokeWidth={1.5}
+                        />
+                      ) : (
+                        <Zap
+                          className="w-4 h-4 sm:w-4 sm:h-4 text-white"
+                          strokeWidth={1.5}
+                        />
+                      )}
                     </div>
                     <span
                       className="
@@ -707,73 +886,100 @@ export const IndustryNewsCard = () => {
                     >
                       Cohi Insights
                     </span>
+                    {!insightsLoading && insights && !insights.error && (
+                      <span className="ml-auto text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-950/30 px-2 py-0.5 rounded-full">
+                        AI Powered
+                      </span>
+                    )}
                   </div>
 
                   <div className="space-y-3 sm:space-y-3 md:space-y-3.5">
-                    {/* Dynamic insights based on article type */}
-                    {selectedNewsItem.item.title.toLowerCase().includes('rate') ||
-                    selectedNewsItem.item.title.toLowerCase().includes('mortgage') ? (
+                    {insightsLoading ? (
+                      // Loading state
                       <>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Pipeline Impact:</span> Rising application volume signals increased demand—ensure capacity to handle 15-20% uptick.
-                          </p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
+                          <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-3/4" />
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
+                          </div>
                         </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Competitive Edge:</span> Early movers capturing refi volume. Consider targeted outreach to existing borrowers.
-                          </p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
+                          <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-2/3" />
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-5/6" />
+                          </div>
                         </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Margin Watch:</span> Rate volatility may compress margins. Lock discipline critical this week.
-                          </p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
+                          <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-1/2" />
+                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-4/5" />
+                          </div>
                         </div>
                       </>
-                    ) : selectedNewsItem.item.title.toLowerCase().includes('compliance') ||
-                      selectedNewsItem.item.title.toLowerCase().includes('regulation') ||
-                      selectedNewsItem.item.title.toLowerCase().includes('guideline') ? (
+                    ) : insights?.insights && insights.insights.length > 0 ? (
+                      // AI-generated insights
                       <>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Compliance Alert:</span> New guidelines require immediate ops review. Estimated 30-day implementation window.
-                          </p>
-                        </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Risk Mitigation:</span> Schedule compliance team briefing—non-conforming loans face rejection risk.
-                          </p>
-                        </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Opportunity:</span> Early adopters gain competitive advantage. Position as compliance leader.
-                          </p>
-                        </div>
+                        {insights.insights.map((insight, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-start gap-3 sm:gap-3"
+                          >
+                            <div
+                              className={`w-1.5 h-1.5 rounded-full ${getInsightColor(
+                                insight.color
+                              )} mt-[0.5rem] flex-shrink-0`}
+                            />
+                            <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                {insight.label}:
+                              </span>{" "}
+                              {insight.content}
+                            </p>
+                          </div>
+                        ))}
+                        {/* Client data summary if available */}
+                        {insights.clientDataSummary && (
+                          <div className="mt-3 pt-3 border-t border-slate-200/50 dark:border-slate-700/40">
+                            <p className="text-[0.8125rem] sm:text-xs md:text-sm text-blue-700 dark:text-blue-300 font-light tracking-tight">
+                              <span className="font-medium">Your Data:</span>{" "}
+                              {insights.clientDataSummary}
+                            </p>
+                          </div>
+                        )}
                       </>
                     ) : (
+                      // Fallback default insights
                       <>
                         <div className="flex items-start gap-3 sm:gap-3">
                           <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-[0.5rem] flex-shrink-0" />
                           <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Market Signal:</span> Industry trend aligns with your Q1 growth targets. Leverage momentum.
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              Market Signal:
+                            </span>{" "}
+                            This development may indicate broader industry
+                            trends worth monitoring.
                           </p>
                         </div>
                         <div className="flex items-start gap-3 sm:gap-3">
                           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-[0.5rem] flex-shrink-0" />
                           <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Strategic Fit:</span> Consider board-level discussion on market positioning strategy.
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              Strategic Fit:
+                            </span>{" "}
+                            Consider how this aligns with your market
+                            positioning.
                           </p>
                         </div>
                         <div className="flex items-start gap-3 sm:gap-3">
                           <div className="w-1.5 h-1.5 rounded-full bg-violet-500 mt-[0.5rem] flex-shrink-0" />
                           <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">Action Item:</span> Brief ops team on implications. Response window: 48 hours.
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              Next Steps:
+                            </span>{" "}
+                            Read the full article for more details.
                           </p>
                         </div>
                       </>
@@ -787,8 +993,11 @@ export const IndustryNewsCard = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => {
-                    sessionStorage.setItem('returnToAdmin', 'true');
-                    sessionStorage.setItem('dashboardUrl', window.location.href);
+                    sessionStorage.setItem("returnToAdmin", "true");
+                    sessionStorage.setItem(
+                      "dashboardUrl",
+                      window.location.href
+                    );
                   }}
                   className="
                     flex items-center justify-center gap-2.5 
@@ -814,7 +1023,10 @@ export const IndustryNewsCard = () => {
                     no-underline
                   "
                 >
-                  <ExternalLink className="w-5 h-5 sm:w-5 sm:h-5" strokeWidth={2} />
+                  <ExternalLink
+                    className="w-5 h-5 sm:w-5 sm:h-5"
+                    strokeWidth={2}
+                  />
                   <span>Read Full Article</span>
                 </a>
               </div>
@@ -825,4 +1037,3 @@ export const IndustryNewsCard = () => {
     </div>
   );
 };
-

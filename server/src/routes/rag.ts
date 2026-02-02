@@ -1,18 +1,71 @@
-import { Router } from 'express';
-import { pool } from '../config/database.js';
-import { tenantDbManager } from '../config/tenantDatabaseManager.js';
-import { authenticateToken, AuthRequest } from '../middleware/auth.js';
-import { z } from 'zod';
-import multer from 'multer';
-import { parseDocument } from '../services/documentParser.js';
-import { chunkDocument } from '../services/documentChunker.js';
-import { generateEmbeddings } from '../services/embeddingService.js';
-import { storeEmbeddings, searchEmbeddings } from '../services/vectorDatabase.js';
-import { logCostEvent } from '../middleware/costTracking.js';
-import { uploadLimiter } from '../middleware/rateLimiter.js';
-import { encryptAPIKeys, decryptAPIKeys, isEncryptionConfigured } from '../services/encryption.js';
-import { auditLog, logDataAccess } from '../services/auditLogger.js';
-import pg from 'pg';
+import { Router } from "express";
+import { pool } from "../config/database.js";
+import { tenantDbManager } from "../config/tenantDatabaseManager.js";
+import { authenticateToken, AuthRequest } from "../middleware/auth.js";
+import { z } from "zod";
+import multer from "multer";
+import { parseDocument } from "../services/documentParser.js";
+import { chunkDocument } from "../services/documentChunker.js";
+import { generateEmbeddings } from "../services/embeddingService.js";
+import {
+  storeEmbeddings,
+  searchEmbeddings,
+} from "../services/vectorDatabase.js";
+import { logCostEvent } from "../middleware/costTracking.js";
+import { uploadLimiter } from "../middleware/rateLimiter.js";
+import {
+  encryptAPIKeys,
+  decryptAPIKeys,
+  isEncryptionConfigured,
+} from "../services/encryption.js";
+import { auditLog, logDataAccess } from "../services/auditLogger.js";
+import pg from "pg";
+
+/**
+ * Helper function to resolve tenant context from auth request
+ * Uses JWT token values instead of querying the database
+ */
+function resolveTenantContext(
+  req: AuthRequest,
+  requestedTenantId?: string
+): {
+  targetTenantId: string | null;
+  isSuperAdmin: boolean;
+  noTenantContext?: boolean;
+  error?: { status: number; message: string };
+} {
+  const isSuperAdmin =
+    req.isSuperAdmin ||
+    req.userRole === "super_admin" ||
+    req.userRole === "platform_admin";
+  const userTenantId = req.tenantId;
+
+  let targetTenantId: string | null = null;
+
+  if (isSuperAdmin && requestedTenantId) {
+    targetTenantId = requestedTenantId;
+  } else if (userTenantId) {
+    targetTenantId = userTenantId;
+  } else if (isSuperAdmin) {
+    // Platform admin without tenant context - return flag for GET requests to return defaults
+    return {
+      targetTenantId: null,
+      isSuperAdmin,
+      noTenantContext: true,
+    };
+  } else {
+    return {
+      targetTenantId: null,
+      isSuperAdmin,
+      error: {
+        status: 403,
+        message: "Access denied. Tenant context required.",
+      },
+    };
+  }
+
+  return { targetTenantId, isSuperAdmin };
+}
 
 /**
  * Helper function to get tenant pool for RAG settings
@@ -88,9 +141,11 @@ async function createRagSettingsTable(tenantPool: pg.Pool): Promise<void> {
 async function ensureRagSettings(tenantPool: pg.Pool): Promise<void> {
   // First, create the table if it doesn't exist
   await createRagSettingsTable(tenantPool);
-  
+
   // Then check if a row exists
-  const existing = await tenantPool.query('SELECT id FROM public.rag_settings LIMIT 1');
+  const existing = await tenantPool.query(
+    "SELECT id FROM public.rag_settings LIMIT 1"
+  );
   if (existing.rows.length === 0) {
     // Create default settings
     const defaultAllowedTopics = `Loan origination
@@ -137,10 +192,19 @@ https://docs.coheus.com/voice-agentic`;
         personality_style,
         personality_custom
       ) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [defaultAllowedTopics, defaultConversationRules, defaultKnowledgeBaseLinks, 'professional', 'concise', defaultPersonalityCustom]
+      [
+        defaultAllowedTopics,
+        defaultConversationRules,
+        defaultKnowledgeBaseLinks,
+        "professional",
+        "concise",
+        defaultPersonalityCustom,
+      ]
     );
-    
-    console.log('[RAG Settings] Created rag_settings table and default row in tenant database');
+
+    console.log(
+      "[RAG Settings] Created rag_settings table and default row in tenant database"
+    );
   }
 }
 
@@ -152,17 +216,24 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/msword',
-      'text/plain',
-      'text/html',
-      'text/csv',
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/msword",
+      "text/plain",
+      "text/html",
+      "text/csv",
     ];
-    if (allowedTypes.includes(file.mimetype) || file.originalname.match(/\.(pdf|docx|doc|txt|html|csv)$/i)) {
+    if (
+      allowedTypes.includes(file.mimetype) ||
+      file.originalname.match(/\.(pdf|docx|doc|txt|html|csv)$/i)
+    ) {
       cb(null, true);
     } else {
-      cb(new Error('Unsupported file type. Allowed: PDF, DOCX, DOC, TXT, HTML, CSV'));
+      cb(
+        new Error(
+          "Unsupported file type. Allowed: PDF, DOCX, DOC, TXT, HTML, CSV"
+        )
+      );
     }
   },
 });
@@ -170,7 +241,7 @@ const upload = multer({
 // Validation schemas
 const ragSettingsSchema = z.object({
   embedding_model: z.string().optional(),
-  vector_database: z.enum(['pinecone', 'pgvector', 'opensearch']).optional(),
+  vector_database: z.enum(["pinecone", "pgvector", "opensearch"]).optional(),
   chunk_size: z.number().int().min(1).max(8192).optional(),
   chunk_overlap: z.number().int().min(0).optional(),
   top_k: z.number().int().min(1).max(50).optional(),
@@ -215,79 +286,98 @@ const ragSettingsSchema = z.object({
 
 const documentSourceSchema = z.object({
   name: z.string().min(1),
-  source_type: z.enum(['upload', 's3', 'sharepoint', 'confluence', 'url', 'api']),
+  source_type: z.enum([
+    "upload",
+    "s3",
+    "sharepoint",
+    "confluence",
+    "url",
+    "api",
+  ]),
   source_config: z.record(z.any()),
-  sync_frequency: z.enum(['realtime', 'hourly', 'daily', 'weekly', 'manual']).optional(),
+  sync_frequency: z
+    .enum(["realtime", "hourly", "daily", "weekly", "manual"])
+    .optional(),
 });
 
 /**
  * GET /api/rag/settings
  * Get RAG settings for authenticated tenant (from tenant-specific database)
  */
-router.get('/settings', authenticateToken, async (req: AuthRequest, res) => {
+router.get("/settings", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const requestedTenantId = req.query.tenant_id as string | undefined;
-    
-    // Get user's role and tenant
-    const profileResult = await pool.query(
-      `SELECT u.role, p.tenant_id 
-       FROM public.users u 
-       LEFT JOIN public.profiles p ON u.id = p.user_id 
-       WHERE u.id = $1`,
-      [req.userId]
-    );
-    
-    const userTenantId = profileResult.rows[0]?.tenant_id;
-    const userRole = profileResult.rows[0]?.role;
-    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
-    
-    // Determine target tenant
-    let targetTenantId: string | undefined;
-    if (isSuperAdmin && requestedTenantId) {
-      targetTenantId = requestedTenantId;
-    } else if (userTenantId) {
-      targetTenantId = userTenantId;
+
+    // Use helper to resolve tenant context
+    const { targetTenantId, isSuperAdmin, noTenantContext, error } =
+      resolveTenantContext(req, requestedTenantId);
+
+    if (error) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    // For platform admins without tenant context, return default/empty settings
+    if (noTenantContext) {
+      return res.json({
+        settings: {
+          // Return default values so the UI can display them
+          embedding_model: "text-embedding-3-small",
+          chat_model: "gpt-4o-mini",
+          temperature: 0.7,
+          chunk_size: 1000,
+          chunk_overlap: 200,
+          top_k: 5,
+          similarity_threshold: 0.7,
+          enable_pii_sanitization: true,
+        },
+        message: "No tenant selected. Select a tenant to view/edit settings.",
+      });
     }
 
     if (!targetTenantId) {
-      return res.status(403).json({ error: 'Access denied. Tenant context required.' });
+      return res
+        .status(403)
+        .json({ error: "Access denied. Tenant context required." });
     }
 
     // Get tenant database pool
     const tenantPool = await getTenantPoolForRag(targetTenantId);
-    
+
     // Ensure default settings exist
     await ensureRagSettings(tenantPool);
-    
+
     // Get settings from tenant database (no tenant_id column)
-    const result = await tenantPool.query('SELECT * FROM public.rag_settings LIMIT 1');
+    const result = await tenantPool.query(
+      "SELECT * FROM public.rag_settings LIMIT 1"
+    );
 
     if (result.rows.length === 0) {
       return res.json({ settings: {} });
     }
 
     const settings = result.rows[0];
-    
+
     // Decrypt API keys before returning
     const decryptedSettings = await decryptAPIKeys(settings);
-    
-    // Log data access
+
+    // Log data access (isPlatformAdmin flag for platform admins accessing tenant data)
     await logDataAccess({
       userId: req.userId!,
       tenantId: targetTenantId,
-      resourceType: 'rag_settings',
+      resourceType: "rag_settings",
       resourceId: settings.id,
-      action: 'view',
+      action: "view",
       containsPII: true,
-      piiFields: ['openai_api_key', 'gemini_api_key'],
+      piiFields: ["openai_api_key", "gemini_api_key"],
       ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
+      userAgent: req.get("user-agent"),
+      isPlatformAdmin: isSuperAdmin && requestedTenantId !== undefined,
     });
-    
+
     res.json({ settings: decryptedSettings });
   } catch (error: any) {
-    console.error('Error fetching RAG settings:', error);
-    res.status(500).json({ error: 'Failed to fetch RAG settings' });
+    console.error("Error fetching RAG settings:", error);
+    res.status(500).json({ error: "Failed to fetch RAG settings" });
   }
 });
 
@@ -295,41 +385,48 @@ router.get('/settings', authenticateToken, async (req: AuthRequest, res) => {
  * PUT /api/rag/settings
  * Update RAG settings for authenticated tenant (in tenant-specific database)
  */
-router.put('/settings', authenticateToken, async (req: AuthRequest, res) => {
+router.put("/settings", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const updates = ragSettingsSchema.parse(req.body);
     const requestedTenantId = req.query.tenant_id as string | undefined;
 
-    // Get user's role and tenant
-    const profileResult = await pool.query(
-      `SELECT u.role, p.tenant_id 
-       FROM public.users u 
-       LEFT JOIN public.profiles p ON u.id = p.user_id 
-       WHERE u.id = $1`,
-      [req.userId]
+    // Use auth middleware values (from JWT token) instead of querying database
+    const isSuperAdmin =
+      req.isSuperAdmin ||
+      req.userRole === "super_admin" ||
+      req.userRole === "platform_admin";
+    const userTenantId = req.tenantId;
+
+    console.log(
+      `[RAG Settings] User role: ${req.userRole}, isSuperAdmin: ${isSuperAdmin}, requestedTenantId: ${requestedTenantId}, userTenantId: ${userTenantId}`
     );
-    
-    const userTenantId = profileResult.rows[0]?.tenant_id;
-    const userRole = profileResult.rows[0]?.role;
-    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
-    
-    console.log(`[RAG Settings] User role: ${userRole}, isSuperAdmin: ${isSuperAdmin}, requestedTenantId: ${requestedTenantId}, userTenantId: ${userTenantId}`);
-    
+
     // Determine target tenant
     let targetTenantId: string;
     if (isSuperAdmin && requestedTenantId) {
       targetTenantId = requestedTenantId;
-      console.log(`[RAG Settings] Super admin updating tenant: ${targetTenantId}`);
+      console.log(
+        `[RAG Settings] Super admin updating tenant: ${targetTenantId}`
+      );
     } else if (userTenantId) {
       targetTenantId = userTenantId;
-      console.log(`[RAG Settings] Regular user updating their tenant: ${targetTenantId}`);
+      console.log(
+        `[RAG Settings] Regular user updating their tenant: ${targetTenantId}`
+      );
+    } else if (isSuperAdmin) {
+      // Super admin without tenant context - need tenant_id param
+      return res.status(400).json({
+        error: "tenant_id query parameter required for platform admins",
+      });
     } else {
-      return res.status(403).json({ error: 'Access denied. Tenant context required.' });
+      return res
+        .status(403)
+        .json({ error: "Access denied. Tenant context required." });
     }
 
     // Get tenant database pool
     const tenantPool = await getTenantPoolForRag(targetTenantId);
-    
+
     // Ensure rag_settings row exists
     await ensureRagSettings(tenantPool);
 
@@ -350,50 +447,59 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res) => {
     });
 
     if (updateFields.length === 0) {
-      return res.status(400).json({ error: 'No valid fields to update' });
+      return res.status(400).json({ error: "No valid fields to update" });
     }
 
     // Update the single rag_settings row in tenant database
     const query = `
       UPDATE public.rag_settings
-      SET ${updateFields.join(', ')}, updated_at = NOW()
+      SET ${updateFields.join(", ")}, updated_at = NOW()
       RETURNING *
     `;
 
-    console.log(`[RAG Settings] Updating settings in tenant database for: ${targetTenantId}`);
-    console.log(`[RAG Settings] Fields being updated:`, Object.keys(encryptedUpdates).filter(k => encryptedUpdates[k] !== undefined));
-    
+    console.log(
+      `[RAG Settings] Updating settings in tenant database for: ${targetTenantId}`
+    );
+    console.log(
+      `[RAG Settings] Fields being updated:`,
+      Object.keys(encryptedUpdates).filter(
+        (k) => encryptedUpdates[k] !== undefined
+      )
+    );
+
     const result = await tenantPool.query(query, values);
     console.log(`[RAG Settings] UPDATE returned ${result.rows.length} rows`);
 
     if (result.rows.length === 0) {
-      return res.status(500).json({ error: 'Failed to update RAG settings' });
+      return res.status(500).json({ error: "Failed to update RAG settings" });
     }
 
     // Decrypt before returning
     const decryptedResult = await decryptAPIKeys(result.rows[0]);
-    
+
     // Audit log
     await auditLog({
       userId: req.userId,
       userEmail: req.userEmail,
       tenantId: targetTenantId,
-      action: 'update',
-      resource: 'rag_settings',
-      description: 'Updated RAG settings in tenant database',
+      action: "update",
+      resource: "rag_settings",
+      description: "Updated RAG settings in tenant database",
       changes: { fields: Object.keys(updates) },
-      status: 'success',
+      status: "success",
       ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
+      userAgent: req.get("user-agent"),
     });
 
     res.json({ settings: decryptedResult });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+      return res
+        .status(400)
+        .json({ error: "Invalid request data", details: error.errors });
     }
-    console.error('Error updating RAG settings:', error);
-    res.status(500).json({ error: 'Failed to update RAG settings' });
+    console.error("Error updating RAG settings:", error);
+    res.status(500).json({ error: "Failed to update RAG settings" });
   }
 });
 
@@ -401,19 +507,20 @@ router.put('/settings', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/rag/sources
  * List all document sources for authenticated tenant
  */
-router.get('/sources', authenticateToken, async (req: AuthRequest, res) => {
+router.get("/sources", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
+    // Get tenant context from auth token
+    const requestedTenantId = req.query.tenant_id as string | undefined;
+    const { targetTenantId, error } = resolveTenantContext(
+      req,
+      requestedTenantId
     );
 
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
+    if (error) {
+      return res.status(error.status).json({ error: error.message });
     }
 
-    const tenantId = profileResult.rows[0].tenant_id;
+    const tenantId = targetTenantId!;
 
     const result = await pool.query(
       `SELECT id, name, source_type, status, document_count, total_chunks, total_tokens,
@@ -426,8 +533,8 @@ router.get('/sources', authenticateToken, async (req: AuthRequest, res) => {
 
     res.json({ sources: result.rows });
   } catch (error: any) {
-    console.error('Error fetching document sources:', error);
-    res.status(500).json({ error: 'Failed to fetch document sources' });
+    console.error("Error fetching document sources:", error);
+    res.status(500).json({ error: "Failed to fetch document sources" });
   }
 });
 
@@ -435,37 +542,47 @@ router.get('/sources', authenticateToken, async (req: AuthRequest, res) => {
  * POST /api/rag/sources
  * Add a new document source
  */
-router.post('/sources', authenticateToken, async (req: AuthRequest, res) => {
+router.post("/sources", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { name, source_type, source_config, sync_frequency } = documentSourceSchema.parse(req.body);
+    const { name, source_type, source_config, sync_frequency } =
+      documentSourceSchema.parse(req.body);
 
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
+    // Get tenant context from auth token
+    const requestedTenantId = req.query.tenant_id as string | undefined;
+    const { targetTenantId, error } = resolveTenantContext(
+      req,
+      requestedTenantId
     );
 
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
+    if (error) {
+      return res.status(error.status).json({ error: error.message });
     }
 
-    const tenantId = profileResult.rows[0].tenant_id;
+    const tenantId = targetTenantId!;
 
     const result = await pool.query(
       `INSERT INTO public.rag_document_sources
        (tenant_id, name, source_type, source_config, sync_frequency, status)
        VALUES ($1, $2, $3, $4, $5, 'pending')
        RETURNING *`,
-      [tenantId, name, source_type, JSON.stringify(source_config), sync_frequency || 'daily']
+      [
+        tenantId,
+        name,
+        source_type,
+        JSON.stringify(source_config),
+        sync_frequency || "daily",
+      ]
     );
 
     res.status(201).json({ source: result.rows[0] });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+      return res
+        .status(400)
+        .json({ error: "Invalid request data", details: error.errors });
     }
-    console.error('Error creating document source:', error);
-    res.status(500).json({ error: 'Failed to create document source' });
+    console.error("Error creating document source:", error);
+    res.status(500).json({ error: "Failed to create document source" });
   }
 });
 
@@ -473,182 +590,207 @@ router.post('/sources', authenticateToken, async (req: AuthRequest, res) => {
  * DELETE /api/rag/sources/:id
  * Remove a document source
  */
-router.delete('/sources/:id', authenticateToken, async (req: AuthRequest, res) => {
-  try {
-    const sourceId = req.params.id;
+router.delete(
+  "/sources/:id",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const sourceId = req.params.id;
 
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
+      // Get tenant_id
+      const profileResult = await pool.query(
+        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
+        [req.userId]
+      );
 
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
+      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+
+      const tenantId = profileResult.rows[0].tenant_id;
+
+      // Verify ownership
+      const sourceResult = await pool.query(
+        "SELECT id FROM public.rag_document_sources WHERE id = $1 AND tenant_id = $2",
+        [sourceId, tenantId]
+      );
+
+      if (sourceResult.rows.length === 0) {
+        return res.status(404).json({ error: "Document source not found" });
+      }
+
+      // Delete (CASCADE will handle documents and embeddings)
+      await pool.query(
+        "DELETE FROM public.rag_document_sources WHERE id = $1",
+        [sourceId]
+      );
+
+      res.json({ message: "Document source deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting document source:", error);
+      res.status(500).json({ error: "Failed to delete document source" });
     }
-
-    const tenantId = profileResult.rows[0].tenant_id;
-
-    // Verify ownership
-    const sourceResult = await pool.query(
-      'SELECT id FROM public.rag_document_sources WHERE id = $1 AND tenant_id = $2',
-      [sourceId, tenantId]
-    );
-
-    if (sourceResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document source not found' });
-    }
-
-    // Delete (CASCADE will handle documents and embeddings)
-    await pool.query(
-      'DELETE FROM public.rag_document_sources WHERE id = $1',
-      [sourceId]
-    );
-
-    res.json({ message: 'Document source deleted successfully' });
-  } catch (error: any) {
-    console.error('Error deleting document source:', error);
-    res.status(500).json({ error: 'Failed to delete document source' });
   }
-});
+);
 
 /**
  * POST /api/rag/sources/:id/sync
  * Trigger manual sync for a document source
  */
-router.post('/sources/:id/sync', authenticateToken, async (req: AuthRequest, res) => {
-  try {
-    const sourceId = req.params.id;
+router.post(
+  "/sources/:id/sync",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const sourceId = req.params.id;
 
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
+      // Get tenant_id
+      const profileResult = await pool.query(
+        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
+        [req.userId]
+      );
 
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
+      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
 
-    const tenantId = profileResult.rows[0].tenant_id;
+      const tenantId = profileResult.rows[0].tenant_id;
 
-    // Verify ownership and update status
-    const result = await pool.query(
-      `UPDATE public.rag_document_sources
+      // Verify ownership and update status
+      const result = await pool.query(
+        `UPDATE public.rag_document_sources
        SET status = 'indexing', updated_at = NOW()
        WHERE id = $1 AND tenant_id = $2
        RETURNING *`,
-      [sourceId, tenantId]
-    );
+        [sourceId, tenantId]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Document source not found' });
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Document source not found" });
+      }
+
+      // TODO: Trigger actual sync job (queue worker, background process, etc.)
+      // For now, just return success
+      res.json({ message: "Sync triggered", source: result.rows[0] });
+    } catch (error: any) {
+      console.error("Error triggering sync:", error);
+      res.status(500).json({ error: "Failed to trigger sync" });
     }
-
-    // TODO: Trigger actual sync job (queue worker, background process, etc.)
-    // For now, just return success
-    res.json({ message: 'Sync triggered', source: result.rows[0] });
-  } catch (error: any) {
-    console.error('Error triggering sync:', error);
-    res.status(500).json({ error: 'Failed to trigger sync' });
   }
-});
+);
 
 /**
  * POST /api/rag/documents/upload
  * Upload and process a document for RAG
  */
-router.post('/documents/upload', uploadLimiter, authenticateToken, upload.single('file'), async (req: AuthRequest, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+router.post(
+  "/documents/upload",
+  uploadLimiter,
+  authenticateToken,
+  upload.single("file"),
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
 
-    // Get tenant_id and RAG settings
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
+      // Get tenant_id and RAG settings
+      const profileResult = await pool.query(
+        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
+        [req.userId]
+      );
 
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
+      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
 
-    const tenantId = profileResult.rows[0].tenant_id;
+      const tenantId = profileResult.rows[0].tenant_id;
 
-    // Get or create default document source for uploads
-    let sourceResult = await pool.query(
-      `SELECT id FROM public.rag_document_sources
+      // Get or create default document source for uploads
+      let sourceResult = await pool.query(
+        `SELECT id FROM public.rag_document_sources
        WHERE tenant_id = $1 AND source_type = 'upload' AND name = 'Uploaded Documents'
        LIMIT 1`,
-      [tenantId]
-    );
+        [tenantId]
+      );
 
-    let sourceId: string;
-    if (sourceResult.rows.length === 0) {
-      const newSource = await pool.query(
-        `INSERT INTO public.rag_document_sources
+      let sourceId: string;
+      if (sourceResult.rows.length === 0) {
+        const newSource = await pool.query(
+          `INSERT INTO public.rag_document_sources
          (tenant_id, name, source_type, source_config, status)
          VALUES ($1, 'Uploaded Documents', 'upload', '{}', 'active')
          RETURNING id`,
+          [tenantId]
+        );
+        sourceId = newSource.rows[0].id;
+      } else {
+        sourceId = sourceResult.rows[0].id;
+      }
+
+      // Get RAG settings
+      const settingsResult = await pool.query(
+        "SELECT * FROM public.rag_settings WHERE tenant_id = $1",
         [tenantId]
       );
-      sourceId = newSource.rows[0].id;
-    } else {
-      sourceId = sourceResult.rows[0].id;
-    }
+      const settings = settingsResult.rows[0] || {
+        embedding_model: "openai/text-embedding-3-large",
+        vector_database: "pgvector",
+        chunk_size: 512,
+        chunk_overlap: 50,
+      };
 
-    // Get RAG settings
-    const settingsResult = await pool.query(
-      'SELECT * FROM public.rag_settings WHERE tenant_id = $1',
-      [tenantId]
-    );
-    const settings = settingsResult.rows[0] || {
-      embedding_model: 'openai/text-embedding-3-large',
-      vector_database: 'pgvector',
-      chunk_size: 512,
-      chunk_overlap: 50,
-    };
-
-    // Create document record
-    const docResult = await pool.query(
-      `INSERT INTO public.rag_documents
+      // Create document record
+      const docResult = await pool.query(
+        `INSERT INTO public.rag_documents
        (source_id, tenant_id, filename, file_type, file_size_bytes, status)
        VALUES ($1, $2, $3, $4, $5, 'processing')
        RETURNING *`,
-      [
-        sourceId,
-        tenantId,
+        [
+          sourceId,
+          tenantId,
+          req.file.originalname,
+          req.file.mimetype,
+          req.file.size,
+        ]
+      );
+
+      const document = docResult.rows[0];
+
+      // Process document asynchronously (don't wait)
+      processDocument(
+        document.id,
+        req.file.buffer,
         req.file.originalname,
         req.file.mimetype,
-        req.file.size,
-      ]
-    );
-
-    const document = docResult.rows[0];
-
-    // Process document asynchronously (don't wait)
-    processDocument(document.id, req.file.buffer, req.file.originalname, req.file.mimetype, settings, tenantId, req.userId!)
-      .catch((error) => {
-        console.error('Error processing document:', error);
+        settings,
+        tenantId,
+        req.userId!
+      ).catch((error) => {
+        console.error("Error processing document:", error);
         // Update document status to error
-        pool.query(
-          `UPDATE public.rag_documents
+        pool
+          .query(
+            `UPDATE public.rag_documents
            SET status = 'error', error_message = $1
            WHERE id = $2`,
-          [error.message, document.id]
-        ).catch(console.error);
+            [error.message, document.id]
+          )
+          .catch(console.error);
       });
 
-    res.status(201).json({
-      document,
-      message: 'Document uploaded and processing started',
-    });
-  } catch (error: any) {
-    console.error('Error uploading document:', error);
-    res.status(500).json({ error: 'Failed to upload document', details: error.message });
+      res.status(201).json({
+        document,
+        message: "Document uploaded and processing started",
+      });
+    } catch (error: any) {
+      console.error("Error uploading document:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to upload document", details: error.message });
+    }
   }
-});
+);
 
 /**
  * Process a document: parse, chunk, embed, and store
@@ -674,22 +816,31 @@ async function processDocument(
 
     // 3. Generate embeddings (use tenant-specific API key if available)
     const texts = chunks.map((chunk) => chunk.text);
-    const apiKey = settings.embedding_model.includes('openai') ? settings.openai_api_key : undefined;
-    const embeddingResults = await generateEmbeddings(texts, settings.embedding_model, apiKey);
+    const apiKey = settings.embedding_model.includes("openai")
+      ? settings.openai_api_key
+      : undefined;
+    const embeddingResults = await generateEmbeddings(
+      texts,
+      settings.embedding_model,
+      apiKey
+    );
 
     // Track embedding costs
-    const embeddingTokens = embeddingResults.reduce((sum, r) => sum + r.tokenCount, 0);
-    const unitPrice = settings.embedding_model.includes('openai')
-      ? (settings.embedding_model.includes('large') ? 0.00013 : 0.00002) / 1000
+    const embeddingTokens = embeddingResults.reduce(
+      (sum, r) => sum + r.tokenCount,
+      0
+    );
+    const unitPrice = settings.embedding_model.includes("openai")
+      ? (settings.embedding_model.includes("large") ? 0.00013 : 0.00002) / 1000
       : 0.0001 / 1000;
 
     await logCostEvent(tenantId, {
-      serviceCategory: 'embedding',
-      serviceProvider: settings.embedding_model.split('/')[0],
+      serviceCategory: "embedding",
+      serviceProvider: settings.embedding_model.split("/")[0],
       serviceName: settings.embedding_model,
-      usageType: 'tokens',
+      usageType: "tokens",
       usageAmount: embeddingTokens,
-      usageUnit: 'tokens',
+      usageUnit: "tokens",
       unitPrice,
       userId,
       metadata: { documentId, chunkCount: chunks.length },
@@ -706,10 +857,18 @@ async function processDocument(
       },
     }));
 
-    await storeEmbeddings(tenantId, documentId, chunksWithEmbeddings, settings.vector_database);
+    await storeEmbeddings(
+      tenantId,
+      documentId,
+      chunksWithEmbeddings,
+      settings.vector_database
+    );
 
     // 5. Update document record
-    const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokenCount, 0);
+    const totalTokens = chunks.reduce(
+      (sum, chunk) => sum + chunk.tokenCount,
+      0
+    );
     await pool.query(
       `UPDATE public.rag_documents
        SET status = 'indexed',
@@ -732,7 +891,7 @@ async function processDocument(
       [chunks.length, totalTokens, documentId]
     );
   } catch (error: any) {
-    console.error('Error processing document:', error);
+    console.error("Error processing document:", error);
     throw error;
   }
 }
@@ -741,18 +900,18 @@ async function processDocument(
  * GET /api/rag/documents
  * List documents for authenticated tenant
  */
-router.get('/documents', authenticateToken, async (req: AuthRequest, res) => {
+router.get("/documents", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const sourceId = req.query.source_id as string | undefined;
 
     // Get tenant_id
     const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+      "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
       [req.userId]
     );
 
     if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
+      return res.status(404).json({ error: "Tenant not found" });
     }
 
     const tenantId = profileResult.rows[0].tenant_id;
@@ -766,18 +925,18 @@ router.get('/documents', authenticateToken, async (req: AuthRequest, res) => {
     const params: any[] = [tenantId];
 
     if (sourceId) {
-      query += ' AND source_id = $2';
+      query += " AND source_id = $2";
       params.push(sourceId);
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += " ORDER BY created_at DESC";
 
     const result = await pool.query(query, params);
 
     res.json({ documents: result.rows });
   } catch (error: any) {
-    console.error('Error fetching documents:', error);
-    res.status(500).json({ error: 'Failed to fetch documents' });
+    console.error("Error fetching documents:", error);
+    res.status(500).json({ error: "Failed to fetch documents" });
   }
 });
 
@@ -785,22 +944,25 @@ router.get('/documents', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/rag/embeddings/stats
  * Get embedding statistics for authenticated tenant
  */
-router.get('/embeddings/stats', authenticateToken, async (req: AuthRequest, res) => {
-  try {
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
+router.get(
+  "/embeddings/stats",
+  authenticateToken,
+  async (req: AuthRequest, res) => {
+    try {
+      // Get tenant_id
+      const profileResult = await pool.query(
+        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
+        [req.userId]
+      );
 
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
+      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
 
-    const tenantId = profileResult.rows[0].tenant_id;
+      const tenantId = profileResult.rows[0].tenant_id;
 
-    const statsResult = await pool.query(
-      `SELECT 
+      const statsResult = await pool.query(
+        `SELECT 
         COUNT(DISTINCT d.id) as total_documents,
         COUNT(DISTINCT ds.id) as total_sources,
         COALESCE(SUM(d.chunk_count), 0) as total_chunks,
@@ -810,48 +972,52 @@ router.get('/embeddings/stats', authenticateToken, async (req: AuthRequest, res)
        LEFT JOIN public.rag_document_sources ds ON d.source_id = ds.id
        LEFT JOIN public.rag_embeddings e ON d.id = e.document_id
        WHERE d.tenant_id = $1 AND d.status = 'indexed'`,
-      [tenantId]
-    );
+        [tenantId]
+      );
 
-    res.json({ stats: statsResult.rows[0] });
-  } catch (error: any) {
-    console.error('Error fetching embedding stats:', error);
-    res.status(500).json({ error: 'Failed to fetch embedding stats' });
+      res.json({ stats: statsResult.rows[0] });
+    } catch (error: any) {
+      console.error("Error fetching embedding stats:", error);
+      res.status(500).json({ error: "Failed to fetch embedding stats" });
+    }
   }
-});
+);
 
 /**
  * GET /api/rag/voice
  * Get RAG voice agentic settings (Cohi voice configuration) from tenant database
  */
-router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
+router.get("/voice", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const requestedTenantId = req.query.tenant_id as string | undefined;
-    
-    // Get user's role and tenant
-    const profileResult = await pool.query(
-      `SELECT u.role, p.tenant_id 
-       FROM public.users u 
-       LEFT JOIN public.profiles p ON u.id = p.user_id 
-       WHERE u.id = $1`,
-      [req.userId]
+
+    // Get tenant context from auth token
+    const { targetTenantId, noTenantContext, error } = resolveTenantContext(
+      req,
+      requestedTenantId
     );
-    
-    const userTenantId = profileResult.rows[0]?.tenant_id;
-    const userRole = profileResult.rows[0]?.role;
-    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
-    
-    let targetTenantId: string;
-    if (isSuperAdmin && requestedTenantId) {
-      targetTenantId = requestedTenantId;
-    } else if (userTenantId) {
-      targetTenantId = userTenantId;
-    } else {
-      return res.status(403).json({ error: 'Access denied. Tenant context required.' });
+
+    if (error) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    // For platform admins without tenant context, return default voice settings
+    if (noTenantContext) {
+      return res.json({
+        voice: {
+          enabled: false,
+          model: "models/gemini-2.0-flash-exp",
+          voice: "Aoede",
+          settings: {},
+          configuration: {},
+        },
+        message:
+          "No tenant selected. Select a tenant to view/edit voice settings.",
+      });
     }
 
     // Get tenant database pool
-    const tenantPool = await getTenantPoolForRag(targetTenantId);
+    const tenantPool = await getTenantPoolForRag(targetTenantId!);
     await ensureRagSettings(tenantPool);
 
     const result = await tenantPool.query(
@@ -883,8 +1049,8 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
       return res.json({
         voice: {
           enabled: false,
-          model: 'models/gemini-2.0-flash-exp',
-          voice: 'Aoede',
+          model: "models/gemini-2.0-flash-exp",
+          voice: "Aoede",
           settings: {},
           configuration: {},
         },
@@ -895,8 +1061,8 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
     res.json({
       voice: {
         enabled: row.voice_agentic_enabled || false,
-        model: row.voice_model || 'models/gemini-2.0-flash-exp',
-        voice: row.voice_name || 'Aoede',
+        model: row.voice_model || "models/gemini-2.0-flash-exp",
+        voice: row.voice_name || "Aoede",
         settings: {
           top_k: row.voice_top_k || 5,
           similarity_threshold: row.voice_similarity_threshold || 0.75,
@@ -909,20 +1075,20 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
           real_time_mode: row.voice_real_time_mode || true,
         },
         configuration: {
-          allowed_topics: row.allowed_topics || '',
-          conversation_rules: row.conversation_rules || '',
-          personality_tone: row.personality_tone || 'professional',
-          personality_style: row.personality_style || 'concise',
-          personality_custom: row.personality_custom || '',
-          knowledge_base_links: row.knowledge_base_links || '',
+          allowed_topics: row.allowed_topics || "",
+          conversation_rules: row.conversation_rules || "",
+          personality_tone: row.personality_tone || "professional",
+          personality_style: row.personality_style || "concise",
+          personality_custom: row.personality_custom || "",
+          knowledge_base_links: row.knowledge_base_links || "",
         },
         system_prompt: row.voice_system_prompt || null,
         api_key_configured: !!row.gemini_api_key,
       },
     });
   } catch (error: any) {
-    console.error('Error fetching RAG voice settings:', error);
-    res.status(500).json({ error: 'Failed to fetch RAG voice settings' });
+    console.error("Error fetching RAG voice settings:", error);
+    res.status(500).json({ error: "Failed to fetch RAG voice settings" });
   }
 });
 
@@ -930,57 +1096,47 @@ router.get('/voice', authenticateToken, async (req: AuthRequest, res) => {
  * PUT /api/rag/voice
  * Update RAG voice agentic settings (Cohi voice configuration) in tenant database
  */
-router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
+router.put("/voice", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const voiceUpdates = ragSettingsSchema.pick({
-      voice_agentic_enabled: true,
-      voice_model: true,
-      voice_name: true,
-      voice_top_k: true,
-      voice_similarity_threshold: true,
-      voice_context_window: true,
-      voice_temperature: true,
-      voice_response_max_length: true,
-      voice_conversation_memory: true,
-      voice_rag_enabled: true,
-      voice_system_prompt: true,
-      voice_enable_reranking: true,
-      voice_real_time_mode: true,
-      allowed_topics: true,
-      conversation_rules: true,
-      personality_tone: true,
-      personality_style: true,
-      personality_custom: true,
-      knowledge_base_links: true,
-      gemini_api_key: true,
-    }).parse(req.body);
+    const voiceUpdates = ragSettingsSchema
+      .pick({
+        voice_agentic_enabled: true,
+        voice_model: true,
+        voice_name: true,
+        voice_top_k: true,
+        voice_similarity_threshold: true,
+        voice_context_window: true,
+        voice_temperature: true,
+        voice_response_max_length: true,
+        voice_conversation_memory: true,
+        voice_rag_enabled: true,
+        voice_system_prompt: true,
+        voice_enable_reranking: true,
+        voice_real_time_mode: true,
+        allowed_topics: true,
+        conversation_rules: true,
+        personality_tone: true,
+        personality_style: true,
+        personality_custom: true,
+        knowledge_base_links: true,
+        gemini_api_key: true,
+      })
+      .parse(req.body);
 
     const requestedTenantId = req.query.tenant_id as string | undefined;
 
-    // Get user's role and tenant
-    const profileResult = await pool.query(
-      `SELECT u.role, p.tenant_id 
-       FROM public.users u 
-       LEFT JOIN public.profiles p ON u.id = p.user_id 
-       WHERE u.id = $1`,
-      [req.userId]
+    // Get tenant context from auth token
+    const { targetTenantId, error } = resolveTenantContext(
+      req,
+      requestedTenantId
     );
-    
-    const userTenantId = profileResult.rows[0]?.tenant_id;
-    const userRole = profileResult.rows[0]?.role;
-    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
-    
-    let targetTenantId: string;
-    if (isSuperAdmin && requestedTenantId) {
-      targetTenantId = requestedTenantId;
-    } else if (userTenantId) {
-      targetTenantId = userTenantId;
-    } else {
-      return res.status(403).json({ error: 'Access denied. Tenant context required.' });
+
+    if (error) {
+      return res.status(error.status).json({ error: error.message });
     }
 
     // Get tenant database pool
-    const tenantPool = await getTenantPoolForRag(targetTenantId);
+    const tenantPool = await getTenantPoolForRag(targetTenantId!);
     await ensureRagSettings(tenantPool);
 
     // Build dynamic UPDATE query (no tenant_id column)
@@ -997,28 +1153,30 @@ router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
     });
 
     if (updateFields.length === 0) {
-      return res.status(400).json({ error: 'No valid fields to update' });
+      return res.status(400).json({ error: "No valid fields to update" });
     }
 
     const query = `
       UPDATE public.rag_settings
-      SET ${updateFields.join(', ')}, updated_at = NOW()
+      SET ${updateFields.join(", ")}, updated_at = NOW()
       RETURNING *
     `;
 
     const result = await tenantPool.query(query, values);
 
     if (result.rows.length === 0) {
-      return res.status(500).json({ error: 'Failed to update voice settings' });
+      return res.status(500).json({ error: "Failed to update voice settings" });
     }
 
     res.json({ voice: result.rows[0] });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+      return res
+        .status(400)
+        .json({ error: "Invalid request data", details: error.errors });
     }
-    console.error('Error updating RAG voice settings:', error);
-    res.status(500).json({ error: 'Failed to update RAG voice settings' });
+    console.error("Error updating RAG voice settings:", error);
+    res.status(500).json({ error: "Failed to update RAG voice settings" });
   }
 });
 
@@ -1026,32 +1184,34 @@ router.put('/voice', authenticateToken, async (req: AuthRequest, res) => {
  * POST /api/rag/search
  * Perform RAG search using vector similarity
  */
-router.post('/search', authenticateToken, async (req: AuthRequest, res) => {
+router.post("/search", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { query, top_k } = z.object({
-      query: z.string().min(1),
-      top_k: z.number().int().min(1).max(50).optional(),
-    }).parse(req.body);
+    const { query, top_k } = z
+      .object({
+        query: z.string().min(1),
+        top_k: z.number().int().min(1).max(50).optional(),
+      })
+      .parse(req.body);
 
     // Get tenant_id and RAG settings
     const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
+      "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
       [req.userId]
     );
 
     if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-      return res.status(404).json({ error: 'Tenant not found' });
+      return res.status(404).json({ error: "Tenant not found" });
     }
 
     const tenantId = profileResult.rows[0].tenant_id;
 
     const settingsResult = await pool.query(
-      'SELECT * FROM public.rag_settings WHERE tenant_id = $1',
+      "SELECT * FROM public.rag_settings WHERE tenant_id = $1",
       [tenantId]
     );
 
     if (settingsResult.rows.length === 0) {
-      return res.status(404).json({ error: 'RAG settings not found' });
+      return res.status(404).json({ error: "RAG settings not found" });
     }
 
     const settings = settingsResult.rows[0];
@@ -1059,22 +1219,28 @@ router.post('/search', authenticateToken, async (req: AuthRequest, res) => {
 
     // Generate embedding for query
     // Use tenant-specific API key if available
-    const apiKey = settings.embedding_model.includes('openai') ? settings.openai_api_key : undefined;
-    const embeddingResults = await generateEmbeddings([query], settings.embedding_model, apiKey);
+    const apiKey = settings.embedding_model.includes("openai")
+      ? settings.openai_api_key
+      : undefined;
+    const embeddingResults = await generateEmbeddings(
+      [query],
+      settings.embedding_model,
+      apiKey
+    );
     const queryEmbedding = embeddingResults[0].embedding;
 
     // Track embedding cost
-    const unitPrice = settings.embedding_model.includes('openai')
-      ? (settings.embedding_model.includes('large') ? 0.00013 : 0.00002) / 1000
+    const unitPrice = settings.embedding_model.includes("openai")
+      ? (settings.embedding_model.includes("large") ? 0.00013 : 0.00002) / 1000
       : 0.0001 / 1000;
 
     await logCostEvent(tenantId, {
-      serviceCategory: 'embedding',
-      serviceProvider: settings.embedding_model.split('/')[0],
+      serviceCategory: "embedding",
+      serviceProvider: settings.embedding_model.split("/")[0],
       serviceName: settings.embedding_model,
-      usageType: 'tokens',
+      usageType: "tokens",
       usageAmount: embeddingResults[0].tokenCount,
-      usageUnit: 'tokens',
+      usageUnit: "tokens",
       unitPrice,
       userId: req.userId,
       metadata: { query: query.substring(0, 100) },
@@ -1103,10 +1269,14 @@ router.post('/search', authenticateToken, async (req: AuthRequest, res) => {
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+      return res
+        .status(400)
+        .json({ error: "Invalid request data", details: error.errors });
     }
-    console.error('Error performing RAG search:', error);
-    res.status(500).json({ error: 'Failed to perform RAG search', details: error.message });
+    console.error("Error performing RAG search:", error);
+    res
+      .status(500)
+      .json({ error: "Failed to perform RAG search", details: error.message });
   }
 });
 
@@ -1114,41 +1284,42 @@ router.post('/search', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/rag/costs
  * Get RAG-related costs for authenticated tenant
  */
-router.get('/costs', authenticateToken, async (req: AuthRequest, res) => {
+router.get("/costs", authenticateToken, async (req: AuthRequest, res) => {
   try {
     // Check if super admin is requesting a specific tenant's costs
     const requestedTenantId = req.query.tenant_id as string | undefined;
-    
-    // Get user's role from users table and tenant from profiles table
-    const profileResult = await pool.query(
-      `SELECT u.role, p.tenant_id 
-       FROM public.users u 
-       LEFT JOIN public.profiles p ON u.id = p.user_id 
-       WHERE u.id = $1`,
-      [req.userId]
+
+    // Use helper to resolve tenant context
+    const { targetTenantId, noTenantContext, error } = resolveTenantContext(
+      req,
+      requestedTenantId
     );
-    
-    const userTenantId = profileResult.rows[0]?.tenant_id;
-    const userRole = profileResult.rows[0]?.role;
-    const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
-    
-    // Determine which tenant_id to use
-    let targetTenantId: string;
-    if (isSuperAdmin && requestedTenantId) {
-      // Super admin can access any tenant's costs
-      targetTenantId = requestedTenantId;
-    } else if (userTenantId) {
-      // Use user's tenant (or super admin's default tenant)
-      targetTenantId = userTenantId;
-    } else {
-      return res.status(403).json({ error: 'Access denied. Tenant context required.' });
+
+    if (error) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    // For platform admins without tenant context, return empty costs
+    if (noTenantContext) {
+      return res.json({
+        costs: [],
+        message: "No tenant selected. Select a tenant to view costs.",
+      });
+    }
+
+    if (!targetTenantId) {
+      return res
+        .status(403)
+        .json({ error: "Access denied. Tenant context required." });
     }
 
     const tenantId = targetTenantId;
 
     // Get date range (default to last 30 days)
-    const startDate = req.query.start_date as string || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const endDate = req.query.end_date as string || new Date().toISOString();
+    const startDate =
+      (req.query.start_date as string) ||
+      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const endDate = (req.query.end_date as string) || new Date().toISOString();
 
     // Check if cost_events table exists
     try {
@@ -1159,12 +1330,14 @@ router.get('/costs', authenticateToken, async (req: AuthRequest, res) => {
           AND table_name = 'cost_events'
         )`
       );
-      
+
       const tableExists = tableCheck.rows[0]?.exists;
-      
+
       if (!tableExists) {
         // Table doesn't exist yet - return empty array
-        console.log('cost_events table does not exist, returning empty costs array');
+        console.log(
+          "cost_events table does not exist, returning empty costs array"
+        );
         return res.json({ costs: [] });
       }
 
@@ -1195,17 +1368,20 @@ router.get('/costs', authenticateToken, async (req: AuthRequest, res) => {
       res.json({ costs: result.rows });
     } catch (dbError: any) {
       // If table doesn't exist (42P01 = relation does not exist)
-      if (dbError.code === '42P01') {
-        console.log('cost_events table does not exist, returning empty costs array');
+      if (dbError.code === "42P01") {
+        console.log(
+          "cost_events table does not exist, returning empty costs array"
+        );
         return res.json({ costs: [] });
       }
       throw dbError;
     }
   } catch (error: any) {
-    console.error('Error fetching RAG costs:', error);
-    res.status(500).json({ error: 'Failed to fetch RAG costs', details: error.message });
+    console.error("Error fetching RAG costs:", error);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch RAG costs", details: error.message });
   }
 });
 
 export default router;
-

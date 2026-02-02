@@ -15,6 +15,7 @@ import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
+import SSOCallback from "./pages/SSOCallback";
 import Loans from "./pages/Loans";
 import MyDashboard from "./pages/MyDashboard";
 import MyDashboardLegacy from "./pages/MyDashboardLegacy";
@@ -33,6 +34,8 @@ import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
+import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
+import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 // Workbench pages
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
@@ -80,6 +83,7 @@ const App = () => (
               {/* Public routes */}
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/auth/sso/callback" element={<SSOCallback />} />
               
               {/* Protected routes - require authentication */}
                 <Route path="/insights" element={
@@ -202,6 +206,8 @@ const App = () => (
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
+              <GlobalCohiChat />
+              <CohiDemoExperience />
           </Router>
         </TooltipProvider>
       </EditProvider>

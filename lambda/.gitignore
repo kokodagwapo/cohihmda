@@ -1,8 +1,0 @@
-node_modules/
-dist/
-*.zip
-.env
-.DS_Store
-*.log
-.serverless/
-.serverless-package-check*/

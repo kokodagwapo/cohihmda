@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Button } from '@/components/ui/button';
 import { useSalesTrendsData, type LoanOfficer as APILoanOfficer, type DrilldownData as APIDrilldownData, type DateRangeOption } from '@/hooks/useSalesTrendsData';
+import { useTenantStore } from '@/stores/tenantStore';
+import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
@@ -185,6 +187,13 @@ const monthlyPerformance6Months: MonthlyPerformance[] = [
 const SalesTrends = () => {
   const { theme } = useTheme();
   const isDarkMode = theme === 'dark';
+  
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
+  const { user } = useAuth();
+  
+  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant
+  const tenantId = selectedTenantId || user?.tenant_id || null;
 
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     const saved = localStorage.getItem('sales-trends-dateRange');
@@ -204,8 +213,8 @@ const SalesTrends = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // Fetch data from API
-  const { data: apiData, loading, error, refetch, fetchDrilldown } = useSalesTrendsData(dateRange as DateRangeOption, 'Retail');
+  // Fetch data from API with tenant context
+  const { data: apiData, loading, error, refetch, fetchDrilldown } = useSalesTrendsData(dateRange as DateRangeOption, 'Retail', tenantId);
 
   useEffect(() => {
     localStorage.setItem('sales-trends-dateRange', dateRange);

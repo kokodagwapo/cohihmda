@@ -989,11 +989,11 @@ const Index = () => {
               <Button
                 variant="ghost"
                 size="lg"
-                onClick={() => navigate('/admin')}
+                onClick={() => window.dispatchEvent(new CustomEvent('start-cohi-demo'))}
                 className="text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-8 py-6 text-sm font-medium rounded-full"
               >
                 <Play className="mr-2 h-4 w-4" />
-                Watch Demo
+                Watch Cohi Demo
               </Button>
             </div>
           </motion.div>

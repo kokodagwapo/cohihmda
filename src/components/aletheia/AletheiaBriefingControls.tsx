@@ -36,7 +36,7 @@ const AudioWaveIcon = ({ className = "w-6 h-6" }: { className?: string }) => {
   );
 };
 
-interface AletheiaBriefingControlsProps {
+export interface AletheiaBriefingControlsProps {
   briefingContext?: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
     funnelStory?: {

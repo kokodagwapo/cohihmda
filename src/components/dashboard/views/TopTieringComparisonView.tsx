@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -7,7 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
-import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2, AlertCircle, Maximize2, X } from 'lucide-react';
+import { Share2, Calendar, Clock, Search, Download, TrendingUp, BarChart3, Users, DollarSign, Loader2, AlertCircle, Maximize2, X, CheckSquare, Square, ListChecks } from 'lucide-react';
+import { useTopTieringSelectionStore, TopTieringSelectionItem } from '@/stores/topTieringSelectionStore';
 import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ComposedChart, Tooltip, Cell, ReferenceLine } from 'recharts';
 import { formatCompactNumber } from '@/utils/formatting';
 import { 
@@ -181,6 +182,49 @@ export function TopTieringComparisonView({
   
   // Custom date range state (for when timeFilter is 'custom')
   const [customDateRange, setCustomDateRange] = useState<CustomDateRange | undefined>(undefined);
+
+  // Selection state for Current Selection feature
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { setSelection } = useTopTieringSelectionStore();
+
+  // Toggle selection of an item
+  const toggleSelection = useCallback((item: ActorData) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(item.id)) {
+        next.delete(item.id);
+      } else {
+        next.add(item.id);
+      }
+      return next;
+    });
+  }, []);
+
+  // Clear all selections
+  const clearAllSelections = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  // Sync selections to the global store whenever they change
+  useEffect(() => {
+    if (selectedIds.size > 0) {
+      const selectedItems: TopTieringSelectionItem[] = currentData
+        .filter((item) => selectedIds.has(item.id))
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          tier: item.tier,
+          revenue: item.revenue,
+          units: item.units,
+          volume: item.volume,
+          revenueBPS: item.revenueBPS,
+          revenuePerLoan: item.revenuePerLoan,
+        }));
+      setSelection(selectedActor, selectedItems);
+    } else {
+      setSelection(selectedActor, []);
+    }
+  }, [selectedIds, currentData, selectedActor, setSelection]);
 
   // Fetch real data from API
   const { data: apiData, loading, error } = useTopTieringComparisonData(
@@ -533,6 +577,26 @@ export function TopTieringComparisonView({
                   </div>
                 </CardHeader>
                 <CardContent className="pt-4 sm:pt-5 space-y-4 sm:space-y-5">
+                  {/* Selection Summary */}
+                  {selectedIds.size > 0 && (
+                    <div className={`p-3 rounded-lg flex items-center justify-between gap-2 ${isDarkMode ? 'bg-violet-900/30 border border-violet-700/50' : 'bg-violet-50 border border-violet-200'}`}>
+                      <div className="flex items-center gap-2">
+                        <ListChecks className={`w-4 h-4 ${isDarkMode ? 'text-violet-400' : 'text-violet-600'}`} />
+                        <span className={`text-sm font-medium ${isDarkMode ? 'text-violet-300' : 'text-violet-700'}`}>
+                          {selectedIds.size} {selectedIds.size === 1 ? actorLabelSingular.toLowerCase() : actorLabelPlural.toLowerCase()} selected
+                        </span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearAllSelections}
+                        className={`h-7 px-2 text-xs ${isDarkMode ? 'text-violet-400 hover:text-violet-300' : 'text-violet-600 hover:text-violet-700'}`}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  )}
+
                   {/* Search Filter */}
                   <div>
                     <label className={`text-xs font-semibold mb-2 block uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -964,9 +1028,16 @@ export function TopTieringComparisonView({
                           yAxisId="left"
                           dataKey="revenue" 
                           radius={[4, 4, 0, 0]}
+                          cursor="pointer"
+                          onClick={(data: any) => data && toggleSelection(data)}
                         >
                           {revenueChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={selectedIds.has(entry.id) ? (isDarkMode ? '#8b5cf6' : '#7c3aed') : getTierColor(entry.tier)} 
+                              stroke={selectedIds.has(entry.id) ? (isDarkMode ? '#a78bfa' : '#8b5cf6') : 'none'}
+                              strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                            />
                           ))}
                         </Bar>
                         <Line 
@@ -1044,6 +1115,9 @@ export function TopTieringComparisonView({
                     <table className={`w-full text-[10px] ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                       <thead>
                         <tr className={`border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                          <th className={`text-center py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`} style={{ width: '40px' }}>
+                            <span className="sr-only">Select</span>
+                          </th>
                           <th className={`text-left py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>{actorLabelSingular}</th>
                           <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Units</th>
                           <th className={`text-right py-1 px-2 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Volume</th>
@@ -1054,11 +1128,29 @@ export function TopTieringComparisonView({
                         </tr>
                       </thead>
                       <tbody>
-                        {unitsChartData.map((actor, index) => (
+                        {unitsChartData.map((actor, index) => {
+                          const isSelected = selectedIds.has(actor.id);
+                          return (
                           <tr 
                             key={actor.id} 
-                            className={`border-b ${isDarkMode ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-slate-100 hover:bg-slate-50'}`}
+                            onClick={() => toggleSelection(actor)}
+                            className={`border-b cursor-pointer transition-colors ${
+                              isSelected 
+                                ? isDarkMode 
+                                  ? 'bg-violet-900/30 border-violet-700/50 hover:bg-violet-900/40' 
+                                  : 'bg-violet-50 border-violet-200 hover:bg-violet-100'
+                                : isDarkMode 
+                                  ? 'border-slate-700/50 hover:bg-slate-700/30' 
+                                  : 'border-slate-100 hover:bg-slate-50'
+                            }`}
                           >
+                            <td className="text-center py-2 px-2">
+                              {isSelected ? (
+                                <CheckSquare className={`w-4 h-4 mx-auto ${isDarkMode ? 'text-violet-400' : 'text-violet-600'}`} />
+                              ) : (
+                                <Square className={`w-4 h-4 mx-auto ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+                              )}
+                            </td>
                             <td className="py-2 px-3">
                               <div className="font-medium">{actor.name}</div>
                               <div className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{actor.id}</div>
@@ -1080,7 +1172,7 @@ export function TopTieringComparisonView({
                               </span>
                             </td>
                           </tr>
-                        ))}
+                        )})}
                       </tbody>
                     </table>
                   </div>
@@ -1157,9 +1249,16 @@ export function TopTieringComparisonView({
                             dataKey={selectedChartTab === 'units' ? 'units' : 'volume'} 
                             name={selectedChartTab === 'units' ? 'Units' : 'Volume'}
                             radius={[4, 4, 0, 0]}
+                            cursor="pointer"
+                            onClick={(data: any) => data && toggleSelection(data)}
                           >
                             {unitsChartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={selectedIds.has(entry.id) ? (isDarkMode ? '#8b5cf6' : '#7c3aed') : getTierColor(entry.tier)}
+                                stroke={selectedIds.has(entry.id) ? (isDarkMode ? '#a78bfa' : '#8b5cf6') : 'none'}
+                                strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                              />
                             ))}
                           </Bar>
                           <Line 
@@ -1263,9 +1362,16 @@ export function TopTieringComparisonView({
                         <Bar 
                           dataKey={selectedRevenueTab === 'revenue-bps' ? 'revenueBPS' : 'revenuePerLoan'} 
                           radius={[4, 4, 0, 0]}
+                          cursor="pointer"
+                          onClick={(data: any) => data && toggleSelection(data)}
                         >
                           {bpsChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={selectedIds.has(entry.id) ? (isDarkMode ? '#8b5cf6' : '#7c3aed') : getTierColor(entry.tier)}
+                              stroke={selectedIds.has(entry.id) ? (isDarkMode ? '#a78bfa' : '#8b5cf6') : 'none'}
+                              strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                            />
                           ))}
                         </Bar>
                       </BarChart>
@@ -1392,9 +1498,14 @@ export function TopTieringComparisonView({
                             return entry ? `${entry.name} (${entry.id})` : label;
                           }}
                         />
-                        <Bar yAxisId="left" dataKey="revenue" radius={[4, 4, 0, 0]} name="Revenue">
+                        <Bar yAxisId="left" dataKey="revenue" radius={[4, 4, 0, 0]} name="Revenue" cursor="pointer" onClick={(data: any) => data && toggleSelection(data)}>
                           {revenueChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={selectedIds.has(entry.id) ? (isDarkMode ? '#8b5cf6' : '#7c3aed') : getTierColor(entry.tier)}
+                              stroke={selectedIds.has(entry.id) ? (isDarkMode ? '#a78bfa' : '#8b5cf6') : 'none'}
+                              strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                            />
                           ))}
                         </Bar>
                         <Line 
@@ -1477,9 +1588,16 @@ export function TopTieringComparisonView({
                           dataKey={selectedChartTab === 'units' ? 'units' : 'volume'} 
                           name={selectedChartTab === 'units' ? 'Units' : 'Volume'}
                           radius={[4, 4, 0, 0]}
+                          cursor="pointer"
+                          onClick={(data: any) => data && toggleSelection(data)}
                         >
                           {unitsChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={selectedIds.has(entry.id) ? (isDarkMode ? '#8b5cf6' : '#7c3aed') : getTierColor(entry.tier)}
+                              stroke={selectedIds.has(entry.id) ? (isDarkMode ? '#a78bfa' : '#8b5cf6') : 'none'}
+                              strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                            />
                           ))}
                         </Bar>
                         <Line 
@@ -1535,9 +1653,14 @@ export function TopTieringComparisonView({
                             return entry ? `${entry.name} (${entry.id})` : label;
                           }}
                         />
-                        <Bar dataKey={selectedRevenueTab === 'revenue-bps' ? 'revenueBPS' : 'revenuePerLoan'} radius={[4, 4, 0, 0]}>
+                        <Bar dataKey={selectedRevenueTab === 'revenue-bps' ? 'revenueBPS' : 'revenuePerLoan'} radius={[4, 4, 0, 0]} cursor="pointer" onClick={(data: any) => data && toggleSelection(data)}>
                           {bpsChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={getTierColor(entry.tier)} />
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={selectedIds.has(entry.id) ? (isDarkMode ? '#8b5cf6' : '#7c3aed') : getTierColor(entry.tier)}
+                              stroke={selectedIds.has(entry.id) ? (isDarkMode ? '#a78bfa' : '#8b5cf6') : 'none'}
+                              strokeWidth={selectedIds.has(entry.id) ? 2 : 0}
+                            />
                           ))}
                         </Bar>
                       </BarChart>

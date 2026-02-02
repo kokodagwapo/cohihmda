@@ -1,6 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTheme } from '@/components/theme-provider';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
 
@@ -18,19 +17,9 @@ export function DashboardContainer({
   isAuthenticated
 }: DashboardContainerProps) {
   const navigate = useNavigate();
-  const { setTheme } = useTheme();
 
-  // Force light theme on dashboard - always override any stored preference
-  useEffect(() => {
-    try {
-      setTheme('light');
-      // Also set it immediately to prevent flash of dark theme
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    } catch (error: any) {
-      console.error('Error setting theme:', error);
-    }
-  }, [setTheme]);
+  // Theme is now controlled by user preference via ThemeProvider
+  // No longer forcing light theme - respects user's choice
 
   // Show loading state
   if (loading) {

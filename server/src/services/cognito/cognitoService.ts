@@ -6,12 +6,13 @@
 import { CognitoJwtVerifier } from "aws-jwt-verify";
 import { logError, logInfo, logDebug } from "../logger.js";
 
-// Cognito configuration from environment
-const COGNITO_USER_POOL_ID =
-  process.env.COGNITO_USER_POOL_ID || "us-east-2_lArr8IsFK";
-const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID || "";
-const COGNITO_REGION = process.env.COGNITO_REGION || "us-east-2";
-const COGNITO_DOMAIN = process.env.COGNITO_DOMAIN || "";
+// Cognito configuration from environment - read lazily to ensure dotenv has loaded
+// These are functions to avoid reading env vars at module load time (ES modules import before dotenv runs)
+const getCognitoUserPoolId = () => process.env.COGNITO_USER_POOL_ID || "";
+const getCognitoClientId = () => process.env.COGNITO_CLIENT_ID || "";
+const getCognitoRegion = () => process.env.COGNITO_REGION || "us-east-2";
+const getCognitoDomain = () => process.env.COGNITO_DOMAIN || "";
+const getCognitoClientSecret = () => process.env.COGNITO_CLIENT_SECRET || "";
 
 // Token types
 export interface CognitoIdToken {
@@ -82,11 +83,14 @@ let accessTokenVerifier: any = null;
  * Get or create ID token verifier
  */
 function getIdTokenVerifier() {
-  if (!idTokenVerifier && COGNITO_USER_POOL_ID && COGNITO_CLIENT_ID) {
+  const userPoolId = getCognitoUserPoolId();
+  const clientId = getCognitoClientId();
+  
+  if (!idTokenVerifier && userPoolId && clientId) {
     idTokenVerifier = CognitoJwtVerifier.create({
-      userPoolId: COGNITO_USER_POOL_ID,
+      userPoolId,
       tokenUse: "id",
-      clientId: COGNITO_CLIENT_ID,
+      clientId,
     });
   }
   return idTokenVerifier;
@@ -96,11 +100,14 @@ function getIdTokenVerifier() {
  * Get or create access token verifier
  */
 function getAccessTokenVerifier() {
-  if (!accessTokenVerifier && COGNITO_USER_POOL_ID && COGNITO_CLIENT_ID) {
+  const userPoolId = getCognitoUserPoolId();
+  const clientId = getCognitoClientId();
+  
+  if (!accessTokenVerifier && userPoolId && clientId) {
     accessTokenVerifier = CognitoJwtVerifier.create({
-      userPoolId: COGNITO_USER_POOL_ID,
+      userPoolId,
       tokenUse: "access",
-      clientId: COGNITO_CLIENT_ID,
+      clientId,
     });
   }
   return accessTokenVerifier;
@@ -190,18 +197,21 @@ export async function exchangeCodeForTokens(
   code: string,
   redirectUri: string,
 ): Promise<CognitoTokens> {
-  if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
+  const domain = getCognitoDomain();
+  const clientId = getCognitoClientId();
+  
+  if (!domain || !clientId) {
     throw new Error(
       "Cognito not configured - missing COGNITO_DOMAIN or COGNITO_CLIENT_ID",
     );
   }
 
-  const clientSecret = process.env.COGNITO_CLIENT_SECRET || "";
-  const tokenEndpoint = `https://${COGNITO_DOMAIN}/oauth2/token`;
+  const clientSecret = getCognitoClientSecret();
+  const tokenEndpoint = `https://${domain}/oauth2/token`;
 
   const params = new URLSearchParams({
     grant_type: "authorization_code",
-    client_id: COGNITO_CLIENT_ID,
+    client_id: clientId,
     code,
     redirect_uri: redirectUri,
   });
@@ -245,14 +255,17 @@ export function buildAuthorizationUrl(
   state: string,
   identityProvider?: string,
 ): string {
-  if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
+  const domain = getCognitoDomain();
+  const clientId = getCognitoClientId();
+  
+  if (!domain || !clientId) {
     throw new Error(
       "Cognito not configured - missing COGNITO_DOMAIN or COGNITO_CLIENT_ID",
     );
   }
 
   const params = new URLSearchParams({
-    client_id: COGNITO_CLIENT_ID,
+    client_id: clientId,
     response_type: "code",
     scope: "openid email profile",
     redirect_uri: redirectUri,
@@ -264,25 +277,28 @@ export function buildAuthorizationUrl(
     params.append("identity_provider", identityProvider);
   }
 
-  return `https://${COGNITO_DOMAIN}/oauth2/authorize?${params.toString()}`;
+  return `https://${domain}/oauth2/authorize?${params.toString()}`;
 }
 
 /**
  * Build Cognito logout URL
  */
 export function buildLogoutUrl(redirectUri: string): string {
-  if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
+  const domain = getCognitoDomain();
+  const clientId = getCognitoClientId();
+  
+  if (!domain || !clientId) {
     throw new Error(
       "Cognito not configured - missing COGNITO_DOMAIN or COGNITO_CLIENT_ID",
     );
   }
 
   const params = new URLSearchParams({
-    client_id: COGNITO_CLIENT_ID,
+    client_id: clientId,
     logout_uri: redirectUri,
   });
 
-  return `https://${COGNITO_DOMAIN}/logout?${params.toString()}`;
+  return `https://${domain}/logout?${params.toString()}`;
 }
 
 /**
@@ -291,18 +307,21 @@ export function buildLogoutUrl(redirectUri: string): string {
 export async function refreshTokens(
   refreshToken: string,
 ): Promise<CognitoTokens> {
-  if (!COGNITO_DOMAIN || !COGNITO_CLIENT_ID) {
+  const domain = getCognitoDomain();
+  const clientId = getCognitoClientId();
+  
+  if (!domain || !clientId) {
     throw new Error(
       "Cognito not configured - missing COGNITO_DOMAIN or COGNITO_CLIENT_ID",
     );
   }
 
-  const clientSecret = process.env.COGNITO_CLIENT_SECRET || "";
-  const tokenEndpoint = `https://${COGNITO_DOMAIN}/oauth2/token`;
+  const clientSecret = getCognitoClientSecret();
+  const tokenEndpoint = `https://${domain}/oauth2/token`;
 
   const params = new URLSearchParams({
     grant_type: "refresh_token",
-    client_id: COGNITO_CLIENT_ID,
+    client_id: clientId,
     refresh_token: refreshToken,
   });
 
@@ -340,7 +359,10 @@ export async function refreshTokens(
  * Check if Cognito is configured
  */
 export function isCognitoConfigured(): boolean {
-  return !!(COGNITO_USER_POOL_ID && COGNITO_CLIENT_ID && COGNITO_DOMAIN);
+  const userPoolId = getCognitoUserPoolId();
+  const clientId = getCognitoClientId();
+  const domain = getCognitoDomain();
+  return !!(userPoolId && clientId && domain);
 }
 
 /**
@@ -348,10 +370,10 @@ export function isCognitoConfigured(): boolean {
  */
 export function getCognitoConfig() {
   return {
-    userPoolId: COGNITO_USER_POOL_ID,
-    clientId: COGNITO_CLIENT_ID,
-    region: COGNITO_REGION,
-    domain: COGNITO_DOMAIN,
+    userPoolId: getCognitoUserPoolId(),
+    clientId: getCognitoClientId(),
+    region: getCognitoRegion(),
+    domain: getCognitoDomain(),
     isConfigured: isCognitoConfigured(),
   };
 }

@@ -1586,6 +1586,129 @@ router.delete('/clear-loans', authenticateToken, attachTenantContext, async (req
 });
 
 /**
+ * GET /api/los/connections/:id/sync-status
+ * Get the current sync status for a connection
+ */
+router.get('/connections/:id/sync-status', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.query.tenant_id as string | undefined;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    // Get tenant pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Get connection status
+    const result = await tenantPool.query(
+      `SELECT last_sync_status, last_synced_at, last_sync_error, updated_at
+       FROM public.los_connections WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'LOS connection not found' });
+    }
+
+    const connection = result.rows[0];
+    
+    // Get current loan count for progress estimation
+    let loansCount = 0;
+    try {
+      const countResult = await tenantPool.query('SELECT COUNT(*) as count FROM public.loans');
+      loansCount = parseInt(countResult.rows[0]?.count || '0', 10);
+    } catch (error: any) {
+      // Table might not exist yet
+      loansCount = 0;
+    }
+
+    // Map database status to frontend status
+    const status = connection.last_sync_status;
+    let frontendStatus = 'idle';
+    let message = '';
+    
+    if (status === 'pending' || status === 'in_progress') {
+      frontendStatus = 'processing';
+      message = 'Syncing loans from Encompass...';
+    } else if (status === 'success') {
+      frontendStatus = 'complete';
+      message = 'Sync completed successfully';
+    } else if (status === 'error') {
+      frontendStatus = 'error';
+      message = connection.last_sync_error || 'Sync failed';
+    }
+
+    res.json({
+      status: frontendStatus,
+      dbStatus: status,
+      progress: status === 'in_progress' || status === 'pending' ? {
+        current_batch: 0, // We don't track batches yet
+        total_batches: 0,
+        loans_processed: loansCount, // Current count
+        loans_total: 0, // We don't know the total until it's done
+        message: message
+      } : null,
+      error: status === 'error' ? connection.last_sync_error : undefined,
+      last_synced_at: connection.last_synced_at,
+      updated_at: connection.updated_at
+    });
+  } catch (error: any) {
+    logError('Error getting sync status', error, { connectionId: req.params.id });
+    res.status(500).json({ error: error.message || 'Failed to get sync status' });
+  }
+});
+
+/**
+ * POST /api/los/connections/:id/cancel-sync
+ * Cancel an in-progress sync (best effort - may not stop immediately)
+ */
+router.post('/connections/:id/cancel-sync', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.query.tenant_id as string | undefined;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    // Get tenant pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Update sync status to cancelled
+    const result = await tenantPool.query(
+      `UPDATE public.los_connections
+       SET last_sync_status = 'cancelled', 
+           last_sync_error = 'Sync cancelled by user',
+           updated_at = NOW()
+       WHERE id = $1 AND last_sync_status IN ('pending', 'in_progress')
+       RETURNING id`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.json({ 
+        success: false, 
+        message: 'No active sync to cancel or connection not found' 
+      });
+    }
+
+    logInfo('Sync cancelled by user', { connectionId: id, tenantId, userId: req.userId });
+
+    res.json({ 
+      success: true, 
+      message: 'Sync cancellation requested. The sync may take a moment to stop.' 
+    });
+  } catch (error: any) {
+    logError('Error cancelling sync', error, { connectionId: req.params.id });
+    res.status(500).json({ error: error.message || 'Failed to cancel sync' });
+  }
+});
+
+/**
  * POST /api/los/csv/upload
  * Upload CSV file and detect columns
  * Uses Papa.parse (consistent with dashboard routes) and memory storage

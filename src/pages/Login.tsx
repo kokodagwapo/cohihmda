@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { getApiUrl } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, LogIn, Shield, CheckCircle2, XCircle, Building2 } from 'lucide-react';
+import { Loader2, LogIn, Shield, CheckCircle2, XCircle, Building2, KeyRound } from 'lucide-react';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
 
 export const Login = () => {
@@ -22,6 +23,17 @@ export const Login = () => {
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline' | 'not-configured'>('checking');
   const [showTenantSelect, setShowTenantSelect] = useState(false);
+  
+  // SSO state
+  const [ssoInfo, setSsoInfo] = useState<{
+    available: boolean;
+    checking: boolean;
+    tenantSlug?: string;
+    tenantName?: string;
+    idpName?: string;
+    allowPassword: boolean;
+  }>({ available: false, checking: false, allowPassword: true });
+  const [ssoConfigured, setSsoConfigured] = useState(false);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -42,7 +54,7 @@ export const Login = () => {
     return `${apiUrl}/health`;
   };
 
-  // Check server status and load tenants on mount
+  // Check server status, load tenants, and check SSO config on mount
   useEffect(() => {
     const checkServer = async () => {
       if (!isBackendConfigured) {
@@ -67,6 +79,8 @@ export const Login = () => {
           setServerStatus('online');
           // Load available tenants
           loadTenants();
+          // Check if SSO is configured
+          checkSsoConfig();
         } else {
           setServerStatus('offline');
         }
@@ -81,6 +95,77 @@ export const Login = () => {
     const interval = setInterval(checkServer, 15000);
     return () => clearInterval(interval);
   }, [apiUrl, isBackendConfigured, loadTenants]);
+
+  // Check if Cognito SSO is configured
+  const checkSsoConfig = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/auth/cognito/config`);
+      if (response.ok) {
+        const data = await response.json();
+        setSsoConfigured(data.isConfigured === true);
+      }
+    } catch (err) {
+      console.debug('[Login] SSO config check failed:', err);
+    }
+  };
+
+  // Lookup SSO availability by email domain
+  const lookupSsoByEmail = useCallback(async (emailValue: string) => {
+    if (!emailValue.includes('@') || !ssoConfigured) {
+      setSsoInfo({ available: false, checking: false, allowPassword: true });
+      return;
+    }
+
+    setSsoInfo(prev => ({ ...prev, checking: true }));
+
+    try {
+      const response = await fetch(`${apiUrl}/api/auth/cognito/lookup-tenant?email=${encodeURIComponent(emailValue)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSsoInfo({
+          available: data.sso_available === true,
+          checking: false,
+          tenantSlug: data.tenant_slug,
+          tenantName: data.tenant_name,
+          idpName: data.idp_name,
+          allowPassword: data.allow_password !== false,
+        });
+      } else {
+        setSsoInfo({ available: false, checking: false, allowPassword: true });
+      }
+    } catch (err) {
+      console.debug('[Login] SSO lookup failed:', err);
+      setSsoInfo({ available: false, checking: false, allowPassword: true });
+    }
+  }, [apiUrl, ssoConfigured]);
+
+  // Debounced email change handler for SSO lookup
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (email && email.includes('@')) {
+        lookupSsoByEmail(email);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [email, lookupSsoByEmail]);
+
+  // Handle SSO sign-in
+  const handleSsoSignIn = () => {
+    const params = new URLSearchParams();
+    if (ssoInfo.tenantSlug) {
+      params.set('tenant', ssoInfo.tenantSlug);
+    }
+    if (ssoInfo.idpName) {
+      params.set('idp', ssoInfo.idpName);
+    }
+    const returnTo = new URLSearchParams(window.location.search).get('returnTo');
+    if (returnTo) {
+      params.set('returnUrl', returnTo);
+    }
+    
+    // Redirect to Cognito authorize endpoint
+    window.location.href = `${apiUrl}/api/auth/cognito/authorize?${params.toString()}`;
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,23 +324,77 @@ export const Login = () => {
               />
             </div>
             
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={loading}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  <LogIn className="mr-2 h-4 w-4" />
-                  Sign In
-                </>
-              )}
-            </Button>
+            {/* Password Sign In Button - hidden if SSO-only mode */}
+            {ssoInfo.allowPassword && (
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="mr-2 h-4 w-4" />
+                    Sign In
+                  </>
+                )}
+              </Button>
+            )}
+
+            {/* SSO Divider and Button */}
+            {ssoConfigured && (
+              <>
+                {ssoInfo.allowPassword && (
+                  <div className="relative my-4">
+                    <Separator />
+                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-slate-900 px-2 text-xs text-slate-500">
+                      or
+                    </span>
+                  </div>
+                )}
+
+                {ssoInfo.available ? (
+                  <Button
+                    type="button"
+                    variant={ssoInfo.allowPassword ? "outline" : "default"}
+                    className="w-full"
+                    onClick={handleSsoSignIn}
+                    disabled={loading}
+                  >
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    {ssoInfo.tenantName 
+                      ? `Sign in with ${ssoInfo.tenantName} SSO`
+                      : 'Sign in with SSO'
+                    }
+                  </Button>
+                ) : ssoInfo.checking ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled
+                  >
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Checking SSO availability...
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={handleSsoSignIn}
+                    disabled={loading}
+                  >
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    Sign in with SSO
+                  </Button>
+                )}
+              </>
+            )}
           </form>
           
           {/* Server Status */}

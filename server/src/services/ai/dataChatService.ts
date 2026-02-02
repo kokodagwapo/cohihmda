@@ -4,10 +4,13 @@
  * Generates SQL queries, executes them, and creates visualization configs
  */
 
-import pg from 'pg';
-import { METRICS_CATALOG, MetricDefinition } from '../metrics/metricsService.js';
-import { tenantDbManager } from '../../config/tenantDatabaseManager.js';
-import { decryptAPIKeys } from '../encryption.js';
+import pg from "pg";
+import {
+  METRICS_CATALOG,
+  MetricDefinition,
+} from "../metrics/metricsService.js";
+import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
+import { decryptAPIKeys } from "../encryption.js";
 
 // ============================================================================
 // Types
@@ -29,14 +32,14 @@ export interface UserPermissions {
 
 export interface RowFilter {
   field: string;
-  operator: 'equals' | 'in' | 'not_in' | 'contains' | 'is_current_user';
+  operator: "equals" | "in" | "not_in" | "contains" | "is_current_user";
   value?: string | string[];
   dynamicSource?: string;
 }
 
 export interface DataChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
   visualization?: VisualizationConfig;
   data?: any[];
@@ -49,15 +52,23 @@ export interface DataChatMessage {
 }
 
 export interface VisualizationConfig {
-  type: 'bar' | 'line' | 'pie' | 'area' | 'table' | 'kpi' | 'donut' | 'horizontal_bar';
+  type:
+    | "bar"
+    | "line"
+    | "pie"
+    | "area"
+    | "table"
+    | "kpi"
+    | "donut"
+    | "horizontal_bar";
   title: string;
   data: any[];
   xKey?: string;
   yKey?: string;
-  yKeys?: string[];  // For multi-series charts
-  xLabel?: string;   // Human-readable X-axis label
-  yLabel?: string;   // Human-readable Y-axis label
-  nameKey?: string;  // For pie charts
+  yKeys?: string[]; // For multi-series charts
+  xLabel?: string; // Human-readable X-axis label
+  yLabel?: string; // Human-readable Y-axis label
+  nameKey?: string; // For pie charts
   valueKey?: string; // For pie charts
   colors?: string[];
   showLegend?: boolean;
@@ -68,7 +79,7 @@ export interface VisualizationConfig {
     label: string;
     change?: number;
     changeLabel?: string;
-    format?: 'number' | 'currency' | 'percent';
+    format?: "number" | "currency" | "percent";
   };
   tableConfig?: {
     columns: { key: string; label: string; format?: string }[];
@@ -96,16 +107,18 @@ export interface QueryResult {
 // ============================================================================
 
 const LOAN_SCHEMA_CONTEXT = `
-## Available Loan Fields
+## Available Loan Fields (Columns in loans table)
 
 ### Core Fields
 - loan_id (TEXT): Unique loan identifier
+- loan_number (TEXT): Loan number
 - loan_amount (DECIMAL): Total loan amount
-- loan_type (TEXT): Type of loan (Conventional, FHA, VA, USDA, etc.)
+- loan_type (TEXT): Type of loan (Conventional, FHA, VA, USDA, FarmersHomeA, etc.)
 - loan_purpose (TEXT): Purpose (Purchase, Refinance, Cash-Out Refinance)
 - loan_program (TEXT): Loan program name
-- current_loan_status (TEXT): Current status
+- current_loan_status (TEXT): Current status (e.g., 'Active Loan', 'Originated', 'Withdrawn', 'Denied')
 - current_milestone (TEXT): Current milestone in pipeline
+- channel (TEXT): Channel (Retail, Wholesale, Correspondent, TPO)
 
 ### Personnel Fields
 - loan_officer (TEXT): Loan officer name
@@ -120,24 +133,108 @@ const LOAN_SCHEMA_CONTEXT = `
 - property_state (TEXT): Property state (2-letter code)
 - property_county (TEXT): Property county
 - property_type (TEXT): Property type (Single Family, Condo, etc.)
+- occupancy_type (TEXT): Occupancy type (Primary, Investment, Second Home)
 
-### Financial Fields
-- interest_rate (DECIMAL): Interest rate
+### Financial Fields (Raw Columns)
+- interest_rate (DECIMAL): Interest rate percentage
+- cltv (DECIMAL): Combined loan-to-value ratio
 - ltv_ratio (DECIMAL): Loan-to-value ratio
-- be_dti_ratio (DECIMAL): Debt-to-income ratio
+- be_dti_ratio (DECIMAL): Back-end debt-to-income ratio
 - fico_score (INTEGER): Credit score
+- rate_lock_buy_side_base_price_rate (DECIMAL): Base buy rate (used for revenue calc)
+- orig_fee_borr_pd (DECIMAL): Origination fee paid by borrower
+- orig_fees_seller (DECIMAL): Origination fees from seller
+- cd_lender_credits (DECIMAL): Lender credits on closing disclosure
 
 ### Key Dates
 - application_date (DATE): Application date
-- started_date (DATE): Started date (aka Lock date in some contexts)
+- started_date (DATE): Started date
 - lock_date (DATE): Rate lock date
 - closing_date (DATE): Closing date
 - funding_date (DATE): Funding date
+- investor_purchase_date (DATE): Investor purchase date
+- credit_pull_date (DATE): Credit pull date
 
-### Status Indicators
-- funding_date IS NOT NULL: Loan is funded
-- current_loan_status = 'Active Loan': Loan is active
-- lock_date IS NOT NULL: Loan is locked
+## CALCULATED METRICS (NOT columns - must be computed)
+
+IMPORTANT: These are NOT columns. You must use the formulas below to calculate them.
+
+### Revenue (per loan)
+Formula: Base Buy ($) + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits
+SQL:
+COALESCE(
+  CASE 
+    WHEN rate_lock_buy_side_base_price_rate IS NOT NULL AND rate_lock_buy_side_base_price_rate != 0 
+    THEN ROUND(((rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * loan_amount, 2)
+    ELSE 0 
+  END, 0) +
+COALESCE(orig_fee_borr_pd, 0) + 
+COALESCE(orig_fees_seller, 0) - 
+COALESCE(cd_lender_credits, 0)
+
+Example: Top 10 loan officers by revenue
+SELECT 
+  loan_officer,
+  COUNT(*) as loan_count,
+  SUM(loan_amount) as total_volume,
+  SUM(
+    COALESCE(CASE WHEN rate_lock_buy_side_base_price_rate IS NOT NULL AND rate_lock_buy_side_base_price_rate != 0 
+      THEN ROUND(((rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * loan_amount, 2) ELSE 0 END, 0) +
+    COALESCE(orig_fee_borr_pd, 0) + COALESCE(orig_fees_seller, 0) - COALESCE(cd_lender_credits, 0)
+  ) as total_revenue
+FROM loans
+WHERE loan_officer IS NOT NULL
+GROUP BY loan_officer
+ORDER BY total_revenue DESC
+LIMIT 10
+
+### Active Loans (current pipeline)
+Definition: Loans with current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+This is a CURRENT STATE metric - do NOT filter by date range.
+SQL: WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+
+### Funded/Closed Loans
+Definition: Loans where funding_date IS NOT NULL
+SQL: WHERE funding_date IS NOT NULL
+
+### Originated Loans (Pull Through Originated Flag = Yes)
+Definition: current_loan_status contains 'Originated' or 'purchased'
+SQL: WHERE current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'
+
+### Pull-Through Rate
+Formula: (Originated loans / Total applications excluding active) * 100
+Only include loans that have completed their journey (not active)
+SQL:
+COUNT(CASE WHEN current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%' THEN 1 END)::float /
+NULLIF(COUNT(CASE WHEN current_loan_status != 'Active Loan' AND application_date IS NOT NULL THEN 1 END), 0) * 100
+
+### Cycle Time (days)
+Formula: Days from application to closing (or funding if no closing)
+SQL: 
+CASE 
+  WHEN closing_date IS NOT NULL AND application_date IS NOT NULL 
+  THEN DATE(closing_date) - DATE(application_date) 
+  WHEN funding_date IS NOT NULL AND application_date IS NOT NULL 
+  THEN DATE(funding_date) - DATE(application_date)
+  ELSE NULL 
+END
+
+### Government Loans
+Definition: loan_type IN ('FHA', 'VA', 'USDA', 'FarmersHomeA', 'FarmersHomeAdministration')
+
+### Withdrawn/Fallout
+Definition: current_loan_status contains 'withdraw', 'not accepted', or 'incomp'
+SQL: WHERE current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%not accepted%' OR current_loan_status ILIKE '%incomp%'
+
+### Denied
+Definition: current_loan_status contains 'denied'
+SQL: WHERE current_loan_status ILIKE '%denied%'
+
+## Status Indicators (Quick Reference)
+- Funded: funding_date IS NOT NULL
+- Active: current_loan_status = 'Active Loan'
+- Locked: lock_date IS NOT NULL
+- Originated: current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'
 `;
 
 // ============================================================================
@@ -148,37 +245,61 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
   if (tenantId) {
     try {
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      // Check for rag_settings table in tenant database
+      // (each tenant has their own database with rag_settings table - no tenant_id column)
       const tableCheck = await tenantPool.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = 'public' AND table_name = 'rag_settings'
         ) as exists
       `);
-      
+
       if (tableCheck.rows[0]?.exists) {
         const result = await tenantPool.query(
           `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
         );
         if (result.rows[0]?.openai_api_key) {
-          const decrypted = await decryptAPIKeys({ openai_api_key: result.rows[0].openai_api_key });
+          console.log(
+            "[DataChat] Found openai_api_key in rag_settings, attempting to decrypt..."
+          );
+          const decrypted = await decryptAPIKeys({
+            openai_api_key: result.rows[0].openai_api_key,
+          });
           if (decrypted.openai_api_key) {
+            console.log(
+              "[DataChat] Using tenant OpenAI API key from rag_settings"
+            );
             return decrypted.openai_api_key;
           }
+        } else {
+          console.log(
+            "[DataChat] rag_settings exists but openai_api_key is null/empty"
+          );
         }
+      } else {
+        console.log(
+          "[DataChat] rag_settings table does not exist in tenant database"
+        );
       }
-    } catch (error) {
-      console.log('[DataChat] Error fetching tenant API key, falling back to env');
+    } catch (error: any) {
+      console.error("[DataChat] Error fetching tenant API key:", error.message);
     }
   }
-  
+
   const envKey = process.env.OPENAI_API_KEY;
-  if (envKey) return envKey;
-  
-  throw new Error('OpenAI API key not configured');
+  if (envKey) {
+    console.log("[DataChat] Using environment OpenAI API key");
+    return envKey;
+  }
+
+  throw new Error(
+    "OpenAI API key not configured. Please add your OpenAI API key in Admin > Settings > RAG Settings, or set OPENAI_API_KEY environment variable on the server."
+  );
 }
 
 interface OpenAIChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -188,32 +309,36 @@ async function callOpenAI(
   options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<string> {
   const body: any = {
-    model: 'gpt-4o',
+    model: "gpt-4o",
     messages,
     temperature: options.temperature ?? 0.3,
     max_tokens: options.maxTokens ?? 2000,
   };
-  
+
   if (options.jsonMode) {
-    body.response_format = { type: 'json_object' };
+    body.response_format = { type: "json_object" };
   }
-  
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
-    const error = await response.json() as { error?: { message?: string } };
-    throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+    const error = (await response.json()) as { error?: { message?: string } };
+    throw new Error(
+      `OpenAI API error: ${error.error?.message || "Unknown error"}`
+    );
   }
 
-  const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return data.choices?.[0]?.message?.content || '';
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content || "";
 }
 
 // ============================================================================
@@ -224,7 +349,7 @@ interface GeneratedQuery {
   sql: string;
   params: any[];
   explanation: string;
-  visualizationType: VisualizationConfig['type'];
+  visualizationType: VisualizationConfig["type"];
   chartConfig: Partial<VisualizationConfig>;
 }
 
@@ -234,19 +359,24 @@ async function generateQuery(
   conversationHistory: DataChatMessage[] = []
 ): Promise<GeneratedQuery> {
   const apiKey = await getOpenAIKey(context.tenantId);
-  
+
   // Build metrics context
   const metricsContext = Object.values(METRICS_CATALOG)
-    .map(m => `- ${m.name} (${m.id}): ${m.description}`)
-    .join('\n');
+    .map((m) => `- ${m.name} (${m.id}): ${m.description}`)
+    .join("\n");
 
   // Get current date for context
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1; // 1-12
   const currentQuarter = Math.ceil(currentMonth / 3);
-  
-  const systemPrompt = `You are a data analyst assistant that converts natural language questions about mortgage loan data into PostgreSQL queries.
+
+  const systemPrompt = `You are Cohi, an expert data analyst assistant for mortgage lending companies. You convert natural language questions about loan data into PostgreSQL queries and provide clear explanations.
+
+## Your Personality
+- Be helpful, concise, and professional
+- When the question is ambiguous, make reasonable assumptions and state them in your explanation
+- If a question seems to be asking for insights rather than raw data, provide a relevant data query that supports the insight
 
 ${LOAN_SCHEMA_CONTEXT}
 
@@ -254,31 +384,43 @@ ${LOAN_SCHEMA_CONTEXT}
 ${metricsContext}
 
 ## Current Date Context
-- Today: ${now.toISOString().split('T')[0]}
+- Today: ${now.toISOString().split("T")[0]}
 - Current Year: ${currentYear}
 - Current Month: ${currentMonth}
 - Current Quarter: Q${currentQuarter}
 
+## Handling Ambiguous Questions
+- "How are we doing?" → Show monthly loan volume trend to indicate business health
+- "Any issues?" → Show loans stuck in processing or with high LTV
+- "Performance update" → Show key metrics like total volume, count, average amount
+- When in doubt, provide aggregate metrics that give a high-level view
+
 ## PostgreSQL Syntax Rules (IMPORTANT)
 1. ALWAYS use table alias "l" for the loans table: FROM public.loans l
 2. Generate ONLY SELECT queries (no INSERT, UPDATE, DELETE)
-3. INTERVAL syntax - ONLY use these valid formats:
+3. CALCULATED METRICS MUST USE FORMULAS - these are NOT columns:
+   - "revenue" or "total_revenue" → Use the formula from CALCULATED METRICS section above
+   - "active_loans" → Use WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+   - "pull_through_rate" → Calculate using the formula, never use as a column
+   - "cycle_time" → Calculate: DATE(closing_date) - DATE(application_date)
+   NEVER reference these as column names - they don't exist in the table!
+4. INTERVAL syntax - ONLY use these valid formats:
    - INTERVAL '1 day', INTERVAL '7 days'
    - INTERVAL '1 week', INTERVAL '2 weeks'
    - INTERVAL '1 month', INTERVAL '3 months' (for quarters)
    - INTERVAL '1 year', INTERVAL '2 years'
    - NEVER use 'quarter' in intervals - use '3 months' instead
-4. Date comparisons for common periods:
+5. Date comparisons for common periods:
    - Last quarter: WHERE date_column >= DATE_TRUNC('quarter', CURRENT_DATE - INTERVAL '3 months')
    - This year: WHERE EXTRACT(YEAR FROM date_column) = ${currentYear}
    - Last 30 days: WHERE date_column >= CURRENT_DATE - INTERVAL '30 days'
    - This quarter: WHERE date_column >= DATE_TRUNC('quarter', CURRENT_DATE)
-5. Use DATE_TRUNC for grouping: DATE_TRUNC('month', date_column)
-6. For counts, use COUNT(*) or COUNT(DISTINCT field)
-7. Group by all non-aggregated columns
-8. Limit results to 100 rows unless specifically asked for more
-9. Order results meaningfully (by count DESC, by date, etc.)
-10. Use COALESCE for null handling when needed
+6. Use DATE_TRUNC for grouping: DATE_TRUNC('month', date_column)
+7. For counts, use COUNT(*) or COUNT(DISTINCT field)
+8. Group by all non-aggregated columns
+9. Limit results to 100 rows unless specifically asked for more
+10. Order results meaningfully (by count DESC, by date, etc.)
+11. Use COALESCE for null handling when needed
 
 ## Visualization Selection & Data Aggregation Rules (CRITICAL)
 - Time series (dates) → "line" or "area" chart, ALWAYS aggregate by date period (day, week, month, quarter, year)
@@ -290,13 +432,20 @@ ${metricsContext}
 ## IMPORTANT: Chart Data Rules
 1. For bar/line/area/pie charts, NEVER return individual loan records - ALWAYS aggregate with GROUP BY
 2. When user asks for "by date" or "by month" or time-based charts:
-   - Use DATE_TRUNC to group: DATE_TRUNC('month', application_date) AS month
+   - Use DATE_TRUNC to group AND TO_CHAR to format for display
    - Aggregate values: SUM(loan_amount), COUNT(*), AVG(interest_rate), etc.
-3. When user asks for "by branch" or "by loan_officer" or category-based charts:
+3. DATE FORMATTING IS CRITICAL - always format dates for human readability:
+   - Daily: TO_CHAR(DATE_TRUNC('day', date_col), 'Mon DD') AS period  → "Jan 15"
+   - Weekly: TO_CHAR(DATE_TRUNC('week', date_col), '"Week of" Mon DD') AS period  → "Week of Jan 12"
+   - Monthly: TO_CHAR(DATE_TRUNC('month', date_col), 'Mon YYYY') AS period  → "Jan 2026"
+   - Quarterly: 'Q' || EXTRACT(QUARTER FROM date_col) || ' ' || EXTRACT(YEAR FROM date_col) AS period  → "Q1 2026"
+   - Yearly: EXTRACT(YEAR FROM date_col)::TEXT AS period  → "2026"
+   NEVER return raw timestamps like "2026-01-19T00:00:00.000Z" - always use TO_CHAR!
+4. When user asks for "by branch" or "by loan_officer" or category-based charts:
    - Group by the category field
    - Aggregate the metric (usually COUNT or SUM)
-4. Maximum 50 data points for charts (use LIMIT or broader date grouping)
-5. If user asks to see individual loans as a chart, suggest using a table instead or ask for clarification
+5. Maximum 50 data points for charts (use LIMIT or broader date grouping)
+6. If user asks to see individual loans as a chart, suggest using a table instead or ask for clarification
 
 ## Response Format
 Respond with a JSON object:
@@ -317,21 +466,21 @@ Respond with a JSON object:
 }`;
 
   // Build conversation context
-  const recentHistory = conversationHistory.slice(-4).map(msg => ({
-    role: msg.role as 'user' | 'assistant',
-    content: msg.content
+  const recentHistory = conversationHistory.slice(-4).map((msg) => ({
+    role: msg.role as "user" | "assistant",
+    content: msg.content,
   }));
 
   const messages: OpenAIChatMessage[] = [
-    { role: 'system', content: systemPrompt },
+    { role: "system", content: systemPrompt },
     ...recentHistory,
-    { role: 'user', content: question }
+    { role: "user", content: question },
   ];
 
-  const response = await callOpenAI(messages, apiKey, { 
-    temperature: 0.2, 
+  const response = await callOpenAI(messages, apiKey, {
+    temperature: 0.2,
     jsonMode: true,
-    maxTokens: 1500 
+    maxTokens: 1500,
   });
 
   try {
@@ -340,11 +489,11 @@ Respond with a JSON object:
       sql: parsed.sql,
       params: parsed.params || [],
       explanation: parsed.explanation,
-      visualizationType: parsed.visualizationType || 'table',
-      chartConfig: parsed.chartConfig || {}
+      visualizationType: parsed.visualizationType || "table",
+      chartConfig: parsed.chartConfig || {},
     };
   } catch (error) {
-    throw new Error('Failed to parse query generation response');
+    throw new Error("Failed to parse query generation response");
   }
 }
 
@@ -357,29 +506,26 @@ Respond with a JSON object:
  */
 function sanitizeGeneratedSQL(sql: string): string {
   let sanitized = sql;
-  
+
   // Fix invalid interval syntax - 'X quarter(s)' -> 'X*3 months'
   sanitized = sanitized.replace(
     /INTERVAL\s*'(\d+)\s*quarters?'/gi,
     (_, num) => `INTERVAL '${parseInt(num) * 3} months'`
   );
-  
+
   // Fix '1 quarter' -> '3 months'
   sanitized = sanitized.replace(
     /INTERVAL\s*'1\s*quarter'/gi,
     `INTERVAL '3 months'`
   );
-  
+
   // Fix potential double quotes around identifiers that should be single
   // But be careful not to break string literals
-  sanitized = sanitized.replace(
-    /INTERVAL\s*"([^"]+)"/gi,
-    `INTERVAL '$1'`
-  );
-  
+  sanitized = sanitized.replace(/INTERVAL\s*"([^"]+)"/gi, `INTERVAL '$1'`);
+
   // Ensure proper spacing around operators
-  sanitized = sanitized.replace(/\s{2,}/g, ' ');
-  
+  sanitized = sanitized.replace(/\s{2,}/g, " ");
+
   return sanitized.trim();
 }
 
@@ -394,34 +540,50 @@ async function executeQuery(
 ): Promise<QueryResult> {
   // Sanitize the SQL first to fix common AI mistakes
   const sanitizedSql = sanitizeGeneratedSQL(sql);
-  
+
   // Validate SQL is read-only
   const normalizedSql = sanitizedSql.trim().toUpperCase();
-  if (!normalizedSql.startsWith('SELECT')) {
-    throw new Error('Only SELECT queries are allowed');
+  if (!normalizedSql.startsWith("SELECT")) {
+    throw new Error("Only SELECT queries are allowed");
   }
-  
+
   // Check for dangerous keywords
-  const dangerousKeywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE', 'GRANT', 'REVOKE'];
+  const dangerousKeywords = [
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "TRUNCATE",
+    "ALTER",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+  ];
   for (const keyword of dangerousKeywords) {
-    if (normalizedSql.includes(keyword + ' ') || normalizedSql.includes(keyword + '\n')) {
+    if (
+      normalizedSql.includes(keyword + " ") ||
+      normalizedSql.includes(keyword + "\n")
+    ) {
       throw new Error(`Query contains forbidden keyword: ${keyword}`);
     }
   }
 
   const pool = await tenantDbManager.getTenantPool(context.tenantId);
-  
+
   const startTime = Date.now();
   console.log(`[DataChat] Executing sanitized SQL: ${sanitizedSql}`);
   const result = await pool.query(sanitizedSql, params);
   const executionTime = Date.now() - startTime;
 
-  console.log(`[DataChat] Query executed in ${executionTime}ms, returned ${result.rows.length} rows`);
+  console.log(
+    `[DataChat] Query executed in ${executionTime}ms, returned ${result.rows.length} rows`
+  );
 
   return {
     rows: result.rows,
     rowCount: result.rows.length,
-    fields: result.fields?.map(f => f.name) || Object.keys(result.rows[0] || {})
+    fields:
+      result.fields?.map((f) => f.name) || Object.keys(result.rows[0] || {}),
   };
 }
 
@@ -434,24 +596,24 @@ function buildVisualizationConfig(
   queryConfig: GeneratedQuery
 ): VisualizationConfig {
   const chartConfig = queryConfig.chartConfig as any;
-  
+
   // Helper to create human-readable label from key
-  const humanize = (key: string): string => 
-    key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-  
+  const humanize = (key: string): string =>
+    key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+
   const baseConfig: VisualizationConfig = {
     type: queryConfig.visualizationType,
-    title: chartConfig.title || 'Query Results',
+    title: chartConfig.title || "Query Results",
     data,
     showLegend: true,
     showGrid: true,
   };
 
   switch (queryConfig.visualizationType) {
-    case 'bar':
-    case 'horizontal_bar':
-    case 'line':
-    case 'area':
+    case "bar":
+    case "horizontal_bar":
+    case "line":
+    case "area":
       const xKey = chartConfig.xKey || Object.keys(data[0] || {})[0];
       const yKey = chartConfig.yKey || Object.keys(data[0] || {})[1];
       return {
@@ -461,19 +623,27 @@ function buildVisualizationConfig(
         yKeys: chartConfig.yKeys,
         xLabel: chartConfig.xLabel || humanize(xKey),
         yLabel: chartConfig.yLabel || humanize(yKey),
-        colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+        colors: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"],
       };
 
-    case 'pie':
-    case 'donut':
+    case "pie":
+    case "donut":
       return {
         ...baseConfig,
         nameKey: chartConfig.nameKey || Object.keys(data[0] || {})[0],
         valueKey: chartConfig.valueKey || Object.keys(data[0] || {})[1],
-        colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'],
+        colors: [
+          "#3b82f6",
+          "#10b981",
+          "#f59e0b",
+          "#ef4444",
+          "#8b5cf6",
+          "#ec4899",
+          "#14b8a6",
+        ],
       };
 
-    case 'kpi':
+    case "kpi":
       const firstRow = data[0] || {};
       const kpiValueKey = Object.keys(firstRow)[0];
       return {
@@ -481,13 +651,17 @@ function buildVisualizationConfig(
         kpiConfig: {
           value: firstRow[kpiValueKey],
           label: chartConfig.title || humanize(kpiValueKey),
-          format: typeof firstRow[kpiValueKey] === 'number' && firstRow[kpiValueKey] > 1000 ? 'currency' : 'number',
+          format:
+            typeof firstRow[kpiValueKey] === "number" &&
+            firstRow[kpiValueKey] > 1000
+              ? "currency"
+              : "number",
         },
       };
 
-    case 'table':
+    case "table":
     default:
-      const columns = Object.keys(data[0] || {}).map(key => ({
+      const columns = Object.keys(data[0] || {}).map((key) => ({
         key,
         label: humanize(key),
         format: undefined,
@@ -508,22 +682,616 @@ function buildVisualizationConfig(
 // ============================================================================
 
 function generateSuggestedQuestions(currentQuestion: string): string[] {
-  const suggestions = [
-    'Show me loans by branch',
-    'What is the average loan amount by loan type?',
-    'Show me loan volume over time',
-    'Who are the top 10 loan officers by volume?',
-    'What is the pull-through rate by month?',
-    'Show me active loans by property state',
-    'What is the average cycle time by loan type?',
-    'Show me funding trends for this year',
-  ];
-  
-  // Filter out the current question and return 3-4 random suggestions
-  return suggestions
-    .filter(s => s.toLowerCase() !== currentQuestion.toLowerCase())
+  const q = currentQuestion.toLowerCase();
+
+  // Context-aware suggestions based on current question topic
+  const suggestionsByTopic: Record<string, string[]> = {
+    volume: [
+      "Break down volume by loan type",
+      "Show volume trend by quarter",
+      "Top 5 branches by volume",
+      "Compare this month vs last month",
+    ],
+    branch: [
+      "Which branch has the highest revenue?",
+      "Average loan amount by branch",
+      "Branch performance trend this year",
+      "Loan count by branch and status",
+    ],
+    officer: [
+      "Loan officers with fastest cycle time",
+      "Bottom 10 loan officers by volume",
+      "Average revenue per loan officer",
+      "New loan officers this quarter",
+    ],
+    trend: [
+      "Compare quarterly trends",
+      "Show weekly funding volume",
+      "Year-over-year comparison",
+      "Pipeline trend by month",
+    ],
+    default: [
+      "Show me loan volume by month",
+      "Top 10 loan officers by revenue",
+      "Loans by branch this year",
+      "Average loan amount by loan type",
+      "Funding trends this quarter",
+      "Pipeline breakdown by status",
+      "Cycle time by loan type",
+      "Loans by property state",
+    ],
+  };
+
+  // Determine topic based on current question
+  let topic = "default";
+  if (/volume|amount|total/i.test(q)) topic = "volume";
+  else if (/branch/i.test(q)) topic = "branch";
+  else if (/officer|lo |loan officer/i.test(q)) topic = "officer";
+  else if (/trend|time|month|week|year/i.test(q)) topic = "trend";
+
+  const topicSuggestions = suggestionsByTopic[topic];
+  const defaultSuggestions = suggestionsByTopic.default;
+
+  // Mix topic-specific and default suggestions
+  const allSuggestions = [...topicSuggestions, ...defaultSuggestions];
+
+  // Filter out the current question and return 4 suggestions
+  return allSuggestions
+    .filter((s) => s.toLowerCase() !== currentQuestion.toLowerCase())
+    .filter((s, i, arr) => arr.indexOf(s) === i) // Remove duplicates
     .sort(() => Math.random() - 0.5)
     .slice(0, 4);
+}
+
+// ============================================================================
+// Question Classification & Smart Routing
+// ============================================================================
+
+interface QuestionClassification {
+  type: "data_query" | "insights" | "help" | "greeting" | "unclear";
+  confidence: number;
+  suggestedRephrase?: string;
+}
+
+/**
+ * Classify the user's question to determine how to handle it
+ */
+function classifyQuestion(question: string): QuestionClassification {
+  const q = question.toLowerCase().trim();
+
+  // Greeting patterns
+  const greetingPatterns =
+    /^(hi|hello|hey|good morning|good afternoon|good evening|howdy|greetings)\b/i;
+  if (greetingPatterns.test(q)) {
+    return { type: "greeting", confidence: 0.95 };
+  }
+
+  // Help patterns
+  const helpPatterns =
+    /^(help|what can you do|how do you work|what are you|who are you|what should i ask)/i;
+  if (helpPatterns.test(q)) {
+    return { type: "help", confidence: 0.95 };
+  }
+
+  // Follow-up/clarification patterns - questions about previous responses
+  const clarificationPatterns = [
+    /what do you mean/i,
+    /can you explain/i,
+    /what does that mean/i,
+    /why did you say/i,
+    /elaborate on/i,
+    /tell me more about/i,
+    /what about the/i,
+    /i don't understand/i,
+    /clarify/i,
+    /^(huh|what)\??$/i,
+  ];
+
+  for (const pattern of clarificationPatterns) {
+    if (pattern.test(q)) {
+      return {
+        type: "help",
+        confidence: 0.9,
+        suggestedRephrase:
+          "I can help clarify! Could you ask a specific data question?",
+      };
+    }
+  }
+
+  // Vague/open-ended insight patterns that don't translate to SQL
+  const insightPatterns = [
+    /what.*(important|need to know|should i know|happening|going on)/i,
+    /how.*(doing|going|business|performing).*\?*$/i,
+    /any.*(issues|problems|concerns|alerts|warnings)/i,
+    /what.*(update|news|highlights|summary)/i,
+    /give me.*(overview|summary|rundown|brief)/i,
+    /^(status|update|brief me|catch me up)/i,
+    /tell me about.*(today|this week|lately)/i,
+  ];
+
+  for (const pattern of insightPatterns) {
+    if (pattern.test(q)) {
+      return {
+        type: "insights",
+        confidence: 0.85,
+        suggestedRephrase:
+          "Try asking specific data questions like: 'Show me loan volume by month' or 'Top loan officers by revenue'",
+      };
+    }
+  }
+
+  // Data query indicators (specific, measurable)
+  const dataQueryIndicators = [
+    /show me/i,
+    /how many/i,
+    /what is the/i,
+    /list/i,
+    /top \d+/i,
+    /by (branch|month|year|type|officer|status)/i,
+    /total|average|sum|count|volume|amount/i,
+    /trend|over time|by date|by month|monthly|quarterly|yearly/i,
+    /compare|comparison|versus|vs/i,
+    /breakdown|distribution|split/i,
+    /loan(s)?/i,
+    /funding|funded|closed|pipeline/i,
+  ];
+
+  const dataQueryScore = dataQueryIndicators.filter((p) => p.test(q)).length;
+
+  if (dataQueryScore >= 2) {
+    return { type: "data_query", confidence: 0.9 };
+  } else if (dataQueryScore === 1) {
+    return { type: "data_query", confidence: 0.7 };
+  }
+
+  // If the question is too short or lacks context
+  if (q.length < 15 || q.split(" ").length < 3) {
+    return {
+      type: "unclear",
+      confidence: 0.6,
+      suggestedRephrase:
+        "Could you be more specific? For example: 'Show me loans by branch' or 'What's the total loan volume this month?'",
+    };
+  }
+
+  // Default to data query with lower confidence
+  return { type: "data_query", confidence: 0.5 };
+}
+
+/**
+ * Run insight queries to gather key metrics for open-ended questions
+ */
+async function gatherInsightMetrics(
+  context: ChatContext
+): Promise<Record<string, any>> {
+  const tenantPool = await tenantDbManager.getTenantPool(context.tenantId);
+  const metrics: Record<string, any> = {};
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  // Helper to safely run queries
+  const safeQuery = async (name: string, sql: string): Promise<any[]> => {
+    try {
+      const result = await tenantPool.query(sql);
+      return result.rows;
+    } catch (error) {
+      console.log(`[DataChat Insights] Query "${name}" failed:`, error);
+      return [];
+    }
+  };
+
+  // 1. Volume summary using ROLLING periods (last 30 days vs previous 30 days)
+  // This avoids the "0 this month" issue when it's early in the month
+  const volumeSummary = await safeQuery(
+    "volumeSummary",
+    `
+    SELECT 
+      COUNT(*) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '30 days') as recent_count,
+      COALESCE(SUM(loan_amount) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '30 days'), 0) as recent_volume,
+      COUNT(*) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '60 days' AND application_date < CURRENT_DATE - INTERVAL '30 days') as previous_count,
+      COALESCE(SUM(loan_amount) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '60 days' AND application_date < CURRENT_DATE - INTERVAL '30 days'), 0) as previous_volume
+    FROM public.loans l
+  `
+  );
+  metrics.volume = volumeSummary[0] || {};
+  // Rename for clarity in the prompt
+  metrics.volume.this_period_count = metrics.volume.recent_count;
+  metrics.volume.this_period_volume = metrics.volume.recent_volume;
+  metrics.volume.last_period_count = metrics.volume.previous_count;
+  metrics.volume.last_period_volume = metrics.volume.previous_volume;
+
+  // 2. Active Loans - uses exact "Active Loan" status per metricsService.ts definition
+  // Active Loan Flag = Yes means current_loan_status = 'Active Loan'
+  // This is a current state snapshot, NOT date-filtered (ignoreDateFilter: true)
+  const activeLoans = await safeQuery(
+    "activeLoans",
+    `
+    SELECT 
+      COUNT(CASE 
+        WHEN l.current_loan_status = 'Active Loan' 
+        AND l.application_date IS NOT NULL 
+        AND l.application_date::text != ''
+        THEN 1 
+      END) as active_count,
+      COALESCE(SUM(CASE 
+        WHEN l.current_loan_status = 'Active Loan' 
+        AND l.application_date IS NOT NULL 
+        AND l.application_date::text != ''
+        THEN l.loan_amount 
+        ELSE 0
+      END), 0) as active_volume
+    FROM public.loans l
+  `
+  );
+  metrics.activeLoans = activeLoans[0] || { active_count: 0, active_volume: 0 };
+
+  // 3. Top performers (last 30 days)
+  const topPerformers = await safeQuery(
+    "topPerformers",
+    `
+    SELECT 
+      COALESCE(loan_officer, 'Unknown') as loan_officer,
+      COUNT(*) as loan_count,
+      COALESCE(SUM(loan_amount), 0) as total_volume
+    FROM public.loans l
+    WHERE application_date >= CURRENT_DATE - INTERVAL '30 days'
+      AND loan_officer IS NOT NULL
+    GROUP BY loan_officer
+    ORDER BY total_volume DESC
+    LIMIT 5
+  `
+  );
+  metrics.topPerformers = topPerformers;
+
+  // 4. Recent funding activity
+  const recentFunding = await safeQuery(
+    "recentFunding",
+    `
+    SELECT 
+      COUNT(*) FILTER (WHERE funding_date >= CURRENT_DATE - INTERVAL '7 days') as funded_last_7_days,
+      COUNT(*) FILTER (WHERE funding_date >= CURRENT_DATE - INTERVAL '30 days') as funded_last_30_days,
+      COALESCE(SUM(loan_amount) FILTER (WHERE funding_date >= CURRENT_DATE - INTERVAL '7 days'), 0) as funded_volume_7_days,
+      COALESCE(SUM(loan_amount) FILTER (WHERE funding_date >= CURRENT_DATE - INTERVAL '30 days'), 0) as funded_volume_30_days
+    FROM public.loans l
+    WHERE funding_date IS NOT NULL
+  `
+  );
+  metrics.funding = recentFunding[0] || {};
+
+  // 5. Volume by loan type
+  const byLoanType = await safeQuery(
+    "byLoanType",
+    `
+    SELECT 
+      COALESCE(loan_type, 'Other') as loan_type,
+      COUNT(*) as count,
+      COALESCE(SUM(loan_amount), 0) as volume
+    FROM public.loans l
+    WHERE EXTRACT(YEAR FROM application_date) = ${currentYear}
+    GROUP BY loan_type
+    ORDER BY volume DESC
+    LIMIT 5
+  `
+  );
+  metrics.byLoanType = byLoanType;
+
+  // 6. Average metrics (use cltv, not ltv per actual schema)
+  const avgMetrics = await safeQuery(
+    "avgMetrics",
+    `
+    SELECT 
+      COALESCE(AVG(loan_amount), 0) as avg_loan_amount,
+      COALESCE(AVG(interest_rate), 0) as avg_interest_rate,
+      COALESCE(AVG(cltv), 0) as avg_ltv,
+      COUNT(*) as total_loans
+    FROM public.loans l
+    WHERE EXTRACT(YEAR FROM application_date) = ${currentYear}
+  `
+  );
+  metrics.averages = avgMetrics[0] || {};
+
+  return metrics;
+}
+
+/**
+ * Helper to format currency
+ */
+function formatCurrencyShort(value: number): string {
+  if (value >= 1000000) {
+    return (value / 1000000).toFixed(1) + "M";
+  } else if (value >= 1000) {
+    return (value / 1000).toFixed(0) + "K";
+  }
+  return value.toFixed(0);
+}
+
+/**
+ * Generate an AI-powered insight summary from gathered metrics
+ */
+async function generateInsightSummary(
+  metrics: Record<string, any>,
+  question: string,
+  context: ChatContext
+): Promise<string> {
+  const apiKey = await getOpenAIKey(context.tenantId);
+
+  const systemPrompt = `You are Cohi, an executive briefing assistant for a mortgage lending company. 
+Your job is to analyze key metrics and provide a concise, actionable summary.
+
+Guidelines:
+- Be concise but insightful (2-4 paragraphs max)
+- Highlight what's important: changes, trends, anomalies
+- Use specific numbers and percentages
+- Format currency as $X.XM or $XXK
+- Use bullet points for lists when helpful
+- End with 1-2 actionable insights or things to watch
+- Use emoji sparingly for visual organization (📈 📉 ⚠️ ✅ 👥 etc.)
+- Be conversational but professional
+
+IMPORTANT: 
+- If a section shows "No data", just skip it - do NOT tell users to "address missing data" or "investigate data gaps"
+- Only discuss metrics that have actual data
+- Focus on what IS available, not what's missing`;
+
+  const userPrompt = `The user asked: "${question}"
+
+Here are the current metrics to analyze:
+
+## Volume Summary (Rolling 30-Day Periods)
+- Last 30 days: ${
+    metrics.volume?.this_period_count || 0
+  } loans, $${formatCurrencyShort(
+    Number(metrics.volume?.this_period_volume) || 0
+  )}
+- Previous 30 days (for comparison): ${
+    metrics.volume?.last_period_count || 0
+  } loans, $${formatCurrencyShort(
+    Number(metrics.volume?.last_period_volume) || 0
+  )}
+
+## Active Loans (Current Pipeline)
+Active loans are those with status "Active Loan" (still being processed, not yet funded/closed).
+- Active Loan Count: ${metrics.activeLoans?.active_count || 0} loans
+- Active Loan Volume: $${formatCurrencyShort(
+    Number(metrics.activeLoans?.active_volume) || 0
+  )}
+
+## Top Performers (Last 30 Days)
+${
+  metrics.topPerformers
+    ?.map(
+      (p: any, i: number) =>
+        `${i + 1}. ${p.loan_officer}: ${
+          p.loan_count
+        } loans ($${formatCurrencyShort(Number(p.total_volume))})`
+    )
+    .join("\n") || "No data"
+}
+
+## Recent Funding Activity
+- Last 7 days: ${
+    metrics.funding?.funded_last_7_days || 0
+  } loans funded ($${formatCurrencyShort(
+    Number(metrics.funding?.funded_volume_7_days) || 0
+  )})
+- Last 30 days: ${
+    metrics.funding?.funded_last_30_days || 0
+  } loans funded ($${formatCurrencyShort(
+    Number(metrics.funding?.funded_volume_30_days) || 0
+  )})
+
+## Volume by Loan Type (YTD)
+${
+  metrics.byLoanType
+    ?.map(
+      (t: any) =>
+        `- ${t.loan_type}: ${t.count} loans ($${formatCurrencyShort(
+          Number(t.volume)
+        )})`
+    )
+    .join("\n") || "No data"
+}
+
+## Averages (YTD)
+- Average Loan Amount: $${formatCurrencyShort(
+    Number(metrics.averages?.avg_loan_amount) || 0
+  )}
+- Average Interest Rate: ${(
+    Number(metrics.averages?.avg_interest_rate) || 0
+  ).toFixed(2)}%
+- Average LTV: ${(Number(metrics.averages?.avg_ltv) || 0).toFixed(1)}%
+- Total Loans: ${metrics.averages?.total_loans || 0}
+
+Provide a helpful executive summary answering their question.`;
+
+  const messages: OpenAIChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+
+  try {
+    const response = await callOpenAI(messages, apiKey, {
+      temperature: 0.7,
+      maxTokens: 800,
+    });
+    return response;
+  } catch (error) {
+    console.error("[DataChat] Error generating insight summary:", error);
+    // Fallback to basic summary
+    const volumeChange =
+      metrics.volume?.last_period_count > 0
+        ? (
+            ((metrics.volume?.this_period_count -
+              metrics.volume?.last_period_count) /
+              metrics.volume?.last_period_count) *
+            100
+          ).toFixed(1)
+        : "N/A";
+
+    return (
+      `📊 **Quick Summary**\n\n` +
+      `**Last 30 Days**: ${
+        metrics.volume?.this_period_count || 0
+      } loans ($${formatCurrencyShort(
+        Number(metrics.volume?.this_period_volume) || 0
+      )}) — ${
+        volumeChange !== "N/A"
+          ? (Number(volumeChange) >= 0 ? "📈 up" : "📉 down") +
+            " " +
+            Math.abs(Number(volumeChange)) +
+            "% vs previous 30 days"
+          : "no comparison available"
+      }\n\n` +
+      `**Recent Funding**: ${
+        metrics.funding?.funded_last_7_days || 0
+      } loans in the last 7 days\n\n` +
+      `**Top Performer**: ${
+        metrics.topPerformers?.[0]?.loan_officer || "N/A"
+      } with ${metrics.topPerformers?.[0]?.loan_count || 0} loans`
+    );
+  }
+}
+
+/**
+ * Generate a helpful response for non-data-query questions
+ */
+async function generateNonQueryResponse(
+  classification: QuestionClassification,
+  question: string,
+  context: ChatContext
+): Promise<DataChatResponse> {
+  switch (classification.type) {
+    case "greeting":
+      return {
+        message:
+          "Hello! I'm Cohi, your data assistant. I can help you explore your loan data and provide executive insights.\n\n" +
+          "**Try asking me:**\n" +
+          "📊 \"What's important to know today?\" - I'll analyze your key metrics\n" +
+          '📈 "Show me loan volume by month" - Data visualizations\n' +
+          '👥 "Top 10 loan officers" - Performance rankings\n' +
+          '🏢 "Compare branches" - Comparative analysis\n\n' +
+          "What would you like to know?",
+        suggestedQuestions: [
+          "What important info do I need to know today?",
+          "Show me loan volume trends by month",
+          "Top 10 loan officers by funded volume",
+          "How is our pipeline looking?",
+        ],
+      };
+
+    case "help": {
+      // Check if this looks like a clarification question
+      const isClarification =
+        /what do you mean|can you explain|clarify|tell me more|elaborate/i.test(
+          question
+        );
+
+      if (isClarification) {
+        return {
+          message:
+            "I'd be happy to clarify! However, I work best with **specific data questions**.\n\n" +
+            "If you want to dig deeper into something I mentioned, try asking directly:\n" +
+            '• "Show me the pipeline breakdown by status"\n' +
+            '• "Who are the top loan officers?"\n' +
+            '• "What\'s our funding activity this month?"\n\n' +
+            "What specific data would you like to explore?",
+          suggestedQuestions: [
+            "Show me pipeline breakdown by status",
+            "Top 10 loan officers by volume",
+            "Funding activity this month",
+            "Loan volume by branch",
+          ],
+        };
+      }
+
+      return {
+        message:
+          "I'm Cohi, your mortgage data analyst! I can answer questions about your loan data in two ways:\n\n" +
+          "**1. Executive Insights** (open-ended questions)\n" +
+          '• "What\'s important today?"\n' +
+          '• "How are we doing?"\n' +
+          '• "Any issues I should know about?"\n\n' +
+          "**2. Data Queries** (specific questions)\n" +
+          '• "Show me loans by branch"\n' +
+          '• "Top 10 loan officers by volume"\n' +
+          '• "Funding trends this year"\n\n' +
+          "Just ask naturally - I'll figure out the best way to answer!",
+        suggestedQuestions: [
+          "What important info do I need to know today?",
+          "Show me funding trends for this year",
+          "How is our pipeline looking?",
+          "Top performers this month",
+        ],
+      };
+    }
+
+    case "insights":
+      // Actually gather and analyze metrics for insight questions
+      try {
+        console.log("[DataChat] Gathering insight metrics...");
+        const metrics = await gatherInsightMetrics(context);
+        console.log("[DataChat] Generating insight summary...");
+        const summary = await generateInsightSummary(
+          metrics,
+          question,
+          context
+        );
+
+        return {
+          message: summary,
+          suggestedQuestions: [
+            "Show me the pipeline breakdown",
+            "Top loan officers this month",
+            "Funding trends by week",
+            "Compare this month to last month",
+          ],
+        };
+      } catch (error) {
+        console.error("[DataChat] Error generating insights:", error);
+        return {
+          message:
+            "I tried to gather insights but encountered an issue. Let me help you with a specific question instead:",
+          suggestedQuestions: [
+            "Show me loan volume this month",
+            "Top 10 loan officers by volume",
+            "Pipeline by status",
+            "Recent funding activity",
+          ],
+        };
+      }
+
+    case "unclear":
+      return {
+        message:
+          `I'd love to help! ${
+            classification.suggestedRephrase ||
+            "Could you be more specific about what data you'd like to see?"
+          }\n\n` +
+          "**You can ask me things like:**\n" +
+          '• "What\'s important to know today?" - Executive summary\n' +
+          '• "Show me loans by branch" - Specific data\n' +
+          '• "How are we trending?" - Performance analysis',
+        suggestedQuestions: [
+          "What important info do I need to know today?",
+          "Show me loan volume this year",
+          "Top loan officers by revenue",
+          "Pipeline breakdown by status",
+        ],
+      };
+
+    default:
+      return {
+        message:
+          "I'm not sure how to help with that. Try asking about your loan data or requesting an executive summary.",
+        suggestedQuestions: [
+          "What important info do I need to know today?",
+          "Show me loan volume by month",
+          "Top 10 loan officers by volume",
+          "How is the pipeline looking?",
+        ],
+      };
+  }
 }
 
 // ============================================================================
@@ -536,14 +1304,39 @@ export async function processDataQuestion(
   conversationHistory: DataChatMessage[] = []
 ): Promise<DataChatResponse> {
   try {
-    console.log(`[DataChat] Processing question: "${question}" for tenant ${context.tenantId}`);
+    console.log(
+      `[DataChat] Processing question: "${question}" for tenant ${context.tenantId}`
+    );
 
-    // Generate the query
-    const queryConfig = await generateQuery(question, context, conversationHistory);
+    // Step 1: Classify the question
+    const classification = classifyQuestion(question);
+    console.log(
+      `[DataChat] Question classified as: ${classification.type} (confidence: ${classification.confidence})`
+    );
+
+    // Step 2: Handle non-data-query questions gracefully
+    if (
+      classification.type !== "data_query" ||
+      classification.confidence < 0.5
+    ) {
+      console.log(`[DataChat] Routing to non-query response handler`);
+      return await generateNonQueryResponse(classification, question, context);
+    }
+
+    // Step 3: Generate the query for data questions
+    const queryConfig = await generateQuery(
+      question,
+      context,
+      conversationHistory
+    );
     console.log(`[DataChat] Generated SQL: ${queryConfig.sql}`);
 
     // Execute the query
-    const result = await executeQuery(queryConfig.sql, queryConfig.params, context);
+    const result = await executeQuery(
+      queryConfig.sql,
+      queryConfig.params,
+      context
+    );
 
     // Format data for display (convert dates, clean numbers)
     const formattedData = formatDataRows(result.rows);
@@ -554,11 +1347,17 @@ export async function processDataQuestion(
     // Generate response message
     let message = queryConfig.explanation;
     if (result.rowCount === 0) {
-      message = "I didn't find any data matching your query. This could mean there's no data for the specified criteria, or you might want to adjust your filters.";
-    } else if (result.rowCount === 1 && queryConfig.visualizationType === 'kpi') {
+      message =
+        "I didn't find any data matching your query. This could mean there's no data for the specified criteria, or you might want to adjust your filters.";
+    } else if (
+      result.rowCount === 1 &&
+      queryConfig.visualizationType === "kpi"
+    ) {
       const valueKey = Object.keys(result.rows[0])[0];
       const value = result.rows[0][valueKey];
-      message = `${queryConfig.explanation}\n\nThe result is: **${formatValue(value)}**`;
+      message = `${queryConfig.explanation}\n\nThe result is: **${formatValue(
+        value
+      )}**`;
     }
 
     return {
@@ -568,31 +1367,35 @@ export async function processDataQuestion(
       suggestedQuestions: generateSuggestedQuestions(question),
     };
   } catch (error: any) {
-    console.error('[DataChat] Error processing question:', error);
-    
+    console.error("[DataChat] Error processing question:", error);
+
     // Provide more helpful error messages based on error type
     let userMessage = "I encountered an error while processing your question.";
-    
-    if (error.code === '42703') {
+
+    if (error.code === "42703") {
       // Column does not exist
-      userMessage = "I tried to use a field that doesn't exist in your data. Let me try a different approach.";
-    } else if (error.code === '42601' || error.code === '22007') {
+      userMessage =
+        "I tried to use a field that doesn't exist in your data. Let me try a different approach.";
+    } else if (error.code === "42601" || error.code === "22007") {
       // Syntax error or date/time parse error
-      userMessage = "There was an issue with the query I generated. Please try rephrasing your question.";
-    } else if (error.message?.includes('timeout')) {
-      userMessage = "The query took too long to execute. Try asking for a smaller date range or more specific criteria.";
-    } else if (error.message?.includes('OpenAI')) {
-      userMessage = "I'm having trouble connecting to my AI assistant. Please try again in a moment.";
+      userMessage =
+        "There was an issue with the query I generated. Please try rephrasing your question.";
+    } else if (error.message?.includes("timeout")) {
+      userMessage =
+        "The query took too long to execute. Try asking for a smaller date range or more specific criteria.";
+    } else if (error.message?.includes("OpenAI")) {
+      userMessage =
+        "I'm having trouble connecting to my AI assistant. Please try again in a moment.";
     }
-    
+
     return {
       message: userMessage + " Here are some questions you can try:",
       error: error.message,
       suggestedQuestions: [
-        'Show me total loan volume',
-        'How many loans by loan type?',
-        'Show me loans by branch',
-        'What are the top 10 loan officers by volume?',
+        "Show me total loan volume",
+        "How many loans by loan type?",
+        "Show me loans by branch",
+        "What are the top 10 loan officers by volume?",
       ],
     };
   }
@@ -610,18 +1413,18 @@ export async function refineQuery(
 ): Promise<DataChatResponse> {
   // Combine the original question with the refinement
   const combinedQuestion = `Based on the previous question "${originalQuestion}", ${refinement}`;
-  
+
   // Create a mock history with the previous interaction
   const history: DataChatMessage[] = [
     {
-      id: 'prev-user',
-      role: 'user',
+      id: "prev-user",
+      role: "user",
       content: originalQuestion,
       timestamp: new Date(),
     },
     {
-      id: 'prev-assistant',
-      role: 'assistant',
+      id: "prev-assistant",
+      role: "assistant",
       content: previousResult.message,
       visualization: previousResult.visualization,
       timestamp: new Date(),
@@ -639,8 +1442,8 @@ export async function refineQuery(
  * Format a single value for display
  */
 function formatValue(value: any): string {
-  if (value === null || value === undefined) return 'N/A';
-  if (typeof value === 'number') {
+  if (value === null || value === undefined) return "N/A";
+  if (typeof value === "number") {
     if (value >= 1000000) {
       return `$${(value / 1000000).toFixed(2)}M`;
     } else if (value >= 1000) {
@@ -654,10 +1457,12 @@ function formatValue(value: any): string {
 }
 
 /**
- * Check if a string looks like an ISO date
+ * Check if a value looks like a date (ISO string or Date object)
  */
 function isISODateString(value: any): boolean {
-  if (typeof value !== 'string') return false;
+  // Handle Date objects from PostgreSQL
+  if (value instanceof Date) return true;
+  if (typeof value !== "string") return false;
   // Match ISO date formats like 2025-09-15T00:00:00.000Z or 2025-09-15
   return /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?)?$/.test(value);
 }
@@ -666,27 +1471,46 @@ function isISODateString(value: any): boolean {
  * Check if a string looks like a numeric value (from PostgreSQL)
  */
 function isNumericString(value: any): boolean {
-  if (typeof value !== 'string') return false;
+  if (typeof value !== "string") return false;
   // Match numbers like "64632379.00" or "123.45"
   return /^-?\d+(\.\d+)?$/.test(value);
 }
 
 /**
- * Format a date value to a readable string
+ * Format a date value to a readable string for chart labels
+ * Tries to be concise - "Jan 15" for daily, "Week of Jan 12" for weekly, "Jan 2026" for monthly
  */
-function formatDateValue(value: string): string {
+function formatDateValue(value: string | Date): string {
   try {
-    const date = new Date(value);
-    if (isNaN(date.getTime())) return value;
-    
-    // Format as "Jan 15, 2025" or "Jan 2025" for month-only contexts
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
+    const date = value instanceof Date ? value : new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+
+    const day = date.getDate();
+    const month = date.toLocaleDateString("en-US", { month: "short" });
+    const year = date.getFullYear();
+
+    // Check if this looks like a week start (typically Monday or Sunday)
+    // Week starts are usually 1, 7, 8, 14, 15, 21, 22, 28, 29
+    const dayOfWeek = date.getDay();
+    const isLikelyWeekStart =
+      (dayOfWeek === 0 || dayOfWeek === 1) &&
+      [1, 2, 7, 8, 14, 15, 21, 22, 28, 29].includes(day);
+
+    // Check if this is the first of the month (likely monthly grouping)
+    const isFirstOfMonth = day === 1;
+
+    if (isFirstOfMonth) {
+      // Monthly format: "Jan 2026"
+      return `${month} ${year}`;
+    } else if (isLikelyWeekStart) {
+      // Weekly format: "Week of Jan 12"
+      return `Week of ${month} ${day}`;
+    } else {
+      // Daily format: "Jan 15"
+      return `${month} ${day}`;
+    }
   } catch {
-    return value;
+    return String(value);
   }
 }
 
@@ -705,10 +1529,10 @@ function formatNumericValue(value: string): number {
  */
 function formatDataRows(rows: any[]): any[] {
   if (!rows || rows.length === 0) return rows;
-  
-  return rows.map(row => {
+
+  return rows.map((row) => {
     const formatted: Record<string, any> = {};
-    
+
     for (const [key, value] of Object.entries(row)) {
       if (value === null || value === undefined) {
         formatted[key] = null;
@@ -720,14 +1544,15 @@ function formatDataRows(rows: any[]): any[] {
         const num = formatNumericValue(value as string);
         // Round to 2 decimal places if has decimals, otherwise keep as integer
         formatted[key] = num % 1 === 0 ? num : Math.round(num * 100) / 100;
-      } else if (typeof value === 'number') {
+      } else if (typeof value === "number") {
         // Round numbers to reasonable precision
-        formatted[key] = value % 1 === 0 ? value : Math.round(value * 100) / 100;
+        formatted[key] =
+          value % 1 === 0 ? value : Math.round(value * 100) / 100;
       } else {
         formatted[key] = value;
       }
     }
-    
+
     return formatted;
   });
 }

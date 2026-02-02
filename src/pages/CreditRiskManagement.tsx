@@ -25,6 +25,8 @@ import { LoanDrilldownModal } from '@/components/dashboard/LoanDrilldownModal';
 import { useTheme } from '@/components/theme-provider';
 import { useCreditRiskData, ApplicationType, DistributionBucket, LoanMixRow, calculateLoanMixTotals } from '@/hooks/useCreditRiskData';
 import { useChannelStore } from '@/stores/channelStore';
+import { useTenantStore } from '@/stores/tenantStore';
+import { useAuth } from '@/contexts/AuthContext';
 import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
 
 interface Loan {
@@ -57,6 +59,13 @@ export default function CreditRiskManagement() {
   
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
+  
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
+  const { user } = useAuth();
+  
+  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant
+  const tenantId = selectedTenantId || user?.tenant_id || null;
   
   // Loan Mix tab state
   const [loanMixTab, setLoanMixTab] = useState<'Loan Type' | 'Loan Purpose' | 'Occupancy'>('Loan Type');
@@ -94,7 +103,8 @@ export default function CreditRiskManagement() {
     applicationType,
     channel: selectedChannel,
     year: selectedYear,
-    dateRange
+    dateRange,
+    tenantId: tenantId
   });
 
   const formatNumber = (num: number, decimals = 0) => {

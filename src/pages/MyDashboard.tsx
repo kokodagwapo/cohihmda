@@ -1,39 +1,43 @@
-import { useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useCallback, useEffect } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { TopTieringSelectionAnalysis } from '@/components/performance/TopTieringSelectionAnalysis';
 import { WorkbenchTopBar } from '@/components/workbench/WorkbenchTopBar';
 import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
-import { AskCohiChat } from '@/components/workbench/AskCohiChat';
 import { MultiCohortComparison } from '@/components/workbench/MultiCohortComparison';
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api } from '@/lib/api';
-import { LayoutGrid, ArrowRight, BarChart3, Users } from 'lucide-react';
+import { WorkbenchCanvas } from '@/components/workbench/WorkbenchCanvas';
+import { LayoutGrid, BarChart3, Users, Palette, FolderOpen, Heart, Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+
+type CanvasListItem = { id: string; title: string; content: any; created_at: string; updated_at: string; favorited: boolean };
 
 export default function MyDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const [loading, setLoading] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [activeTab, setActiveTab] = useState('canvas');
+  const [canvasList, setCanvasList] = useState<CanvasListItem[]>([]);
+  const [loadCanvasId, setLoadCanvasId] = useState<string | null>(null);
+  const [canvasSearch, setCanvasSearch] = useState('');
 
-  const sendPrompt = useCallback(async (prompt: string) => {
-    setChatOpen(true);
-    setMessages((m) => [...m, { role: 'user', content: prompt }]);
-    setLoading(true);
+  const fetchCanvases = useCallback(async () => {
     try {
-      const res = await api.request<{ response: string }>('/api/workbench/ai/query', {
-        method: 'POST',
-        body: JSON.stringify({ prompt }),
-      });
-      setMessages((m) => [...m, { role: 'assistant', content: res?.response ?? '' }]);
+      const res = await api.request<{ canvases: CanvasListItem[] }>('/api/workbench/canvases');
+      setCanvasList(res?.canvases ?? []);
     } catch {
-      setMessages((m) => [...m, { role: 'assistant', content: "Sorry, I couldn't process that. Please try again." }]);
-    } finally {
-      setLoading(false);
+      setCanvasList([]);
     }
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'canvas') fetchCanvases();
+  }, [activeTab, fetchCanvases]);
+
+  const filteredCanvases = canvasSearch.trim()
+    ? canvasList.filter((c) => c.title.toLowerCase().includes(canvasSearch.trim().toLowerCase()))
+    : canvasList;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80">
@@ -46,43 +50,83 @@ export default function MyDashboard() {
           onSidebarCollapsedChange={setSidebarCollapsed}
         />
         <div className="flex-1 flex flex-col min-w-0">
-          <WorkbenchTopBar onOpenSidebar={() => setSidebarOpen(true)} onAsk={sendPrompt} />
+          <WorkbenchTopBar onOpenSidebar={() => setSidebarOpen(true)} />
           <div className="flex flex-1 min-w-0">
             <div className="relative flex-1 px-4 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-auto">
-              <div className="mx-auto max-w-[1600px]">
-                {/* Hero */}
-                <div className="mb-8 sm:mb-10">
-                  <div className="flex items-start gap-4">
-                    <IconBadge icon={LayoutGrid} variant="violet" size="xl" rounded="2xl" />
-                    <div>
-                      <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                        My Workbench
-                      </h1>
-                      <p className="mt-1.5 text-[15px] text-slate-600 dark:text-slate-400 max-w-xl">
-                        Review selections and compare performance across saved or ad-hoc cohorts.
-                      </p>
-                      <Link
-                        to="/performance/toptiering-comparison"
-                        className="inline-flex items-center gap-1.5 mt-4 text-sm font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300"
-                      >
-                        Open TopTiering Comparison
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
+              <div className={activeTab === 'canvas' ? 'w-full mx-auto' : 'mx-auto max-w-[1600px]'}>
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <div className="mb-8 sm:mb-10">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-start gap-4">
+                        <IconBadge icon={LayoutGrid} variant="violet" size="xl" rounded="2xl" />
+                        <div>
+                          <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
+                            My Workbench
+                          </h1>
+                        </div>
+                      </div>
+                      <TabsList className="shrink-0">
+                        <TabsTrigger value="canvas" className="gap-2">
+                          <Palette className="h-4 w-4" />
+                          Canvas
+                        </TabsTrigger>
+                        <TabsTrigger value="selection" className="gap-2">
+                          <BarChart3 className="h-4 w-4" />
+                          Current Selection
+                        </TabsTrigger>
+                        <TabsTrigger value="comparison" className="gap-2">
+                          <Users className="h-4 w-4" />
+                          Cohort Comparison
+                        </TabsTrigger>
+                      </TabsList>
                     </div>
                   </div>
-                </div>
+                  {activeTab === 'canvas' && canvasList.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                      <div className="flex items-center gap-2 min-w-0 max-w-xs sm:max-w-sm">
+                        <Search className="h-4 w-4 text-slate-400 shrink-0" />
+                        <Input
+                          placeholder="Search canvases…"
+                          value={canvasSearch}
+                          onChange={(e) => setCanvasSearch(e.target.value)}
+                          className="h-9 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                        />
+                      </div>
+                      <span className="text-sm text-slate-500 dark:text-slate-400 shrink-0">
+                        <FolderOpen className="h-4 w-4 inline mr-1 align-middle" />
+                        {filteredCanvases.length} canvas{filteredCanvases.length !== 1 ? 'es' : ''}
+                      </span>
+                    </div>
+                  )}
+                  {activeTab === 'canvas' && filteredCanvases.length > 0 && (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {filteredCanvases.map((c) => (
+                        <Button
+                          key={c.id}
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => {
+                            setLoadCanvasId(c.id);
+                            setActiveTab('canvas');
+                          }}
+                        >
+                          {c.favorited && <Heart className="h-4 w-4 fill-rose-500 text-rose-500" />}
+                          <span className="truncate max-w-[140px]">{c.title}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
 
-                <Tabs defaultValue="selection" className="w-full">
-                  <TabsList className="mb-6">
-                    <TabsTrigger value="selection" className="gap-2">
-                      <BarChart3 className="h-4 w-4" />
-                      Current Selection
-                    </TabsTrigger>
-                    <TabsTrigger value="comparison" className="gap-2">
-                      <Users className="h-4 w-4" />
-                      Cohort Comparison
-                    </TabsTrigger>
-                  </TabsList>
+                  <TabsContent value="canvas" className="mt-0">
+                    <WorkbenchCanvas
+                      loadCanvasId={loadCanvasId}
+                      onLoaded={() => {
+                        setLoadCanvasId(null);
+                        fetchCanvases();
+                      }}
+                    />
+                  </TabsContent>
 
                   <TabsContent value="selection" className="mt-0">
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
@@ -92,12 +136,7 @@ export default function MyDashboard() {
                           <div className="px-5 pt-5 pb-4 border-b border-slate-100 dark:border-slate-800">
                             <div className="flex items-center gap-3.5">
                               <IconBadge icon={BarChart3} variant="sky" size="md" rounded="xl" />
-                              <div>
-                                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Selection Overview</h2>
-                                <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-0.5">
-                                  Mirrors your selections from the TopTiering Comparison page.
-                                </p>
-                              </div>
+                              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Selection Overview</h2>
                             </div>
                           </div>
                           <div className="p-5">
@@ -121,13 +160,6 @@ export default function MyDashboard() {
                 </Tabs>
               </div>
             </div>
-            <AskCohiChat
-              open={chatOpen}
-              onOpenChange={setChatOpen}
-              messages={messages}
-              loading={loading}
-              onSend={sendPrompt}
-            />
           </div>
         </div>
       </div>

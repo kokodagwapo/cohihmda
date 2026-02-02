@@ -20,6 +20,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { DatePeriodPicker, useDatePeriodState } from '@/components/ui/DatePeriodPicker';
 import { useChannelStore } from '@/stores/channelStore';
+import { useTenantStore } from '@/stores/tenantStore';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 
@@ -60,9 +61,12 @@ const SalesScorecard = () => {
   
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
+  
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
 
-  // Get tenant_id from auth context
-  const tenantId = user?.tenant_id || null;
+  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant
+  const tenantId = selectedTenantId || user?.tenant_id || null;
 
   // Fetch TTS data from API using the hook
   const actorType = selectedActor === 'branch' ? 'branch' : 'loan_officer';
