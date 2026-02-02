@@ -94,6 +94,8 @@ export interface DataChatResponse {
   data?: any[];
   suggestedQuestions?: string[];
   error?: string;
+  /** Metric IDs from METRICS_CATALOG that were used in this query */
+  metricsUsed?: string[];
 }
 
 export interface QueryResult {
@@ -342,6 +344,75 @@ async function callOpenAI(
 }
 
 // ============================================================================
+// Metric Detection
+// ============================================================================
+
+/**
+ * Detects which metrics from METRICS_CATALOG were used or referenced in a query/response.
+ * Checks both the SQL query and the question text for metric references.
+ */
+function detectMetricsUsed(sql: string, question: string): string[] {
+  const metricsUsed: Set<string> = new Set();
+  const lowerSql = sql.toLowerCase();
+  const lowerQuestion = question.toLowerCase();
+
+  // Check each metric in the catalog
+  for (const metric of Object.values(METRICS_CATALOG)) {
+    const metricId = metric.id.toLowerCase();
+    const metricName = metric.name.toLowerCase();
+
+    // Check if metric ID or name is mentioned in question
+    if (
+      lowerQuestion.includes(metricId.replace(/_/g, " ")) ||
+      lowerQuestion.includes(metricName)
+    ) {
+      metricsUsed.add(metric.id);
+    }
+
+    // Check if the SQL query uses patterns similar to the metric's SQL
+    // This is a heuristic - we look for key patterns in the metric's SQL
+    if (metric.sqlQuery) {
+      const sqlPatterns = extractKeyPatterns(metric.sqlQuery);
+      for (const pattern of sqlPatterns) {
+        if (lowerSql.includes(pattern.toLowerCase())) {
+          metricsUsed.add(metric.id);
+          break;
+        }
+      }
+    }
+  }
+
+  return Array.from(metricsUsed);
+}
+
+/**
+ * Extracts key patterns from a metric's SQL query for matching.
+ * Returns distinguishing parts like aggregate functions, specific field combinations.
+ */
+function extractKeyPatterns(sqlQuery: string): string[] {
+  const patterns: string[] = [];
+
+  // Extract aggregate patterns like AVG(...), SUM(...), COUNT(...)
+  const aggregateMatch = sqlQuery.match(
+    /(AVG|SUM|COUNT|MAX|MIN)\s*\([^)]+\)/gi
+  );
+  if (aggregateMatch) {
+    patterns.push(...aggregateMatch.map((m) => m.replace(/\s+/g, "")));
+  }
+
+  // Extract CASE WHEN patterns (simplified)
+  if (sqlQuery.includes("CASE") && sqlQuery.includes("WHEN")) {
+    // Look for the condition in the CASE
+    const caseMatch = sqlQuery.match(/WHEN\s+[^T][^\n]+?\s+THEN/gi);
+    if (caseMatch && caseMatch[0]) {
+      patterns.push(caseMatch[0].substring(0, 50));
+    }
+  }
+
+  return patterns.filter((p) => p.length > 5);
+}
+
+// ============================================================================
 // Query Generation
 // ============================================================================
 
@@ -360,9 +431,18 @@ async function generateQuery(
 ): Promise<GeneratedQuery> {
   const apiKey = await getOpenAIKey(context.tenantId);
 
-  // Build metrics context
+  // Build metrics context with SQL implementations
+  // This allows the LLM to use the exact SQL from METRICS_CATALOG when appropriate
   const metricsContext = Object.values(METRICS_CATALOG)
-    .map((m) => `- ${m.name} (${m.id}): ${m.description}`)
+    .map((m) => {
+      const sqlHint = m.sqlQuery
+        ? `\n    SQL: ${m.sqlQuery
+            .replace(/\s+/g, " ")
+            .trim()
+            .substring(0, 200)}${m.sqlQuery.length > 200 ? "..." : ""}`
+        : "";
+      return `- ${m.name} (${m.id}): ${m.description}${sqlHint}`;
+    })
     .join("\n");
 
   // Get current date for context
@@ -1360,11 +1440,18 @@ export async function processDataQuestion(
       )}**`;
     }
 
+    // Detect which metrics from the catalog were used in this query
+    const metricsUsed = detectMetricsUsed(queryConfig.sql, question);
+    if (metricsUsed.length > 0) {
+      console.log(`[DataChat] Metrics used: ${metricsUsed.join(", ")}`);
+    }
+
     return {
       message,
       visualization,
       data: formattedData,
       suggestedQuestions: generateSuggestedQuestions(question),
+      metricsUsed: metricsUsed.length > 0 ? metricsUsed : undefined,
     };
   } catch (error: any) {
     console.error("[DataChat] Error processing question:", error);

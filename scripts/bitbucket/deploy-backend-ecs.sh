@@ -166,8 +166,21 @@ build_docker_image() {
         exit 1
     fi
     
-    # Build the image
+    # Get git info for version stamping
+    GIT_COMMIT="${BITBUCKET_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo 'unknown')}"
+    GIT_BRANCH="${BITBUCKET_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')}"
+    BUILD_ENV="${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-production}"
+    
+    echo "Git Commit: $GIT_COMMIT"
+    echo "Git Branch: $GIT_BRANCH"
+    echo "Build Env: $BUILD_ENV"
+    echo ""
+    
+    # Build the image with git info as build args
     docker build \
+        --build-arg GIT_COMMIT="$GIT_COMMIT" \
+        --build-arg GIT_BRANCH="$GIT_BRANCH" \
+        --build-arg BUILD_ENV="$BUILD_ENV" \
         -t "$ECR_REPOSITORY_URI:$IMAGE_TAG" \
         -t "$ECR_REPOSITORY_URI:latest" \
         -f Dockerfile.backend.prod \

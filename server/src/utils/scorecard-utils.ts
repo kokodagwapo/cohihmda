@@ -2,11 +2,11 @@
  * Scorecard Utilities
  * Shared helper functions and configurations for TopTiering, Sales Scorecard,
  * and Operations Scorecard endpoints.
- * 
+ *
  * Extracted from loans.ts to reduce duplication and ensure consistency.
  */
 
-import pg from 'pg';
+import pg from "pg";
 
 // ============================================================================
 // Actor Missing Detection
@@ -17,61 +17,61 @@ import pg from 'pg';
  * - 'strict': Only matches '99-Missing' (used by Operations Scorecard per Qlik)
  * - 'extended': Matches all placeholder values (used by Sales Scorecard, TopTiering)
  */
-export type ActorMissingMode = 'strict' | 'extended';
+export type ActorMissingMode = "strict" | "extended";
 
 /**
  * Check if an actor name represents a missing/placeholder value.
- * 
+ *
  * Qlik Logic References:
  * - Operations: If([Processor] = '99-Missing',1,0) as [Processor Missing]
  * - Sales: [Loan Officer Missing] = If([Loan Officer] = '99-Missing' OR IsNull([Loan Officer]) Or [Loan Officer]='No LO Found',1,0)
- * 
+ *
  * @param name - The actor name to check
  * @param mode - Detection mode ('strict' for ops, 'extended' for sales)
  * @returns true if the actor name represents a missing/placeholder value
  */
 export const isActorMissing = (
   name: string | null | undefined,
-  mode: ActorMissingMode = 'extended'
+  mode: ActorMissingMode = "extended"
 ): boolean => {
-  if (!name || name.trim() === '') return true;
+  if (!name || name.trim() === "") return true;
   const normalized = name.toUpperCase().trim();
 
   // Strict mode: Only '99-Missing' (Qlik Operations Scorecard)
-  if (mode === 'strict') {
-    return normalized === '99-MISSING';
+  if (mode === "strict") {
+    return normalized === "99-MISSING";
   }
 
   // Extended mode: All placeholder values (Sales Scorecard, TopTiering)
   return (
-    normalized === '99-MISSING' ||
-    normalized === 'MISSING' ||
-    normalized === 'NO LO FOUND' ||
-    normalized === 'NO LOAN OFFICER' ||
-    normalized === 'NO BRANCH FOUND' ||
-    normalized === 'UNKNOWN' ||
-    normalized.startsWith('99-')
+    normalized === "99-MISSING" ||
+    normalized === "MISSING" ||
+    normalized === "NO LO FOUND" ||
+    normalized === "NO LOAN OFFICER" ||
+    normalized === "NO BRANCH FOUND" ||
+    normalized === "UNKNOWN" ||
+    normalized.startsWith("99-")
   );
 };
 
 /**
  * SQL WHERE clause fragment to exclude missing actors.
  * Use in queries to filter out placeholder values at the database level.
- * 
+ *
  * @param actorColumn - The column name (e.g., 'processor', 'loan_officer')
  * @param mode - Detection mode
  * @returns SQL fragment for WHERE clause
  */
 export const buildActorNotMissingClause = (
   actorColumn: string,
-  mode: ActorMissingMode = 'extended'
+  mode: ActorMissingMode = "extended"
 ): string => {
   const baseClause = `${actorColumn} IS NOT NULL AND TRIM(${actorColumn}) != ''`;
-  
-  if (mode === 'strict') {
+
+  if (mode === "strict") {
     return `${baseClause} AND UPPER(TRIM(${actorColumn})) != '99-MISSING'`;
   }
-  
+
   // Extended mode - exclude all placeholder values
   return `${baseClause} 
     AND UPPER(TRIM(${actorColumn})) NOT IN ('99-MISSING', 'MISSING', 'NO LO FOUND', 'NO LOAN OFFICER', 'NO BRANCH FOUND', 'UNKNOWN')
@@ -102,33 +102,36 @@ export interface ActorConfig {
  */
 export const OPERATIONS_ACTOR_CONFIGS: Record<string, ActorConfig> = {
   processor: {
-    actorColumn: 'processor',
-    outputDateField: 'approval_date',
+    actorColumn: "processor",
+    outputDateField: "approval_date",
     // Turn Time: Try processing_date → approval_date (if submitted_to_processing_date is empty)
-    turnTimeStartField: 'processing_date',
-    turnTimeEndField: 'approval_date',
+    turnTimeStartField: "processing_date",
+    turnTimeEndField: "approval_date",
   },
   underwriter: {
-    actorColumn: 'underwriter',
-    outputDateField: 'closing_date',
+    actorColumn: "underwriter",
+    outputDateField: "closing_date",
     // ORIGINAL CONFIG - was working before
-    turnTimeStartField: 'approval_date',
-    turnTimeEndField: 'closing_date',
+    turnTimeStartField: "approval_date",
+    turnTimeEndField: "closing_date",
   },
   closer: {
-    actorColumn: 'closer',
-    outputDateField: 'disbursement_date',
-    turnTimeStartField: 'closing_date',
-    turnTimeEndField: 'disbursement_date',
+    actorColumn: "closer",
+    outputDateField: "disbursement_date",
+    turnTimeStartField: "closing_date",
+    turnTimeEndField: "disbursement_date",
   },
 };
 
 /**
  * Sales Scorecard actor configurations.
  */
-export const SALES_ACTOR_CONFIGS: Record<string, { actorColumn: string; idColumn?: string }> = {
-  branch: { actorColumn: 'branch' },
-  loan_officer: { actorColumn: 'loan_officer', idColumn: 'loan_officer_id' },
+export const SALES_ACTOR_CONFIGS: Record<
+  string,
+  { actorColumn: string; idColumn?: string }
+> = {
+  branch: { actorColumn: "branch" },
+  loan_officer: { actorColumn: "loan_officer", idColumn: "loan_officer_id" },
 };
 
 // ============================================================================
@@ -138,11 +141,11 @@ export const SALES_ACTOR_CONFIGS: Record<string, { actorColumn: string; idColumn
 /**
  * Consolidated channel groups matching Qlik's [Consolidated Channels] field.
  */
-export type ChannelGroup = 'Retail' | 'TPO' | '99-Missing' | 'Other' | 'All';
+export type ChannelGroup = "Retail" | "TPO" | "99-Missing" | "Other" | "All";
 
 /**
  * Filter a channel value by channel group (for JavaScript filtering).
- * 
+ *
  * @param channel - The channel value from the loan
  * @param channelGroup - The channel group to filter by
  * @returns true if the channel matches the group
@@ -151,23 +154,23 @@ export const filterByChannel = (
   channel: string | null | undefined,
   channelGroup: string | undefined
 ): boolean => {
-  if (!channelGroup || channelGroup === 'All') return true;
-  const ch = (channel || '').toLowerCase();
+  if (!channelGroup || channelGroup === "All") return true;
+  const ch = (channel || "").toLowerCase();
 
   switch (channelGroup) {
-    case 'Retail':
-      return ch.includes('retail') || ch.includes('brok');
-    case 'TPO':
-      return ch.includes('whole') || ch.includes('corresp');
-    case '99-Missing':
-      return !ch || ch.trim() === '';
-    case 'Other':
+    case "Retail":
+      return ch.includes("retail") || ch.includes("brok");
+    case "TPO":
+      return ch.includes("whole") || ch.includes("corresp");
+    case "99-Missing":
+      return !ch || ch.trim() === "";
+    case "Other":
       return (
-        ch.trim() !== '' &&
-        !ch.includes('retail') &&
-        !ch.includes('brok') &&
-        !ch.includes('whole') &&
-        !ch.includes('corresp')
+        ch.trim() !== "" &&
+        !ch.includes("retail") &&
+        !ch.includes("brok") &&
+        !ch.includes("whole") &&
+        !ch.includes("corresp")
       );
     default:
       return true;
@@ -177,26 +180,28 @@ export const filterByChannel = (
 /**
  * Build SQL WHERE clause fragment for channel filtering.
  * Use this for efficient database-level filtering.
- * 
+ *
  * @param channelGroup - The channel group to filter by
  * @returns SQL fragment to add to WHERE clause (includes leading AND)
  */
-export const buildChannelWhereClause = (channelGroup: string | undefined): string => {
-  if (!channelGroup || channelGroup === 'All') return '';
+export const buildChannelWhereClause = (
+  channelGroup: string | undefined
+): string => {
+  if (!channelGroup || channelGroup === "All") return "";
 
   switch (channelGroup) {
-    case 'Retail':
+    case "Retail":
       return `AND (channel ILIKE '%retail%' OR channel ILIKE '%brokered%' OR channel ILIKE '%brok%')`;
-    case 'TPO':
+    case "TPO":
       return `AND (channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%')`;
-    case '99-Missing':
+    case "99-Missing":
       return `AND (channel IS NULL OR TRIM(channel) = '')`;
-    case 'Other':
+    case "Other":
       return `AND channel IS NOT NULL AND TRIM(channel) != '' 
               AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%'
               AND channel NOT ILIKE '%wholesale%' AND channel NOT ILIKE '%corresp%'`;
     default:
-      return '';
+      return "";
   }
 };
 
@@ -217,31 +222,40 @@ export interface LoanRevenueData {
 
 /**
  * Calculate loan revenue using Qlik's formula.
- * 
+ *
  * Qlik Formula (Transform.qvs line 549):
  *   Revenue = [Base Buy ($)] + [Orig Fee Borr Pd] + [Orig Fees Seller] - [CD Lender Credits]
  *   [Base Buy ($)] = ((Base Buy - 100) / 100) * Loan Amount
- * 
+ *
  * Where Base Buy is rate_lock_buy_side_base_price_rate stored as basis points
  * (100 = par/0%, 101 = 1% premium, 99 = 1% discount)
- * 
+ *
  * @param loan - Loan data with revenue-related fields
  * @returns Calculated revenue in dollars
  */
 export const calcLoanRevenue = (loan: LoanRevenueData): number => {
-  const baseBuyRate = loan.rate_lock_buy_side_base_price_rate;
-  const loanAmount = loan.loan_amount || 0;
+  // Parse values to numbers - PostgreSQL can return strings for NUMERIC types
+  const baseBuyRate = parseFloat(
+    String(loan.rate_lock_buy_side_base_price_rate ?? "")
+  );
+  const loanAmount = parseFloat(String(loan.loan_amount ?? "")) || 0;
 
   // Base Buy calculation: ((rate - 100) / 100) * loan_amount
+  // baseBuyRate is stored as percentage (e.g., 101 = 1% premium over par)
   const baseBuy =
-    baseBuyRate != null && baseBuyRate !== 0 && loanAmount > 0
+    !isNaN(baseBuyRate) && baseBuyRate !== 0 && loanAmount > 0
       ? ((baseBuyRate - 100) / 100) * loanAmount
       : 0;
 
-  const origFees = (loan.orig_fee_borr_pd || 0) + (loan.orig_fees_seller || 0);
-  const lenderCredits = loan.cd_lender_credits || 0;
+  // Parse fee fields - ensure we get valid numbers
+  const origFeeBorr = parseFloat(String(loan.orig_fee_borr_pd ?? "")) || 0;
+  const origFeesSeller = parseFloat(String(loan.orig_fees_seller ?? "")) || 0;
+  const lenderCredits = parseFloat(String(loan.cd_lender_credits ?? "")) || 0;
 
-  return baseBuy + origFees - lenderCredits;
+  const revenue = baseBuy + origFeeBorr + origFeesSeller - lenderCredits;
+
+  // Guard against NaN - return 0 if calculation resulted in NaN
+  return isNaN(revenue) ? 0 : revenue;
 };
 
 /**
@@ -267,7 +281,7 @@ export const REVENUE_SQL_EXPRESSION = `
 /**
  * Get the vMaxDate (maximum data date) from the database.
  * This matches Qlik's Max("Last Modified Date") calculation.
- * 
+ *
  * @param pool - Database connection pool
  * @returns The maximum date in the data
  */
@@ -282,18 +296,23 @@ export const getVMaxDate = async (pool: pg.Pool): Promise<Date> => {
     FROM public.loans
     WHERE funding_date IS NOT NULL OR last_modified_date IS NOT NULL
   `);
-  return result.rows[0]?.max_date ? new Date(result.rows[0].max_date) : new Date();
+  return result.rows[0]?.max_date
+    ? new Date(result.rows[0].max_date)
+    : new Date();
 };
 
 /**
  * Calculate the start date for a rolling month window.
  * Matches Qlik's Rolling13MonthFlag calculation.
- * 
+ *
  * @param maxDate - The end date (vMaxDate)
  * @param monthsBack - Number of months to go back
  * @returns Start date for the rolling window
  */
-export const calculateRollingStartDate = (maxDate: Date, monthsBack: number): Date => {
+export const calculateRollingStartDate = (
+  maxDate: Date,
+  monthsBack: number
+): Date => {
   const startDate = new Date(maxDate);
   // Go back to first day of month, then subtract months
   startDate.setDate(1);
@@ -305,7 +324,7 @@ export const calculateRollingStartDate = (maxDate: Date, monthsBack: number): Da
  * Format a date as YYYY-MM-DD for SQL queries.
  */
 export const formatDateForSQL = (date: Date): string => {
-  return date.toISOString().split('T')[0];
+  return date.toISOString().split("T")[0];
 };
 
 /**
@@ -313,7 +332,7 @@ export const formatDateForSQL = (date: Date): string => {
  */
 export const formatMonthKey = (date: Date): string => {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
 };
 
@@ -332,18 +351,18 @@ export const TTS_TIER_THRESHOLDS = {
   SECOND: 80,
 } as const;
 
-export type TTSTier = 'top' | 'second' | 'bottom';
+export type TTSTier = "top" | "second" | "bottom";
 
 /**
  * Assign a tier based on TTS score.
- * 
+ *
  * @param ttsScore - The calculated TTS score
  * @returns The tier assignment
  */
 export const assignTTSTier = (ttsScore: number): TTSTier => {
-  if (ttsScore >= TTS_TIER_THRESHOLDS.TOP) return 'top';
-  if (ttsScore >= TTS_TIER_THRESHOLDS.SECOND) return 'second';
-  return 'bottom';
+  if (ttsScore >= TTS_TIER_THRESHOLDS.TOP) return "top";
+  if (ttsScore >= TTS_TIER_THRESHOLDS.SECOND) return "second";
+  return "bottom";
 };
 
 /**
@@ -351,7 +370,7 @@ export const assignTTSTier = (ttsScore: number): TTSTier => {
  * From Qlik Script.csv lines 2314-2316.
  */
 export const OPS_TTS_WEIGHTS = {
-  units: 0.70,
+  units: 0.7,
   turnTime: 0.15,
   complexity: 0.15,
 } as const;
@@ -361,12 +380,12 @@ export const OPS_TTS_WEIGHTS = {
  * All components weighted equally at 20% each (6 components = 120% total, normalized).
  */
 export const SALES_TTS_WEIGHTS = {
-  volume: 0.20,
-  margin: 0.20,
-  unit: 0.20,
-  pullThrough: 0.20,
-  turnTime: 0.20,
-  concession: 0.20,
+  volume: 0.2,
+  margin: 0.2,
+  unit: 0.2,
+  pullThrough: 0.2,
+  turnTime: 0.2,
+  concession: 0.2,
 } as const;
 
 // ============================================================================
@@ -389,14 +408,14 @@ export interface LoanComplexityData {
 /**
  * Calculate loan complexity score.
  * Based on Qlik's Transform.qvs Loan Complexity Score calculation.
- * 
+ *
  * Factors:
  * - Government loans (FHA, VA, USDA) = more complex
  * - Purchase transactions = more complex than refinance
  * - Low FICO, High LTV, High DTI = more complex
  * - Non-owner occupied = more complex
  * - Self-employed borrower = more complex
- * 
+ *
  * @param loan - Loan data for complexity calculation
  * @returns Complexity score (100 = baseline, >100 = higher complexity)
  */
@@ -404,14 +423,18 @@ export const calcLoanComplexity = (loan: LoanComplexityData): number => {
   let complexity = 100; // Baseline
 
   // Government loan: +10
-  const loanType = (loan.loan_type || '').toUpperCase();
-  if (['FHA', 'VA', 'USDA', 'FARMERSHOMEA', 'FARMERSHOMEADMINISTRATION'].includes(loanType)) {
+  const loanType = (loan.loan_type || "").toUpperCase();
+  if (
+    ["FHA", "VA", "USDA", "FARMERSHOMEA", "FARMERSHOMEADMINISTRATION"].includes(
+      loanType
+    )
+  ) {
     complexity += 10;
   }
 
   // Purchase: +5
-  const loanPurpose = (loan.loan_purpose || '').toUpperCase();
-  if (loanPurpose === 'PURCHASE') {
+  const loanPurpose = (loan.loan_purpose || "").toUpperCase();
+  if (loanPurpose === "PURCHASE") {
     complexity += 5;
   }
 
@@ -431,14 +454,23 @@ export const calcLoanComplexity = (loan: LoanComplexityData): number => {
   }
 
   // Non-owner occupied: +5
-  const occupancy = (loan.occupancy_type || '').toUpperCase();
-  if (occupancy && !occupancy.includes('PRIMARY') && !occupancy.includes('OWNER')) {
+  const occupancy = (loan.occupancy_type || "").toUpperCase();
+  if (
+    occupancy &&
+    !occupancy.includes("PRIMARY") &&
+    !occupancy.includes("OWNER")
+  ) {
     complexity += 5;
   }
 
   // Self-employed: +5
   const selfEmployed = loan.borr_self_employed;
-  if (selfEmployed === true || selfEmployed === 'Y' || selfEmployed === 'Yes' || selfEmployed === '1') {
+  if (
+    selfEmployed === true ||
+    selfEmployed === "Y" ||
+    selfEmployed === "Yes" ||
+    selfEmployed === "1"
+  ) {
     complexity += 5;
   }
 

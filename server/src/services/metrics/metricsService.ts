@@ -43,6 +43,7 @@ export interface MetricDefinition {
   dependencies: string[]; // Other metric IDs this depends on
   defaultDateField?: string; // Which date field to filter on by default (e.g., 'application_date')
   ignoreDateFilter?: boolean; // If true, don't apply date filtering (for current state metrics like active_loans)
+  notes?: string; // Additional notes about the metric (e.g., estimation methodology, caveats)
 }
 
 // Metric result interface
@@ -76,9 +77,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "active_loans",
     name: "Active Loans",
     description:
-      "Count of loans with Active Loan Flag = Yes (current state, not filtered by date)",
+      "Count of loans where current_loan_status = 'Active Loan' and application_date is not empty. This is the current snapshot, not filtered by date range.",
     category: "status",
-    formula: "Count({<[Active Loan Flag]={Yes}>}[Loan Number])",
+    formula:
+      "current_loan_status = 'Active Loan' AND application_date IS NOT NULL",
     sqlQuery: `COUNT(CASE 
       WHEN l.current_loan_status = 'Active Loan' 
       AND l.application_date IS NOT NULL 
@@ -92,9 +94,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   closed_loans: {
     id: "closed_loans",
     name: "Closed Loans",
-    description: "Count of loans with Funded Flag = Yes",
+    description:
+      "Count of loans where funding_date is not empty (funded loans).",
     category: "status",
-    formula: "Count({<[Funded Flag]={Yes}>}[Loan Number])",
+    formula: "funding_date IS NOT NULL AND funding_date <= today",
     sqlQuery: `COUNT(CASE WHEN l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE THEN 1 END)`,
     dependencies: [],
     defaultDateField: "funding_date",
@@ -102,9 +105,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   locked_loans: {
     id: "locked_loans",
     name: "Locked Loans",
-    description: "Count of loans locked within the selected date range",
+    description:
+      "Count of loans where lock_date is not empty within the selected date range.",
     category: "status",
-    formula: "Count({<[Locked Flag]={Yes}>}[Loan Number])",
+    formula: "lock_date IS NOT NULL",
     sqlQuery: `COUNT(CASE 
       WHEN l.lock_date IS NOT NULL 
       THEN 1 
@@ -119,9 +123,9 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "avg_cycle_time",
     name: "Average Cycle Time",
     description:
-      "Average App-Close turn time (days from Application to Closing), falls back to App-Fund. Filtered by closing/funding date.",
+      "Average number of days from application_date to closing_date (or funding_date if closing is not available).",
     category: "turn_time",
-    formula: "Avg([App-Close])",
+    formula: "AVG(closing_date - application_date) in days",
     sqlQuery: `AVG(COALESCE(
       CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
         THEN DATE(l.closing_date) - DATE(l.application_date) 
@@ -138,9 +142,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   avg_app_fund_days: {
     id: "avg_app_fund_days",
     name: "Average App to Fund",
-    description: "Average days from Application to Funding",
+    description:
+      "Average number of days from application_date to funding_date.",
     category: "turn_time",
-    formula: "Avg([App-Fund])",
+    formula: "AVG(funding_date - application_date) in days",
     sqlQuery: `AVG(CASE 
       WHEN l.funding_date IS NOT NULL AND l.application_date IS NOT NULL 
       THEN DATE(l.funding_date) - DATE(l.application_date) 
@@ -152,9 +157,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   avg_app_close_days: {
     id: "avg_app_close_days",
     name: "Average App to Close",
-    description: "Average days from Application to Closing",
+    description:
+      "Average number of days from application_date to closing_date.",
     category: "turn_time",
-    formula: "Avg([App-Close])",
+    formula: "AVG(closing_date - application_date) in days",
     sqlQuery: `AVG(CASE 
       WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
       THEN DATE(l.closing_date) - DATE(l.application_date) 
@@ -169,10 +175,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "pull_through_rate",
     name: "Pull-Through Rate",
     description:
-      "Percentage of applications that funded/closed (excludes active loans)",
+      "Percentage of non-active applications that funded or closed. Calculated as: (funded loans / total applications) * 100",
     category: "pull_through",
     formula:
-      "Count({<[Active Loan Flag]={No},[Pull Through Originated Flag]={Yes}>}[Investor Purchase Date]) / Count({<[Active Loan Flag]={No}>}[Application Date]) * 100",
+      "(funded_loans / total_applications) * 100, excluding active loans",
     sqlQuery: `
       COUNT(CASE 
         WHEN l.current_loan_status IS DISTINCT FROM 'Active Loan'
@@ -193,9 +199,9 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   total_volume: {
     id: "total_volume",
     name: "Total Volume",
-    description: "Sum of loan amounts",
+    description: "Sum of all loan_amount values within the date range.",
     category: "volume",
-    formula: "Sum([Loan Amount])",
+    formula: "SUM(loan_amount)",
     sqlQuery: `SUM(l.loan_amount)`,
     dependencies: [],
     defaultDateField: "application_date",
@@ -203,10 +209,9 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   total_units: {
     id: "total_units",
     name: "Total Units",
-    description: "Count of all loans within the date range",
+    description: "Count of all loans (with loan_number) within the date range.",
     category: "count",
-    formula: "Count([Loan Number])",
-    // Use COUNT(loan_number) to match Qlik's Count([Loan Number]) which skips NULLs
+    formula: "COUNT(loan_number)",
     sqlQuery: `COUNT(l.loan_number)`,
     dependencies: [],
     defaultDateField: "application_date",
@@ -214,28 +219,27 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   funded_volume: {
     id: "funded_volume",
     name: "Funded Volume",
-    description: "Sum of loan amounts for funded loans",
+    description:
+      "Sum of loan_amount for loans where funding_date is not empty.",
     category: "volume",
-    formula: "Sum({<[Funded Flag]={Yes}>}[Loan Amount])",
+    formula: "SUM(loan_amount) WHERE funding_date IS NOT NULL",
     sqlQuery: `SUM(CASE WHEN l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE THEN l.loan_amount ELSE 0 END)`,
     dependencies: [],
     defaultDateField: "funding_date",
   },
-  // Originated Volume - Sum of loan amounts for originated loans only
-  // Qlik: Sum({$<DateType={'Application'},[$(vToDate)]={'Yes'}, [Pull Through Originated Flag]*={'Yes'}>}[Loan Amount])
   originated_volume: {
     id: "originated_volume",
     name: "Originated Volume",
     description:
-      "Sum of loan amounts for originated loans. Matches Qlik CompanyScorecard_Originated Volume $ expression.",
+      "Sum of loan_amount for loans with status containing 'Originated' or 'purchased'.",
     category: "volume",
-    formula: "Sum({$<[Pull Through Originated Flag]*={'Yes'}>}[Loan Amount])",
+    formula: "SUM(loan_amount) WHERE status LIKE 'Originated' OR 'purchased'",
     sqlQuery: `SUM(CASE 
       WHEN l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%' THEN l.loan_amount 
       ELSE 0 
     END)`,
     dependencies: [],
-    defaultDateField: "application_date", // Company Scorecard uses application_date
+    defaultDateField: "application_date",
   },
   active_volume: {
     id: "active_volume",
@@ -286,9 +290,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   credit_pulls: {
     id: "credit_pulls",
     name: "Credit Pulls",
-    description: "Count of loans with credit pull date",
+    description:
+      "Count of loans where credit_pull_date is not empty within the selected date range.",
     category: "count",
-    formula: "Count([Credit Pull Date])",
+    formula: "COUNT WHERE credit_pull_date IS NOT NULL",
     sqlQuery: `COUNT(CASE WHEN l.credit_pull_date IS NOT NULL THEN 1 END)`,
     dependencies: [],
     defaultDateField: "credit_pull_date",
@@ -836,6 +841,349 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     dependencies: [],
     defaultDateField: "application_date", // Company Scorecard uses application_date
   },
+
+  // ==========================================================================
+  // TopTiering Metrics - Used in TopTieringComparisonView
+  // Source: server/src/routes/toptiering/index.ts (lines 466-763)
+  // Tier Assignment: Top (cumulative revenue ≤50%), Second (50-80%), Bottom (>80%)
+  // ==========================================================================
+  //
+  // NOTE: TTS (Top Tier Score) calculations are NOT in the metrics catalog.
+  // TTS requires per-actor comparison to company averages, which cannot be
+  // represented as a simple aggregate SQL query.
+  //
+  // TTS Score Formulas (computed in scorecard API endpoints):
+  //
+  // SALES SCORECARD (server/src/routes/scorecard/index.ts lines 394-402):
+  //   TTS = (VolumeRating × 0.20 + MarginRating × 0.20 + UnitRating × 0.20 +
+  //          TurnTimeRating × 0.20 + PullThroughRating × 0.20 + ConcessionRating × 0.20) / 10
+  //
+  //   Where each Rating = (actorValue / companyAverage) × 100
+  //   TurnTimeRating and ConcessionRating are INVERTED (lower value = higher rating)
+  //
+  // OPERATIONS SCORECARD (server/src/routes/scorecard/index.ts lines 761-766):
+  //   OPS_TTS = (UnitRating × 0.70 + TurnTimeRating × 0.15 + ComplexityRating × 0.15)
+  //
+  // TIER THRESHOLDS (server/src/utils/scorecard-utils.ts lines 330-347):
+  //   Top Tier:    TTS ≥ 120 (20%+ above average)
+  //   Second Tier: TTS ≥ 80 and < 120
+  //   Bottom Tier: TTS < 80
+  //
+  // ==========================================================================
+
+  // Revenue BPS - Revenue per loan amount in basis points
+  // Source: toptiering/index.ts line 263, scorecard-utils.ts line 251
+  revenue_bps: {
+    id: "revenue_bps",
+    name: "Revenue BPS",
+    description:
+      "Revenue per loan amount in basis points. Calculated as (Total Revenue / Total Volume) * 10000. Used in TopTiering analysis.",
+    category: "revenue",
+    formula: "(total_revenue / total_volume) * 10000",
+    sqlQuery: `CASE 
+      WHEN SUM(l.loan_amount) > 0 THEN 
+        (SUM(
+          COALESCE(
+            CASE 
+              WHEN l.rate_lock_buy_side_base_price_rate IS NOT NULL AND l.rate_lock_buy_side_base_price_rate != 0 
+              THEN ROUND(((l.rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * l.loan_amount, 2)
+              ELSE 0 
+            END, 0) +
+          COALESCE(l.orig_fee_borr_pd, 0) + 
+          COALESCE(l.orig_fees_seller, 0) - 
+          COALESCE(l.cd_lender_credits, 0)
+        ) / NULLIF(SUM(l.loan_amount), 0)) * 10000
+      ELSE 0 
+    END`,
+    dependencies: ["total_revenue", "total_volume"],
+    defaultDateField: "funding_date",
+  },
+
+  // Revenue Per Loan - Average revenue per funded loan
+  // Source: toptiering/index.ts line 264
+  revenue_per_loan: {
+    id: "revenue_per_loan",
+    name: "Revenue Per Loan",
+    description:
+      "Average revenue per funded loan. Calculated as Total Revenue / Count of Funded Loans. Used in TopTiering analysis.",
+    category: "revenue",
+    formula: "total_revenue / COUNT(DISTINCT loan_number)",
+    sqlQuery: `CASE 
+      WHEN COUNT(DISTINCT COALESCE(l.loan_number, l.loan_id::text)) > 0 THEN 
+        SUM(
+          COALESCE(
+            CASE 
+              WHEN l.rate_lock_buy_side_base_price_rate IS NOT NULL AND l.rate_lock_buy_side_base_price_rate != 0 
+              THEN ROUND(((l.rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * l.loan_amount, 2)
+              ELSE 0 
+            END, 0) +
+          COALESCE(l.orig_fee_borr_pd, 0) + 
+          COALESCE(l.orig_fees_seller, 0) - 
+          COALESCE(l.cd_lender_credits, 0)
+        ) / NULLIF(COUNT(DISTINCT COALESCE(l.loan_number, l.loan_id::text)), 0)
+      ELSE 0 
+    END`,
+    dependencies: ["total_revenue"],
+    defaultDateField: "funding_date",
+  },
+
+  // Lost Opportunity Units - Withdrawn/Cancelled/Not Accepted loans
+  // Source: toptiering/index.ts lines 125-147, 306-309
+  lost_opportunity_units: {
+    id: "lost_opportunity_units",
+    name: "Lost Opportunity Units",
+    description:
+      "Count of loans that were withdrawn, cancelled, not accepted, or incomplete. These represent potential revenue that was lost.",
+    category: "count",
+    formula:
+      "COUNT where current_loan_status IN ('withdrawn', 'cancelled', 'not accepted', 'incomplete')",
+    sqlQuery: `COUNT(CASE 
+      WHEN LOWER(l.current_loan_status) LIKE '%withdraw%'
+        OR LOWER(l.current_loan_status) LIKE '%cancelled%'
+        OR LOWER(l.current_loan_status) LIKE '%not accepted%'
+        OR LOWER(l.current_loan_status) LIKE '%incomplete%'
+      THEN 1 
+    END)`,
+    dependencies: [],
+    defaultDateField: "application_date",
+  },
+
+  // Lost Opportunity Revenue - Revenue from lost opportunity loans
+  // Source: toptiering/index.ts lines 396-397, scorecard/index.ts line 309
+  lost_opportunity_revenue: {
+    id: "lost_opportunity_revenue",
+    name: "Lost Opportunity Revenue",
+    description:
+      "Estimated revenue that would have been earned from withdrawn/cancelled/not accepted loans, based on their loan amount and rate lock pricing.",
+    category: "revenue",
+    formula: "SUM(revenue) where status = lost opportunity",
+    sqlQuery: `SUM(CASE 
+      WHEN LOWER(l.current_loan_status) LIKE '%withdraw%'
+        OR LOWER(l.current_loan_status) LIKE '%cancelled%'
+        OR LOWER(l.current_loan_status) LIKE '%not accepted%'
+        OR LOWER(l.current_loan_status) LIKE '%incomplete%'
+      THEN 
+        COALESCE(
+          CASE 
+            WHEN l.rate_lock_buy_side_base_price_rate IS NOT NULL AND l.rate_lock_buy_side_base_price_rate != 0 
+            THEN ROUND(((l.rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * l.loan_amount, 2)
+            ELSE 0 
+          END, 0) +
+        COALESCE(l.orig_fee_borr_pd, 0) + 
+        COALESCE(l.orig_fees_seller, 0) - 
+        COALESCE(l.cd_lender_credits, 0)
+      ELSE 0
+    END)`,
+    dependencies: [],
+    defaultDateField: "application_date",
+  },
+
+  // Denied Units - Denied/Declined loans count
+  // Source: toptiering/index.ts lines 149-163, scorecard/index.ts lines 313-315
+  denied_units: {
+    id: "denied_units",
+    name: "Denied Units",
+    description: "Count of loans that were denied or declined.",
+    category: "count",
+    formula: "COUNT where current_loan_status IN ('denied', 'declined')",
+    sqlQuery: `COUNT(CASE 
+      WHEN LOWER(l.current_loan_status) LIKE '%denied%'
+        OR LOWER(l.current_loan_status) LIKE '%declined%'
+      THEN 1 
+    END)`,
+    dependencies: [],
+    defaultDateField: "application_date",
+  },
+
+  // ==========================================================================
+  // Sales Scorecard TTS Metrics
+  // Source: server/src/routes/scorecard/index.ts (lines 63-511)
+  // TTS Formula: (VolumeRating + MarginRating + UnitRating + TurnTimeRating +
+  //               PullThroughRating + ConcessionRating) × weights / 10
+  // Tier Thresholds: Top ≥120, Second ≥80, Bottom <80
+  // ==========================================================================
+
+  // Branch Price Concession - Average concession given
+  // Source: scorecard/index.ts lines 254-255, 367-369
+  avg_concession: {
+    id: "avg_concession",
+    name: "Average Concession",
+    description:
+      "Average branch price concession across funded loans. Lower is better. Used in Sales Scorecard TTS calculation.",
+    category: "revenue",
+    formula: "AVG(branch_price_concession)",
+    sqlQuery: `AVG(CASE 
+      WHEN l.branch_price_concession IS NOT NULL AND l.branch_price_concession != 0 
+      THEN l.branch_price_concession 
+    END)`,
+    dependencies: [],
+    defaultDateField: "funding_date",
+    notes: "Inverted rating: lower concession = higher TTS rating",
+  },
+
+  // ==========================================================================
+  // Operations Scorecard TTS Metrics
+  // Source: server/src/routes/scorecard/index.ts (lines 532-869)
+  // TTS Formula: (UnitRating × 0.70) + (TurnTimeRating × 0.15) + (ComplexityRating × 0.15)
+  // ==========================================================================
+
+  // Loan Complexity Score - Complexity based on loan characteristics
+  // Source: scorecard-utils.ts lines 403-446
+  loan_complexity_score: {
+    id: "loan_complexity_score",
+    name: "Loan Complexity Score",
+    description:
+      "Average loan complexity score. Baseline 100. Factors: Government loan (+10), Purchase (+5), Low FICO <680 (+10), High LTV >80 (+5), High DTI >43 (+5), Non-owner occupied (+5), Self-employed (+5).",
+    category: "turn_time",
+    formula:
+      "100 + (govt_loan × 10) + (purchase × 5) + (low_fico × 10) + (high_ltv × 5) + (high_dti × 5) + (non_owner × 5) + (self_employed × 5)",
+    sqlQuery: `AVG(
+      100 +
+      CASE WHEN UPPER(l.loan_type) IN ('FHA', 'VA', 'USDA', 'FARMERSHOMEA', 'FARMERSHOMEADMINISTRATION') THEN 10 ELSE 0 END +
+      CASE WHEN UPPER(l.loan_purpose) = 'PURCHASE' THEN 5 ELSE 0 END +
+      CASE WHEN l.fico_score IS NOT NULL AND l.fico_score < 680 THEN 10 ELSE 0 END +
+      CASE WHEN l.ltv_ratio IS NOT NULL AND l.ltv_ratio > 80 THEN 5 ELSE 0 END +
+      CASE WHEN l.be_dti_ratio IS NOT NULL AND l.be_dti_ratio > 43 THEN 5 ELSE 0 END +
+      CASE WHEN l.occupancy_type IS NOT NULL AND UPPER(l.occupancy_type) NOT LIKE '%PRIMARY%' AND UPPER(l.occupancy_type) NOT LIKE '%OWNER%' THEN 5 ELSE 0 END +
+      CASE WHEN l.borr_self_employed = true OR l.borr_self_employed = 'Y' OR l.borr_self_employed = 'Yes' OR l.borr_self_employed = '1' THEN 5 ELSE 0 END
+    )`,
+    dependencies: [],
+    defaultDateField: "funding_date",
+    notes:
+      "Higher complexity = more difficult to process. Used in Operations Scorecard.",
+  },
+
+  // Processor Turn Time - Days from processing to approval
+  // Source: scorecard-utils.ts lines 103-124 (OPERATIONS_ACTOR_CONFIGS)
+  processor_turn_time: {
+    id: "processor_turn_time",
+    name: "Processor Turn Time",
+    description:
+      "Average days from processing_date to approval_date. Used in Operations Scorecard for Processor actors.",
+    category: "turn_time",
+    formula: "AVG(approval_date - processing_date)",
+    sqlQuery: `AVG(
+      CASE 
+        WHEN l.processing_date IS NOT NULL AND l.approval_date IS NOT NULL 
+          AND l.approval_date > l.processing_date
+        THEN EXTRACT(EPOCH FROM (l.approval_date - l.processing_date)) / 86400
+      END
+    )`,
+    dependencies: [],
+    defaultDateField: "approval_date",
+  },
+
+  // Underwriter Turn Time - Days from approval to closing
+  // Source: scorecard-utils.ts lines 103-124 (OPERATIONS_ACTOR_CONFIGS)
+  underwriter_turn_time: {
+    id: "underwriter_turn_time",
+    name: "Underwriter Turn Time",
+    description:
+      "Average days from approval_date to closing_date. Used in Operations Scorecard for Underwriter actors.",
+    category: "turn_time",
+    formula: "AVG(closing_date - approval_date)",
+    sqlQuery: `AVG(
+      CASE 
+        WHEN l.approval_date IS NOT NULL AND l.closing_date IS NOT NULL 
+          AND l.closing_date > l.approval_date
+        THEN EXTRACT(EPOCH FROM (l.closing_date - l.approval_date)) / 86400
+      END
+    )`,
+    dependencies: [],
+    defaultDateField: "closing_date",
+  },
+
+  // Closer Turn Time - Days from closing to disbursement
+  // Source: scorecard-utils.ts lines 103-124 (OPERATIONS_ACTOR_CONFIGS)
+  closer_turn_time: {
+    id: "closer_turn_time",
+    name: "Closer Turn Time",
+    description:
+      "Average days from closing_date to disbursement_date. Used in Operations Scorecard for Closer actors.",
+    category: "turn_time",
+    formula: "AVG(disbursement_date - closing_date)",
+    sqlQuery: `AVG(
+      CASE 
+        WHEN l.closing_date IS NOT NULL AND l.disbursement_date IS NOT NULL 
+          AND l.disbursement_date > l.closing_date
+        THEN EXTRACT(EPOCH FROM (l.disbursement_date - l.closing_date)) / 86400
+      END
+    )`,
+    dependencies: [],
+    defaultDateField: "disbursement_date",
+  },
+
+  // Warehouse Days - Days from funding to investor purchase
+  // Source: scorecard/index.ts lines 230-240 (waWhDays calculation)
+  warehouse_days: {
+    id: "warehouse_days",
+    name: "Warehouse Days",
+    description:
+      "Weighted average days loans are held in warehouse (funding to investor purchase). If not yet purchased, uses current date.",
+    category: "turn_time",
+    formula:
+      "WA(investor_purchase_date - funding_date) weighted by loan_amount",
+    sqlQuery: `CASE 
+      WHEN SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount END) > 0 THEN
+        SUM(
+          CASE 
+            WHEN l.funding_date IS NOT NULL THEN
+              l.loan_amount * 
+              CASE 
+                WHEN l.investor_purchase_date IS NOT NULL 
+                THEN EXTRACT(EPOCH FROM (l.investor_purchase_date - l.funding_date)) / 86400
+                ELSE EXTRACT(EPOCH FROM (CURRENT_DATE - l.funding_date)) / 86400
+              END
+          END
+        ) / NULLIF(SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount END), 0)
+      ELSE 0
+    END`,
+    dependencies: [],
+    defaultDateField: "funding_date",
+  },
+
+  // Average Conditions - Average number of conditions per loan
+  // Source: scorecard/index.ts lines 203-210
+  avg_conditions: {
+    id: "avg_conditions",
+    name: "Average Conditions",
+    description:
+      "Average number of conditions (PTDs/PTCs) per loan. Higher number indicates more documentation requirements.",
+    category: "count",
+    formula: "AVG(number_of_conditions)",
+    sqlQuery: `AVG(CASE WHEN l.number_of_conditions IS NOT NULL AND l.number_of_conditions > 0 THEN l.number_of_conditions END)`,
+    dependencies: [],
+    defaultDateField: "funding_date",
+  },
+
+  // ==========================================================================
+  // Funnel Metrics - Used in LoanFunnelView
+  // ==========================================================================
+
+  // Conversion Rate - Originated loans as percentage of loans started
+  conversion_rate: {
+    id: "conversion_rate",
+    name: "Conversion Rate",
+    description:
+      "Percentage of loans started that were originated. Calculated as (Originated Loans / Loans Started) * 100.",
+    category: "pull_through",
+    formula: "(originated_loans / loans_started) * 100",
+    sqlQuery: `CASE 
+      WHEN COUNT(CASE WHEN l.started_date IS NOT NULL THEN 1 END) > 0 THEN
+        COUNT(CASE 
+          WHEN (l.funding_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
+          THEN 1 
+        END)::float / NULLIF(COUNT(CASE WHEN l.started_date IS NOT NULL THEN 1 END), 0) * 100
+      ELSE 0
+    END`,
+    dependencies: ["loans_started", "originated_loans"],
+    defaultDateField: "started_date",
+  },
+
+  // NOTE: estimated_inquiries was REMOVED from the catalog.
+  // It was a fabricated metric (loansStarted * 1.5) with no actual data backing.
+  // Fake/estimated data should NOT be in a queryable metrics catalog.
+  // The LoanFunnelView still displays this estimate visually, clearly labeled as such.
 };
 
 // Helper to build date range WHERE clause
