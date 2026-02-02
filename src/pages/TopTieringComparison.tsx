@@ -1,21 +1,18 @@
 import { useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { TopTieringComparisonView } from '@/components/dashboard/views/TopTieringComparisonView';
-import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 import { useChannelStore } from '@/stores/channelStore';
+import { useTenantStore } from '@/stores/tenantStore';
 
 const TopTieringComparison = () => {
-  const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
-  // Tenant selection state for admins
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(
-    user?.role === 'tenant_admin' && user?.tenant_id ? user.tenant_id : null
-  );
+  // Tenant selection from global store (persists across pages)
+  const { selectedTenantId } = useTenantStore();
   
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();

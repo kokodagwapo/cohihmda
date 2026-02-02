@@ -30,11 +30,17 @@ const router = Router();
 
 /**
  * Build chat context from request
+ * Uses tenantContext.tenantId (resolved from query param or JWT) over req.tenantId
  */
 function buildChatContext(req: AuthRequest): ChatContext {
+  // Use resolved tenant from middleware (handles both query param and JWT)
+  const tenantId = req.tenantContext?.tenantId || req.tenantId;
+  if (!tenantId) {
+    throw new Error('No tenant context available');
+  }
   return {
     userId: req.userId!,
-    tenantId: req.tenantId!,
+    tenantId,
     userRole: req.userRole || 'user',
     userEmail: req.userEmail,
   };
@@ -42,11 +48,17 @@ function buildChatContext(req: AuthRequest): ChatContext {
 
 /**
  * Build query context from request
+ * Uses tenantContext.tenantId (resolved from query param or JWT) over req.tenantId
  */
 function buildQueryContext(req: AuthRequest): QueryContext {
+  // Use resolved tenant from middleware (handles both query param and JWT)
+  const tenantId = req.tenantContext?.tenantId || req.tenantId;
+  if (!tenantId) {
+    throw new Error('No tenant context available');
+  }
   return {
     userId: req.userId!,
-    tenantId: req.tenantId!,
+    tenantId,
     userRole: req.userRole || 'user',
     userEmail: req.userEmail,
   };
@@ -88,36 +100,43 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
     );
 
     // Save to chat history if we have a session
-    if (sessionId) {
-      const tenantPool = getTenantContext(req).tenantPool;
-      
-      // Save user message
-      await tenantPool.query(`
-        INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
-        VALUES ($1, $2, 'user', $3, $4)
-      `, [
-        req.userId,
-        sessionId,
-        question,
-        JSON.stringify({ timestamp: new Date().toISOString() })
-      ]);
+    // Note: Platform staff have shadow user records auto-created by tenantContext middleware
+    if (sessionId && req.tenantContext) {
+      try {
+        const tenantPool = req.tenantContext.tenantPool;
+        
+        // Save user message
+        await tenantPool.query(`
+          INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
+          VALUES ($1, $2, 'user', $3, $4)
+        `, [
+          req.userId,
+          sessionId,
+          question,
+          JSON.stringify({ timestamp: new Date().toISOString() })
+        ]);
 
-      // Save assistant response
-      await tenantPool.query(`
-        INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
-        VALUES ($1, $2, 'assistant', $3, $4)
-      `, [
-        req.userId,
-        sessionId,
-        response.message,
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          hasVisualization: !!response.visualization,
-          visualizationType: response.visualization?.type,
-          rowCount: response.data?.length || 0,
-          error: response.error
-        })
-      ]);
+        // Save assistant response
+        await tenantPool.query(`
+          INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
+          VALUES ($1, $2, 'assistant', $3, $4)
+        `, [
+          req.userId,
+          sessionId,
+          response.message,
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            hasVisualization: !!response.visualization,
+            visualizationType: response.visualization?.type,
+            rowCount: response.data?.length || 0,
+            error: response.error
+          })
+        ]);
+      } catch (historyError) {
+        // Don't fail the request if history saving fails
+        // This can happen if shadow user creation failed (e.g., schema migration not run)
+        console.warn('[DataChat] Failed to save chat history:', historyError);
+      }
     }
 
     res.json(response);
@@ -151,37 +170,42 @@ router.post('/refine', authenticateToken, attachTenantContext, apiLimiter, async
     );
 
     // Save to chat history
-    if (sessionId) {
-      const tenantPool = getTenantContext(req).tenantPool;
-      
-      await tenantPool.query(`
-        INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
-        VALUES ($1, $2, 'user', $3, $4)
-      `, [
-        req.userId,
-        sessionId,
-        refinement,
-        JSON.stringify({ 
-          timestamp: new Date().toISOString(),
-          isRefinement: true,
-          originalQuestion 
-        })
-      ]);
+    // Note: Platform staff have shadow user records auto-created by tenantContext middleware
+    if (sessionId && req.tenantContext) {
+      try {
+        const tenantPool = req.tenantContext.tenantPool;
+        
+        await tenantPool.query(`
+          INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
+          VALUES ($1, $2, 'user', $3, $4)
+        `, [
+          req.userId,
+          sessionId,
+          refinement,
+          JSON.stringify({ 
+            timestamp: new Date().toISOString(),
+            isRefinement: true,
+            originalQuestion 
+          })
+        ]);
 
-      await tenantPool.query(`
-        INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
-        VALUES ($1, $2, 'assistant', $3, $4)
-      `, [
-        req.userId,
-        sessionId,
-        response.message,
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          hasVisualization: !!response.visualization,
-          visualizationType: response.visualization?.type,
-          rowCount: response.data?.length || 0
-        })
-      ]);
+        await tenantPool.query(`
+          INSERT INTO public.chat_history (user_id, session_id, role, content, metadata)
+          VALUES ($1, $2, 'assistant', $3, $4)
+        `, [
+          req.userId,
+          sessionId,
+          response.message,
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            hasVisualization: !!response.visualization,
+            visualizationType: response.visualization?.type,
+            rowCount: response.data?.length || 0
+          })
+        ]);
+      } catch (historyError) {
+        console.warn('[DataChat] Failed to save chat history:', historyError);
+      }
     }
 
     res.json(response);

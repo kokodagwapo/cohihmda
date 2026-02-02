@@ -131,11 +131,13 @@ export interface UseSalesTrendsDataReturn {
  * 
  * @param dateRange - '3-months' or '6-months'
  * @param channelGroup - Channel filter (default: 'Retail')
+ * @param tenantId - Tenant ID for multi-tenant support (optional)
  * @returns Sales trends data, loading state, error, and refetch function
  */
 export function useSalesTrendsData(
   dateRange: DateRangeOption = '3-months',
-  channelGroup: string = 'Retail'
+  channelGroup: string = 'Retail',
+  tenantId?: string | null
 ): UseSalesTrendsDataReturn {
   const [data, setData] = useState<SalesTrendsData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -147,7 +149,10 @@ export function useSalesTrendsData(
 
     try {
       // NOTE: Using original endpoint until /api/scorecard/sales-trends is fully tested
-      const url = `/api/loans/sales-trends?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
+      let url = `/api/loans/sales-trends?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
+      if (tenantId) {
+        url += `&tenant_id=${encodeURIComponent(tenantId)}`;
+      }
       console.log('[SalesTrends] Fetching data from', url);
       
       const responseData = await api.request<SalesTrendsData>(url);
@@ -164,7 +169,7 @@ export function useSalesTrendsData(
     } finally {
       setLoading(false);
     }
-  }, [dateRange, channelGroup]);
+  }, [dateRange, channelGroup, tenantId]);
 
   useEffect(() => {
     fetchData();
@@ -176,7 +181,10 @@ export function useSalesTrendsData(
   const fetchDrilldown = useCallback(async (loName: string): Promise<DrilldownData | null> => {
     try {
       // NOTE: Using original endpoint until /api/scorecard/sales-trends is fully tested
-      const url = `/api/loans/sales-trends/drilldown/${encodeURIComponent(loName)}?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
+      let url = `/api/loans/sales-trends/drilldown/${encodeURIComponent(loName)}?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
+      if (tenantId) {
+        url += `&tenant_id=${encodeURIComponent(tenantId)}`;
+      }
       console.log('[SalesTrends] Fetching drilldown from', url);
       
       const responseData = await api.request<DrilldownData>(url);
@@ -185,7 +193,7 @@ export function useSalesTrendsData(
       console.error('Error fetching drilldown data:', err);
       return null;
     }
-  }, [dateRange, channelGroup]);
+  }, [dateRange, channelGroup, tenantId]);
 
   return {
     data,

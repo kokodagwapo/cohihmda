@@ -72,6 +72,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   clearError: () => void;
   loadTenants: () => Promise<void>;
+  setAuthFromToken: (token: string, user: AuthUser) => void;
   
   // Role checks
   hasRole: (role: UserRole | UserRole[]) => boolean;
@@ -285,6 +286,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setImpersonatingTenant(null);
   }, []);
 
+  /**
+   * Set auth state from token (used by SSO callback)
+   */
+  const setAuthFromToken = useCallback((token: string, userData: AuthUser) => {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    api.setToken(token);
+    setUser(userData);
+    setError(null);
+    setIsLoading(false);
+  }, []);
+
   const value: AuthContextType = {
     user,
     isAuthenticated: !!user,
@@ -296,6 +308,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     refreshUser,
     clearError,
     loadTenants,
+    setAuthFromToken,
     hasRole,
     isSuperAdmin,
     isPlatformStaff,

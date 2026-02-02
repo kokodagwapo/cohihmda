@@ -14,6 +14,7 @@ export interface CreditRiskFilters {
   channel?: string | null; // Channel group filter (Retail, TPO, etc.) - matches Qlik [Consolidated Channels]
   year: number;
   dateRange?: { start: string; end: string }; // Optional: explicit date range
+  tenantId?: string | null; // Tenant ID for multi-tenant support (admins viewing other tenants)
 }
 
 // Distribution bucket interface - matches backend DistributionBucket
@@ -160,8 +161,14 @@ export function useCreditRiskData(filters: CreditRiskFilters) {
 
       console.log('[useCreditRiskData] Fetching data with filters:', requestBody);
 
+      // Build URL with tenant_id as query param (required by tenant context middleware)
+      let url = '/api/metrics/credit-risk';
+      if (filters.tenantId) {
+        url += `?tenant_id=${encodeURIComponent(filters.tenantId)}`;
+      }
+
       // Call the combined credit-risk endpoint
-      const response = await api.request<CreditRiskApiResponse>('/api/metrics/credit-risk', {
+      const response = await api.request<CreditRiskApiResponse>(url, {
         method: 'POST',
         body: JSON.stringify(requestBody)
       });
@@ -191,7 +198,8 @@ export function useCreditRiskData(filters: CreditRiskFilters) {
     filters.channel, 
     filters.year, 
     filters.dateRange?.start, 
-    filters.dateRange?.end
+    filters.dateRange?.end,
+    filters.tenantId
   ]);
 
   useEffect(() => {

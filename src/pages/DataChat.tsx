@@ -3,7 +3,7 @@
  * Full-page AI-powered chat interface for querying loan data
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Send, 
   Save,
@@ -18,6 +18,7 @@ import {
   Table,
   PieChart,
   TrendingUp,
+  Building2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +29,8 @@ import { useDataChat, ChatMessage, VisualizationConfig } from '@/hooks/useDataCh
 import { DynamicVisualization } from '@/components/visualizations/DynamicVisualization';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTenants } from '@/hooks/admin/useTenants';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -104,7 +107,11 @@ const QUESTION_CATEGORIES = [
 
 const DataChat: React.FC = () => {
   const { toast } = useToast();
-  const { user, tenantId } = useAuth();
+  const { user, isPlatformStaff } = useAuth();
+  const isPlatform = isPlatformStaff();
+  const isDevMode = import.meta.env.DEV;
+  const userTenantId = user?.tenant_id ?? null;
+  const userTenantName = user?.tenant_name || 'My Tenant';
   const [input, setInput] = useState('');
   const [showSidebar, setShowSidebar] = useState(true);
   const [saveDialog, setSaveDialog] = useState<SaveDialogState>({
@@ -114,9 +121,47 @@ const DataChat: React.FC = () => {
   });
   const [saveTitle, setSaveTitle] = useState('');
   const [saveDescription, setSaveDescription] = useState('');
+  const { tenants, loading: tenantsLoading, loadTenants } = useTenants();
+  const DEMO_TENANT_VALUE = 'demo-data';
+  const [selectedTenantValue, setSelectedTenantValue] = useState<string | null>(userTenantId);
+  const hasUserSelectedTenantRef = useRef(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const previousTenantIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isPlatform) {
+      loadTenants();
+    }
+  }, [isPlatform, loadTenants]);
+
+  useEffect(() => {
+    if (hasUserSelectedTenantRef.current) return;
+    if (isPlatform && isDevMode) {
+      setSelectedTenantValue(DEMO_TENANT_VALUE);
+    } else if (userTenantId) {
+      setSelectedTenantValue(userTenantId);
+    }
+  }, [isPlatform, isDevMode, userTenantId]);
+
+  const demoTenantId = useMemo(() => {
+    if (tenants.length === 0) return null;
+    const demoTenant = tenants.find(tenant => /demo|sample/i.test(tenant.name));
+    return demoTenant?.id ?? tenants[0]?.id ?? null;
+  }, [tenants]);
+
+  const resolvedTenantId = useMemo(() => {
+    if (isPlatform) {
+      if (selectedTenantValue === DEMO_TENANT_VALUE) {
+        return demoTenantId;
+      }
+      return selectedTenantValue || null;
+    }
+    return userTenantId;
+  }, [isPlatform, selectedTenantValue, demoTenantId, userTenantId]);
+
+  const tenantReady = !isPlatform || !!resolvedTenantId;
   
   const {
     messages,
@@ -126,7 +171,15 @@ const DataChat: React.FC = () => {
     saveVisualization,
     clearMessages,
     newSession,
-  } = useDataChat({ tenantId: tenantId || undefined });
+  } = useDataChat({ tenantId: resolvedTenantId || undefined });
+
+  useEffect(() => {
+    if (!resolvedTenantId) return;
+    if (previousTenantIdRef.current && previousTenantIdRef.current !== resolvedTenantId) {
+      newSession();
+    }
+    previousTenantIdRef.current = resolvedTenantId;
+  }, [resolvedTenantId, newSession]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -142,7 +195,7 @@ const DataChat: React.FC = () => {
    * Handle send message
    */
   const handleSend = () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !tenantReady) return;
     sendMessage(input.trim());
     setInput('');
   };
@@ -279,6 +332,44 @@ const DataChat: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-slate-400" />
+                <Select
+                  value={selectedTenantValue ?? undefined}
+                  onValueChange={(value) => {
+                    hasUserSelectedTenantRef.current = true;
+                    setSelectedTenantValue(value);
+                  }}
+                  disabled={!isPlatform || tenantsLoading}
+                >
+                  <SelectTrigger className="h-9 w-[180px] sm:w-[220px] text-sm font-light">
+                    {tenantsLoading && isPlatform ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span className="text-xs">Loading tenants...</span>
+                      </div>
+                    ) : (
+                      <SelectValue placeholder="Select tenant..." />
+                    )}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {isPlatform ? (
+                      <>
+                        <SelectItem value={DEMO_TENANT_VALUE}>Demo data (default)</SelectItem>
+                        {tenants.map((tenant) => (
+                          <SelectItem key={tenant.id} value={tenant.id}>
+                            {tenant.name}
+                          </SelectItem>
+                        ))}
+                      </>
+                    ) : (
+                      userTenantId && (
+                        <SelectItem value={userTenantId}>{userTenantName}</SelectItem>
+                      )
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 variant="outline"
                 size="sm"
@@ -367,13 +458,13 @@ const DataChat: React.FC = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Ask about your loan data... (e.g., 'Show me loan volume by branch')"
-                  disabled={isLoading}
+                  placeholder={tenantReady ? "Ask about your loan data... (e.g., 'Show me loan volume by branch')" : "Select a tenant to start chatting"}
+                  disabled={isLoading || !tenantReady}
                   className="flex-1 h-12 text-base"
                 />
                 <Button 
                   onClick={handleSend} 
-                  disabled={!input.trim() || isLoading}
+                  disabled={!input.trim() || isLoading || !tenantReady}
                   size="lg"
                   className="h-12 px-6"
                 >

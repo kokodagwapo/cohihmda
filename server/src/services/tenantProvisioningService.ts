@@ -14,10 +14,11 @@ export interface CreateTenantOptions {
   name: string;
   slug: string;
   deployment_type: 'cloud' | 'on_premise' | 'per_lender_aws';
-  database_host: string;
+  // For cloud deployment, these are optional - we use the shared Aurora cluster
+  database_host?: string;
   database_port?: number;
-  database_user: string;
-  database_password: string;
+  database_user?: string;
+  database_password?: string;
   aws_account_id?: string;
   rds_instance_id?: string;
 }
@@ -44,8 +45,30 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
     // Generate database name
     const databaseName = `coheus_tenant_${options.slug.replace(/[^a-z0-9]/g, '_')}`;
 
-    // Encrypt database password
-    const encryptedPassword = await encryptField(options.database_password);
+    // For cloud deployments, use the shared Aurora cluster credentials from environment
+    let dbHost = options.database_host;
+    let dbPort = options.database_port || 5432;
+    let dbUser = options.database_user;
+    let dbPassword = options.database_password;
+
+    if (options.deployment_type === 'cloud') {
+      // Use the same Aurora cluster as the management database
+      dbHost = process.env.DB_HOST;
+      dbPort = parseInt(process.env.DB_PORT || '5432');
+      dbUser = process.env.DB_USER;
+      dbPassword = process.env.DB_PASSWORD;
+
+      if (!dbHost || !dbUser || !dbPassword) {
+        throw new Error('Cloud deployment requires DB_HOST, DB_USER, and DB_PASSWORD environment variables');
+      }
+
+      console.log(`[TenantProvisioning] Using shared Aurora cluster: ${dbHost}`);
+    } else if (!dbHost || !dbUser || !dbPassword) {
+      throw new Error('Non-cloud deployments require database_host, database_user, and database_password');
+    }
+
+    // Encrypt database password for storage
+    const encryptedPassword = await encryptField(dbPassword);
 
     // Insert tenant record
     const insertResult = await client.query(
@@ -59,9 +82,9 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
         options.name,
         options.slug,
         databaseName,
-        options.database_host,
-        options.database_port || 5432,
-        options.database_user,
+        dbHost,
+        dbPort,
+        dbUser,
         encryptedPassword,
         options.deployment_type,
         options.aws_account_id || null,
@@ -71,19 +94,25 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
 
     const tenant = insertResult.rows[0];
 
-    // Create tenant database (if on same host)
-    if (options.database_host === 'localhost' || options.database_host === '127.0.0.1') {
-      await createTenantDatabase(databaseName, options.database_user, options.database_password);
-    }
+    // Create tenant database on the target host
+    await createTenantDatabase(
+      databaseName,
+      dbUser!,
+      dbPassword!,
+      dbHost!,
+      dbPort
+    );
 
     // Create tenant database schema
+    // Use SSL for non-local hosts (Aurora requires SSL)
+    const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1';
     const tenantPool = new Pool({
-      host: options.database_host,
-      port: options.database_port || 5432,
+      host: dbHost,
+      port: dbPort,
       database: databaseName,
-      user: options.database_user,
-      password: options.database_password,
-      ssl: false,
+      user: dbUser,
+      password: dbPassword,
+      ssl: isLocalHost ? false : { rejectUnauthorized: false },
     });
 
     try {
@@ -124,15 +153,23 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
 async function createTenantDatabase(
   databaseName: string,
   dbUser: string,
-  dbPassword: string
+  dbPassword: string,
+  dbHost: string,
+  dbPort: number
 ): Promise<void> {
   // Connect to postgres database to create new database
+  const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1';
+  
+  console.log(`[TenantProvisioning] Creating database ${databaseName} on ${dbHost}:${dbPort}`);
+  
   const adminPool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432'),
+    host: dbHost,
+    port: dbPort,
     database: 'postgres',
     user: dbUser,
     password: dbPassword,
+    ssl: isLocalHost ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
   });
 
   try {
@@ -143,8 +180,8 @@ async function createTenantDatabase(
     );
 
     if (checkResult.rows.length === 0) {
-      // Create database
-      await adminPool.query(`CREATE DATABASE ${databaseName}`);
+      // Create database - use quoted identifier to handle special characters
+      await adminPool.query(`CREATE DATABASE "${databaseName}"`);
       console.log(`[TenantProvisioning] Created database: ${databaseName}`);
     } else {
       console.log(`[TenantProvisioning] Database already exists: ${databaseName}`);

@@ -46,13 +46,51 @@ $CONTAINER_CPU = 512
 $CONTAINER_MEMORY = 1024
 $DESIRED_COUNT = 2
 
-# Domain Configuration (update these for your environment)
-$DOMAIN_NAME = ""  # e.g., "app.cohi.io"
-$CERTIFICATE_ARN = ""  # ACM certificate ARN (us-east-1 for CloudFront)
-$ALB_CERTIFICATE_ARN = ""  # ACM certificate ARN (same region as deployment)
+# Domain Configuration (coheus1.com subdomains)
+# See docs/deployment/HTTPS_AND_CERTIFICATES.md and COHEUS1_DOMAIN_SETUP.md.
+# Dev:  cohi-dev.coheus1.com (frontend), cohi-dev-api.coheus1.com (API/ALB)
+# Prod: cohi.coheus1.com (frontend), cohi-api.coheus1.com (API/ALB)
+$DOMAIN_NAME = "cohi-dev.coheus1.com"
+$CERTIFICATE_ARN = "arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63"  # CloudFront (us-east-1); must cover $DOMAIN_NAME
+$ALB_CERTIFICATE_ARN = "arn:aws:acm:us-east-2:339712788893:certificate/ed3ea4da-effe-47ba-a974-a61964930484"  # ALB (us-east-2); catch-all for *.coheus1.com
+$BACKEND_ORIGIN_DOMAIN = "cohi-dev-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
+$BACKEND_ORIGIN_PROTOCOL = "https-only"  # Use "https-only" when ALB has cert and BACKEND_ORIGIN_DOMAIN is set.
 
 # Alert Configuration
-$ALERT_EMAIL = ""  # e.g., "alerts@yourcompany.com"
+$ALERT_EMAIL = "mpetrovic@teraverde.com"  # e.g., "alerts@yourcompany.com"
+
+# ============================================================================
+# COGNITO SSO CONFIGURATION
+# Each environment (dev/prod) should have its own Cognito User Pool
+# ============================================================================
+# Dev Cognito Configuration
+$COGNITO_USER_POOL_ID_DEV = "us-east-2_lArr8IsFK"
+$COGNITO_CLIENT_ID_DEV = "3b3ntlo09hcc46gec2esd6iii5"
+$COGNITO_CLIENT_SECRET_DEV = "rgf0qcvtbuhuvdsrd28tanenke7u70duq4r6l7j35gc0bk8amrb"
+$COGNITO_DOMAIN_DEV = "us-east-2larr8isfk.auth.us-east-2.amazoncognito.com"
+
+# Prod Cognito Configuration (update these when you create prod pool)
+$COGNITO_USER_POOL_ID_PROD = ""  # TODO: Create prod Cognito pool
+$COGNITO_CLIENT_ID_PROD = ""
+$COGNITO_CLIENT_SECRET_PROD = ""
+$COGNITO_DOMAIN_PROD = ""
+
+# Select Cognito config based on environment
+if ($ENVIRONMENT -eq "prod") {
+    $COGNITO_USER_POOL_ID = $COGNITO_USER_POOL_ID_PROD
+    $COGNITO_CLIENT_ID = $COGNITO_CLIENT_ID_PROD
+    $COGNITO_CLIENT_SECRET = $COGNITO_CLIENT_SECRET_PROD
+    $COGNITO_DOMAIN = $COGNITO_DOMAIN_PROD
+    $COGNITO_FRONTEND_URL = "https://cohi.coheus1.com"  # Prod frontend
+    $COGNITO_IDENTITY_PROVIDERS = @("COGNITO")  # Add tenant IdPs here as they're configured
+} else {
+    $COGNITO_USER_POOL_ID = $COGNITO_USER_POOL_ID_DEV
+    $COGNITO_CLIENT_ID = $COGNITO_CLIENT_ID_DEV
+    $COGNITO_CLIENT_SECRET = $COGNITO_CLIENT_SECRET_DEV
+    $COGNITO_DOMAIN = $COGNITO_DOMAIN_DEV
+    $COGNITO_FRONTEND_URL = "https://cohi-dev.coheus1.com"  # Dev frontend
+    $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "TestAccCognito")  # Include your test IdP
+}
 
 # Frontend S3 Bucket
 $FRONTEND_BUCKET = "$PROJECT_NAME-frontend-$AWS_ACCOUNT_ID"
@@ -163,6 +201,57 @@ function Test-StackExists {
     param([string]$StackName)
     $result = aws cloudformation describe-stacks --stack-name $StackName --profile $env:AWS_PROFILE --region $env:AWS_REGION 2>$null
     return $LASTEXITCODE -eq 0
+}
+
+# ============================================================================
+# Update Cognito App Client callback URLs for the current environment
+# This ensures SSO redirects work for both dev and prod
+# ============================================================================
+function Update-CognitoCallbackUrls {
+    if (-not $COGNITO_USER_POOL_ID -or -not $COGNITO_CLIENT_ID) {
+        Write-Status "Cognito not configured - skipping callback URL update" "Yellow"
+        return
+    }
+    
+    Write-Status "Updating Cognito callback URLs for $ENVIRONMENT environment..."
+    
+    # Build callback URLs - include localhost for development testing
+    $callbackUrls = @(
+        "$COGNITO_FRONTEND_URL/auth/sso/callback",
+        "http://localhost:5000/auth/sso/callback"
+    )
+    
+    $logoutUrls = @(
+        "$COGNITO_FRONTEND_URL",
+        "http://localhost:5000"
+    )
+    
+    try {
+        aws cognito-idp update-user-pool-client `
+            --user-pool-id $COGNITO_USER_POOL_ID `
+            --client-id $COGNITO_CLIENT_ID `
+            --callback-urls $callbackUrls `
+            --logout-urls $logoutUrls `
+            --default-redirect-uri "$COGNITO_FRONTEND_URL/auth/sso/callback" `
+            --supported-identity-providers $COGNITO_IDENTITY_PROVIDERS `
+            --allowed-o-auth-flows "code" `
+            --allowed-o-auth-scopes "email" "openid" "phone" "profile" `
+            --allowed-o-auth-flows-user-pool-client `
+            --profile $env:AWS_PROFILE `
+            --region $env:AWS_REGION `
+            --output json | Out-Null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Status "Cognito callback URLs updated:" "Green"
+            Write-Host "  Callbacks: $($callbackUrls -join ', ')"
+            Write-Host "  Logout:    $($logoutUrls -join ', ')"
+            Write-Host "  IdPs:      $($COGNITO_IDENTITY_PROVIDERS -join ', ')"
+        } else {
+            Write-Status "Failed to update Cognito callback URLs" "Red"
+        }
+    } catch {
+        Write-Status "Error updating Cognito: $_" "Red"
+    }
 }
 
 # Discover subnets if using existing VPC

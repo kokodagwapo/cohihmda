@@ -13,6 +13,7 @@ export interface ScorecardFilters {
   channel?: string | null; // Channel group filter (Retail, TPO, etc.) - matches Qlik [Consolidated Channels]
   dateRange?: { start: string; end: string }; // Optional: explicit date range (overrides year)
   dateField?: string; // Which date field to filter on (application_date, funding_date, started_date, etc.)
+  tenantId?: string | null; // Tenant ID for multi-tenant support (admins viewing other tenants)
 }
 
 export interface GroupedMetricResult {
@@ -232,10 +233,13 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
         ...(Object.keys(additionalFilters).length > 0 && { additionalFilters })
       };
 
+      // Build URL with tenant_id as query param (required by tenant context middleware)
+      const tenantQueryParam = filters.tenantId ? `?tenant_id=${encodeURIComponent(filters.tenantId)}` : '';
+
       // Fetch in parallel: grouped by branch, totals, and filter options
       const [groupedResponse, totalsResponse, branchesResponse, losResponse] = await Promise.all([
         // Grouped metrics by branch
-        api.request<{ metrics: MetricsByGroup; groupedBy: string }>('/api/metrics/query', {
+        api.request<{ metrics: MetricsByGroup; groupedBy: string }>(`/api/metrics/query${tenantQueryParam}`, {
           method: 'POST',
           body: JSON.stringify({
             ...requestBody,
@@ -243,14 +247,14 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
           })
         }),
         // Total metrics (non-grouped)
-        api.request<{ metrics: Record<string, MetricResult> }>('/api/metrics/query', {
+        api.request<{ metrics: Record<string, MetricResult> }>(`/api/metrics/query${tenantQueryParam}`, {
           method: 'POST',
           body: JSON.stringify(requestBody)
         }),
         // Branch dropdown values
-        api.request<{ values: string[] }>('/api/loans/distinct-values/branch'),
+        api.request<{ values: string[] }>(`/api/loans/distinct-values/branch${tenantQueryParam}`),
         // Loan officer dropdown values
-        api.request<{ values: string[] }>('/api/loans/distinct-values/loan_officer')
+        api.request<{ values: string[] }>(`/api/loans/distinct-values/loan_officer${tenantQueryParam}`)
       ]);
 
       // Transform responses
@@ -270,7 +274,7 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
     } finally {
       setLoading(false);
     }
-  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.dateField]);
+  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.dateField, filters.tenantId]);
 
   useEffect(() => {
     fetchData();

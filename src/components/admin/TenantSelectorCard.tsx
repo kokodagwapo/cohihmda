@@ -54,8 +54,8 @@ export function TenantSelectorCard({
       <div className={`flex items-center gap-2 ${className}`}>
         <Building2 className="h-4 w-4 text-slate-400" />
         <Select
-          value={selectedTenantId || ''}
-          onValueChange={(value) => setSelectedTenantId(value || null)}
+          value={selectedTenantId || '__all__'}
+          onValueChange={(value) => setSelectedTenantId(value === '__all__' ? null : value)}
           disabled={tenantsLoading}
         >
           <SelectTrigger className="w-[200px] font-light">
@@ -66,7 +66,7 @@ export function TenantSelectorCard({
             )}
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All Tenants</SelectItem>
+            <SelectItem value="__all__">All Tenants</SelectItem>
             {tenants.map((tenant) => (
               <SelectItem key={tenant.id} value={tenant.id}>
                 {tenant.name}
@@ -119,8 +119,8 @@ export function TenantSelectorCard({
       <CardContent>
         <div className="flex items-center gap-4">
           <Select
-            value={selectedTenantId || ''}
-            onValueChange={(value) => setSelectedTenantId(value || null)}
+            value={selectedTenantId || '__none__'}
+            onValueChange={(value) => setSelectedTenantId(value === '__none__' ? null : value)}
             disabled={tenantsLoading}
           >
             <SelectTrigger className="w-full max-w-md font-light">
@@ -134,7 +134,7 @@ export function TenantSelectorCard({
               )}
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">
+              <SelectItem value="__none__">
                 <span className="text-slate-500">-- Select a tenant --</span>
               </SelectItem>
               {tenants.map((tenant) => (

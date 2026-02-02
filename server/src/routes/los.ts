@@ -1586,6 +1586,129 @@ router.delete('/clear-loans', authenticateToken, attachTenantContext, async (req
 });
 
 /**
+ * GET /api/los/connections/:id/sync-status
+ * Get the current sync status for a connection
+ */
+router.get('/connections/:id/sync-status', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.query.tenant_id as string | undefined;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    // Get tenant pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Get connection status
+    const result = await tenantPool.query(
+      `SELECT last_sync_status, last_synced_at, last_sync_error, updated_at
+       FROM public.los_connections WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'LOS connection not found' });
+    }
+
+    const connection = result.rows[0];
+    
+    // Get current loan count for progress estimation
+    let loansCount = 0;
+    try {
+      const countResult = await tenantPool.query('SELECT COUNT(*) as count FROM public.loans');
+      loansCount = parseInt(countResult.rows[0]?.count || '0', 10);
+    } catch (error: any) {
+      // Table might not exist yet
+      loansCount = 0;
+    }
+
+    // Map database status to frontend status
+    const status = connection.last_sync_status;
+    let frontendStatus = 'idle';
+    let message = '';
+    
+    if (status === 'pending' || status === 'in_progress') {
+      frontendStatus = 'processing';
+      message = 'Syncing loans from Encompass...';
+    } else if (status === 'success') {
+      frontendStatus = 'complete';
+      message = 'Sync completed successfully';
+    } else if (status === 'error') {
+      frontendStatus = 'error';
+      message = connection.last_sync_error || 'Sync failed';
+    }
+
+    res.json({
+      status: frontendStatus,
+      dbStatus: status,
+      progress: status === 'in_progress' || status === 'pending' ? {
+        current_batch: 0, // We don't track batches yet
+        total_batches: 0,
+        loans_processed: loansCount, // Current count
+        loans_total: 0, // We don't know the total until it's done
+        message: message
+      } : null,
+      error: status === 'error' ? connection.last_sync_error : undefined,
+      last_synced_at: connection.last_synced_at,
+      updated_at: connection.updated_at
+    });
+  } catch (error: any) {
+    logError('Error getting sync status', error, { connectionId: req.params.id });
+    res.status(500).json({ error: error.message || 'Failed to get sync status' });
+  }
+});
+
+/**
+ * POST /api/los/connections/:id/cancel-sync
+ * Cancel an in-progress sync (best effort - may not stop immediately)
+ */
+router.post('/connections/:id/cancel-sync', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const tenantId = req.query.tenant_id as string | undefined;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant_id query parameter is required' });
+    }
+
+    // Get tenant pool
+    const { tenantDbManager } = await import('../config/tenantDatabaseManager.js');
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Update sync status to cancelled
+    const result = await tenantPool.query(
+      `UPDATE public.los_connections
+       SET last_sync_status = 'cancelled', 
+           last_sync_error = 'Sync cancelled by user',
+           updated_at = NOW()
+       WHERE id = $1 AND last_sync_status IN ('pending', 'in_progress')
+       RETURNING id`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.json({ 
+        success: false, 
+        message: 'No active sync to cancel or connection not found' 
+      });
+    }
+
+    logInfo('Sync cancelled by user', { connectionId: id, tenantId, userId: req.userId });
+
+    res.json({ 
+      success: true, 
+      message: 'Sync cancellation requested. The sync may take a moment to stop.' 
+    });
+  } catch (error: any) {
+    logError('Error cancelling sync', error, { connectionId: req.params.id });
+    res.status(500).json({ error: error.message || 'Failed to cancel sync' });
+  }
+});
+
+/**
  * POST /api/los/csv/upload
  * Upload CSV file and detect columns
  * Uses Papa.parse (consistent with dashboard routes) and memory storage
@@ -1999,7 +2122,7 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
           closing_date: parseDate(getField(['closing_date', 'close_date', 'fund_date', 'funded_date'])),
           lock_date: parseDate(getField(['lock_date', 'rate_lock_date'])), // Added lock_date
           interest_rate: parseNumber(getField(['interest_rate', 'rate', 'apr', 'note_rate'])),
-          raw_data: record, // Store original record for reference
+          // Note: raw_data column has been removed - metadata stored in structured columns
         };
 
         // Validate required fields
@@ -2019,14 +2142,16 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
         const cycleTimeDays = parseNumber(getField(['cycle_time_days', 'cycleTime', 'cycle_time']));
         const complexityScore = parseNumber(getField(['complexity_score', 'complexityScore', 'complexity'])); // For TopTiering Ops scoring
         
-        // Store loan data in the database - include all fields in raw_data for comprehensive access
+        // Store loan data in the database
+        // Note: raw_data column has been removed - additional metadata stored in metadata JSONB
         await pool.query(
           `INSERT INTO public.loans (
             tenant_id, loan_id, borrower_name, loan_amount, loan_type, 
             status, application_date, closing_date, lock_date, interest_rate,
             loan_purpose, branch, credit_pull_date, cycle_time_days,
-            raw_data, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
+            fico_score, ltv_ratio, loan_officer_name, fallout_reason,
+            metadata, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
           ON CONFLICT (tenant_id, loan_id) 
           DO UPDATE SET
             borrower_name = EXCLUDED.borrower_name,
@@ -2041,7 +2166,11 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
             branch = EXCLUDED.branch,
             credit_pull_date = EXCLUDED.credit_pull_date,
             cycle_time_days = EXCLUDED.cycle_time_days,
-            raw_data = EXCLUDED.raw_data,
+            fico_score = EXCLUDED.fico_score,
+            ltv_ratio = EXCLUDED.ltv_ratio,
+            loan_officer_name = EXCLUDED.loan_officer_name,
+            fallout_reason = EXCLUDED.fallout_reason,
+            metadata = EXCLUDED.metadata,
             updated_at = NOW()`,
           [
             tenantId,
@@ -2060,16 +2189,14 @@ router.post('/demo/upload', authenticateToken, upload.single('csv'), async (req:
             cycleTimeDays || (loanData.application_date && loanData.closing_date 
               ? Math.round((new Date(loanData.closing_date).getTime() - new Date(loanData.application_date).getTime()) / (1000 * 60 * 60 * 24))
               : null),
+            ficoScore,
+            ltv,
+            loanOfficerName,
+            falloutReason,
             JSON.stringify({
-              ...(typeof loanData.raw_data === 'object' && loanData.raw_data !== null ? loanData.raw_data : {}),
-              ...(typeof record === 'object' && record !== null ? record : {}),
-              // Ensure all fields are in raw_data for API access (Business Overview, Leaderboard, Loan Funnel, Ops)
               respa_date: respaDate, // For Ops turn time by stage calculations
-              fico_score: ficoScore,
-              ltv: ltv,
-              loan_officer_name: loanOfficerName,
-              fallout_reason: falloutReason,
               complexity_score: complexityScore, // For TopTiering Ops complexity scoring
+              import_source: 'csv',
             }),
           ]
         );
@@ -2159,7 +2286,7 @@ router.get('/field-population-stats', authenticateToken, attachTenantContext, ap
       FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name = 'loans'
-        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'raw_data', 'metadata')
+        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'metadata')
       ORDER BY column_name
     `);
 
@@ -2278,7 +2405,7 @@ router.get('/field-mapping-debug', authenticateToken, attachTenantContext, apiLi
       FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name = 'loans'
-        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'raw_data', 'metadata')
+        AND column_name NOT IN ('id', 'created_at', 'updated_at', 'created_by', 'embedding', 'metadata')
     `);
     const dbColumns = new Set(columnsResult.rows.map((r: any) => r.column_name));
 

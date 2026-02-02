@@ -12,6 +12,7 @@ import { authenticateToken, AuthRequest } from '../../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
 import { apiLimiter } from '../../middleware/rateLimiter.js';
 import { logError, logWarn, logInfo, logDebug } from '../../services/logger.js';
+import { getLoanAccessContext } from '../../services/userLoanAccessService.js';
 import {
   isActorMissing,
   filterByChannel,
@@ -63,6 +64,19 @@ router.get('/sales', authenticateToken, attachTenantContext, apiLimiter, async (
   try {
     const tenantPool = getTenantContext(req).tenantPool;
 
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return empty scorecard
+    if (accessCtx.hasNoAccess) {
+      return res.json({
+        actor: req.query.actor || 'loan_officer',
+        dateRange: { start: '', end: '' },
+        data: [],
+        summary: { actorCount: 0, avgTTS: 0, medianTTS: 0, totalVolume: 0 }
+      });
+    }
+
     const actor = (req.query.actor as string) || 'loan_officer';
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
@@ -82,7 +96,7 @@ router.get('/sales', authenticateToken, attachTenantContext, apiLimiter, async (
     const effectiveEndDate = vMaxDate;
     const effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - 12, 1);
     
-    logInfo('[Scorecard/Sales] Start', { actor, channel: channelGroup });
+    logInfo('[Scorecard/Sales] Start', { actor, channel: channelGroup, hasAccessFilter: accessCtx.requiresFiltering });
 
     // TTS Weight Configuration - matches Qlik eCCA_TVI_Score_13_Months formula
     const weightConfig = SALES_TTS_WEIGHTS;
@@ -91,6 +105,19 @@ router.get('/sales', authenticateToken, attachTenantContext, apiLimiter, async (
     const channelClause = buildChannelWhereClause(channelGroup);
     const startDateStr = formatDateForSQL(effectiveStartDate);
     const endDateStr = formatDateForSQL(effectiveEndDate);
+    
+    // Build access filter clause
+    const { accessClause, accessParams } = accessCtx.buildWhereClause('', 3); // Params start at $3 (after $1, $2 for dates)
+    const accessFilterClause = accessClause ? accessClause.replace(/^AND\s+/, 'AND ') : '';
+
+    // Build query params - access filter params come after date params
+    const fundedQueryParams = accessCtx.requiresFiltering 
+      ? [startDateStr, endDateStr, accessCtx.userId]
+      : [startDateStr, endDateStr];
+    
+    const accessWhereClause = accessCtx.requiresFiltering 
+      ? `AND guid IN (SELECT loan_guid FROM user_loan_access WHERE user_id = $3)` 
+      : '';
 
     // Fetch FUNDED loans (main data for scorecard - DateType={'Funding'})
     const fundedLoansResult = await retryQuery(
@@ -111,8 +138,9 @@ router.get('/sales', authenticateToken, attachTenantContext, apiLimiter, async (
            AND TRIM(${actorColumn}) != ''
            AND UPPER(TRIM(${actorColumn})) NOT IN ('99-MISSING', 'MISSING', 'NO LO FOUND', 'NO LOAN OFFICER', 'NO BRANCH FOUND', 'UNKNOWN')
            AND UPPER(TRIM(${actorColumn})) NOT LIKE '99-%'
+           ${accessWhereClause}
            ${channelClause}`,
-        [startDateStr, endDateStr]
+        fundedQueryParams
       ),
       2, 500
     );
@@ -130,8 +158,9 @@ router.get('/sales', authenticateToken, attachTenantContext, apiLimiter, async (
          FROM loans
          WHERE COALESCE(started_date, application_date) >= $1
            AND COALESCE(started_date, application_date) <= $2
+           ${accessWhereClause}
            ${channelClause}`,
-        [startDateStr, endDateStr]
+        fundedQueryParams
       ),
       2, 500
     );

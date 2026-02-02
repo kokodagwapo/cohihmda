@@ -4,13 +4,14 @@
  * Centralized tenant selection management for admin sections.
  * - Auto-sets tenant for tenant_admin users (locked to their tenant)
  * - Provides tenant selector for platform admins (super_admin, platform_admin)
- * - Single source of truth for current tenant across all admin sections
+ * - Syncs with global useTenantStore for site-wide persistence
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useCallback, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useTenantStore } from '@/stores/tenantStore';
 
 /**
  * Tenant info for the selector
@@ -56,52 +57,21 @@ export function AdminTenantProvider({ children }: AdminTenantProviderProps) {
   const { toast } = useToast();
   const { user } = useAuth();
   
-  // Track previous user ID to detect user changes (login/logout)
-  const [prevUserId, setPrevUserId] = useState<string | null>(null);
+  // Use global tenant store for persistence across pages
+  const { selectedTenantId: globalSelectedTenantId, setSelectedTenantId: setGlobalSelectedTenantId } = useTenantStore();
   
   // Role determination - use null checks to handle logged out state
   const isTenantAdmin = user?.role === 'tenant_admin';
   const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
   
   // Tenant list state (for platform admin selector)
-  const [tenants, setTenants] = useState<AdminTenant[]>([]);
-  const [tenantsLoading, setTenantsLoading] = useState(false);
+  const [tenants, setTenants] = React.useState<AdminTenant[]>([]);
+  const [tenantsLoading, setTenantsLoading] = React.useState(false);
   
-  // Selected tenant state
-  // For tenant admins, this is auto-set to their tenant_id
-  // For platform admins, this starts as null and can be changed
-  const [selectedTenantId, setSelectedTenantIdInternal] = useState<string | null>(null);
-  
-  // Reset all state when user changes (login/logout/switch user)
-  useEffect(() => {
-    const currentUserId = user?.id || null;
-    
-    if (currentUserId !== prevUserId) {
-      console.log('[AdminTenantContext] User changed, resetting state', { 
-        from: prevUserId, 
-        to: currentUserId,
-        newRole: user?.role 
-      });
-      
-      // Clear all state
-      setTenants([]);
-      setTenantsLoading(false);
-      
-      // Set tenant based on new user's role
-      if (!user) {
-        // Logged out - clear everything
-        setSelectedTenantIdInternal(null);
-      } else if (user.role === 'tenant_admin' && user.tenant_id) {
-        // Tenant admin - set to their tenant
-        setSelectedTenantIdInternal(user.tenant_id);
-      } else {
-        // Platform admin or other - start with no tenant selected
-        setSelectedTenantIdInternal(null);
-      }
-      
-      setPrevUserId(currentUserId);
-    }
-  }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
+  // Selected tenant - use global store value, but tenant_admins always use their own tenant
+  const selectedTenantId = isTenantAdmin && user?.tenant_id 
+    ? user.tenant_id 
+    : globalSelectedTenantId;
   
   // Load tenants list (for platform admin selector)
   const loadTenants = useCallback(async () => {
@@ -126,14 +96,16 @@ export function AdminTenantProvider({ children }: AdminTenantProviderProps) {
   }, [isPlatformAdmin, user, toast]);
   
   // Setter that prevents tenant admins from changing tenant
+  // Uses the global store for persistence
   const setSelectedTenantId = useCallback((id: string | null) => {
     if (isTenantAdmin) {
       // Tenant admins cannot change tenant - always use their assigned tenant
       console.warn('[AdminTenantContext] Tenant admin cannot change tenant selection');
       return;
     }
-    setSelectedTenantIdInternal(id);
-  }, [isTenantAdmin]);
+    // Update global store - this persists across pages
+    setGlobalSelectedTenantId(id);
+  }, [isTenantAdmin, setGlobalSelectedTenantId]);
   
   // Load tenants list when platform admin accesses admin
   useEffect(() => {

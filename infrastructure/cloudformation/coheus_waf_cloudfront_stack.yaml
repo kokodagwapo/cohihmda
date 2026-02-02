@@ -4,12 +4,16 @@ Description: |
   
   This stack creates:
   - WAFv2 Web ACL with AWS Managed Rules
-  - Rate limiting
-  - SQL injection protection
-  - XSS protection
+  - Rate limiting, SQL injection, XSS protection
   - CloudFront distribution with WAF association
+  - S3 origin (OAC) for frontend; custom origin for API (ALB)
   
-  Deploy this in us-east-1 (required for CloudFront WAF)
+  Caching (SPA best practice):
+  - Static assets (default): long TTL, gzip/brotli in cache key
+  - index.html: managed CachingDisabled (no cache; custom TTL=0 cannot use EnableAcceptEncoding*)
+  - /api/*, /health: managed CachingDisabled + AllViewer origin request
+  
+  Deploy in us-east-1 (required for CloudFront WAF).
 
 Parameters:
   ProjectName:
@@ -28,11 +32,7 @@ Parameters:
 
   S3BucketName:
     Type: String
-    Description: S3 bucket name for static frontend assets
-
-  S3BucketRegionalDomainName:
-    Type: String
-    Description: S3 bucket regional domain name (e.g., bucket-name.s3.us-east-1.amazonaws.com)
+    Description: S3 bucket name for static frontend assets (must be globally unique)
 
   BackendOriginDomain:
     Type: String
@@ -62,9 +62,18 @@ Parameters:
       - 'false'
     Description: Enable backend origin for /api/* routing
 
+  BackendOriginProtocol:
+    Type: String
+    Default: http-only
+    AllowedValues:
+      - http-only
+      - https-only
+    Description: CloudFront-to-ALB protocol. Use https-only when ALB has an HTTPS listener (CertificateArn in backend stack) and BackendOriginDomain is a custom domain (e.g. api.cohi.io) with that cert. See docs/deployment/HTTPS_AND_CERTIFICATES.md.
+
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref DomainName, '']]
   HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
+  BackendOriginUseHTTPS: !Equals [!Ref BackendOriginProtocol, 'https-only']
   HasBackendOrigin: !And
     - !Equals [!Ref EnableBackendOrigin, 'true']
     - !Not [!Equals [!Ref BackendOriginDomain, '']]
@@ -240,52 +249,18 @@ Resources:
           QueryStringsConfig:
             QueryStringBehavior: none
 
-  # Cache policy for HTML (no cache)
-  HtmlCachePolicy:
-    Type: AWS::CloudFront::CachePolicy
-    Properties:
-      CachePolicyConfig:
-        Name: !Sub '${ProjectName}-${Environment}-html-no-cache'
-        Comment: No cache for HTML files (SPA routing)
-        DefaultTTL: 0
-        MaxTTL: 0
-        MinTTL: 0
-        ParametersInCacheKeyAndForwardedToOrigin:
-          CookiesConfig:
-            CookieBehavior: none
-          EnableAcceptEncodingBrotli: true
-          EnableAcceptEncodingGzip: true
-          HeadersConfig:
-            HeaderBehavior: none
-          QueryStringsConfig:
-            QueryStringBehavior: none
+  # index.html uses AWS managed CachingDisabled (no custom policy).
+  # Custom cache policies with TTL=0 cannot set EnableAcceptEncodingGzip/Brotli
+  # (CloudFront restriction). Managed ID: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
 
   # ============================================================================
   # CloudFront Origin Request Policies
   # ============================================================================
   
-  # Origin request policy for API requests
-  ApiOriginRequestPolicy:
-    Type: AWS::CloudFront::OriginRequestPolicy
-    Condition: HasBackendOrigin
-    Properties:
-      OriginRequestPolicyConfig:
-        Name: !Sub '${ProjectName}-${Environment}-api-origin'
-        Comment: Origin request policy for API backend
-        CookiesConfig:
-          CookieBehavior: all
-        HeadersConfig:
-          HeaderBehavior: whitelist
-          Headers:
-            - Authorization
-            - Content-Type
-            - Origin
-            - Accept
-            - Accept-Language
-            - X-Requested-With
-            - X-Tenant-ID
-        QueryStringsConfig:
-          QueryStringBehavior: all
+  # API origin uses AWS managed AllViewer policy: forwards all headers (including
+  # Authorization), cookies, and query strings. Custom policies cannot whitelist
+  # Authorization (CloudFront restriction).
+  # Managed ID: 216adef6-5c7f-47e4-b989-5492eafa07d3 = AllViewer
 
   # ============================================================================
   # CloudFront Distribution
@@ -318,12 +293,13 @@ Resources:
         Origins:
           # S3 Origin for static assets
           - Id: S3Origin
-            DomainName: !Ref S3BucketRegionalDomainName
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
             OriginAccessControlId: !GetAtt OriginAccessControl.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
           
           # Backend Origin (conditional)
+          # Protocol: http-only (default) or https-only. Use https-only when ALB has a cert and BackendOriginDomain is that custom domain. See docs/deployment/HTTPS_AND_CERTIFICATES.md.
           - !If
             - HasBackendOrigin
             - Id: BackendOrigin
@@ -331,9 +307,11 @@ Resources:
               CustomOriginConfig:
                 HTTPPort: 80
                 HTTPSPort: 443
-                OriginProtocolPolicy: https-only
-                OriginSSLProtocols:
-                  - TLSv1.2
+                OriginProtocolPolicy: !If [BackendOriginUseHTTPS, https-only, http-only]
+                OriginSSLProtocols: !If
+                  - BackendOriginUseHTTPS
+                  - - TLSv1.2
+                  - !Ref AWS::NoValue
                 OriginReadTimeout: 60
                 OriginKeepaliveTimeout: 60
             - !Ref AWS::NoValue
@@ -373,7 +351,7 @@ Resources:
                 - GET
                 - HEAD
               CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled managed policy
-              OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+              OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # Managed AllViewer (forwards Authorization, etc.)
               Compress: true
             - !Ref AWS::NoValue
           
@@ -390,11 +368,11 @@ Resources:
               Compress: true
             - !Ref AWS::NoValue
           
-          # index.html - no cache for SPA routing
+          # index.html - no cache for SPA (managed CachingDisabled)
           - PathPattern: '/index.html'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
-            CachePolicyId: !Ref HtmlCachePolicy
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed CachingDisabled
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
             Compress: true
             AllowedMethods:
@@ -456,12 +434,127 @@ Resources:
             Override: false
 
   # ============================================================================
+  # S3 Bucket for Frontend Assets
+  # ============================================================================
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-frontend'
+
+  # ============================================================================
+  # Empty bucket on stack delete (so bucket can be deleted and redeploy works)
+  # ============================================================================
+  EmptyBucketRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-empty-bucket-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  EmptyBucketRolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn:
+      - EmptyBucketRole
+      - FrontendBucket
+    Properties:
+      PolicyName: EmptyBucket
+      Roles: [!Ref EmptyBucketRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:ListBucketVersions
+              - s3:GetBucketVersioning
+            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}'
+          - Effect: Allow
+            Action:
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}/*'
+  EmptyBucketFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: EmptyBucketRolePolicy
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-empty-frontend-bucket'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt EmptyBucketRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          const { S3Client, ListObjectVersionsCommand, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
+          const response = require('cfn-response');
+          exports.handler = async (event, context) => {
+            if (event.RequestType !== 'Delete') {
+              return response.send(event, context, response.SUCCESS, {});
+            }
+            const bucket = event.ResourceProperties.BucketName;
+            const s3 = new S3Client({});
+            try {
+              let nextKeyMarker, nextVersionIdMarker;
+              do {
+                const list = await s3.send(new ListObjectVersionsCommand({
+                  Bucket: bucket,
+                  KeyMarker: nextKeyMarker,
+                  VersionIdMarker: nextVersionIdMarker,
+                  MaxKeys: 1000,
+                }));
+                const toDelete = [
+                  ...(list.Versions || []).map(v => ({ Key: v.Key, VersionId: v.VersionId })),
+                  ...(list.DeleteMarkers || []).map(d => ({ Key: d.Key, VersionId: d.VersionId })),
+                ];
+                if (toDelete.length > 0) {
+                  await s3.send(new DeleteObjectsCommand({
+                    Bucket: bucket,
+                    Delete: { Objects: toDelete, Quiet: true },
+                  }));
+                }
+                nextKeyMarker = list.NextKeyMarker;
+                nextVersionIdMarker = list.NextVersionIdMarker;
+              } while (nextKeyMarker || nextVersionIdMarker);
+              return response.send(event, context, response.SUCCESS, {});
+            } catch (err) {
+              console.error(err);
+              return response.send(event, context, response.FAILED, { Error: String(err.message) });
+            }
+          };
+  EmptyBucketOnDelete:
+    Type: Custom::EmptyBucket
+    DependsOn: FrontendBucket
+    Properties:
+      ServiceToken: !GetAtt EmptyBucketFunction.Arn
+      BucketName: !Ref FrontendBucket
+
+  # ============================================================================
   # S3 Bucket Policy (allow CloudFront OAC access)
   # ============================================================================
   S3BucketPolicy:
     Type: AWS::S3::BucketPolicy
+    DependsOn: FrontendBucket
     Properties:
-      Bucket: !Ref S3BucketName
+      Bucket: !Ref FrontendBucket
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -470,7 +563,7 @@ Resources:
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}/*'
             Condition:
               StringEquals:
                 'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
@@ -521,6 +614,16 @@ Resources:
       TreatMissingData: notBreaching
 
 Outputs:
+  FrontendBucketName:
+    Description: S3 bucket name for frontend assets
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-frontend-bucket'
+
+  FrontendBucketArn:
+    Description: S3 bucket ARN
+    Value: !GetAtt FrontendBucket.Arn
+
   CloudFrontDistributionId:
     Description: CloudFront distribution ID
     Value: !Ref CloudFrontDistribution

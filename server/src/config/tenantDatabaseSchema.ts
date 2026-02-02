@@ -80,11 +80,15 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_employees_employee_id ON public.employees(employee_id)
     `).catch(() => {});
 
-    // Create loans table (NO tenant_id, UNIQUE on loan_id only)
+    // Create loans table (NO tenant_id, UNIQUE on guid)
+    // guid: Encompass GUID (unique system identifier)
+    // loan_number: Human-readable loan number (Fields.364)
+    // loan_id: DEPRECATED - kept for backwards compatibility
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.loans (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        loan_id TEXT NOT NULL UNIQUE,
+        guid TEXT UNIQUE,
+        loan_id TEXT,
         
         -- Core loan fields (all columns match CoheusDataDictionary.xml aliases)
         loan_amount DECIMAL(12,2),
@@ -426,11 +430,11 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         gfe_initial_gfe_disclosure_heloc_brochure_provided_date DATE,
         
         -- Other fields
-        guid TEXT,
+        -- Note: guid is defined at the top of the table as the unique identifier
         uw_touches INTEGER,
         
         -- Metadata
-        raw_data JSONB,
+        -- Note: raw_data column has been removed - additional fields use structured columns via additional_field_definitions
         metadata JSONB DEFAULT '{}',
         -- pgvector embedding for RAG
         embedding vector(3072),
@@ -463,6 +467,16 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
 
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_loans_branch ON public.loans(branch) WHERE branch IS NOT NULL
+    `).catch(() => {});
+
+    // Create index on guid for access control joins
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_guid ON public.loans(guid) WHERE guid IS NOT NULL
+    `).catch(() => {});
+
+    // Create index on loan_number for human-readable lookups
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_loans_loan_number ON public.loans(loan_number) WHERE loan_number IS NOT NULL
     `).catch(() => {});
 
     // Create pgvector extension if it doesn't exist

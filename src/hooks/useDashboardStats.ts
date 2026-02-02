@@ -27,7 +27,8 @@ export interface DashboardStatsData {
 
 export const useDashboardStats = (
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom',
-  year: number = 2025
+  year: number = 2025,
+  selectedTenantId?: string | null
 ) => {
   const [statsData, setStatsData] = useState<DashboardStatsData | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -52,7 +53,8 @@ export const useDashboardStats = (
     try {
       // Build URL with query parameters - respect dateFilter prop, default to 'all' to show all imported data
       const filterParam = dateFilter === 'custom' ? 'all' : dateFilter; // 'custom' not supported by API
-      const url = `/api/loans/stats?dateFilter=${filterParam}&_t=${Date.now()}`; // Add timestamp to prevent caching
+      const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+      const url = `/api/loans/stats?dateFilter=${filterParam}${tenantParam}&_t=${Date.now()}`; // Add timestamp to prevent caching
       const data = await api.request<DashboardStatsData>(url);
       
       // Check if we got valid data - accept any response with expected structure
@@ -100,7 +102,8 @@ export const useDashboardStats = (
     
     try {
       setFunnelLoading(true);
-      const data = await api.request<LOSFunnelData>('/api/loans/funnel');
+      const tenantParam = selectedTenantId ? `?tenant_id=${selectedTenantId}` : '';
+      const data = await api.request<LOSFunnelData>(`/api/loans/funnel${tenantParam}`);
       
       // Check if we got valid data
       if (data && (data.loansStarted?.units !== undefined || data.stillActive?.units !== undefined)) {
@@ -126,17 +129,17 @@ export const useDashboardStats = (
     }
   };
 
-  // Fetch stats data when dateFilter changes
+  // Fetch stats data when dateFilter or tenant changes
   useEffect(() => {
     fetchStatsData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFilter]);
+  }, [dateFilter, selectedTenantId]);
 
-  // Fetch funnel data when year changes
+  // Fetch funnel data when year or tenant changes
   useEffect(() => {
     fetchFunnelData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year]);
+  }, [year, selectedTenantId]);
 
   return {
     statsData,

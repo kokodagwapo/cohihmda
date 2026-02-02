@@ -51,12 +51,18 @@ export function AskCohiChat({ open, onOpenChange, messages, loading, onSend, cla
   }
 
   return (
-    <div
-      className={cn(
-        'flex flex-col border-l border-slate-200/70 dark:border-slate-700/50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm w-[340px] sm:w-[380px] shrink-0 transition-all duration-200 shadow-[-4px_0_24px_-4px_rgba(0,0,0,0.06)] dark:shadow-none',
-        className
-      )}
-    >
+    <>
+      <div 
+        className="fixed inset-0 bg-white/40 dark:bg-slate-900/40 backdrop-blur-[2px] z-[100]"
+        onClick={() => onOpenChange(false)}
+        aria-hidden="true"
+      />
+      <div
+        className={cn(
+          'fixed right-0 top-0 bottom-0 flex flex-col border-l border-slate-200/70 dark:border-slate-700/50 bg-white dark:bg-slate-900 w-[340px] sm:w-[380px] transition-all duration-200 shadow-[-4px_0_24px_-4px_rgba(0,0,0,0.1)] dark:shadow-none z-[110]',
+          className
+        )}
+      >
       {/* Header */}
       <div className="flex items-center justify-between gap-2 px-3.5 py-3 border-b border-slate-200/70 dark:border-slate-700/50 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -79,7 +85,7 @@ export function AskCohiChat({ open, onOpenChange, messages, loading, onSend, cla
         <div className="space-y-4 pb-2">
           {messages.length === 0 && !loading && (
             <p className="text-[13px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              Ask questions in plain language. Cohi can explain metrics, suggest views, and recommend next steps.
+              Ask questions in plain language. Cohi can use connected dashboards, insights, and knowledge sources (news or policy docs if loaded) to explain metrics, suggest views, and recommend next steps.
             </p>
           )}
           {messages.map((m, i) => (
@@ -127,6 +133,7 @@ export function AskCohiChat({ open, onOpenChange, messages, loading, onSend, cla
           </Button>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

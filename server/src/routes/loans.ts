@@ -36,6 +36,11 @@ import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 import { logError, logWarn, logInfo, logDebug } from '../services/logger.js';
+import { 
+  getLoanAccessContext, 
+  getUserLoanAccessFilter,
+  type LoanAccessContext 
+} from '../services/userLoanAccessService.js';
 import {
   isActorMissing,
   filterByChannel,
@@ -236,6 +241,7 @@ router.get('/channels', authenticateToken, attachTenantContext, apiLimiter, asyn
  * GET /api/loans
  * Get loans for authenticated tenant with optional filters
  * Uses tenant-specific database (no tenant_id in WHERE clause)
+ * Applies user-level loan access filtering based on role and Encompass mapping
  */
 router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
@@ -255,6 +261,26 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
     const conditions: string[] = [];
     const params: any[] = [];
     let paramIndex = 1;
+
+    // Apply user-level loan access filter (based on role and encompass_user_id mapping)
+    if (req.userId) {
+      const accessFilter = await getUserLoanAccessFilter(req.userId, tenantPool, {
+        loanTableAlias: '',  // No alias for simple queries
+        startParamIndex: paramIndex,
+      });
+      
+      if (accessFilter) {
+        if (accessFilter.sql === 'FALSE') {
+          // User has no loan access - return empty result
+          logDebug('[Loans] User has no loan access, returning empty result', { userId: req.userId });
+          return res.json({ loans: [], total: 0, limit: parseInt(limit as string), offset: parseInt(offset as string) });
+        }
+        conditions.push(accessFilter.sql);
+        params.push(...accessFilter.params);
+        paramIndex += accessFilter.paramOffset;
+        logDebug('[Loans] Applied user loan access filter', { userId: req.userId, filter: accessFilter.sql });
+      }
+    }
 
     // Handle search across multiple fields
     if (search && typeof search === 'string' && search.trim()) {
@@ -356,8 +382,8 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
     const sortColumn = allowedSortColumns.includes(sort_by as string) ? sort_by : 'created_at';
     const sortDirection = sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    // Execute main query - exclude raw_data to reduce response size significantly
-    // raw_data is a huge JSONB column that's not needed for list views
+    // Execute main query - select only the columns needed for list views
+    // Note: raw_data column has been removed from the schema
     // Only select columns that exist in the tenant schema (from tenantDatabaseSchema.ts)
     const query = `
       SELECT 
@@ -407,6 +433,7 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
  * GET /api/loans/stats
  * Get aggregated loan statistics for business overview
  * Uses tenant-specific database via attachTenantContext middleware
+ * Respects user-level loan access filtering
  */
 router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
@@ -414,11 +441,29 @@ router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (
     const tenantPool = tenantContext.tenantPool;
     const tenantId = tenantContext.tenantId;
 
-    // REFACTORED: Use metricsService for efficient SQL-based metrics computation
-    // instead of fetching all loans and computing in JavaScript
-    const { queryMetrics, queryMetricGroupedBy } = await import('../services/metrics/metricsService.js');
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return empty stats
+    if (accessCtx.hasNoAccess) {
+      return res.json({
+        total: 0, active: 0, closed: 0, locked: 0,
+        byLoanType: {}, byStatus: {},
+        avgLoanAmount: 0, avgInterestRate: 0, totalVolume: 0,
+        avgCycleTime: 0, pullThroughRate: 0, creditPulls: 0,
+        activeVolume: 0, closedVolume: 0, lockedVolume: 0,
+      });
+    }
 
-    // Fetch core metrics in parallel using metricsService
+    // REFACTORED: Use metricsService for efficient SQL-based metrics computation
+    // with user access filtering
+    const { queryMetrics, queryMetricGroupedBy } = await import('../services/metrics/metricsService.js');
+    const accessFilter = accessCtx.getFilter('l');
+    
+    // Build access clause for direct queries
+    const { accessClause, accessParams, nextParamIndex } = accessCtx.buildWhereClause('l');
+
+    // Fetch core metrics in parallel using metricsService with access filter
     const [metrics, byLoanTypeData, byStatusData, volumeMetrics] = await Promise.all([
       // Core counts
       queryMetrics(tenantPool, [
@@ -428,35 +473,37 @@ router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (
         'total_units',
         'avg_cycle_time',
         'pull_through_rate',
-      ]),
+      ], { userAccessFilter: accessFilter }),
       // Group by loan type
-      queryMetricGroupedBy(tenantPool, 'total_units', 'loan_type'),
+      queryMetricGroupedBy(tenantPool, 'total_units', 'loan_type', { userAccessFilter: accessFilter }),
       // Group by status (use custom query for current_loan_status)
       tenantPool.query(`
         SELECT 
-          COALESCE(current_loan_status, 'Unknown') as status,
+          COALESCE(l.current_loan_status, 'Unknown') as status,
           COUNT(*) as count,
-          SUM(loan_amount) as volume
-        FROM public.loans
-        GROUP BY current_loan_status
+          SUM(l.loan_amount) as volume
+        FROM public.loans l
+        WHERE 1=1 ${accessClause}
+        GROUP BY l.current_loan_status
         ORDER BY COUNT(*) DESC
-      `),
-      // Volume metrics - use single efficient query
+      `, accessParams),
+      // Volume metrics - use single efficient query with access filter
       tenantPool.query(`
         SELECT 
-          SUM(loan_amount) as total_volume,
-          AVG(loan_amount) as avg_loan_amount,
-          AVG(CASE WHEN interest_rate > 0 THEN interest_rate END) as avg_interest_rate,
-          COUNT(CASE WHEN credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls,
+          SUM(l.loan_amount) as total_volume,
+          AVG(l.loan_amount) as avg_loan_amount,
+          AVG(CASE WHEN l.interest_rate > 0 THEN l.interest_rate END) as avg_interest_rate,
+          COUNT(CASE WHEN l.credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls,
           SUM(CASE 
-            WHEN current_loan_status = 'Active Loan' 
-            AND application_date IS NOT NULL 
-            AND application_date::text != ''
-            THEN loan_amount ELSE 0 END) as active_volume,
-          SUM(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as closed_volume,
-          SUM(CASE WHEN lock_date IS NOT NULL THEN loan_amount ELSE 0 END) as locked_volume
-        FROM public.loans
-      `)
+            WHEN l.current_loan_status = 'Active Loan' 
+            AND l.application_date IS NOT NULL 
+            AND l.application_date::text != ''
+            THEN l.loan_amount ELSE 0 END) as active_volume,
+          SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as closed_volume,
+          SUM(CASE WHEN l.lock_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as locked_volume
+        FROM public.loans l
+        WHERE 1=1 ${accessClause}
+      `, accessParams)
     ]);
 
     // Extract metric values
@@ -470,15 +517,16 @@ router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (
     // Build byLoanType from grouped metrics
     const byLoanType: Record<string, { count: number; volume: number }> = {};
     
-    // Get volume by loan type with separate query
+    // Get volume by loan type with separate query (with access filter)
     const volumeByTypeResult = await tenantPool.query(`
       SELECT 
-        COALESCE(loan_type, 'Other') as loan_type,
+        COALESCE(l.loan_type, 'Other') as loan_type,
         COUNT(*) as count,
-        SUM(loan_amount) as volume
-      FROM public.loans
-      GROUP BY loan_type
-    `);
+        SUM(l.loan_amount) as volume
+      FROM public.loans l
+      WHERE 1=1 ${accessClause}
+      GROUP BY l.loan_type
+    `, accessParams);
     
     volumeByTypeResult.rows.forEach((row: any) => {
       byLoanType[row.loan_type || 'Other'] = {
@@ -549,12 +597,26 @@ router.get('/stats', authenticateToken, attachTenantContext, apiLimiter, async (
  * GET /api/loans/funnel
  * Get funnel data calculated from loans
  * Uses tenant-specific database via attachTenantContext (same as metrics endpoints)
+ * Respects user-level loan access filtering
  */
 router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
   try {
     const tenantContext = getTenantContext(req);
     const tenantPool = tenantContext.tenantPool;
     const tenantId = tenantContext.tenantId;
+
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantPool);
+    
+    // If user has no access, return empty funnel data
+    if (accessCtx.hasNoAccess) {
+      return res.json({
+        summary: { loansStarted: 0, withRespaApp: 0, noRespaApp: 0, originated: 0, falloutWithdrawn: 0, falloutDenied: 0 },
+        stages: [],
+        filters: {},
+        debug: { accessFiltered: true, noAccess: true }
+      });
+    }
 
     // Parse optional filters
     const yearFilter = req.query.year ? parseInt(req.query.year as string) : null;
@@ -577,6 +639,20 @@ router.get('/funnel', authenticateToken, attachTenantContext, apiLimiter, async 
     const conditions: string[] = [];
     const params: any[] = [];
     let paramIndex = 1;
+    
+    // Add user access filter first
+    const { accessClause: rawAccessClause, accessParams: rawAccessParams, nextParamIndex } = 
+      accessCtx.buildWhereClause('', paramIndex);
+    
+    if (rawAccessClause) {
+      // Remove the leading "AND " for direct inclusion in conditions
+      const accessCondition = rawAccessClause.replace(/^AND\s+/, '');
+      if (accessCondition && accessCondition !== 'FALSE') {
+        conditions.push(accessCondition);
+        params.push(...rawAccessParams);
+        paramIndex = nextParamIndex;
+      }
+    }
     
     // Handle date filtering - MUST use started_date (not application_date)
     // Qlik Logic: Loans Started is filtered by [Started Year], then RESPA App Status is calculated
@@ -979,7 +1055,7 @@ router.get('/company-overview', authenticateToken, apiLimiter, async (req: AuthR
       () => pool.query(
         `SELECT 
           loan_id, borrower_name, loan_amount, loan_type, status, channel,
-          application_date, closing_date, lock_date, funding_date, interest_rate, raw_data
+          application_date, closing_date, lock_date, funding_date, interest_rate
          FROM public.loans 
          WHERE ${whereClause}
            AND (
@@ -1217,7 +1293,7 @@ router.get('/operations-overview', authenticateToken, apiLimiter, async (req: Au
       () => pool.query(
         `SELECT 
           loan_id, borrower_name, loan_amount, loan_type, status, channel,
-          application_date, closing_date, lock_date, funding_date, ctc_date, interest_rate, raw_data
+          application_date, closing_date, lock_date, funding_date, ctc_date, interest_rate
          FROM public.loans 
          WHERE ${whereClause}
          ORDER BY application_date DESC`,
@@ -5444,7 +5520,7 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
       ? new Date(Date.now() - maxLoanAgeMonths * 30 * 24 * 60 * 60 * 1000)
       : null;
 
-    // Fetch ONLY active loans with essential columns (avoid raw_data which is huge)
+    // Fetch ONLY active loans with essential columns for processing
     // Column names from tenantDatabaseSchema.ts
     // Use EXACT same criteria as metricsService.ts active_loans definition:
     //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''

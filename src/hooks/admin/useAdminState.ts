@@ -4,22 +4,20 @@ export type AdminSection =
   | 'overview' 
   | 'org-overview'  // Tenant admin overview (their org only)
   | 'tenants' 
+  | 'platform-team'  // Cohi internal team management (super_admin only)
   | 'users'
   | 'roles'
   | 'sso'
   | 'org'
   | 'data-quality'
   | 'data-config'  // Tenant data configuration (field mappings, ranges, filters, scoring)
-  | 'system' 
-  | 'security' 
-  | 'monitoring' 
-  | 'los' 
-  | 'synapse' 
-  | 'demo' 
+  | 'infrastructure'  // Renamed from 'system' for clarity
+  | 'security-compliance'  // Combined security and SOC 2
+  | 'connections'  // Combined LOS + Synapse integrations
+  | 'dev-tools'  // Developer tools including demo data
   | 'deployment' 
   | 'stripe' 
   | 'rag-voice' 
-  | 'soc2' 
   | 'aws-hosting'
   | 'metrics-catalog';
 

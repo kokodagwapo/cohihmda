@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getTenantId } from '../../utils/tenantUtils.js';
 import { handleDatabaseError } from '../../config/database.js';
 import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
+import { getLoanAccessContext } from '../../services/userLoanAccessService.js';
 import {
   getLeaderboardData,
   getInsights,
@@ -31,6 +32,7 @@ const yearQuerySchema = z.object({
  * Get leaderboard data for a specific timeframe
  * Supports filters: branch, scope (all/branch/team)
  * Supports custom date range with startDate and endDate parameters
+ * Respects user-level loan access filtering
  */
 router.get('/leaderboard', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
@@ -47,12 +49,26 @@ router.get('/leaderboard', authenticateToken, attachTenantContext, async (req: A
 
     const tenantContext = getTenantContext(req);
     
-    // Build filters object
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+    
+    // If user has no access, return empty leaderboard
+    if (accessCtx.hasNoAccess) {
+      return res.json({ 
+        timeframe, 
+        entries: [], 
+        period: { start: startDate || '', end: endDate || '' },
+        accessFiltered: true 
+      });
+    }
+    
+    // Build filters object with access filter
     const filters = {
       branch: branch || undefined,
       scope: (scope as 'all' | 'branch' | 'team') || 'all',
       startDate: startDate || undefined,
       endDate: endDate || undefined,
+      userAccessFilter: accessCtx.getFilter('l'),
     };
     
     const result = await getLeaderboardData(
@@ -79,6 +95,7 @@ router.get('/leaderboard', authenticateToken, attachTenantContext, async (req: A
 /**
  * GET /api/dashboard/insights
  * Get comprehensive insights based on loan data, business overview, leaderboard, and industry news
+ * Respects user-level loan access filtering
  * 
  * Query params:
  * - dateFilter: 'today' | 'mtd' | 'ytd' | 'rolling_90_days' | 'rolling_13_months' (default: 'ytd')
@@ -95,6 +112,19 @@ router.get('/insights', authenticateToken, attachTenantContext, async (req: Auth
     } = req.query;
     const authHeader = req.headers.authorization;
 
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+    
+    // If user has no access, return empty insights
+    if (accessCtx.hasNoAccess) {
+      return res.json({ 
+        insights: [], 
+        metrics: {},
+        accessFiltered: true,
+        noAccess: true 
+      });
+    }
+
     const result = await getInsights(
       tenantContext.tenantPool, 
       dateFilter as string, 
@@ -102,7 +132,8 @@ router.get('/insights', authenticateToken, attachTenantContext, async (req: Auth
       {
         useLLM: useLLM === 'true',
         tenantId: tenantContext.tenantId,
-        forceRefresh: forceRefresh === 'true'
+        forceRefresh: forceRefresh === 'true',
+        userAccessFilter: accessCtx.getFilter('l'),
       }
     );
     res.json(result);
@@ -121,12 +152,30 @@ router.get('/insights', authenticateToken, attachTenantContext, async (req: Auth
 /**
  * GET /api/dashboard/closing-fallout-forecast
  * Get closing and fallout forecast with Qlik formulas (pull-through by loan type, active aging, predictions)
+ * Respects user-level loan access filtering
  */
 router.get('/closing-fallout-forecast', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const tenantContext = getTenantContext(req);
     const { dateFilter = 'ytd' } = req.query;
-    const result = await getClosingFalloutForecast(tenantContext.tenantPool, dateFilter as 'today' | 'mtd' | 'ytd' | 'custom');
+    
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+    
+    // If user has no access, return empty forecast
+    if (accessCtx.hasNoAccess) {
+      return res.json({ 
+        forecast: {}, 
+        accessFiltered: true,
+        noAccess: true 
+      });
+    }
+    
+    const result = await getClosingFalloutForecast(
+      tenantContext.tenantPool, 
+      dateFilter as 'today' | 'mtd' | 'ytd' | 'custom',
+      { userAccessFilter: accessCtx.getFilter('l') }
+    );
     res.json(result);
   } catch (error: any) {
     console.error('Error fetching closing and fallout forecast:', error);
@@ -145,13 +194,32 @@ router.get('/closing-fallout-forecast', authenticateToken, attachTenantContext, 
  * PERFORMANCE: Consolidated endpoint that returns stats, funnel, critical loans, and predictions in one call.
  * This reduces frontend API calls from 4 to 1, improving initial page load and reducing network waterfall.
  * Query params: period (optional: 'all' | 'mtd' | 'ytd' | 'last_month' | 'last_year' | year string)
+ * Respects user-level loan access filtering
  */
 router.get('/overview', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const tenantContext = getTenantContext(req);
     const { period = 'all' } = req.query;
     
-    const result = await getDashboardOverview(tenantContext.tenantPool, period as string);
+    // Get user's loan access context
+    const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+    
+    // If user has no access, return empty overview
+    if (accessCtx.hasNoAccess) {
+      return res.json({ 
+        stats: { total: 0, active: 0, closed: 0, locked: 0 },
+        funnel: [],
+        criticalLoans: [],
+        accessFiltered: true,
+        noAccess: true 
+      });
+    }
+    
+    const result = await getDashboardOverview(
+      tenantContext.tenantPool, 
+      period as string,
+      { userAccessFilter: accessCtx.getFilter('l') }
+    );
     res.json(result);
   } catch (error: any) {
     console.error('Error fetching dashboard overview:', error);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,13 +41,19 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
-  Crown,
-  Eye
+  Eye,
+  Link2,
+  Settings2,
+  Database,
+  Clock,
+  AlertCircle,
+  Unlink
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
+import { EncompassUserBrowserSection } from './EncompassUserBrowserSection';
 
 /**
  * User type for display
@@ -66,6 +72,11 @@ interface UserDisplay {
   tenant_slug?: string;
   // For super admins
   is_super_admin?: boolean;
+  // Encompass integration
+  encompass_user_id?: string;
+  los_connection_id?: string;
+  loan_access_mode?: 'encompass_sync' | 'full_access' | 'no_access' | 'manual';
+  loan_access_synced_at?: string;
 }
 
 /**
@@ -82,7 +93,7 @@ interface Tenant {
 
 // Role display names and colors
 const ROLE_CONFIG: Record<string, { label: string; color: string; icon: typeof Shield }> = {
-  super_admin: { label: 'Super Admin', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: Crown },
+  super_admin: { label: 'Super Admin', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: Shield },
   platform_admin: { label: 'Platform Admin', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400', icon: Shield },
   support: { label: 'Support', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: Shield },
   tenant_admin: { label: 'Tenant Admin', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Building2 },
@@ -101,21 +112,27 @@ export function UserManagementSection() {
   const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName } = useAdminTenant();
   
   // State
-  const [superAdmins, setSuperAdmins] = useState<UserDisplay[]>([]);
   const [tenantUsers, setTenantUsers] = useState<UserDisplay[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
-  // Filters - for tenant admins, always use 'all' since they can only see their own tenant's users anyway
-  // The API already restricts them to their tenant, so no need to filter client-side
+  // Encompass users state
+  const [losConnections, setLosConnections] = useState<Array<{ id: string; name: string; connection_type: string }>>([]);
+  const [selectedLosConnectionId, setSelectedLosConnectionId] = useState<string>('');
+  
+  // Search filter
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTenant, setSelectedTenant] = useState<string>('all');
   
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [loanAccessDialogOpen, setLoanAccessDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserDisplay | null>(null);
+  
+  // Loan access sync state
+  const [syncingLoanAccess, setSyncingLoanAccess] = useState(false);
+  const [updatingLoanAccessMode, setUpdatingLoanAccessMode] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -127,9 +144,38 @@ export function UserManagementSection() {
     is_super_admin: false,
   });
 
+  // Load LOS connections for Encompass user sync
+  const loadLosConnections = useCallback(async () => {
+    const tenantId = selectedTenantId || currentUser?.tenant_id;
+    if (!tenantId) return;
+    
+    try {
+      // Use the LOS connections endpoint with tenant_id query parameter
+      const response = await api.request(`/api/los/connections?tenant_id=${tenantId}`);
+      const allConnections = response.connections || response || [];
+      const connections = allConnections
+        .filter((conn: any) => conn.los_type === 'encompass' && conn.is_active)
+        .map((conn: any) => ({
+          id: conn.id,
+          name: conn.name,
+          connection_type: conn.los_type,
+        }));
+      setLosConnections(connections);
+      
+      // Auto-select first connection if none selected
+      if (connections.length > 0 && !selectedLosConnectionId) {
+        setSelectedLosConnectionId(connections[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to load LOS connections:', error);
+      setLosConnections([]);
+    }
+  }, [selectedTenantId, currentUser?.tenant_id, selectedLosConnectionId]);
+
   // Load data on mount and when tenant context changes
   useEffect(() => {
     loadData();
+    loadLosConnections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTenantAdmin, selectedTenantId]);
 
@@ -137,11 +183,13 @@ export function UserManagementSection() {
     setLoading(true);
     try {
       if (isPlatformAdmin) {
-        // Platform admins can see all users
-        await Promise.all([
-          loadSuperAdmins(),
-          loadTenants(),
-        ]);
+        // Platform admins: if a tenant is selected, load only that tenant's users
+        if (selectedTenantId) {
+          await loadTenantUsersOnly();
+        } else {
+          // No tenant selected - load all tenants but no users until one is selected
+          await loadTenantsOnly();
+        }
       } else if (isTenantAdmin) {
         // Tenant admins only see their own tenant's users
         await loadTenantUsersOnly();
@@ -157,28 +205,12 @@ export function UserManagementSection() {
     }
   };
 
-  const loadSuperAdmins = async () => {
-    if (!isPlatformAdmin) return; // Only platform admins can see super admins
-    
-    try {
-      const response = await api.request('/api/admin/super-admins');
-      const users = response.users.map((u: any) => ({
-        ...u,
-        is_super_admin: true,
-      }));
-      setSuperAdmins(users);
-    } catch (error: any) {
-      console.error('Failed to load super admins:', error);
-      setSuperAdmins([]);
-    }
-  };
-  
   const loadTenantUsersOnly = async () => {
-    // For tenant admins, load only their tenant's users using the correct endpoint
+    // Load users for a specific tenant
     const tenantId = selectedTenantId || currentUser?.tenant_id;
     
     if (!tenantId) {
-      console.error('No tenant ID available for tenant admin');
+      console.error('No tenant ID available');
       setTenantUsers([]);
       return;
     }
@@ -186,27 +218,38 @@ export function UserManagementSection() {
     try {
       // Use the tenant-specific users endpoint
       const response = await api.request(`/api/admin/tenants/${tenantId}/users`);
-      setTenantUsers(response.users || []);
       
-      // Set the tenant info from response or from current user
-      if (response.tenant) {
-        setTenants([{
-          id: response.tenant.id,
-          name: response.tenant.name,
-          slug: response.tenant.slug || response.tenant.id,
-          status: 'active',
-          database_name: '',
-          created_at: '',
-        }]);
-      } else if (currentUser?.tenant_id && currentUser?.tenant_name) {
-        setTenants([{
-          id: currentUser.tenant_id,
-          name: currentUser.tenant_name,
-          slug: currentUser.tenant_id,
-          status: 'active',
-          database_name: '',
-          created_at: '',
-        }]);
+      // Add tenant info to each user for display
+      const usersWithTenant = (response.users || []).map((user: UserDisplay) => ({
+        ...user,
+        tenant_id: response.tenant?.id || tenantId,
+        tenant_name: response.tenant?.name || 'Unknown',
+        tenant_slug: response.tenant?.slug || tenantId,
+      }));
+      
+      setTenantUsers(usersWithTenant);
+      
+      // For platform admins, keep the existing tenants list; for tenant admins, set their tenant
+      if (!isPlatformAdmin) {
+        if (response.tenant) {
+          setTenants([{
+            id: response.tenant.id,
+            name: response.tenant.name,
+            slug: response.tenant.slug || response.tenant.id,
+            status: 'active',
+            database_name: '',
+            created_at: '',
+          }]);
+        } else if (currentUser?.tenant_id && currentUser?.tenant_name) {
+          setTenants([{
+            id: currentUser.tenant_id,
+            name: currentUser.tenant_name,
+            slug: currentUser.tenant_id,
+            status: 'active',
+            database_name: '',
+            created_at: '',
+          }]);
+        }
       }
     } catch (error: any) {
       console.error('Failed to load tenant users:', error);
@@ -219,31 +262,16 @@ export function UserManagementSection() {
     }
   };
 
-  const loadTenants = async () => {
+  const loadTenantsOnly = async () => {
     try {
-      // Load all data in one call
-      const response = await api.request('/api/admin/all-users');
-      
-      setTenants(response.tenants || []);
-      
-      // Super admins are already loaded separately, but we can update if needed
-      if (response.superAdmins) {
-        setSuperAdmins(response.superAdmins.map((u: any) => ({ ...u, is_super_admin: true })));
-      }
-      
-      // Tenant users come with tenant info attached
-      setTenantUsers(response.tenantUsers || []);
+      // Load only tenants list (for the filter dropdown)
+      const tenantsResponse = await api.request('/api/admin/tenants');
+      setTenants(tenantsResponse.tenants || []);
+      setTenantUsers([]); // No users until a tenant is selected
     } catch (error: any) {
-      console.error('Failed to load tenants and users:', error);
-      // Fallback: try to load tenants separately
-      try {
-        const tenantsResponse = await api.request('/api/admin/tenants');
-        setTenants(tenantsResponse.tenants || []);
-        setTenantUsers([]);
-      } catch (fallbackError) {
-        setTenants([]);
-        setTenantUsers([]);
-      }
+      console.error('Failed to load tenants:', error);
+      setTenants([]);
+      setTenantUsers([]);
     }
   };
 
@@ -445,9 +473,93 @@ export function UserManagementSection() {
     setEditDialogOpen(true);
   };
 
-  // Filter users
+  const openLoanAccessDialog = (user: UserDisplay) => {
+    setSelectedUser(user);
+    setLoanAccessDialogOpen(true);
+  };
+
+  const handleSyncLoanAccess = async () => {
+    if (!selectedUser) return;
+    
+    // Get tenant context - use selected tenant for platform admins, or user's tenant
+    const tenantId = selectedTenantId || selectedUser.tenant_id || currentUser?.tenant_id;
+    if (!tenantId) {
+      toast({
+        title: 'Error',
+        description: 'No tenant context available. Please select a tenant.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    setSyncingLoanAccess(true);
+    try {
+      const response = await api.request(`/api/admin/users/${selectedUser.id}/sync-loan-access`, {
+        method: 'POST',
+        body: JSON.stringify({ tenant_id: tenantId }),
+      });
+      
+      toast({
+        title: 'Loan Access Synced',
+        description: `Synced ${response.loansAccessible} accessible loans for ${selectedUser.full_name || selectedUser.email}`,
+      });
+      
+      // Refresh user data
+      await loadData();
+      setLoanAccessDialogOpen(false);
+    } catch (error: any) {
+      toast({
+        title: 'Sync Failed',
+        description: error.message || 'Failed to sync loan access from Encompass',
+        variant: 'destructive',
+      });
+    } finally {
+      setSyncingLoanAccess(false);
+    }
+  };
+
+  const handleUpdateLoanAccessMode = async (mode: 'encompass_sync' | 'full_access' | 'no_access' | 'manual') => {
+    if (!selectedUser) return;
+    
+    // Get tenant context
+    const tenantId = selectedTenantId || selectedUser.tenant_id || currentUser?.tenant_id;
+    if (!tenantId) {
+      toast({
+        title: 'Error',
+        description: 'No tenant context available',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    setUpdatingLoanAccessMode(true);
+    try {
+      await api.request(`/api/admin/tenants/${tenantId}/users/${selectedUser.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ loan_access_mode: mode }),
+      });
+      
+      toast({
+        title: 'Loan Access Mode Updated',
+        description: `Updated to "${mode}" for ${selectedUser.full_name || selectedUser.email}`,
+      });
+      
+      // Update local state
+      setSelectedUser({ ...selectedUser, loan_access_mode: mode });
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Update Failed',
+        description: error.message || 'Failed to update loan access mode',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingLoanAccessMode(false);
+    }
+  };
+
+  // Filter users by search query
   const filteredTenantUsers = tenantUsers.filter(user => {
-    if (selectedTenant !== 'all' && user.tenant_slug !== selectedTenant) return false;
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       return (
@@ -519,23 +631,8 @@ export function UserManagementSection() {
         </div>
       </div>
 
-      {/* Stats - Shown differently for platform admins vs tenant admins */}
-      <div className={`grid gap-4 ${isPlatformAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
-        {isPlatformAdmin && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
-                  <Crown className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Super Admins</p>
-                  <p className="text-2xl font-semibold">{superAdmins.length}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {/* Stats */}
+      <div className={`grid gap-4 ${isPlatformAdmin ? 'md:grid-cols-2' : 'md:grid-cols-2'}`}>
         {isPlatformAdmin && (
           <Card>
             <CardContent className="p-4">
@@ -581,130 +678,62 @@ export function UserManagementSection() {
         )}
       </div>
 
-      {/* Tabs - Platform admins see both, tenant admins only see tenant users */}
-      <Tabs defaultValue={isPlatformAdmin ? "super-admins" : "tenant-users"} className="w-full">
-        <TabsList className={`grid w-full ${isPlatformAdmin ? 'grid-cols-2' : 'grid-cols-1'}`}>
-          {isPlatformAdmin && (
-            <TabsTrigger value="super-admins">
-              <Crown className="h-4 w-4 mr-2" />
-              Cohi Admins ({superAdmins.length})
-            </TabsTrigger>
-          )}
+      {/* Tabs for tenant user management */}
+      <Tabs defaultValue="tenant-users" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="tenant-users">
             <Users className="h-4 w-4 mr-2" />
-            {isTenantAdmin ? `Organization Users (${tenantUsers.length})` : `Tenant Users (${tenantUsers.length})`}
+            Cohi Users ({tenantUsers.length})
+          </TabsTrigger>
+          <TabsTrigger value="encompass-users">
+            <Link2 className="h-4 w-4 mr-2" />
+            Encompass Directory
           </TabsTrigger>
         </TabsList>
 
-        {/* Super Admins Tab - Only for platform admins */}
-        {isPlatformAdmin && (
-          <TabsContent value="super-admins" className="space-y-4 mt-6">
+        {/* Cohi Users Tab - Users with accounts on the platform */}
+        <TabsContent value="tenant-users" className="space-y-4 mt-6">
+          {/* Platform admin without tenant selected - show prompt */}
+          {isPlatformAdmin && !selectedTenantId ? (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Cohi Platform Admins</CardTitle>
-                <CardDescription>
-                  Internal team members with platform-wide access
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Last Login</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {superAdmins.map(user => {
-                      const roleConfig = ROLE_CONFIG[user.role] || ROLE_CONFIG.user;
-                    return (
-                      <TableRow key={user.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{user.full_name || user.email}</p>
-                            <p className="text-sm text-slate-500">{user.email}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={roleConfig.color}>
-                            {roleConfig.label}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {user.is_active ? (
-                            <Badge variant="outline" className="text-emerald-600 border-emerald-200">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Active
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-slate-500 border-slate-200">
-                              <XCircle className="h-3 w-3 mr-1" />
-                              Inactive
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm text-slate-500">
-                          {formatDate(user.last_login_at)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(user)}
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+              <CardContent className="py-12 text-center">
+                <Building2 className="h-12 w-12 mx-auto mb-4 text-slate-300 dark:text-slate-600" />
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+                  Select a Tenant
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                  Use the tenant selector in the header to choose which organization's users to manage.
+                </p>
               </CardContent>
             </Card>
-          </TabsContent>
-        )}
+          ) : (
+            <>
+              {/* Filters */}
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex flex-col sm:flex-row gap-4 items-center">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <Input
+                        placeholder="Search users..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                    {/* Show current tenant for platform admins */}
+                    {isPlatformAdmin && currentTenantName && (
+                      <Badge variant="outline" className="text-blue-600 border-blue-200 dark:text-blue-400 dark:border-blue-800">
+                        <Building2 className="h-3 w-3 mr-1" />
+                        {currentTenantName}
+                      </Badge>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-        {/* Tenant Users Tab */}
-        <TabsContent value="tenant-users" className="space-y-4 mt-6">
-          {/* Filters */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                {/* Tenant filter - only shown for platform admins */}
-                {isPlatformAdmin && (
-                  <Select value={selectedTenant} onValueChange={setSelectedTenant}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Filter by tenant" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Tenants</SelectItem>
-                      {tenants.map(tenant => (
-                        <SelectItem key={tenant.slug} value={tenant.slug}>
-                          {tenant.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Users Table */}
-          <Card>
+              {/* Users Table */}
+              <Card>
             <CardContent className="p-0">
             <Table>
               <TableHeader>
@@ -712,6 +741,7 @@ export function UserManagementSection() {
                     <TableHead>User</TableHead>
                     <TableHead>Tenant</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Encompass</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Last Login</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -740,6 +770,19 @@ export function UserManagementSection() {
                           </Badge>
                     </TableCell>
                     <TableCell>
+                          {user.encompass_user_id ? (
+                            <Badge variant="outline" className="text-blue-600 border-blue-200 dark:text-blue-400 dark:border-blue-800">
+                              <Link2 className="h-3 w-3 mr-1" />
+                              {user.encompass_user_id}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-slate-400 border-slate-200 dark:text-slate-500 dark:border-slate-700">
+                              <Unlink className="h-3 w-3 mr-1" />
+                              Not Linked
+                            </Badge>
+                          )}
+                    </TableCell>
+                    <TableCell>
                           {user.is_active ? (
                             <Badge variant="outline" className="text-emerald-600 border-emerald-200">
                           <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -759,7 +802,16 @@ export function UserManagementSection() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => openLoanAccessDialog(user)}
+                          title="Loan Access Settings"
+                        >
+                            <Settings2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => openEditDialog(user)}
+                          title="Edit User"
                         >
                             <Edit2 className="h-4 w-4" />
                         </Button>
@@ -767,6 +819,7 @@ export function UserManagementSection() {
                           variant="ghost"
                           size="sm"
                             onClick={() => handleToggleActive(user)}
+                          title={user.is_active ? 'Deactivate User' : 'Activate User'}
                           >
                             {user.is_active ? (
                               <XCircle className="h-4 w-4 text-slate-500" />
@@ -780,10 +833,10 @@ export function UserManagementSection() {
                   })}
                   {filteredTenantUsers.length === 0 && (
                   <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-slate-500">
-                        {searchQuery || selectedTenant !== 'all'
-                          ? 'No users match your filters'
-                          : 'No tenant users found'}
+                      <TableCell colSpan={7} className="text-center py-8 text-slate-500">
+                        {searchQuery
+                          ? 'No users match your search'
+                          : 'No users found'}
                     </TableCell>
                   </TableRow>
                 )}
@@ -791,6 +844,36 @@ export function UserManagementSection() {
             </Table>
         </CardContent>
       </Card>
+            </>
+          )}
+        </TabsContent>
+
+        {/* Encompass Users Tab */}
+        <TabsContent value="encompass-users" className="space-y-4 mt-6">
+          {losConnections.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Link2 className="h-12 w-12 mx-auto mb-4 text-slate-300 dark:text-slate-600" />
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+                  No Encompass Connection Found
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400 mb-4 max-w-md mx-auto">
+                  To sync users from Encompass, you need to set up an LOS connection first. 
+                  Go to <strong>Connections & Integrations</strong> to configure your Encompass connection.
+                </p>
+                <Button variant="outline" onClick={() => loadLosConnections()}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Connections
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <EncompassUserBrowserSection
+              losConnections={losConnections}
+              selectedConnectionId={selectedLosConnectionId}
+              onConnectionChange={setSelectedLosConnectionId}
+            />
+          )}
         </TabsContent>
       </Tabs>
 
@@ -990,6 +1073,142 @@ export function UserManagementSection() {
             </Button>
             <Button onClick={handleEditUser}>
                   Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Loan Access Settings Dialog */}
+      <Dialog open={loanAccessDialogOpen} onOpenChange={setLoanAccessDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Loan Access Settings</DialogTitle>
+            <DialogDescription>
+              Configure how {selectedUser?.full_name || selectedUser?.email} accesses loan data
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedUser && (
+            <div className="space-y-6">
+              {/* Encompass Link Status */}
+              <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                  <Link2 className="h-4 w-4" />
+                  Encompass Link
+                </h4>
+                {selectedUser.encompass_user_id ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-600 dark:text-slate-400">Encompass User ID</span>
+                      <Badge variant="outline" className="text-blue-600 border-blue-200 dark:text-blue-400">
+                        {selectedUser.encompass_user_id}
+                      </Badge>
+                    </div>
+                    {selectedUser.loan_access_synced_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-600 dark:text-slate-400">Last Synced</span>
+                        <span className="text-sm">{formatDate(selectedUser.loan_access_synced_at)}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="text-sm">
+                      Not linked to Encompass. Invite from Encompass Directory to link.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Loan Access Mode */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Loan Data Access Mode
+                </h4>
+                <div className="space-y-2">
+                  {[
+                    { value: 'encompass_sync', label: 'Encompass Sync', desc: 'Access only loans they can see in Encompass', requiresLink: true },
+                    { value: 'full_access', label: 'Full Access', desc: 'Access all loans (for admins)', requiresLink: false },
+                    { value: 'no_access', label: 'No Access', desc: 'Cannot view individual loans', requiresLink: false },
+                    { value: 'manual', label: 'Manual', desc: 'Manually configured loan access', requiresLink: false },
+                  ].map((option) => {
+                    const isSelected = selectedUser.loan_access_mode === option.value;
+                    const isDisabled = option.requiresLink && !selectedUser.encompass_user_id;
+                    return (
+                      <div
+                        key={option.value}
+                        onClick={() => !isDisabled && !isSelected && handleUpdateLoanAccessMode(option.value as any)}
+                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                            : isDisabled
+                            ? 'border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed'
+                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className={`font-medium ${isSelected ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                              {option.label}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {option.desc}
+                            </p>
+                          </div>
+                          {isSelected && (
+                            <CheckCircle2 className="h-5 w-5 text-blue-500" />
+                          )}
+                        </div>
+                        {isDisabled && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                            Requires Encompass link
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {updatingLoanAccessMode && (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Updating...
+                  </div>
+                )}
+              </div>
+
+              {/* Sync Button */}
+              {selectedUser.encompass_user_id && selectedUser.loan_access_mode === 'encompass_sync' && (
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                  <Button
+                    onClick={handleSyncLoanAccess}
+                    disabled={syncingLoanAccess}
+                    className="w-full"
+                  >
+                    {syncingLoanAccess ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Syncing Loan Access...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Sync Loan Access from Encompass
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center">
+                    This queries Encompass with the user's permissions to determine which loans they can access.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLoanAccessDialogOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
