@@ -71,19 +71,6 @@ export const TenantSelector = ({
     userRole === "super_admin" ||
     userRole === "tenant_admin";
 
-  // Show debug info
-  console.log("[TenantSelector] Debug:", {
-    currentUserRole,
-    userRole,
-    isAdmin,
-    currentUser: currentUser
-      ? { email: currentUser.email, role: currentUser.role }
-      : null,
-    authError,
-    tenantsCount: tenants?.length || 0,
-    tenants: tenants?.map((t) => ({ id: t.id, name: t.name })) || [],
-  });
-
   // Non-admin users don't see the selector
   if (!isAdmin) {
     // In compact mode, just return null

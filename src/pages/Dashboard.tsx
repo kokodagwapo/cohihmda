@@ -23,7 +23,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Area, AreaChart } from 'recharts';
 import { Copy, Code2, Sparkles } from 'lucide-react';
 import { AletheiaVoiceAssistant } from '@/components/aletheia/AletheiaVoiceAssistant';
-import { CohiPodcast } from '@/components/aletheia/CohiPodcast';
+import { CohiPodcast } from '@/components/cohi/CohiPodcast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePDF } from '@/utils/pdfExport';
 import { ReportsSidebar, DashboardVisibility } from '@/components/dashboard/ReportsSidebar';
@@ -207,18 +207,6 @@ const Dashboard = () => {
 
   // Helper function to get filter-based KPI values for reports
   // Now imported from utils/dashboardHelpers.ts
-  
-  // Get greeting based on time of day
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) {
-      return 'Good morning';
-    } else if (hour < 17) {
-      return 'Good afternoon';
-    } else {
-      return 'Good evening';
-    }
-  };
   
   // Report sidebar and modal - state is now managed by useDashboardState hook
   const totalEmployees = 100;
@@ -1034,18 +1022,9 @@ const Dashboard = () => {
         setTrendsModal={setTrendsModal}
       />
 
-      <div className="w-full h-full px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
+      <div className="w-full h-full min-w-0 overflow-x-hidden px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
         {/* Insights Section - Minimalist */}
         {isAuthenticated && <div className="section-insights mb-16 md:mb-20 w-full">
-            {/* Greeting */}
-            {dashboardVisibility.aletheiaInsights && (
-              <div className="mb-10 md:mb-12">
-                <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-white">
-                  {getGreeting()}{displayName ? `, ${displayName}` : ''}
-                </h1>
-              </div>
-            )}
-            
             {/* Cohi Insights - First */}
             {dashboardVisibility.aletheiaInsights && (
               <div id="aletheiaInsights" className="section-aletheia-insights mb-8 md:mb-12">
@@ -1053,6 +1032,7 @@ const Dashboard = () => {
                   dateFilter={dateFilter} 
                   briefingContext={briefingContext || undefined}
                   selectedTenantId={selectedTenantId}
+                  onOpenCohiPanel={() => window.dispatchEvent(new Event('cohi-chat-open'))}
                   onDataAvailabilityChange={(hasData) => {
                     if (!hasData && dashboardVisibility.aletheiaInsights) {
                       handleVisibilityChange({

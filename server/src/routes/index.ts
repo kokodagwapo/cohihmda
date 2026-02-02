@@ -24,6 +24,7 @@ import tenantConfigRoutes from "./tenantConfig.js";
 import dataChatRoutes from "./dataChat.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
+import newsRoutes from "./news.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -67,6 +68,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/tenant-config", tenantConfigRoutes);
   app.use("/api/data-chat", dataChatRoutes);
   app.use("/api/data-quality", dataQualityRoutes);
+  app.use("/api/news", newsRoutes);
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

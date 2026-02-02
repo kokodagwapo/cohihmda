@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { CoheusLogo } from "@/components/ui/CoheusLogo";
+import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -106,11 +107,14 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   // Dropdown state
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [topTieringOpen, setTopTieringOpen] = useState(false);
+  const [allPagesOpen, setAllPagesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const insightsRef = useRef<HTMLDivElement>(null);
   const topTieringRef = useRef<HTMLDivElement>(null);
+  const allPagesRef = useRef<HTMLDivElement>(null);
   const insightsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const topTieringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const allPagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Keyboard navigation state
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
@@ -141,6 +145,9 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       if (topTieringRef.current && !topTieringRef.current.contains(event.target as Node)) {
         setTopTieringOpen(false);
         setFocusedIndex(-1);
+      }
+      if (allPagesRef.current && !allPagesRef.current.contains(event.target as Node)) {
+        setAllPagesOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1018,6 +1025,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 />
               </div>
             )}
+
+            <ThemeIconToggle />
 
             {isAuthenticated ? (
               <UserMenu

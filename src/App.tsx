@@ -34,6 +34,8 @@ import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
+import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
+import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 // Workbench pages
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
@@ -204,6 +206,8 @@ const App = () => (
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
+              <GlobalCohiChat />
+              <CohiDemoExperience />
           </Router>
         </TooltipProvider>
       </EditProvider>

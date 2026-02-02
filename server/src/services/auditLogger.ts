@@ -3,8 +3,8 @@
  * SOC 2 Compliance: Comprehensive audit trail for all system actions
  */
 
-import { pool } from '../config/database.js';
-import { logError, logInfo } from './logger.js';
+import { pool } from "../config/database.js";
+import { logError, logInfo } from "./logger.js";
 
 export interface AuditLogEntry {
   // Who
@@ -12,21 +12,21 @@ export interface AuditLogEntry {
   userEmail?: string;
   userRole?: string;
   tenantId?: string | null;
-  
+
   // What
   action: string;
   resource: string;
   resourceId?: string;
-  
+
   // Details
   description?: string;
   changes?: Record<string, any>; // Before/after values
   metadata?: Record<string, any>;
-  
+
   // Result
-  status?: 'success' | 'failure' | 'error';
+  status?: "success" | "failure" | "error";
   errorMessage?: string;
-  
+
   // Request Info
   ipAddress?: string;
   userAgent?: string;
@@ -57,7 +57,7 @@ export async function auditLog(entry: AuditLogEntry): Promise<void> {
         entry.description || null,
         entry.changes ? JSON.stringify(entry.changes) : null,
         entry.metadata ? JSON.stringify(entry.metadata) : null,
-        entry.status || 'success',
+        entry.status || "success",
         entry.errorMessage || null,
         entry.ipAddress || null,
         entry.userAgent || null,
@@ -66,26 +66,42 @@ export async function auditLog(entry: AuditLogEntry): Promise<void> {
     );
   } catch (error) {
     // Don't throw - audit logging should never break the main flow
-    logError('Audit log error', error, { action: entry.action, resource: entry.resource });
+    logError("Audit log error", error, {
+      action: entry.action,
+      resource: entry.resource,
+    });
   }
 }
 
 /**
  * Log data access (for PII tracking)
+ * Note: isPlatformAdmin flag indicates the user is a platform admin accessing tenant data
+ * Platform admins don't exist in tenant databases, so we handle FK constraint errors gracefully
  */
 export async function logDataAccess(params: {
   userId: string;
   tenantId: string | null;
   resourceType: string;
   resourceId: string;
-  action: 'view' | 'download' | 'export' | 'print';
+  action: "view" | "download" | "export" | "print";
   containsPII?: boolean;
   piiFields?: string[];
   purpose?: string;
   ipAddress?: string;
   userAgent?: string;
   metadata?: Record<string, any>;
+  isPlatformAdmin?: boolean;
 }): Promise<void> {
+  const metadata = params.isPlatformAdmin
+    ? JSON.stringify({
+        ...(params.metadata || {}),
+        platform_admin_user_id: params.userId,
+        access_type: "platform_admin",
+      })
+    : params.metadata
+    ? JSON.stringify(params.metadata)
+    : null;
+
   try {
     await pool.query(
       `INSERT INTO public.data_access_logs (
@@ -102,14 +118,39 @@ export async function logDataAccess(params: {
         params.action,
         params.containsPII || false,
         params.piiFields || null,
-        params.purpose || null,
+        params.isPlatformAdmin
+          ? "Platform admin access"
+          : params.purpose || null,
         params.ipAddress || null,
         params.userAgent || null,
-        params.metadata ? JSON.stringify(params.metadata) : null,
+        metadata,
       ]
     );
-  } catch (error) {
-    logError('Data access log error', error, { userId: params.userId, resourceType: params.resourceType });
+  } catch (error: any) {
+    // Handle FK violations for platform admins (user doesn't exist in tenant DB)
+    // This is expected and not an error - just log it as info
+    if (error?.code === "23503" && error?.constraint?.includes("user_id")) {
+      // For platform admins, this is expected - log as info, not error
+      if (params.isPlatformAdmin) {
+        logInfo("Platform admin data access logged (user not in tenant DB)", {
+          userId: params.userId,
+          resourceType: params.resourceType,
+          tenantId: params.tenantId,
+        });
+      } else {
+        // For regular users, FK violation is unexpected - still log but don't clutter with error
+        logInfo("Data access log skipped - user not found", {
+          userId: params.userId,
+          resourceType: params.resourceType,
+          tenantId: params.tenantId,
+        });
+      }
+    } else {
+      logError("Data access log error", error, {
+        userId: params.userId,
+        resourceType: params.resourceType,
+      });
+    }
   }
 }
 
@@ -120,7 +161,11 @@ export async function logFailedLogin(params: {
   email: string;
   ipAddress?: string;
   userAgent?: string;
-  failureReason: 'invalid_password' | 'user_not_found' | 'account_locked' | 'rate_limited';
+  failureReason:
+    | "invalid_password"
+    | "user_not_found"
+    | "account_locked"
+    | "rate_limited";
   metadata?: Record<string, any>;
 }): Promise<void> {
   try {
@@ -137,7 +182,7 @@ export async function logFailedLogin(params: {
       ]
     );
   } catch (error) {
-    logError('Failed login log error', error, { email: params.email });
+    logError("Failed login log error", error, { email: params.email });
   }
 }
 
@@ -172,9 +217,9 @@ export async function createSession(params: {
   } catch (error) {
     // Don't throw - session creation should never break the main flow
     // If table doesn't exist or there's an error, log it but continue
-    logError('Create session error', error, { userId: params.userId });
+    logError("Create session error", error, { userId: params.userId });
     // Return a dummy ID so the flow continues
-    return 'session-error';
+    return "session-error";
   }
 }
 
@@ -184,11 +229,13 @@ export async function createSession(params: {
 export async function updateSessionActivity(tokenHash: string): Promise<void> {
   try {
     await pool.query(
-      'UPDATE public.user_sessions SET last_activity_at = NOW() WHERE token_hash = $1 AND is_active = true',
+      "UPDATE public.user_sessions SET last_activity_at = NOW() WHERE token_hash = $1 AND is_active = true",
       [tokenHash]
     );
   } catch (error) {
-    logError('Update session activity error', error, { tokenHash: tokenHash.substring(0, 8) + '...' });
+    logError("Update session activity error", error, {
+      tokenHash: tokenHash.substring(0, 8) + "...",
+    });
   }
 }
 
@@ -197,7 +244,7 @@ export async function updateSessionActivity(tokenHash: string): Promise<void> {
  */
 export async function endSession(
   tokenHash: string,
-  reason: 'manual' | 'timeout' | 'forced' | 'token_expired'
+  reason: "manual" | "timeout" | "forced" | "token_expired"
 ): Promise<void> {
   try {
     await pool.query(
@@ -207,7 +254,7 @@ export async function endSession(
       [tokenHash, reason]
     );
   } catch (error) {
-    logError('End session error', error, { reason });
+    logError("End session error", error, { reason });
   }
 }
 
@@ -229,7 +276,7 @@ export async function getRecentFailedLogins(
 
     return parseInt(result.rows[0].count);
   } catch (error) {
-    logError('Get failed logins error', error, { email });
+    logError("Get failed logins error", error, { email });
     return 0;
   }
 }
@@ -248,7 +295,7 @@ export async function getAuditLogs(params: {
   offset?: number;
 }): Promise<any[]> {
   try {
-    let query = 'SELECT * FROM public.audit_logs WHERE 1=1';
+    let query = "SELECT * FROM public.audit_logs WHERE 1=1";
     const values: any[] = [];
     let paramIndex = 1;
 
@@ -282,7 +329,7 @@ export async function getAuditLogs(params: {
       values.push(params.endDate);
     }
 
-    query += ' ORDER BY timestamp DESC';
+    query += " ORDER BY timestamp DESC";
 
     if (params.limit) {
       query += ` LIMIT $${paramIndex++}`;
@@ -297,7 +344,10 @@ export async function getAuditLogs(params: {
     const result = await pool.query(query, values);
     return result.rows;
   } catch (error) {
-    logError('Get audit logs error', error, { userId: params.userId, tenantId: params.tenantId });
+    logError("Get audit logs error", error, {
+      userId: params.userId,
+      tenantId: params.tenantId,
+    });
     return [];
   }
 }
@@ -315,7 +365,7 @@ export async function getDataAccessLogs(params: {
   limit?: number;
 }): Promise<any[]> {
   try {
-    let query = 'SELECT * FROM public.data_access_logs WHERE 1=1';
+    let query = "SELECT * FROM public.data_access_logs WHERE 1=1";
     const values: any[] = [];
     let paramIndex = 1;
 
@@ -349,7 +399,7 @@ export async function getDataAccessLogs(params: {
       values.push(params.endDate);
     }
 
-    query += ' ORDER BY accessed_at DESC';
+    query += " ORDER BY accessed_at DESC";
 
     if (params.limit) {
       query += ` LIMIT $${paramIndex++}`;
@@ -359,7 +409,10 @@ export async function getDataAccessLogs(params: {
     const result = await pool.query(query, values);
     return result.rows;
   } catch (error) {
-    logError('Get data access logs error', error, { userId: params.userId, tenantId: params.tenantId });
+    logError("Get data access logs error", error, {
+      userId: params.userId,
+      tenantId: params.tenantId,
+    });
     return [];
   }
 }
@@ -370,16 +423,16 @@ export async function getDataAccessLogs(params: {
 export async function cleanupOldLogs(): Promise<void> {
   try {
     // Clean up audit logs older than 2 years
-    await pool.query('SELECT cleanup_old_audit_logs()');
-    
+    await pool.query("SELECT cleanup_old_audit_logs()");
+
     // Clean up expired sessions
-    await pool.query('SELECT cleanup_expired_sessions()');
-    
+    await pool.query("SELECT cleanup_expired_sessions()");
+
     // Clean up old failed login attempts
-    await pool.query('SELECT cleanup_old_failed_logins()');
-    
-    logInfo('Log cleanup completed');
+    await pool.query("SELECT cleanup_old_failed_logins()");
+
+    logInfo("Log cleanup completed");
   } catch (error) {
-    logError('Log cleanup error', error, {});
+    logError("Log cleanup error", error, {});
   }
 }
