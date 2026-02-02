@@ -1,34 +1,0 @@
-ScriptLine,QsdaVersion,MetaId
-"///$tab Sales",3.4.5,
-"SET vUseDEVAPI = 0; // 1 = Dev Setup Tool XML AND QVDs; 0 = Prod Setup Tool XML AND QVDs",3.4.5,
-"",3.4.5,
-"//SET vEnvironment = 'Development'; // Comment for production migration",3.4.5,
-"SET vEnvironment = 'Production'; // Uncomment for production migration",3.4.5,
-"SET vBuilderVersion = 'v2'; // Created for testing new updates to the builder",3.4.5,
-"LET vQVDPrefix = 'lib://QlikData/$(vEnvironment)/qvd-transform/tvd-coheus-inc-builder/$(vBuilderVersion)' & Pick(vUseDEVAPI + 1, '', '/DEV');",3.4.5,
-"SET vConfigLocale = 'lib://QlikData/$(vEnvironment)/tvd-coheus-git/v1/CoheusConfigs';",3.4.5,
-"SET vDefaultConfigLocale = '$(vConfigLocale)/DefaultFiles/default_config.xml';",3.4.5,
-"SET vSharedData = 'lib://QlikData/$(vEnvironment)/tvd-coheus-git/v1/SharedData';",3.4.5,
-"SET vRoot = 'lib://QlikData/$(vEnvironment)/tvd-coheus-sales-qlik';",3.4.5,
-"SET vAppScripts = '$(vRoot)/Scripts';",3.4.5,
-"",3.4.5,
-"$(Must_Include=$(vAppScripts)/AutoConfig.qvs);",3.4.5,
-"",3.4.5,
-"//  // USE THESE VARIABLES IF WORKING ON APP IN WORK STREAM TO OVERRIDE/BYPASS VARIABLES SET IN THE MUST_INCLUDE SCRIPT ABOVE.",3.4.5,
-"/*------------ OVERRIDE VARIABLES ------------*/",3.4.5,
-"",3.4.5,
-"// LET vSectionAccess = 'Yes';",3.4.5,
-"// LET vSectionAccess = 'No';",3.4.5,
-"// LET vSource = '';",3.4.5,
-"",3.4.5,
-"/*-------------------------------------------*/",3.4.5,
-"",3.4.5,
-"/*---------- Demo Assigning ---------*/",3.4.5,
-"//To anonymize data run the Client Anonymizer app in 2 - Coheus Demo https://tvlabs.teraverde.com/tvma/dataloadeditor/app/59e2be90-985f-45bc-a667-d28be6ef52df",3.4.5,
-"//Use START HERE Section line 11 to set Source. Must be listed in ODAG Config file. Saves anonmyized L2 QlikShare/QVD/Demo/$(vSource)",3.4.5,
-"",3.4.5,
-"Let vIsDemoApp = 'No';",3.4.5,
-"",3.4.5,
-"//Reference vAnonClient to get which client is used for Demo. See externalized $(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ODAG Loan Data.qvs);",3.4.5,
-"",3.4.5,
-$(Must_Include=$(vRoot)/Sales.qvs); // <--------------- MAIN SALES SCRIPT,3.4.5,
