@@ -25,6 +25,8 @@ import dataChatRoutes from "./dataChat.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
 import newsRoutes from "./news.js";
+import globalKnowledgeRoutes from "./admin/globalKnowledge.js";
+import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -69,6 +71,8 @@ export function setupRoutes(app: Express) {
   app.use("/api/data-chat", dataChatRoutes);
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);
+  app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
+  app.use("/api/knowledge-center", knowledgeCenterRoutes);
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {
@@ -109,7 +113,7 @@ export function setupRoutes(app: Express) {
         const dbCheck = Promise.race([
           pool.query("SELECT NOW(), current_database(), version()"),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Database query timeout")), 2000),
+            setTimeout(() => reject(new Error("Database query timeout")), 2000)
           ),
         ]);
 
@@ -145,7 +149,7 @@ export function setupRoutes(app: Express) {
         try {
           resetPool();
           console.log(
-            "🔄 Reset database pool - next query will attempt reconnection",
+            "🔄 Reset database pool - next query will attempt reconnection"
           );
         } catch (resetError) {
           console.warn("Could not reset pool:", resetError);

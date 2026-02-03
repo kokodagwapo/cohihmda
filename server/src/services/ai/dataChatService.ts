@@ -11,6 +11,7 @@ import {
 } from "../metrics/metricsService.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { decryptAPIKeys } from "../encryption.js";
+import { generateEmbeddings } from "../embeddingService.js";
 
 // ============================================================================
 // Types
@@ -828,9 +829,101 @@ function generateSuggestedQuestions(currentQuestion: string): string[] {
 // ============================================================================
 
 interface QuestionClassification {
-  type: "data_query" | "insights" | "help" | "greeting" | "unclear";
+  type:
+    | "data_query"
+    | "insights"
+    | "help"
+    | "greeting"
+    | "unclear"
+    | "knowledge_query"
+    | "hybrid";
   confidence: number;
   suggestedRephrase?: string;
+}
+
+interface RAGContext {
+  chunks: string[];
+  sources: string[];
+  totalChunks: number;
+}
+
+/**
+ * Retrieve relevant context from the knowledge base using RAG
+ * Searches the tenant's rag_embeddings table (includes both global and tenant docs)
+ */
+async function retrieveRAGContext(
+  tenantId: string,
+  question: string,
+  topK: number = 5,
+  similarityThreshold: number = 0.7
+): Promise<RAGContext> {
+  try {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // First check if the rag_embeddings table exists
+    const tableCheck = await tenantPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'rag_embeddings'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      console.log("[DataChat RAG] rag_embeddings table does not exist");
+      return { chunks: [], sources: [], totalChunks: 0 };
+    }
+
+    // Generate embedding for the question
+    const embeddingResults = await generateEmbeddings(
+      [question],
+      "openai/text-embedding-3-large"
+    );
+
+    if (!embeddingResults || embeddingResults.length === 0) {
+      console.log("[DataChat RAG] Failed to generate embedding for question");
+      return { chunks: [], sources: [], totalChunks: 0 };
+    }
+
+    const queryEmbedding = embeddingResults[0].embedding;
+    const embeddingVector = `[${queryEmbedding.join(",")}]`;
+
+    // Search for similar chunks
+    const results = await tenantPool.query(
+      `SELECT 
+        e.chunk_text,
+        d.filename,
+        d.title,
+        d.is_global,
+        d.category,
+        1 - (e.embedding <=> $1::vector) as similarity
+       FROM rag_embeddings e
+       JOIN rag_documents d ON e.document_id = d.id
+       WHERE d.status = 'indexed'
+         AND 1 - (e.embedding <=> $1::vector) >= $2
+       ORDER BY e.embedding <=> $1::vector
+       LIMIT $3`,
+      [embeddingVector, similarityThreshold, topK]
+    );
+
+    const chunks = results.rows.map((r: any) => r.chunk_text);
+    const sources = results.rows.map((r: any) => {
+      const docName = r.title || r.filename;
+      const type = r.is_global ? "Global" : "Tenant";
+      const category = r.category ? ` (${r.category})` : "";
+      return `${docName}${category} [${type}]`;
+    });
+
+    console.log(`[DataChat RAG] Retrieved ${chunks.length} relevant chunks`);
+
+    return {
+      chunks,
+      sources: [...new Set(sources)], // Deduplicate sources
+      totalChunks: chunks.length,
+    };
+  } catch (error: any) {
+    console.error("[DataChat RAG] Error retrieving context:", error.message);
+    return { chunks: [], sources: [], totalChunks: 0 };
+  }
 }
 
 /**
@@ -900,6 +993,28 @@ function classifyQuestion(question: string): QuestionClassification {
     }
   }
 
+  // Knowledge query indicators (regulatory, policy, guidelines, compliance)
+  const knowledgeQueryIndicators = [
+    /what is.*(fha|va|usda|conventional|conforming|jumbo|qm|atm)/i,
+    /explain.*(rule|regulation|requirement|guideline|policy|procedure)/i,
+    /what are.*(requirements|rules|guidelines|limits|thresholds)/i,
+    /how do i.*(comply|handle|process|document)/i,
+    /when.*(required|needed|mandatory)/i,
+    /tell me about.*(regulation|compliance|policy|guideline)/i,
+    /(fha|va|usda|fannie|freddie|cfpb|trid|respa|ecoa|hmda|tila).*(rules?|requirements?|guidelines?|limits?)/i,
+    /what.*(documentation|documents).*(needed|required)/i,
+    /compliance.*(requirements?|rules?)/i,
+    /regulatory.*(requirements?|guidelines?)/i,
+    /loan limits/i,
+    /dti.*requirements?/i,
+    /ltv.*requirements?/i,
+    /credit score.*requirements?/i,
+  ];
+
+  const knowledgeQueryScore = knowledgeQueryIndicators.filter((p) =>
+    p.test(q)
+  ).length;
+
   // Data query indicators (specific, measurable)
   const dataQueryIndicators = [
     /show me/i,
@@ -918,6 +1033,19 @@ function classifyQuestion(question: string): QuestionClassification {
 
   const dataQueryScore = dataQueryIndicators.filter((p) => p.test(q)).length;
 
+  // Hybrid query: Both knowledge and data indicators present
+  if (knowledgeQueryScore >= 1 && dataQueryScore >= 1) {
+    return { type: "hybrid", confidence: 0.85 };
+  }
+
+  // Pure knowledge query
+  if (knowledgeQueryScore >= 2) {
+    return { type: "knowledge_query", confidence: 0.9 };
+  } else if (knowledgeQueryScore === 1 && dataQueryScore === 0) {
+    return { type: "knowledge_query", confidence: 0.75 };
+  }
+
+  // Pure data query
   if (dataQueryScore >= 2) {
     return { type: "data_query", confidence: 0.9 };
   } else if (dataQueryScore === 1) {
@@ -1234,6 +1362,258 @@ Provide a helpful executive summary answering their question.`;
 }
 
 /**
+ * Handle pure knowledge queries using RAG
+ */
+async function handleKnowledgeQuery(
+  question: string,
+  context: ChatContext
+): Promise<DataChatResponse> {
+  try {
+    // Retrieve relevant context from knowledge base
+    const ragContext = await retrieveRAGContext(
+      context.tenantId,
+      question,
+      5,
+      0.65
+    );
+
+    if (ragContext.totalChunks === 0) {
+      return {
+        message:
+          "I couldn't find relevant information in the knowledge base for your question. " +
+          "I'm primarily designed to help with loan data queries. Would you like to ask about your loan data instead?",
+        suggestedQuestions: [
+          "Show me loan volume by loan type",
+          "What are the current FHA loans in pipeline?",
+          "Top 10 loan officers by volume",
+          "How many VA loans funded this month?",
+        ],
+      };
+    }
+
+    // Build context string for the LLM
+    const contextString = ragContext.chunks
+      .map((chunk, i) => `[Source ${i + 1}]: ${chunk}`)
+      .join("\n\n");
+
+    // Get API key
+    const { apiKey } = await decryptAPIKeys(context);
+    if (!apiKey) {
+      return {
+        message: "Unable to process your question. API key not configured.",
+        error: "OpenAI API key not available",
+      };
+    }
+
+    // Generate response using LLM with RAG context
+    const systemPrompt = `You are Cohi, an AI assistant specialized in mortgage lending. 
+You have access to a knowledge base of regulations, guidelines, and policies.
+
+Use the following context from the knowledge base to answer the user's question.
+Be specific, accurate, and helpful. If the context doesn't fully answer the question, 
+say what you know and suggest they ask a more specific question or consult additional resources.
+
+Always cite your sources by referring to the document names when relevant.
+
+Context from Knowledge Base:
+${contextString}`;
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: question },
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(
+        `OpenAI API error: ${error.error?.message || "Unknown error"}`
+      );
+    }
+
+    const data = await response.json();
+    const answer =
+      data.choices?.[0]?.message?.content || "Unable to generate response.";
+
+    // Format source references
+    const sourceNote =
+      ragContext.sources.length > 0
+        ? `\n\n📚 **Sources:** ${ragContext.sources.join(", ")}`
+        : "";
+
+    return {
+      message: answer + sourceNote,
+      suggestedQuestions: [
+        "Tell me more about the requirements",
+        "What documentation is needed?",
+        "Are there any exceptions?",
+        "Show me related loan data",
+      ],
+    };
+  } catch (error: any) {
+    console.error("[DataChat] Error handling knowledge query:", error);
+    return {
+      message:
+        "I encountered an error while searching the knowledge base. Please try again or ask a different question.",
+      error: error.message,
+      suggestedQuestions: [
+        "Show me loan volume by type",
+        "Top loan officers by volume",
+        "Pipeline breakdown by status",
+      ],
+    };
+  }
+}
+
+/**
+ * Handle hybrid queries (combining data and knowledge)
+ */
+async function handleHybridQuery(
+  question: string,
+  context: ChatContext,
+  conversationHistory: DataChatMessage[]
+): Promise<DataChatResponse> {
+  try {
+    // Run both data query and RAG retrieval in parallel
+    const [ragContext, queryConfigPromise] = await Promise.all([
+      retrieveRAGContext(context.tenantId, question, 3, 0.65),
+      generateQuery(question, context, conversationHistory).catch(() => null),
+    ]);
+
+    let dataResult: QueryResult | null = null;
+    let visualization: VisualizationConfig | undefined;
+    let queryConfig: any = queryConfigPromise;
+
+    // Try to execute the data query if we have one
+    if (queryConfig?.sql) {
+      try {
+        dataResult = await executeQuery(
+          queryConfig.sql,
+          queryConfig.params,
+          context
+        );
+        if (dataResult.rowCount > 0) {
+          const formattedData = formatDataRows(dataResult.rows);
+          visualization = buildVisualizationConfig(formattedData, queryConfig);
+        }
+      } catch (error) {
+        console.log(
+          "[DataChat] Hybrid query: Data query failed, continuing with RAG only"
+        );
+      }
+    }
+
+    // Build combined context for LLM
+    let contextParts: string[] = [];
+
+    if (ragContext.totalChunks > 0) {
+      contextParts.push("**Knowledge Base Context:**");
+      ragContext.chunks.forEach((chunk, i) => {
+        contextParts.push(
+          `[${ragContext.sources[i] || `Source ${i + 1}`}]: ${chunk}`
+        );
+      });
+    }
+
+    if (dataResult && dataResult.rowCount > 0) {
+      contextParts.push("\n**Your Loan Data:**");
+      const dataPreview = dataResult.rows.slice(0, 10);
+      contextParts.push(JSON.stringify(dataPreview, null, 2));
+      if (dataResult.rowCount > 10) {
+        contextParts.push(`... and ${dataResult.rowCount - 10} more rows`);
+      }
+    }
+
+    // Get API key
+    const { apiKey } = await decryptAPIKeys(context);
+    if (!apiKey) {
+      return {
+        message: "Unable to process your question. API key not configured.",
+        error: "OpenAI API key not available",
+      };
+    }
+
+    // Generate combined response
+    const systemPrompt = `You are Cohi, an AI assistant specialized in mortgage lending.
+You have access to both a knowledge base (regulations, guidelines, policies) and the user's actual loan data.
+
+Use the following context to provide a comprehensive answer that combines regulatory knowledge 
+with insights from their actual data where relevant.
+
+${contextParts.join("\n\n")}`;
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: question },
+        ],
+        temperature: 0.7,
+        max_tokens: 1200,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(
+        `OpenAI API error: ${error.error?.message || "Unknown error"}`
+      );
+    }
+
+    const data = await response.json();
+    const answer =
+      data.choices?.[0]?.message?.content || "Unable to generate response.";
+
+    // Format source references
+    const sourceNote =
+      ragContext.sources.length > 0
+        ? `\n\n📚 **Knowledge Sources:** ${ragContext.sources.join(", ")}`
+        : "";
+
+    return {
+      message: answer + sourceNote,
+      visualization,
+      data: dataResult?.rows,
+      suggestedQuestions: [
+        "Tell me more about the requirements",
+        "Show me this data broken down by month",
+        "What are the compliance considerations?",
+        "How does this compare to last month?",
+      ],
+    };
+  } catch (error: any) {
+    console.error("[DataChat] Error handling hybrid query:", error);
+    return {
+      message:
+        "I encountered an error processing your question. Please try rephrasing it or asking separately about the data and the knowledge topic.",
+      error: error.message,
+      suggestedQuestions: [
+        "Show me loan volume by type",
+        "What are the FHA requirements?",
+        "Top loan officers by volume",
+      ],
+    };
+  }
+}
+
+/**
  * Generate a helpful response for non-data-query questions
  */
 async function generateNonQueryResponse(
@@ -1394,7 +1774,19 @@ export async function processDataQuestion(
       `[DataChat] Question classified as: ${classification.type} (confidence: ${classification.confidence})`
     );
 
-    // Step 2: Handle non-data-query questions gracefully
+    // Step 2: Handle knowledge queries (RAG-only)
+    if (classification.type === "knowledge_query") {
+      console.log(`[DataChat] Routing to knowledge query handler`);
+      return await handleKnowledgeQuery(question, context);
+    }
+
+    // Step 3: Handle hybrid queries (data + knowledge)
+    if (classification.type === "hybrid") {
+      console.log(`[DataChat] Routing to hybrid query handler`);
+      return await handleHybridQuery(question, context, conversationHistory);
+    }
+
+    // Step 4: Handle non-data-query questions gracefully
     if (
       classification.type !== "data_query" ||
       classification.confidence < 0.5
@@ -1403,7 +1795,7 @@ export async function processDataQuestion(
       return await generateNonQueryResponse(classification, question, context);
     }
 
-    // Step 3: Generate the query for data questions
+    // Step 5: Generate the query for data questions
     const queryConfig = await generateQuery(
       question,
       context,
