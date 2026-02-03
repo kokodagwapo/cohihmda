@@ -95,27 +95,33 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "closed_loans",
     name: "Closed Loans",
     description:
-      "Count of loans where funding_date is not empty (funded loans).",
+      "Count of loans closed/funded. Uses funding_date/closing_date when present, or closed/funded status when dates are missing.",
     category: "status",
-    formula: "funding_date IS NOT NULL AND funding_date <= today",
-    sqlQuery: `COUNT(CASE WHEN l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE THEN 1 END)`,
+    formula:
+      "funding_date OR closing_date OR current_loan_status in ('closed','funded','originated')",
+    sqlQuery: `COUNT(CASE 
+      WHEN l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL
+        OR LOWER(l.current_loan_status) LIKE '%closed%'
+        OR LOWER(l.current_loan_status) LIKE '%funded%'
+        OR LOWER(l.current_loan_status) LIKE '%originated%'
+      THEN 1 END)`,
     dependencies: [],
-    defaultDateField: "funding_date",
+    defaultDateField: "any_date",
   },
   locked_loans: {
     id: "locked_loans",
     name: "Locked Loans",
     description:
-      "Count of loans where lock_date is not empty within the selected date range.",
+      "Count of loans where lock_date exists or status indicates locked.",
     category: "status",
-    formula: "lock_date IS NOT NULL",
+    formula: "lock_date IS NOT NULL OR current_loan_status LIKE '%locked%'",
     sqlQuery: `COUNT(CASE 
       WHEN l.lock_date IS NOT NULL 
+        OR LOWER(l.current_loan_status) LIKE '%locked%'
       THEN 1 
     END)`,
     dependencies: [],
-    defaultDateField: "lock_date",
-    // Date filter applied via lock_date
+    defaultDateField: "any_date",
   },
 
   // Turn Time Metrics
@@ -291,12 +297,19 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "credit_pulls",
     name: "Credit Pulls",
     description:
-      "Count of loans where credit_pull_date is not empty within the selected date range.",
+      "Count of loans where credit pull date is available (credit_pull_date or raw_data credit report fields).",
     category: "count",
     formula: "COUNT WHERE credit_pull_date IS NOT NULL",
-    sqlQuery: `COUNT(CASE WHEN l.credit_pull_date IS NOT NULL THEN 1 END)`,
+    sqlQuery: `COUNT(CASE 
+      WHEN COALESCE(
+        l.credit_pull_date,
+        (l.raw_data->>'credit_report_date')::date,
+        (l.raw_data->>'creditPullDate')::date,
+        (l.raw_data->>'credit_pull_date')::date
+      ) IS NOT NULL
+      THEN 1 END)`,
     dependencies: [],
-    defaultDateField: "credit_pull_date",
+    defaultDateField: "any_date",
   },
 
   // Company Scorecard Total Loans - matches Qlik expression:

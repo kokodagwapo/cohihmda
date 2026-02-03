@@ -737,7 +737,14 @@ router.get(
           SUM(l.loan_amount) as total_volume,
           AVG(l.loan_amount) as avg_loan_amount,
           AVG(CASE WHEN l.interest_rate > 0 THEN l.interest_rate END) as avg_interest_rate,
-          COUNT(CASE WHEN l.credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls,
+          COUNT(CASE 
+            WHEN COALESCE(
+              l.credit_pull_date,
+              (l.raw_data->>'credit_report_date')::date,
+              (l.raw_data->>'creditPullDate')::date,
+              (l.raw_data->>'credit_pull_date')::date
+            ) IS NOT NULL 
+            THEN 1 END) as credit_pulls,
           SUM(CASE 
             WHEN l.current_loan_status = 'Active Loan' 
             AND l.application_date IS NOT NULL 
@@ -751,6 +758,82 @@ router.get(
             accessParams
           ),
         ]);
+
+      const buildBreakdownQuery = (groupExpr: string, statusClause: string) => `
+        SELECT
+          ${groupExpr} as category,
+          COUNT(*) as units,
+          SUM(l.loan_amount) as volume,
+          AVG(l.loan_amount) as avg_balance,
+          SUM(CASE WHEN l.interest_rate > 0 AND l.interest_rate < 15 THEN l.interest_rate * l.loan_amount ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN l.interest_rate > 0 AND l.interest_rate < 15 THEN l.loan_amount ELSE 0 END), 0) as wac,
+          SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.fico_score * l.loan_amount ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.loan_amount ELSE 0 END), 0) as wa_fico,
+          SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.ltv_ratio * l.loan_amount ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.loan_amount ELSE 0 END), 0) as wa_ltv
+        FROM public.loans l
+        WHERE 1=1 ${accessClause} AND ${statusClause}
+        GROUP BY category
+        ORDER BY units DESC
+      `;
+
+      const activeStatusClause =
+        "l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND l.application_date::text != ''";
+      const closedStatusClause =
+        "l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE";
+      const lockedStatusClause = "l.lock_date IS NOT NULL";
+
+      const jumboThreshold = 766550;
+      const sizeExpr = `CASE WHEN l.loan_amount >= ${jumboThreshold} THEN 'Jumbo' ELSE 'Conforming Balance' END`;
+
+      const [
+        activeByLoanType,
+        activeByLoanPurpose,
+        activeByLoanSize,
+        closedByLoanType,
+        closedByLoanPurpose,
+        closedByLoanSize,
+        lockedByLoanType,
+        lockedByLoanPurpose,
+        lockedByLoanSize,
+      ] = await Promise.all([
+        tenantPool.query(
+          buildBreakdownQuery("COALESCE(l.loan_type, 'Unknown')", activeStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery("COALESCE(l.loan_purpose, 'Unknown')", activeStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery(sizeExpr, activeStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery("COALESCE(l.loan_type, 'Unknown')", closedStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery("COALESCE(l.loan_purpose, 'Unknown')", closedStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery(sizeExpr, closedStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery("COALESCE(l.loan_type, 'Unknown')", lockedStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery("COALESCE(l.loan_purpose, 'Unknown')", lockedStatusClause),
+          accessParams
+        ),
+        tenantPool.query(
+          buildBreakdownQuery(sizeExpr, lockedStatusClause),
+          accessParams
+        ),
+      ]);
 
       // Extract metric values
       const activeLoans = Number(metrics.active_loans?.value || 0);
@@ -833,6 +916,23 @@ router.get(
         activeVolume,
         closedVolume,
         lockedVolume,
+        breakdowns: {
+          active: {
+            byLoanType: activeByLoanType.rows || [],
+            byLoanPurpose: activeByLoanPurpose.rows || [],
+            byLoanSize: activeByLoanSize.rows || [],
+          },
+          closed: {
+            byLoanType: closedByLoanType.rows || [],
+            byLoanPurpose: closedByLoanPurpose.rows || [],
+            byLoanSize: closedByLoanSize.rows || [],
+          },
+          locked: {
+            byLoanType: lockedByLoanType.rows || [],
+            byLoanPurpose: lockedByLoanPurpose.rows || [],
+            byLoanSize: lockedByLoanSize.rows || [],
+          },
+        },
       });
     } catch (error: any) {
       logError("Error fetching loan statistics", error, { userId: req.userId });

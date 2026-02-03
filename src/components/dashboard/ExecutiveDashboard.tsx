@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MetricExplainButton } from "@/components/common/MetricExplainButton";
+import { api } from "@/lib/api";
 
 // Period options for KPI timeframe selectors (mortgage industry standard)
 const PERIOD_OPTIONS: Array<{
@@ -100,6 +101,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   } = useMetrics(selectedTenantId, year);
   const [metricsData, setMetricsData] = useState<Record<string, any>>({});
   const [loadingKpis, setLoadingKpis] = useState<Set<string>>(new Set());
+  const [breakdownsData, setBreakdownsData] = useState<any>(null);
 
   // Fetch a single KPI's metrics based on its timeframe
   const fetchKpiMetrics = useCallback(
@@ -116,6 +118,14 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       try {
         const metricsToFetch = [kpiConfig.primary];
         if (kpiConfig.volume) metricsToFetch.push(kpiConfig.volume);
+
+        // Additional metrics for business overview accuracy (dynamic, backend-sourced)
+        if (["activeLoans", "closedLoans", "lockedLoans"].includes(kpiId)) {
+          metricsToFetch.push("wac", "wa_fico", "wa_ltv");
+        }
+        if (kpiId === "pullThrough") {
+          metricsToFetch.push("total_units", "fallout_withdrawn", "fallout_denied");
+        }
 
         // Active loans ignores date filter (current state)
         const effectivePeriod = kpiId === "activeLoans" ? "all" : period;
@@ -211,6 +221,26 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       fetchKpiMetrics(kpiId, period);
     });
   }, [selectedTenantId, year]); // Re-fetch when tenant or year changes
+
+  // Fetch backend breakdowns for loan type/purpose/size
+  useEffect(() => {
+    const fetchBreakdowns = async () => {
+      try {
+        const filterParam = dateFilter === "custom" ? "all" : dateFilter;
+        const tenantParam = selectedTenantId
+          ? `&tenant_id=${selectedTenantId}`
+          : "";
+        const url = `/api/loans/stats?dateFilter=${filterParam}${tenantParam}&_t=${Date.now()}`;
+        const data = await api.request<any>(url);
+        setBreakdownsData(data?.breakdowns || null);
+      } catch (error) {
+        console.warn("[ExecutiveDashboard] Failed to fetch breakdowns:", error);
+        setBreakdownsData(null);
+      }
+    };
+
+    fetchBreakdowns();
+  }, [dateFilter, selectedTenantId]);
 
   // Helper function to format numbers (using utility function)
   // Note: Using formatCompactNumberNoCurrency for non-currency numbers
@@ -631,10 +661,18 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         : parseFloat(metricsData.locked_volume?.value as string) || 0;
     const lockedAvgBalance = lockedUnits > 0 ? lockedVolume / lockedUnits : 0;
 
-    // Industry benchmark placeholders when API does not provide; replace with actual metrics when available
-    const avgInterestRate = 6.875;
-    const avgFICO = 740;
-    const avgLTV = 78.5;
+    const avgInterestRate =
+      typeof metricsData.wac?.value === "number"
+        ? metricsData.wac.value
+        : parseFloat(metricsData.wac?.value as string) || 0;
+    const avgFICO =
+      typeof metricsData.wa_fico?.value === "number"
+        ? metricsData.wa_fico.value
+        : parseFloat(metricsData.wa_fico?.value as string) || 0;
+    const avgLTV =
+      typeof metricsData.wa_ltv?.value === "number"
+        ? metricsData.wa_ltv.value
+        : parseFloat(metricsData.wa_ltv?.value as string) || 0;
 
     // Cycle Time: avg days from application to funding (industry standard: total days / loans funded)
     const avgDaysToFunding =
@@ -670,7 +708,12 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       typeof metricsData.pull_through_rate?.value === "number"
         ? metricsData.pull_through_rate.value
         : parseFloat(metricsData.pull_through_rate?.value as string) || 0;
-    const companyAvg = 75.0; // Common benchmark; replace with tenant/co target when available
+    const companyAvg = pullThroughPercent;
+
+    const totalUnits =
+      typeof metricsData.total_units?.value === "number"
+        ? metricsData.total_units.value
+        : parseFloat(metricsData.total_units?.value as string) || 0;
 
     // Calculate breakdowns by loan type - use defaults (can be enhanced with additional metrics)
     const loanTypeDistribution: Record<string, number> = {
@@ -688,6 +731,32 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       Jumbo: 0.15,
       "Conforming Balance": 0.85,
     };
+
+    const mapBreakdownRows = (rows: any[] = []) =>
+      rows.map((row) => {
+        const units = Number(row.units ?? row.count ?? 0);
+        const volume = Number(row.volume ?? 0);
+        const avgBalance = Number(row.avg_balance ?? row.avgBalance ?? 0);
+        const wac = Number(row.wac ?? row.avgInterestRate ?? 0);
+        const waFico = Number(row.wa_fico ?? row.waFico ?? row.avgFICO ?? 0);
+        const waLtv = Number(row.wa_ltv ?? row.waLtv ?? row.avgLTV ?? 0);
+        return {
+          label: row.category || row.loan_type || row.loan_purpose || "Unknown",
+          values: [
+            formatBusinessValue(units, "units"),
+            formatBusinessValue(volume, "volume"),
+            formatBusinessValue(wac, "rate"),
+            formatBusinessValue(avgBalance, "balance"),
+            formatBusinessValue(waFico, "fico"),
+            formatBusinessValue(waLtv, "ltv"),
+          ],
+        };
+      });
+
+    const hasActiveBreakdowns =
+      breakdownsData?.active?.byLoanType?.length > 0;
+    const hasClosedBreakdowns =
+      breakdownsData?.closed?.byLoanType?.length > 0;
 
     // Active Loans breakdowns - use defaults (can be enhanced with additional metrics)
     const activeByLoanType = Object.entries(loanTypeDistribution).map(
@@ -870,20 +939,10 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       }
     );
 
-    // Pull-Through by loan type
+    // Pull-Through by loan type (fallback to overall rate until backend provides per-type)
     const pullThroughByLoanType = Object.keys(loanTypeDistribution).map(
       (type) => {
-        const variance =
-          type === "Conventional"
-            ? 5
-            : type === "FHA"
-            ? -3
-            : type === "VA"
-            ? 2
-            : type === "Jumbo"
-            ? 8
-            : 0;
-        const pct = pullThroughPercent + variance;
+        const pct = pullThroughPercent;
         return {
           label: type,
           values: [
@@ -896,28 +955,35 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     );
 
     // Fallout breakdown: Withdrawn + Denied = fallout (inverse of pull-through). Use API metrics when available.
-    const withdrawnUnits = 0;
-    const deniedUnits = 0;
+    const withdrawnUnits =
+      typeof metricsData.fallout_withdrawn?.value === "number"
+        ? metricsData.fallout_withdrawn.value
+        : parseFloat(metricsData.fallout_withdrawn?.value as string) || 0;
+    const deniedUnits =
+      typeof metricsData.fallout_denied?.value === "number"
+        ? metricsData.fallout_denied.value
+        : parseFloat(metricsData.fallout_denied?.value as string) || 0;
     const totalFallout = withdrawnUnits + deniedUnits;
     const withdrawnPct =
-      totalFallout > 0 ? (withdrawnUnits / totalFallout) * 100 : 0;
-    const deniedPct = totalFallout > 0 ? (deniedUnits / totalFallout) * 100 : 0;
+      totalUnits > 0 ? (withdrawnUnits / totalUnits) * 100 : 0;
+    const deniedPct = totalUnits > 0 ? (deniedUnits / totalUnits) * 100 : 0;
+    const falloutAvg = totalUnits > 0 ? (totalFallout / totalUnits) * 100 : 0;
 
     const falloutBreakdown = [
       {
         label: "Withdrawn",
         values: [
           formatBusinessValue(withdrawnPct, "percent"),
-          formatBusinessValue(companyAvg, "percent"),
-          withdrawnPct <= companyAvg ? "Below Avg" : "Above Avg",
+          formatBusinessValue(falloutAvg, "percent"),
+          withdrawnPct <= falloutAvg ? "Below Avg" : "Above Avg",
         ],
       },
       {
         label: "Denied",
         values: [
           formatBusinessValue(deniedPct, "percent"),
-          formatBusinessValue(companyAvg, "percent"),
-          deniedPct <= companyAvg ? "Below Avg" : "Above Avg",
+          formatBusinessValue(falloutAvg, "percent"),
+          deniedPct <= falloutAvg ? "Below Avg" : "Above Avg",
         ],
       },
     ];
@@ -968,9 +1034,17 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           avgFICO: formatBusinessValue(avgFICO, "fico"),
           avgLTV: formatBusinessValue(avgLTV, "ltv"),
         },
-        byLoanType: activeByLoanType,
-        byLoanPurpose: activeByLoanPurpose,
-        byLoanSize: activeByLoanSize,
+        byLoanType: hasActiveBreakdowns
+          ? mapBreakdownRows(breakdownsData.active.byLoanType)
+          : activeByLoanType,
+        byLoanPurpose:
+          breakdownsData?.active?.byLoanPurpose?.length > 0
+            ? mapBreakdownRows(breakdownsData.active.byLoanPurpose)
+            : activeByLoanPurpose,
+        byLoanSize:
+          breakdownsData?.active?.byLoanSize?.length > 0
+            ? mapBreakdownRows(breakdownsData.active.byLoanSize)
+            : activeByLoanSize,
         byStage: activeByStage,
       },
       closedLoans: {
@@ -982,9 +1056,17 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           avgFICO: formatBusinessValue(avgFICO, "fico"),
           avgLTV: formatBusinessValue(avgLTV, "ltv"),
         },
-        byLoanType: closedByLoanType,
-        byLoanPurpose: closedByLoanPurpose,
-        byLoanSize: closedByLoanSize,
+        byLoanType: hasClosedBreakdowns
+          ? mapBreakdownRows(breakdownsData.closed.byLoanType)
+          : closedByLoanType,
+        byLoanPurpose:
+          breakdownsData?.closed?.byLoanPurpose?.length > 0
+            ? mapBreakdownRows(breakdownsData.closed.byLoanPurpose)
+            : closedByLoanPurpose,
+        byLoanSize:
+          breakdownsData?.closed?.byLoanSize?.length > 0
+            ? mapBreakdownRows(breakdownsData.closed.byLoanSize)
+            : closedByLoanSize,
       },
       lockedLoans: {
         summary: {

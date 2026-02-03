@@ -23,107 +23,95 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 
-/** Mock rate indices for ticker (Optimal Blue OBMMI-style). Replace with API when available. */
-const RATE_INDICES = [
-  { label: "30-Yr. FHA", rate: 5.88, change: -0.107, trend: "down" as const },
-  { label: "30-Yr. VA", rate: 5.692, change: 0.054, trend: "up" as const },
-  { label: "30-Yr. USDA", rate: 6.035, change: -0.027, trend: "down" as const },
-  { label: "15-Yr. Conf", rate: 5.245, change: 0.031, trend: "up" as const },
-  { label: "30-Yr. Conf", rate: 6.125, change: -0.015, trend: "down" as const },
-];
-
-function TickerItem({
-  item,
-  showLeftBorder,
-}: {
-  item: (typeof RATE_INDICES)[0];
-  showLeftBorder: boolean;
-}) {
-  return (
-    <div
-      className="flex items-center gap-2 sm:gap-3 px-4 sm:px-5 md:px-6 py-3 flex-shrink-0 min-w-0"
-      style={{
-        borderLeft: showLeftBorder ? "1px solid #add8e6" : "none",
-      }}
-    >
-      <span
-        className="text-xs sm:text-sm font-medium whitespace-nowrap"
-        style={{ color: "#1e3a8a" }}
-      >
-        {item.label}
-      </span>
-      {item.trend === "down" ? (
-        <TrendingDown
-          className="w-4 h-4 flex-shrink-0"
-          style={{ color: "#ef4444" }}
-          strokeWidth={2}
-        />
-      ) : (
-        <TrendingUp
-          className="w-4 h-4 flex-shrink-0"
-          style={{ color: "#22c55e" }}
-          strokeWidth={2}
-        />
-      )}
-      <span
-        className="text-xs sm:text-sm font-medium tabular-nums"
-        style={{ color: "#1e3a8a" }}
-      >
-        {item.rate.toFixed(3)}%
-      </span>
-      <span
-        className="text-xs sm:text-sm font-medium tabular-nums"
-        style={{
-          color: item.change >= 0 ? "#22c55e" : "#ef4444",
-        }}
-      >
-        {item.change >= 0 ? "+" : ""}
-        {item.change.toFixed(3)}
-      </span>
-    </div>
-  );
-}
-
 function MarketIntelligenceTicker() {
+  const RATE_INDICES = [
+    { label: "30-Yr. Conforming", rate: 6.092, delta: 0.026, trend: "up" as const },
+    { label: "30-Yr. Jumbo", rate: 6.263, delta: 0.017, trend: "up" as const },
+    { label: "30-Yr. FHA", rate: 5.88, delta: -0.107, trend: "down" as const },
+    { label: "30-Yr. VA", rate: 5.692, delta: 0.054, trend: "up" as const },
+    { label: "30-Yr. USDA", rate: 6.035, delta: -0.027, trend: "down" as const },
+    { label: "15-Yr. Conforming", rate: 5.378, delta: -0.034, trend: "down" as const },
+  ];
+
+  const renderSparkline = (trend: "up" | "down") => {
+    const stroke = trend === "up" ? "#16a34a" : "#ef4444";
+    const points =
+      trend === "up"
+        ? "0 9 6 6 12 8 18 4 24 6 30 2 36 4"
+        : "0 3 6 6 12 4 18 8 24 6 30 9 36 7";
+    return (
+      <svg width="38" height="12" viewBox="0 0 38 12" aria-hidden="true">
+        <polyline
+          points={points}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  };
+
   return (
     <div
-      className="flex items-center rounded-lg mb-4 sm:mb-5 md:mb-6 lg:mb-7 min-h-[56px] sm:min-h-[64px] overflow-hidden relative"
-      style={{
-        background: "#f3f9fc",
-        border: "1px solid #e0eef5",
-      }}
+      className="flex items-center w-full max-w-[920px] min-w-0 box-border mx-auto rounded-md overflow-hidden relative border border-slate-200/60 dark:border-slate-700/50"
+      style={{ background: "rgba(243, 249, 252, 0.85)" }}
     >
-      {/* Minimalist icon - fixed on the left */}
-      <div
-        className="flex items-center justify-center flex-shrink-0 z-10 pl-3 pr-2 sm:pl-4 sm:pr-3 h-full bg-[#f3f9fc] dark:bg-slate-800/80 border-r border-[#e0eef5] dark:border-slate-600/50"
-        aria-hidden
-      >
-        <BarChart3
-          className="w-4 h-4 sm:w-5 sm:h-5 text-slate-500 dark:text-slate-400"
-          strokeWidth={1.5}
-        />
-      </div>
-      {/* Marquee track - scrolls left */}
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <div className="flex items-center w-max animate-ticker-left">
-          {[...RATE_INDICES, ...RATE_INDICES].map((item, i) => (
-            <TickerItem
-              key={`${item.label}-${i}`}
-              item={item}
-              showLeftBorder={i > 0}
-            />
-          ))}
+      <div className="relative flex-1 min-w-0 h-10 sm:h-11 overflow-hidden">
+        <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#f3f9fc] to-transparent pointer-events-none" />
+        <div className="absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#f3f9fc] to-transparent pointer-events-none" />
+        <div className="ticker-track">
+          {[...RATE_INDICES, ...RATE_INDICES].map((item, idx) => {
+            const isUp = item.trend === "up";
+            return (
+              <div
+                key={`${item.label}-${idx}`}
+                className="flex items-center gap-3 px-6 h-full border-r border-slate-200/70 shrink-0"
+              >
+                <span className="text-[11px] sm:text-xs md:text-[13px] font-medium text-slate-700">
+                  {item.label}
+                </span>
+                {renderSparkline(item.trend)}
+                <span className="text-[11px] sm:text-xs md:text-[13px] font-semibold text-slate-800">
+                  {item.rate.toFixed(3)}%
+                </span>
+                <span
+                  className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium ${
+                    isUp ? "text-emerald-600" : "text-red-500"
+                  }`}
+                >
+                  {isUp ? "+" : ""}
+                  {item.delta.toFixed(3)}
+                </span>
+              </div>
+            );
+          })}
         </div>
+        <a
+          href="https://www2.optimalblue.com/obmmi"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute right-1 bottom-0.5 text-[8px] sm:text-[9px] text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-900/70 px-1 py-0.5 rounded-full border border-slate-200/60 dark:border-slate-700/50 backdrop-blur"
+        >
+          Powered by OBMMI
+        </a>
+        <style>{`
+          @keyframes ticker-left {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+          }
+          .ticker-track {
+            display: inline-flex;
+            align-items: center;
+            height: 100%;
+            width: max-content;
+            white-space: nowrap;
+            animation: ticker-left 42s linear infinite;
+            will-change: transform;
+          }
+        `}</style>
       </div>
-      <style>{`
-        @keyframes ticker-left {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .animate-ticker-left {
-          animation: ticker-left 45s linear infinite;
-        }
-      `}</style>
     </div>
   );
 }
@@ -655,7 +643,7 @@ export const IndustryNewsCard = () => {
             selectedSources.length >= 4
               ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
               : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-          } gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 xl:gap-8 items-start`}
+          } gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 xl:gap-8 items-start mt-[8.7mm]`}
         >
           {filteredNewsFeed.map((source: any, sourceIdx: number) => {
             const SourceIcon = source.icon;
@@ -665,7 +653,7 @@ export const IndustryNewsCard = () => {
                 className="min-w-0 w-full flex flex-col h-full"
               >
                 {/* Header - Fixed height for alignment */}
-                <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3 mb-3 sm:mb-4 md:mb-5 h-8 sm:h-9 md:h-10">
+                <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3 mb-3 sm:mb-4 md:mb-5 h-8 sm:h-9 md:h-10 mt-[2mm]">
                   <div
                     className={`w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 lg:w-9 lg:h-9 rounded-lg sm:rounded-xl ${source.bg} flex items-center justify-center flex-shrink-0 shadow-sm border border-slate-200/40 dark:border-slate-700/40`}
                   >
