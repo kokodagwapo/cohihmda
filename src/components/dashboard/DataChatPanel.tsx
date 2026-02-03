@@ -1721,63 +1721,23 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -16 }}
                   transition={{ duration: 0.35 }}
-                  className="text-center py-8"
+                  className="py-12 px-2"
                 >
-                  <motion.div
-                    animate={{ scale: [1, 1.05, 1] }}
-                    transition={{ repeat: Infinity, duration: 2.5 }}
-                    className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center"
-                  >
-                    <Sparkles className="w-7 h-7 text-blue-500 dark:text-blue-400" />
-                  </motion.div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-1.5 text-lg tracking-tight">
-                    What do you need to know?
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-1 max-w-[280px] mx-auto">
-                    Ask about pipeline, top performers, volume, or pull-through. Cohi will analyze, visualize, and you can add dashboards to the chat canvas above.
-                  </p>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-6">
-                    AI-generated. Validate important numbers yourself.
-                  </p>
-                  
-                  {/* Quick Stats Preview */}
-                  <div className="grid grid-cols-2 gap-3 mb-6 max-w-[240px] mx-auto">
-                    <AnimatedKPI
-                      label="Pipeline"
-                      value="$67.8M"
-                      change={12}
-                      icon={<Activity className="w-3.5 h-3.5" />}
-                      color="blue"
-                      delay={0.1}
-                    />
-                    <AnimatedKPI
-                      label="Closed MTD"
-                      value="$4.3M"
-                      change={8}
-                      icon={<CheckCircle2 className="w-3.5 h-3.5" />}
-                      color="green"
-                      delay={0.2}
-                    />
-                  </div>
-                  
-                  {/* Suggested Questions */}
-                  <div className="space-y-2 text-left max-w-[320px] mx-auto">
-                    <p className="text-[11px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-medium">Try asking</p>
+                  {/* Suggested Questions – minimalist */}
+                  <div className="space-y-1 max-w-[300px] mx-auto">
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-medium mb-4 text-center">
+                      Try asking
+                    </p>
                     {suggestedQuestions.slice(0, 4).map((question, index) => (
                       <motion.button
                         key={index}
-                        initial={{ opacity: 0, x: -12 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.25 + index * 0.08 }}
-                        whileHover={{ x: 4 }}
-                        whileTap={{ scale: 0.99 }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.1 + index * 0.05 }}
                         onClick={() => handleSuggestionClick(question)}
-                        className="group block w-full text-left px-4 py-3 text-sm rounded-2xl bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 hover:border-blue-300/80 dark:hover:border-blue-500/50 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 text-slate-700 dark:text-slate-300 transition-all duration-200"
+                        className="group block w-full text-left py-2.5 px-0 text-[13px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-150 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 last:border-0"
                       >
-                        <span className="flex items-center gap-3">
-                          <span className="w-2 h-2 rounded-full bg-blue-400/60 group-hover:bg-blue-500 shrink-0" />
-                          <span className="font-medium">{question}</span>
-                        </span>
+                        <span className="font-normal">{question}</span>
                       </motion.button>
                     ))}
                   </div>
