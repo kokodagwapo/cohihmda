@@ -5,8 +5,13 @@
 -- Creates the loans table with all fields from CoheusDataDictionary.xml
 -- This is the core table that stores mortgage loan data from Encompass/LOS
 
--- Enable pgvector extension for embeddings (if available)
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Enable pgvector extension for embeddings (optional - skip if not installed, e.g. plain postgres:15-alpine)
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS vector;
+EXCEPTION WHEN OTHERS THEN
+  NULL; -- pgvector not available (e.g. standard postgres image)
+END $$;
 
 -- =============================================================================
 -- LOANS - Core loan data table
@@ -362,8 +367,6 @@ CREATE TABLE IF NOT EXISTS loans (
   -- Metadata
   raw_data JSONB,
   metadata JSONB DEFAULT '{}',
-  -- pgvector embedding for RAG
-  embedding vector(3072),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   created_by UUID REFERENCES users(id)
@@ -385,7 +388,15 @@ CREATE INDEX IF NOT EXISTS idx_loans_loan_officer ON loans(loan_officer) WHERE l
 CREATE INDEX IF NOT EXISTS idx_loans_processor ON loans(processor) WHERE processor IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_loans_underwriter ON loans(underwriter) WHERE underwriter IS NOT NULL;
 
--- Vector similarity index (requires sufficient data)
+-- Add pgvector embedding column only when extension is available (e.g. pgvector/pgvector image)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    ALTER TABLE loans ADD COLUMN IF NOT EXISTS embedding vector(3072);
+  END IF;
+END $$;
+
+-- Vector similarity index (requires sufficient data, uncomment when using pgvector)
 -- CREATE INDEX IF NOT EXISTS idx_loans_embedding ON loans USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- =============================================================================
