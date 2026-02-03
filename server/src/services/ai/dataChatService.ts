@@ -855,7 +855,7 @@ async function retrieveRAGContext(
   tenantId: string,
   question: string,
   topK: number = 5,
-  similarityThreshold: number = 0.7
+  similarityThreshold: number = 0.35 // Lowered from 0.7 - semantic similarity rarely exceeds 0.5 for doc retrieval
 ): Promise<RAGContext> {
   try {
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -872,6 +872,25 @@ async function retrieveRAGContext(
       console.log("[DataChat RAG] rag_embeddings table does not exist");
       return { chunks: [], sources: [], totalChunks: 0 };
     }
+
+    // Debug: Check what documents and embeddings exist
+    const docCount = await tenantPool.query(
+      `SELECT COUNT(*) as total, 
+              COUNT(*) FILTER (WHERE is_global = true) as global_count,
+              COUNT(*) FILTER (WHERE status = 'indexed') as indexed_count
+       FROM rag_documents`
+    );
+    const embeddingCount = await tenantPool.query(
+      `SELECT COUNT(*) as total FROM rag_embeddings`
+    );
+    console.log(
+      `[DataChat RAG] Documents in tenant DB: ${JSON.stringify(
+        docCount.rows[0]
+      )}`
+    );
+    console.log(
+      `[DataChat RAG] Embeddings in tenant DB: ${embeddingCount.rows[0].total}`
+    );
 
     // Generate embedding for the question
     const embeddingResults = await generateEmbeddings(
@@ -904,6 +923,39 @@ async function retrieveRAGContext(
        LIMIT $3`,
       [embeddingVector, similarityThreshold, topK]
     );
+
+    // Debug: Log similarity scores
+    if (results.rows.length > 0) {
+      console.log(
+        `[DataChat RAG] Top matches:`,
+        results.rows.slice(0, 3).map((r: any) => ({
+          title: r.title,
+          similarity: r.similarity?.toFixed(4),
+          is_global: r.is_global,
+        }))
+      );
+    } else {
+      // Check what the top score would be without threshold
+      const debugResults = await tenantPool.query(
+        `SELECT d.title, d.is_global, 1 - (e.embedding <=> $1::vector) as similarity
+         FROM rag_embeddings e
+         JOIN rag_documents d ON e.document_id = d.id
+         WHERE d.status = 'indexed'
+         ORDER BY e.embedding <=> $1::vector
+         LIMIT 3`,
+        [embeddingVector]
+      );
+      if (debugResults.rows.length > 0) {
+        console.log(
+          `[DataChat RAG] Best matches (below threshold ${similarityThreshold}):`,
+          debugResults.rows.map((r: any) => ({
+            title: r.title,
+            similarity: r.similarity?.toFixed(4),
+            is_global: r.is_global,
+          }))
+        );
+      }
+    }
 
     const chunks = results.rows.map((r: any) => r.chunk_text);
     const sources = results.rows.map((r: any) => {
@@ -1374,7 +1426,7 @@ async function handleKnowledgeQuery(
       context.tenantId,
       question,
       5,
-      0.65
+      0.35 // Lower threshold for better recall
     );
 
     if (ragContext.totalChunks === 0) {
@@ -1397,13 +1449,8 @@ async function handleKnowledgeQuery(
       .join("\n\n");
 
     // Get API key
-    const { apiKey } = await decryptAPIKeys(context);
-    if (!apiKey) {
-      return {
-        message: "Unable to process your question. API key not configured.",
-        error: "OpenAI API key not available",
-      };
-    }
+    // Get OpenAI API key using proper tenant-aware function
+    const apiKey = await getOpenAIKey(context.tenantId);
 
     // Generate response using LLM with RAG context
     const systemPrompt = `You are Cohi, an AI assistant specialized in mortgage lending. 
@@ -1487,7 +1534,7 @@ async function handleHybridQuery(
   try {
     // Run both data query and RAG retrieval in parallel
     const [ragContext, queryConfigPromise] = await Promise.all([
-      retrieveRAGContext(context.tenantId, question, 3, 0.65),
+      retrieveRAGContext(context.tenantId, question, 3, 0.35), // Lower threshold for better recall
       generateQuery(question, context, conversationHistory).catch(() => null),
     ]);
 
@@ -1535,14 +1582,8 @@ async function handleHybridQuery(
       }
     }
 
-    // Get API key
-    const { apiKey } = await decryptAPIKeys(context);
-    if (!apiKey) {
-      return {
-        message: "Unable to process your question. API key not configured.",
-        error: "OpenAI API key not available",
-      };
-    }
+    // Get API key using proper tenant-aware function
+    const apiKey = await getOpenAIKey(context.tenantId);
 
     // Generate combined response
     const systemPrompt = `You are Cohi, an AI assistant specialized in mortgage lending.

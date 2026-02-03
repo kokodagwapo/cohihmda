@@ -1,6 +1,6 @@
 /**
- * Data Chat Panel Component
- * AI-powered chat interface for querying loan data
+ * Cohi Chat Panel Component
+ * AI-powered chat interface with hybrid data + knowledge capabilities
  * Enhanced with executive-level visualizations, color-coded messages, and voice agentic
  */
 
@@ -71,7 +71,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useDataChat, ChatMessage, VisualizationConfig } from '@/hooks/useDataChat';
+import { useCohiChat, ChatMessage, VisualizationConfig } from '@/hooks/useCohiChat';
 import { DynamicVisualization } from '@/components/visualizations/DynamicVisualization';
 import { EnhancedVisualization, EnhancedVisualizationConfig, CohiInsight } from '@/components/visualizations/EnhancedVisualization';
 import { useToast } from '@/components/ui/use-toast';
@@ -630,7 +630,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     saveVisualization,
     clearMessages,
     newSession,
-  } = useDataChat({ tenantId });
+  } = useCohiChat({ tenantId });
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {

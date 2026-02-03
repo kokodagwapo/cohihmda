@@ -155,6 +155,16 @@ const allAdminSections: AdminSectionDef[] = [
     category: "Developer",
     mode: "platform",
   },
+  {
+    id: "ai-prompts" as AdminSection,
+    label: "AI Prompts",
+    icon: Brain,
+    description: "Manage system prompts for all AI features",
+    color: "text-violet-300 dark:text-violet-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Developer",
+    mode: "platform",
+  },
 
   // ============ TENANT CONTEXT (mode: tenant) ============
   // These sections are for managing a specific tenant (impersonation for platform admins)

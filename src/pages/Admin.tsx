@@ -26,6 +26,7 @@ import { MetricsCatalogSection } from "@/components/admin/MetricsCatalogSection"
 import { TenantSelectorCard } from "@/components/admin/TenantSelectorCard";
 import { GlobalKnowledgeLibrary } from "@/components/admin/GlobalKnowledgeLibrary";
 import { KnowledgeCenterSection } from "@/components/admin/KnowledgeCenterSection";
+import { AIPromptManager } from "@/components/admin/AIPromptManager";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings, Crown, Briefcase, Building2 } from "lucide-react";
@@ -291,6 +292,7 @@ export const Admin = () => {
       { id: "aws-hosting", label: "AWS Hosting" },
       { id: "metrics-catalog", label: "Metrics Catalog" },
       { id: "dev-tools", label: "Developer Tools" },
+      { id: "ai-prompts", label: "AI Prompts" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
   };
@@ -692,6 +694,17 @@ export const Admin = () => {
                   transition={{ duration: 0.3 }}
                 >
                   <KnowledgeCenterSection />
+                </motion.div>
+              )}
+
+              {/* AI Prompts Section (Platform Admin) */}
+              {activeSection === "ai-prompts" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <AIPromptManager />
                 </motion.div>
               )}
             </AdminLayoutWithContext>

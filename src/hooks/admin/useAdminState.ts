@@ -21,7 +21,8 @@ export type AdminSection =
   | "aws-hosting"
   | "metrics-catalog"
   | "knowledge-library" // Global knowledge library (platform admin)
-  | "knowledge-center"; // Tenant knowledge center
+  | "knowledge-center" // Tenant knowledge center
+  | "ai-prompts"; // AI prompt configuration (platform admin)
 
 // Admin mode: platform (Cohi internal management) vs tenant (tenant context/impersonation)
 export type AdminMode = "platform" | "tenant";

@@ -48,7 +48,7 @@ export interface GlobalEmbedding {
   document_id: string;
   chunk_index: number;
   chunk_text: string;
-  embedding: number[];
+  embedding: number[] | string; // Array from API, string from pgvector DB
   token_count: number;
 }
 
@@ -139,9 +139,15 @@ async function logSyncEvent(
 }
 
 /**
- * Convert embedding array to pgvector format string
+ * Convert embedding to pgvector format string
+ * Handles both array format (from OpenAI API) and string format (from pgvector DB column)
  */
-function embeddingToVector(embedding: number[]): string {
+function embeddingToVector(embedding: number[] | string): string {
+  // If already a string (from pgvector), return as-is
+  if (typeof embedding === "string") {
+    return embedding;
+  }
+  // If array, convert to pgvector format
   return `[${embedding.join(",")}]`;
 }
 
@@ -341,11 +347,17 @@ export async function syncDocumentToAllTenants(
   const tenants = await getActiveTenants();
   if (tenants.length === 0) {
     console.log("[GlobalKnowledgeSync] No active tenants to sync to");
+    // Debug: Check why no active tenants
+    const allTenants = await managementPool.query(
+      `SELECT id, name, status FROM coheus_tenants`
+    );
+    console.log("[GlobalKnowledgeSync] All tenants in DB:", allTenants.rows);
     return [];
   }
 
   console.log(
-    `[GlobalKnowledgeSync] Syncing document "${doc.title}" to ${tenants.length} tenants`
+    `[GlobalKnowledgeSync] Syncing document "${doc.title}" to ${tenants.length} tenants:`,
+    tenants.map((t) => `${t.name} (${t.id})`)
   );
 
   // Check if this is a new sync or update
@@ -372,6 +384,11 @@ export async function syncDocumentToAllTenants(
         const action = previouslySyncedTenants.has(tenant.id)
           ? "updated"
           : "added";
+
+        console.log(
+          `[GlobalKnowledgeSync] Syncing to tenant: ${tenant.name} (${tenant.id})`
+        );
+
         const result = await syncDocumentToTenant(
           doc,
           embeddings,
@@ -379,6 +396,16 @@ export async function syncDocumentToAllTenants(
           publishedBy,
           action
         );
+
+        if (result.success) {
+          console.log(
+            `[GlobalKnowledgeSync] ✓ ${tenant.name}: ${result.chunksCreated} chunks synced`
+          );
+        } else {
+          console.error(
+            `[GlobalKnowledgeSync] ✗ ${tenant.name}: ${result.error}`
+          );
+        }
 
         // Log the sync event
         await logSyncEvent(

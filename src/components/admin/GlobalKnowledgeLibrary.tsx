@@ -391,13 +391,25 @@ export function GlobalKnowledgeLibrary() {
               Manage documents that sync to all tenant databases
             </CardDescription>
           </div>
-          <Button
-            onClick={() => setUploadDialogOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-700"
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            Upload Document
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchDocuments()}
+              disabled={loading}
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+              />
+            </Button>
+            <Button
+              onClick={() => setUploadDialogOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Upload Document
+            </Button>
+          </div>
         </div>
       </CardHeader>
 

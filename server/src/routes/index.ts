@@ -22,10 +22,12 @@ import encompassRoutes from "./encompass.js";
 import tenantRoutes from "./tenants.js";
 import tenantConfigRoutes from "./tenantConfig.js";
 import dataChatRoutes from "./dataChat.js";
+import cohiChatRoutes from "./cohiChat.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
 import newsRoutes from "./news.js";
 import globalKnowledgeRoutes from "./admin/globalKnowledge.js";
+import aiPromptsRoutes from "./admin/aiPrompts.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
@@ -68,10 +70,12 @@ export function setupRoutes(app: Express) {
   app.use("/api/encompass", encompassRoutes);
   app.use("/api/tenants", tenantRoutes);
   app.use("/api/tenant-config", tenantConfigRoutes);
-  app.use("/api/data-chat", dataChatRoutes);
+  app.use("/api/data-chat", dataChatRoutes); // Legacy route - kept for backwards compatibility
+  app.use("/api/cohi-chat", cohiChatRoutes); // New hybrid chat service
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);
   app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
+  app.use("/api/admin/ai-prompts", aiPromptsRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
 
   // Health check handler (shared by both /health and /api/health)

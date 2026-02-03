@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { useDataChat, ChatMessage, VisualizationConfig } from '@/hooks/useDataChat';
+import { useCohiChat, ChatMessage, VisualizationConfig } from '@/hooks/useCohiChat';
 import { DynamicVisualization } from '@/components/visualizations/DynamicVisualization';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -80,23 +80,23 @@ const QUESTION_CATEGORIES = [
     ],
   },
   {
-    title: 'Geography & Demographics',
+    title: 'Regulations & Knowledge',
     icon: PieChart,
     questions: [
-      'Show me loan distribution by property state',
-      'What are the top 10 counties by loan volume?',
-      'Show me average loan amount by property type',
-      'How does loan volume compare across branches?',
+      'What are the FHA loan requirements?',
+      'Explain DTI ratio guidelines',
+      'What documentation is required for VA loans?',
+      'What are the conforming loan limits?',
     ],
   },
   {
-    title: 'Detailed Data',
+    title: 'Data + Knowledge',
     icon: Table,
     questions: [
-      'List recent funded loans with loan officer and amount',
-      'Show me all locked loans from this week',
-      'List loans with FICO score below 700',
-      'Show me loans with DTI above 43%',
+      'How do our FHA loans compare to guidelines?',
+      'Show me loans that might exceed DTI limits',
+      'What percentage of our loans are government vs conventional?',
+      'Analyze our VA loan volume trend',
     ],
   },
 ];
@@ -171,7 +171,7 @@ const DataChat: React.FC = () => {
     saveVisualization,
     clearMessages,
     newSession,
-  } = useDataChat({ tenantId: resolvedTenantId || undefined });
+  } = useCohiChat({ tenantId: resolvedTenantId || undefined });
 
   useEffect(() => {
     if (!resolvedTenantId) return;
@@ -326,8 +326,8 @@ const DataChat: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Sparkles className="w-6 h-6 text-blue-500" />
                 <div>
-                  <h1 className="font-semibold text-lg text-slate-900 dark:text-white">Data Chat</h1>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Ask questions about your loan data</p>
+                  <h1 className="font-semibold text-lg text-slate-900 dark:text-white">Cohi Chat</h1>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Ask about data, regulations, or anything mortgage-related</p>
                 </div>
               </div>
             </div>
@@ -394,11 +394,11 @@ const DataChat: React.FC = () => {
                 <div className="text-center py-16">
                   <Sparkles className="w-16 h-16 mx-auto mb-6 text-blue-500 opacity-50" />
                   <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-3">
-                    Ask anything about your data
+                    Ask anything about your loans or mortgage knowledge
                   </h2>
                   <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-md mx-auto">
-                    I can help you explore your loan data with natural language questions. 
-                    Get insights, generate charts, and save visualizations to your dashboard.
+                    I can help you explore your loan data AND answer questions about regulations, 
+                    guidelines, and policies. Get data-driven insights with knowledge context.
                   </p>
                   
                   {/* Quick suggestions */}
@@ -458,7 +458,7 @@ const DataChat: React.FC = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={tenantReady ? "Ask about your loan data... (e.g., 'Show me loan volume by branch')" : "Select a tenant to start chatting"}
+                  placeholder={tenantReady ? "Ask about loans, regulations, or mortgage knowledge... (e.g., 'Show me loan volume' or 'What are FHA requirements?')" : "Select a tenant to start chatting"}
                   disabled={isLoading || !tenantReady}
                   className="flex-1 h-12 text-base"
                 />

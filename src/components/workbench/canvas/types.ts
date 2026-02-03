@@ -2,7 +2,7 @@
  * Canvas layout and widget types for Workbench Canvas
  */
 
-import type { VisualizationConfig } from '@/hooks/useDataChat';
+import type { VisualizationConfig } from '@/hooks/useCohiChat';
 
 /** Single upload record for canvas (file analyzed via /api/data-chat/analyze-file) */
 export interface CanvasUpload {

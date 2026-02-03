@@ -3,16 +3,28 @@
  * Exports all AI-related services
  */
 
-// Export types from dataChatService
+// Export types from cohiChatService (new hybrid architecture)
 export type {
   ChatContext,
   UserPermissions,
   RowFilter,
-  DataChatMessage,
+  CohiChatMessage,
+  CohiChatResponse,
   VisualizationConfig,
+} from "./cohiChatService.js";
+
+// Export functions from cohiChatService
+export {
+  processCohiQuestion,
+  refineCohiQuery,
+} from "./cohiChatService.js";
+
+// Legacy exports from dataChatService (for backwards compatibility)
+export type {
+  DataChatMessage,
+  DataChatResponse,
 } from "./dataChatService.js";
 
-// Export functions from dataChatService
 export {
   processDataQuestion,
   refineQuery,

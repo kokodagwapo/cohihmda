@@ -1,0 +1,1376 @@
+/**
+ * Cohi Chat Service
+ * AI-powered natural language interface with hybrid data + knowledge capabilities
+ *
+ * Architecture: "Always gather, intelligently combine"
+ * - Every question triggers parallel data query generation AND knowledge retrieval
+ * - The LLM receives all available context and decides what's relevant
+ * - This eliminates classification errors and provides richer responses
+ *
+ * Prompts are loaded from the database via promptConfigService (admin-configurable)
+ * Schema context is dynamically generated from METRICS_CATALOG
+ */
+
+import pg from "pg";
+import {
+  METRICS_CATALOG,
+  MetricDefinition,
+} from "../metrics/metricsService.js";
+import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
+import { decryptAPIKeys } from "../encryption.js";
+import { generateEmbeddings } from "../embeddingService.js";
+import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface ChatContext {
+  userId: string;
+  tenantId: string;
+  userRole: string;
+  userEmail?: string;
+  permissions?: UserPermissions;
+}
+
+export interface UserPermissions {
+  sectionAccess: string[];
+  rowFilters: RowFilter[];
+  fieldRestrictions: string[];
+}
+
+export interface RowFilter {
+  field: string;
+  operator: "equals" | "in" | "not_in" | "contains" | "is_current_user";
+  value?: string | string[];
+  dynamicSource?: string;
+}
+
+export interface CohiChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  visualization?: VisualizationConfig;
+  data?: any[];
+  timestamp: Date;
+  metadata?: {
+    query?: string;
+    executionTime?: number;
+    rowCount?: number;
+  };
+}
+
+export interface VisualizationConfig {
+  type:
+    | "bar"
+    | "line"
+    | "pie"
+    | "area"
+    | "table"
+    | "kpi"
+    | "donut"
+    | "horizontal_bar";
+  title: string;
+  data: any[];
+  xKey?: string;
+  yKey?: string;
+  yKeys?: string[]; // For multi-series charts
+  xLabel?: string; // Human-readable X-axis label
+  yLabel?: string; // Human-readable Y-axis label
+  nameKey?: string; // For pie charts
+  valueKey?: string; // For pie charts
+  colors?: string[];
+  showLegend?: boolean;
+  showGrid?: boolean;
+  stacked?: boolean;
+  kpiConfig?: {
+    value: number | string;
+    label: string;
+    change?: number;
+    changeLabel?: string;
+    format?: "number" | "currency" | "percent";
+  };
+  tableConfig?: {
+    columns: { key: string; label: string; format?: string }[];
+    sortable?: boolean;
+    pageSize?: number;
+  };
+}
+
+export interface CohiChatResponse {
+  message: string;
+  visualization?: VisualizationConfig;
+  data?: any[];
+  suggestedQuestions?: string[];
+  error?: string;
+  /** Metric IDs from METRICS_CATALOG that were used in this query */
+  metricsUsed?: string[];
+  /** Sources used to generate the response */
+  sources?: {
+    dataQuery?: boolean;
+    knowledgeBase?: string[];
+  };
+}
+
+export interface QueryResult {
+  rows: any[];
+  rowCount: number;
+  fields: string[];
+}
+
+// ============================================================================
+// Dynamic Schema Context Builder
+// ============================================================================
+
+/**
+ * Static loan field definitions (these are actual database columns)
+ * This could also be loaded from a config or database in the future
+ */
+const LOAN_FIELD_SCHEMA = {
+  core: [
+    { name: "loan_id", type: "TEXT", description: "Unique loan identifier" },
+    { name: "loan_number", type: "TEXT", description: "Loan number" },
+    { name: "loan_amount", type: "DECIMAL", description: "Total loan amount" },
+    {
+      name: "loan_type",
+      type: "TEXT",
+      description: "Type of loan (Conventional, FHA, VA, USDA, etc.)",
+    },
+    {
+      name: "loan_purpose",
+      type: "TEXT",
+      description: "Purpose (Purchase, Refinance, Cash-Out Refinance)",
+    },
+    { name: "loan_program", type: "TEXT", description: "Loan program name" },
+    {
+      name: "current_loan_status",
+      type: "TEXT",
+      description:
+        "Current status (Active Loan, Originated, Withdrawn, Denied)",
+    },
+    {
+      name: "current_milestone",
+      type: "TEXT",
+      description: "Current milestone in pipeline",
+    },
+    {
+      name: "channel",
+      type: "TEXT",
+      description: "Channel (Retail, Wholesale, Correspondent, TPO)",
+    },
+  ],
+  personnel: [
+    { name: "loan_officer", type: "TEXT", description: "Loan officer name" },
+    { name: "loan_officer_id", type: "TEXT", description: "Loan officer ID" },
+    { name: "processor", type: "TEXT", description: "Processor name" },
+    { name: "underwriter", type: "TEXT", description: "Underwriter name" },
+    { name: "closer", type: "TEXT", description: "Closer name" },
+    { name: "branch", type: "TEXT", description: "Branch name/code" },
+  ],
+  property: [
+    { name: "property_city", type: "TEXT", description: "Property city" },
+    {
+      name: "property_state",
+      type: "TEXT",
+      description: "Property state (2-letter code)",
+    },
+    { name: "property_county", type: "TEXT", description: "Property county" },
+    {
+      name: "property_type",
+      type: "TEXT",
+      description: "Property type (Single Family, Condo, etc.)",
+    },
+    {
+      name: "occupancy_type",
+      type: "TEXT",
+      description: "Occupancy type (Primary, Investment, Second Home)",
+    },
+  ],
+  financial: [
+    {
+      name: "interest_rate",
+      type: "DECIMAL",
+      description: "Interest rate percentage",
+    },
+    {
+      name: "cltv",
+      type: "DECIMAL",
+      description: "Combined loan-to-value ratio",
+    },
+    { name: "ltv_ratio", type: "DECIMAL", description: "Loan-to-value ratio" },
+    {
+      name: "be_dti_ratio",
+      type: "DECIMAL",
+      description: "Back-end debt-to-income ratio",
+    },
+    { name: "fico_score", type: "INTEGER", description: "Credit score" },
+    {
+      name: "rate_lock_buy_side_base_price_rate",
+      type: "DECIMAL",
+      description: "Base buy rate (for revenue calc)",
+    },
+    {
+      name: "orig_fee_borr_pd",
+      type: "DECIMAL",
+      description: "Origination fee paid by borrower",
+    },
+    {
+      name: "orig_fees_seller",
+      type: "DECIMAL",
+      description: "Origination fees from seller",
+    },
+    {
+      name: "cd_lender_credits",
+      type: "DECIMAL",
+      description: "Lender credits on closing disclosure",
+    },
+  ],
+  dates: [
+    { name: "application_date", type: "DATE", description: "Application date" },
+    { name: "started_date", type: "DATE", description: "Started date" },
+    { name: "lock_date", type: "DATE", description: "Rate lock date" },
+    { name: "closing_date", type: "DATE", description: "Closing date" },
+    { name: "funding_date", type: "DATE", description: "Funding date" },
+    {
+      name: "investor_purchase_date",
+      type: "DATE",
+      description: "Investor purchase date",
+    },
+    { name: "credit_pull_date", type: "DATE", description: "Credit pull date" },
+  ],
+};
+
+/**
+ * Build the schema context dynamically from LOAN_FIELD_SCHEMA and METRICS_CATALOG
+ * This ensures the LLM always has accurate, up-to-date information about available fields and metrics
+ */
+function buildDynamicSchemaContext(): string {
+  const sections: string[] = [];
+
+  // Build field schema sections
+  sections.push("## Available Loan Fields (Columns in loans table)\n");
+
+  const fieldCategories: Record<
+    string,
+    { title: string; fields: typeof LOAN_FIELD_SCHEMA.core }
+  > = {
+    core: { title: "Core Fields", fields: LOAN_FIELD_SCHEMA.core },
+    personnel: {
+      title: "Personnel Fields",
+      fields: LOAN_FIELD_SCHEMA.personnel,
+    },
+    property: { title: "Property Fields", fields: LOAN_FIELD_SCHEMA.property },
+    financial: {
+      title: "Financial Fields",
+      fields: LOAN_FIELD_SCHEMA.financial,
+    },
+    dates: { title: "Key Dates", fields: LOAN_FIELD_SCHEMA.dates },
+  };
+
+  for (const [, category] of Object.entries(fieldCategories)) {
+    sections.push(`### ${category.title}`);
+    for (const field of category.fields) {
+      sections.push(`- ${field.name} (${field.type}): ${field.description}`);
+    }
+    sections.push("");
+  }
+
+  // Build metrics context from METRICS_CATALOG
+  sections.push("## CALCULATED METRICS (from METRICS_CATALOG)\n");
+  sections.push(
+    "IMPORTANT: These are NOT columns. You must use the SQL formulas below to calculate them.\n"
+  );
+
+  // Group metrics by category
+  const metricsByCategory: Record<string, MetricDefinition[]> = {};
+  for (const metric of Object.values(METRICS_CATALOG)) {
+    if (!metricsByCategory[metric.category]) {
+      metricsByCategory[metric.category] = [];
+    }
+    metricsByCategory[metric.category].push(metric);
+  }
+
+  const categoryTitles: Record<string, string> = {
+    status: "Status Metrics",
+    turn_time: "Turn Time Metrics",
+    revenue: "Revenue Metrics",
+    pull_through: "Pull-Through Metrics",
+    volume: "Volume Metrics",
+    count: "Count Metrics",
+  };
+
+  for (const [categoryId, metrics] of Object.entries(metricsByCategory)) {
+    sections.push(`### ${categoryTitles[categoryId] || categoryId}`);
+    for (const metric of metrics) {
+      sections.push(`**${metric.name}** (${metric.id})`);
+      sections.push(`- Description: ${metric.description}`);
+      sections.push(`- Formula: ${metric.formula}`);
+      if (metric.defaultDateField) {
+        sections.push(`- Default date field: ${metric.defaultDateField}`);
+      }
+      if (metric.ignoreDateFilter) {
+        sections.push(
+          `- Note: This is a current state metric - do NOT filter by date range`
+        );
+      }
+      if (metric.sqlQuery) {
+        // Clean up the SQL for display
+        const cleanSql = metric.sqlQuery.replace(/\s+/g, " ").trim();
+        sections.push(
+          `- SQL: \`${cleanSql.substring(0, 300)}${
+            cleanSql.length > 300 ? "..." : ""
+          }\``
+        );
+      }
+      if (metric.notes) {
+        sections.push(`- Notes: ${metric.notes}`);
+      }
+      sections.push("");
+    }
+  }
+
+  // Add quick reference
+  sections.push("## Quick Reference - Status Indicators");
+  sections.push("- Funded: funding_date IS NOT NULL");
+  sections.push("- Active: current_loan_status = 'Active Loan'");
+  sections.push("- Locked: lock_date IS NOT NULL");
+  sections.push(
+    "- Originated: current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'"
+  );
+
+  return sections.join("\n");
+}
+
+// Cache the schema context (it only changes if METRICS_CATALOG changes, which requires a redeploy)
+let cachedSchemaContext: string | null = null;
+
+function getSchemaContext(): string {
+  if (!cachedSchemaContext) {
+    cachedSchemaContext = buildDynamicSchemaContext();
+    console.log("[CohiChat] Built dynamic schema context from METRICS_CATALOG");
+  }
+  return cachedSchemaContext;
+}
+
+// ============================================================================
+// OpenAI Integration
+// ============================================================================
+
+async function getOpenAIKey(tenantId?: string): Promise<string> {
+  if (tenantId) {
+    try {
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      // Check for rag_settings table in tenant database
+      const tableCheck = await tenantPool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_name = 'rag_settings'
+        ) as exists
+      `);
+
+      if (tableCheck.rows[0]?.exists) {
+        const result = await tenantPool.query(
+          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
+        );
+        if (result.rows[0]?.openai_api_key) {
+          console.log(
+            "[CohiChat] Found openai_api_key in rag_settings, attempting to decrypt..."
+          );
+          const decrypted = await decryptAPIKeys({
+            openai_api_key: result.rows[0].openai_api_key,
+          });
+          if (decrypted.openai_api_key) {
+            console.log(
+              "[CohiChat] Using tenant OpenAI API key from rag_settings"
+            );
+            return decrypted.openai_api_key;
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("[CohiChat] Error fetching tenant API key:", error.message);
+    }
+  }
+
+  const envKey = process.env.OPENAI_API_KEY;
+  if (envKey) {
+    console.log("[CohiChat] Using environment OpenAI API key");
+    return envKey;
+  }
+
+  throw new Error(
+    "OpenAI API key not configured. Please add your OpenAI API key in Admin > Settings > RAG Settings, or set OPENAI_API_KEY environment variable on the server."
+  );
+}
+
+interface OpenAIChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+async function callOpenAI(
+  messages: OpenAIChatMessage[],
+  apiKey: string,
+  options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
+): Promise<string> {
+  const body: any = {
+    model: "gpt-4o",
+    messages,
+    temperature: options.temperature ?? 0.3,
+    max_tokens: options.maxTokens ?? 2000,
+  };
+
+  if (options.jsonMode) {
+    body.response_format = { type: "json_object" };
+  }
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = (await response.json()) as { error?: { message?: string } };
+    throw new Error(
+      `OpenAI API error: ${error.error?.message || "Unknown error"}`
+    );
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content || "";
+}
+
+// ============================================================================
+// RAG Context Retrieval
+// ============================================================================
+
+interface RAGContext {
+  chunks: string[];
+  sources: string[];
+  totalChunks: number;
+}
+
+/**
+ * Retrieve relevant context from the knowledge base using RAG
+ */
+async function retrieveRAGContext(
+  tenantId: string,
+  question: string,
+  topK: number = 5,
+  similarityThreshold: number = 0.3 // Lowered for better recall in hybrid mode
+): Promise<RAGContext> {
+  try {
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+    // Check if the rag_embeddings table exists
+    const tableCheck = await tenantPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'rag_embeddings'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      console.log("[CohiChat RAG] rag_embeddings table does not exist");
+      return { chunks: [], sources: [], totalChunks: 0 };
+    }
+
+    // Generate embedding for the question
+    const embeddingResults = await generateEmbeddings(
+      [question],
+      "openai/text-embedding-3-large"
+    );
+
+    if (!embeddingResults || embeddingResults.length === 0) {
+      console.log("[CohiChat RAG] Failed to generate embedding for question");
+      return { chunks: [], sources: [], totalChunks: 0 };
+    }
+
+    const queryEmbedding = embeddingResults[0].embedding;
+    const embeddingVector = `[${queryEmbedding.join(",")}]`;
+
+    // Search for similar chunks
+    const results = await tenantPool.query(
+      `SELECT 
+        e.chunk_text,
+        d.filename,
+        d.title,
+        d.is_global,
+        d.category,
+        1 - (e.embedding <=> $1::vector) as similarity
+       FROM rag_embeddings e
+       JOIN rag_documents d ON e.document_id = d.id
+       WHERE d.status = 'indexed'
+         AND 1 - (e.embedding <=> $1::vector) >= $2
+       ORDER BY e.embedding <=> $1::vector
+       LIMIT $3`,
+      [embeddingVector, similarityThreshold, topK]
+    );
+
+    if (results.rows.length > 0) {
+      console.log(
+        `[CohiChat RAG] Found ${results.rows.length} relevant chunks:`,
+        results.rows.slice(0, 3).map((r: any) => ({
+          title: r.title,
+          similarity: r.similarity?.toFixed(4),
+        }))
+      );
+    }
+
+    const chunks = results.rows.map((r: any) => r.chunk_text);
+    const sources = results.rows.map((r: any) => {
+      const docName = r.title || r.filename;
+      const type = r.is_global ? "Global" : "Tenant";
+      const category = r.category ? ` (${r.category})` : "";
+      return `${docName}${category} [${type}]`;
+    });
+
+    return {
+      chunks,
+      sources: [...new Set(sources)],
+      totalChunks: chunks.length,
+    };
+  } catch (error: any) {
+    console.error("[CohiChat RAG] Error retrieving context:", error.message);
+    return { chunks: [], sources: [], totalChunks: 0 };
+  }
+}
+
+// ============================================================================
+// Metric Detection
+// ============================================================================
+
+function detectMetricsUsed(sql: string, question: string): string[] {
+  const metricsUsed: Set<string> = new Set();
+  const lowerSql = sql.toLowerCase();
+  const lowerQuestion = question.toLowerCase();
+
+  for (const metric of Object.values(METRICS_CATALOG)) {
+    const metricId = metric.id.toLowerCase();
+    const metricName = metric.name.toLowerCase();
+
+    if (
+      lowerQuestion.includes(metricId.replace(/_/g, " ")) ||
+      lowerQuestion.includes(metricName)
+    ) {
+      metricsUsed.add(metric.id);
+    }
+
+    if (metric.sqlQuery) {
+      const sqlPatterns = extractKeyPatterns(metric.sqlQuery);
+      for (const pattern of sqlPatterns) {
+        if (lowerSql.includes(pattern.toLowerCase())) {
+          metricsUsed.add(metric.id);
+          break;
+        }
+      }
+    }
+  }
+
+  return Array.from(metricsUsed);
+}
+
+function extractKeyPatterns(sqlQuery: string): string[] {
+  const patterns: string[] = [];
+
+  const aggregateMatch = sqlQuery.match(
+    /(AVG|SUM|COUNT|MAX|MIN)\s*\([^)]+\)/gi
+  );
+  if (aggregateMatch) {
+    patterns.push(...aggregateMatch.map((m) => m.replace(/\s+/g, "")));
+  }
+
+  if (sqlQuery.includes("CASE") && sqlQuery.includes("WHEN")) {
+    const caseMatch = sqlQuery.match(/WHEN\s+[^T][^\n]+?\s+THEN/gi);
+    if (caseMatch && caseMatch[0]) {
+      patterns.push(caseMatch[0].substring(0, 50));
+    }
+  }
+
+  return patterns.filter((p) => p.length > 5);
+}
+
+// ============================================================================
+// Query Generation
+// ============================================================================
+
+interface GeneratedQuery {
+  sql: string;
+  params: any[];
+  explanation: string;
+  visualizationType: VisualizationConfig["type"];
+  chartConfig: Partial<VisualizationConfig>;
+}
+
+async function generateQuery(
+  question: string,
+  context: ChatContext,
+  conversationHistory: CohiChatMessage[] = []
+): Promise<GeneratedQuery | null> {
+  try {
+    const apiKey = await getOpenAIKey(context.tenantId);
+
+    // Get the dynamic schema context from METRICS_CATALOG
+    const schemaContext = getSchemaContext();
+
+    // Get current date context
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const currentQuarter = Math.ceil(currentMonth / 3);
+
+    // Get prompt configuration from database (with fallback to defaults)
+    const promptConfig = await getPromptConfig("cohi_chat.query_generation");
+
+    // Build the system prompt with variable substitution
+    // The prompt template uses {{variableName}} syntax
+    const systemPrompt = buildPrompt(promptConfig.system_prompt, {
+      LOAN_SCHEMA_CONTEXT: schemaContext,
+      metricsContext: schemaContext, // Schema context now includes metrics from METRICS_CATALOG
+      currentDate: now.toISOString().split("T")[0],
+      currentYear: currentYear.toString(),
+      currentMonth: currentMonth.toString(),
+      currentQuarter: currentQuarter.toString(),
+    });
+
+    const recentHistory = conversationHistory.slice(-4).map((msg) => ({
+      role: msg.role as "user" | "assistant",
+      content: msg.content,
+    }));
+
+    const messages: OpenAIChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      ...recentHistory,
+      { role: "user", content: question },
+    ];
+
+    const response = await callOpenAI(messages, apiKey, {
+      temperature: promptConfig.temperature,
+      jsonMode: promptConfig.json_mode,
+      maxTokens: promptConfig.max_tokens,
+    });
+
+    const parsed = JSON.parse(response);
+
+    // Check if this was determined to not be a data query
+    if (parsed.isDataQuery === false) {
+      console.log(
+        `[CohiChat] Query generator determined this is not a data query: ${parsed.reason}`
+      );
+      return null;
+    }
+
+    return {
+      sql: parsed.sql,
+      params: parsed.params || [],
+      explanation: parsed.explanation,
+      visualizationType: parsed.visualizationType || "table",
+      chartConfig: parsed.chartConfig || {},
+    };
+  } catch (error) {
+    console.log("[CohiChat] Failed to generate query:", error);
+    return null;
+  }
+}
+
+// ============================================================================
+// Query Sanitization & Execution
+// ============================================================================
+
+function sanitizeGeneratedSQL(sql: string): string {
+  let sanitized = sql;
+  sanitized = sanitized.replace(
+    /INTERVAL\s*'(\d+)\s*quarters?'/gi,
+    (_, num) => `INTERVAL '${parseInt(num) * 3} months'`
+  );
+  sanitized = sanitized.replace(
+    /INTERVAL\s*'1\s*quarter'/gi,
+    `INTERVAL '3 months'`
+  );
+  sanitized = sanitized.replace(/INTERVAL\s*"([^"]+)"/gi, `INTERVAL '$1'`);
+  sanitized = sanitized.replace(/\s{2,}/g, " ");
+  return sanitized.trim();
+}
+
+async function executeQuery(
+  sql: string,
+  params: any[],
+  context: ChatContext
+): Promise<QueryResult> {
+  const sanitizedSql = sanitizeGeneratedSQL(sql);
+  const normalizedSql = sanitizedSql.trim().toUpperCase();
+
+  if (!normalizedSql.startsWith("SELECT")) {
+    throw new Error("Only SELECT queries are allowed");
+  }
+
+  const dangerousKeywords = [
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "TRUNCATE",
+    "ALTER",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+  ];
+  for (const keyword of dangerousKeywords) {
+    if (
+      normalizedSql.includes(keyword + " ") ||
+      normalizedSql.includes(keyword + "\n")
+    ) {
+      throw new Error(`Query contains forbidden keyword: ${keyword}`);
+    }
+  }
+
+  const pool = await tenantDbManager.getTenantPool(context.tenantId);
+  const startTime = Date.now();
+  console.log(`[CohiChat] Executing SQL: ${sanitizedSql}`);
+  const result = await pool.query(sanitizedSql, params);
+  const executionTime = Date.now() - startTime;
+
+  console.log(
+    `[CohiChat] Query executed in ${executionTime}ms, returned ${result.rows.length} rows`
+  );
+
+  return {
+    rows: result.rows,
+    rowCount: result.rows.length,
+    fields:
+      result.fields?.map((f) => f.name) || Object.keys(result.rows[0] || {}),
+  };
+}
+
+// ============================================================================
+// Visualization Building
+// ============================================================================
+
+function buildVisualizationConfig(
+  data: any[],
+  queryConfig: GeneratedQuery
+): VisualizationConfig {
+  const chartConfig = queryConfig.chartConfig as any;
+  const humanize = (key: string): string =>
+    key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+
+  const baseConfig: VisualizationConfig = {
+    type: queryConfig.visualizationType,
+    title: chartConfig.title || "Query Results",
+    data,
+    showLegend: true,
+    showGrid: true,
+  };
+
+  switch (queryConfig.visualizationType) {
+    case "bar":
+    case "horizontal_bar":
+    case "line":
+    case "area": {
+      const xKey = chartConfig.xKey || Object.keys(data[0] || {})[0];
+      const yKey = chartConfig.yKey || Object.keys(data[0] || {})[1];
+      return {
+        ...baseConfig,
+        xKey,
+        yKey,
+        yKeys: chartConfig.yKeys,
+        xLabel: chartConfig.xLabel || humanize(xKey),
+        yLabel: chartConfig.yLabel || humanize(yKey),
+        colors: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"],
+      };
+    }
+
+    case "pie":
+    case "donut":
+      return {
+        ...baseConfig,
+        nameKey: chartConfig.nameKey || Object.keys(data[0] || {})[0],
+        valueKey: chartConfig.valueKey || Object.keys(data[0] || {})[1],
+        colors: [
+          "#3b82f6",
+          "#10b981",
+          "#f59e0b",
+          "#ef4444",
+          "#8b5cf6",
+          "#ec4899",
+          "#14b8a6",
+        ],
+      };
+
+    case "kpi": {
+      const firstRow = data[0] || {};
+      const kpiValueKey = Object.keys(firstRow)[0];
+      return {
+        ...baseConfig,
+        kpiConfig: {
+          value: firstRow[kpiValueKey],
+          label: chartConfig.title || humanize(kpiValueKey),
+          format:
+            typeof firstRow[kpiValueKey] === "number" &&
+            firstRow[kpiValueKey] > 1000
+              ? "currency"
+              : "number",
+        },
+      };
+    }
+
+    case "table":
+    default: {
+      const columns = Object.keys(data[0] || {}).map((key) => ({
+        key,
+        label: humanize(key),
+        format: undefined,
+      }));
+      return {
+        ...baseConfig,
+        tableConfig: { columns, sortable: true, pageSize: 10 },
+      };
+    }
+  }
+}
+
+// ============================================================================
+// Insight Metrics (for open-ended questions)
+// ============================================================================
+
+async function gatherInsightMetrics(
+  context: ChatContext
+): Promise<Record<string, any>> {
+  const tenantPool = await tenantDbManager.getTenantPool(context.tenantId);
+  const metrics: Record<string, any> = {};
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  const safeQuery = async (name: string, sql: string): Promise<any[]> => {
+    try {
+      const result = await tenantPool.query(sql);
+      return result.rows;
+    } catch (error) {
+      console.log(`[CohiChat Insights] Query "${name}" failed:`, error);
+      return [];
+    }
+  };
+
+  // Volume summary (rolling 30-day periods)
+  const volumeSummary = await safeQuery(
+    "volumeSummary",
+    `
+    SELECT 
+      COUNT(*) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '30 days') as recent_count,
+      COALESCE(SUM(loan_amount) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '30 days'), 0) as recent_volume,
+      COUNT(*) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '60 days' AND application_date < CURRENT_DATE - INTERVAL '30 days') as previous_count,
+      COALESCE(SUM(loan_amount) FILTER (WHERE application_date >= CURRENT_DATE - INTERVAL '60 days' AND application_date < CURRENT_DATE - INTERVAL '30 days'), 0) as previous_volume
+    FROM public.loans l
+  `
+  );
+  metrics.volume = volumeSummary[0] || {};
+
+  // Active loans
+  const activeLoans = await safeQuery(
+    "activeLoans",
+    `
+    SELECT 
+      COUNT(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL THEN 1 END) as active_count,
+      COALESCE(SUM(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as active_volume
+    FROM public.loans l
+  `
+  );
+  metrics.activeLoans = activeLoans[0] || { active_count: 0, active_volume: 0 };
+
+  // Top performers
+  const topPerformers = await safeQuery(
+    "topPerformers",
+    `
+    SELECT 
+      COALESCE(loan_officer, 'Unknown') as loan_officer,
+      COUNT(*) as loan_count,
+      COALESCE(SUM(loan_amount), 0) as total_volume
+    FROM public.loans l
+    WHERE application_date >= CURRENT_DATE - INTERVAL '30 days' AND loan_officer IS NOT NULL
+    GROUP BY loan_officer
+    ORDER BY total_volume DESC
+    LIMIT 5
+  `
+  );
+  metrics.topPerformers = topPerformers;
+
+  // Recent funding
+  const recentFunding = await safeQuery(
+    "recentFunding",
+    `
+    SELECT 
+      COUNT(*) FILTER (WHERE funding_date >= CURRENT_DATE - INTERVAL '7 days') as funded_last_7_days,
+      COUNT(*) FILTER (WHERE funding_date >= CURRENT_DATE - INTERVAL '30 days') as funded_last_30_days
+    FROM public.loans l WHERE funding_date IS NOT NULL
+  `
+  );
+  metrics.funding = recentFunding[0] || {};
+
+  return metrics;
+}
+
+// ============================================================================
+// Suggested Questions
+// ============================================================================
+
+function generateSuggestedQuestions(
+  currentQuestion: string,
+  hasKnowledge: boolean
+): string[] {
+  const q = currentQuestion.toLowerCase();
+
+  const dataSuggestions = [
+    "Show me loan volume by month",
+    "Top 10 loan officers by revenue",
+    "Pipeline breakdown by status",
+    "Funding trends this quarter",
+  ];
+
+  const knowledgeSuggestions = [
+    "What are the FHA loan requirements?",
+    "Explain DTI ratio guidelines",
+    "What documentation is required for VA loans?",
+  ];
+
+  const hybridSuggestions = [
+    "How do our FHA loans compare to guidelines?",
+    "Show me loans that might not meet compliance thresholds",
+  ];
+
+  // Mix based on context
+  if (hasKnowledge) {
+    return [
+      ...dataSuggestions.slice(0, 2),
+      ...knowledgeSuggestions.slice(0, 2),
+    ];
+  }
+
+  return dataSuggestions;
+}
+
+// ============================================================================
+// Main Hybrid Processing
+// ============================================================================
+
+interface GatheredContext {
+  dataQueryResult?: {
+    query: GeneratedQuery;
+    result: QueryResult;
+    formattedData: any[];
+  };
+  ragContext: RAGContext;
+  insightMetrics?: Record<string, any>;
+}
+
+/**
+ * Gather all available context in parallel
+ */
+async function gatherAllContext(
+  question: string,
+  context: ChatContext,
+  conversationHistory: CohiChatMessage[]
+): Promise<GatheredContext> {
+  console.log(`[CohiChat] Gathering context for: "${question}"`);
+
+  // Run all context gathering in parallel
+  const [ragContext, queryConfig] = await Promise.all([
+    retrieveRAGContext(context.tenantId, question, 5, 0.3),
+    generateQuery(question, context, conversationHistory),
+  ]);
+
+  let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
+
+  // If we got a valid query, try to execute it
+  if (queryConfig?.sql) {
+    try {
+      const result = await executeQuery(
+        queryConfig.sql,
+        queryConfig.params,
+        context
+      );
+      if (result.rowCount > 0) {
+        const formattedData = formatDataRows(result.rows);
+        dataQueryResult = {
+          query: queryConfig,
+          result,
+          formattedData,
+        };
+      }
+    } catch (error: any) {
+      console.log(`[CohiChat] Data query failed: ${error.message}`);
+    }
+  }
+
+  // Gather insight metrics for open-ended questions
+  let insightMetrics: Record<string, any> | undefined;
+  const isOpenEnded =
+    /how are we|what.*(important|happening|know)|status|update|overview/i.test(
+      question
+    );
+  if (isOpenEnded) {
+    try {
+      insightMetrics = await gatherInsightMetrics(context);
+    } catch (error) {
+      console.log("[CohiChat] Failed to gather insight metrics");
+    }
+  }
+
+  console.log(
+    `[CohiChat] Context gathered - Data: ${!!dataQueryResult}, Knowledge: ${
+      ragContext.totalChunks
+    } chunks, Insights: ${!!insightMetrics}`
+  );
+
+  return {
+    dataQueryResult,
+    ragContext,
+    insightMetrics,
+  };
+}
+
+/**
+ * Generate a unified response using all available context
+ */
+async function generateUnifiedResponse(
+  question: string,
+  context: ChatContext,
+  gathered: GatheredContext
+): Promise<CohiChatResponse> {
+  const apiKey = await getOpenAIKey(context.tenantId);
+
+  // Build context sections for the LLM
+  const contextParts: string[] = [];
+
+  // Add knowledge base context if available
+  if (gathered.ragContext.totalChunks > 0) {
+    contextParts.push("## Knowledge Base Information");
+    gathered.ragContext.chunks.forEach((chunk, i) => {
+      const source = gathered.ragContext.sources[i] || `Source ${i + 1}`;
+      contextParts.push(`[${source}]:\n${chunk}`);
+    });
+  }
+
+  // Add loan data if available
+  if (gathered.dataQueryResult) {
+    contextParts.push("\n## Your Loan Data (Query Results)");
+    const preview = gathered.dataQueryResult.formattedData.slice(0, 15);
+    contextParts.push(`Query: ${gathered.dataQueryResult.query.explanation}`);
+    contextParts.push(
+      `Results (${gathered.dataQueryResult.result.rowCount} rows):`
+    );
+    contextParts.push(JSON.stringify(preview, null, 2));
+    if (gathered.dataQueryResult.result.rowCount > 15) {
+      contextParts.push(
+        `... and ${gathered.dataQueryResult.result.rowCount - 15} more rows`
+      );
+    }
+  }
+
+  // Add insight metrics if available
+  if (gathered.insightMetrics) {
+    contextParts.push("\n## Current Business Metrics");
+    contextParts.push(
+      `Active Pipeline: ${
+        gathered.insightMetrics.activeLoans?.active_count || 0
+      } loans`
+    );
+    contextParts.push(
+      `Last 30 Days: ${
+        gathered.insightMetrics.volume?.recent_count || 0
+      } new applications`
+    );
+    if (gathered.insightMetrics.topPerformers?.length > 0) {
+      contextParts.push(
+        "Top Performers: " +
+          gathered.insightMetrics.topPerformers
+            .map((p: any) => p.loan_officer)
+            .join(", ")
+      );
+    }
+  }
+
+  const hasAnyContext = contextParts.length > 0;
+
+  // Get prompt configuration from database (with fallback to defaults)
+  const promptConfig = await getPromptConfig("cohi_chat.response");
+
+  // Build the system prompt with variable substitution
+  const systemPrompt = buildPrompt(promptConfig.system_prompt, {
+    combinedContext: hasAnyContext
+      ? contextParts.join("\n\n")
+      : "No specific context available for this query.",
+  });
+
+  const messages: OpenAIChatMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: question },
+  ];
+
+  const response = await callOpenAI(messages, apiKey, {
+    temperature: promptConfig.temperature,
+    maxTokens: promptConfig.max_tokens,
+  });
+
+  // Build visualization if we have data
+  let visualization: VisualizationConfig | undefined;
+  let data: any[] | undefined;
+
+  if (gathered.dataQueryResult) {
+    visualization = buildVisualizationConfig(
+      gathered.dataQueryResult.formattedData,
+      gathered.dataQueryResult.query
+    );
+    data = gathered.dataQueryResult.formattedData;
+  }
+
+  // Add source attribution
+  let message = response;
+  if (gathered.ragContext.sources.length > 0) {
+    message += `\n\n📚 **Sources:** ${gathered.ragContext.sources.join(", ")}`;
+  }
+
+  return {
+    message,
+    visualization,
+    data,
+    suggestedQuestions: generateSuggestedQuestions(
+      question,
+      gathered.ragContext.totalChunks > 0
+    ),
+    sources: {
+      dataQuery: !!gathered.dataQueryResult,
+      knowledgeBase:
+        gathered.ragContext.sources.length > 0
+          ? gathered.ragContext.sources
+          : undefined,
+    },
+  };
+}
+
+// ============================================================================
+// Non-Query Handlers (greetings, help, etc.)
+// ============================================================================
+
+function isGreeting(question: string): boolean {
+  return /^(hi|hello|hey|good morning|good afternoon|good evening|howdy|greetings)\b/i.test(
+    question.toLowerCase().trim()
+  );
+}
+
+function isHelp(question: string): boolean {
+  return /^(help|what can you do|how do you work|what are you|who are you)\b/i.test(
+    question.toLowerCase().trim()
+  );
+}
+
+function generateGreetingResponse(): CohiChatResponse {
+  return {
+    message:
+      "Hello! I'm Cohi, your AI assistant. I can help you with:\n\n" +
+      "**📊 Data Analysis** - Ask about your loans, pipeline, performance metrics\n" +
+      "**📚 Knowledge** - Questions about regulations, guidelines, policies\n" +
+      "**🔍 Combined Insights** - I'll automatically find relevant data AND knowledge\n\n" +
+      "What would you like to know?",
+    suggestedQuestions: [
+      "What's important to know today?",
+      "Show me loan volume by month",
+      "What are the FHA requirements?",
+      "Top loan officers by revenue",
+    ],
+  };
+}
+
+function generateHelpResponse(): CohiChatResponse {
+  return {
+    message:
+      "I'm Cohi, your intelligent mortgage analytics assistant! Here's how I can help:\n\n" +
+      "**Ask me anything** - I automatically search both your loan data AND our knowledge base to give you the most complete answer.\n\n" +
+      "**Example questions:**\n" +
+      '- "Show me loans by branch" → Data visualization\n' +
+      '- "What are FHA guidelines?" → Knowledge base lookup\n' +
+      '- "How do our VA loans compare to requirements?" → Combined analysis\n' +
+      '- "What\'s happening today?" → Executive summary\n\n' +
+      "Just ask naturally - I'll figure out the best way to answer!",
+    suggestedQuestions: [
+      "What important info do I need to know today?",
+      "Show me pipeline by status",
+      "What documentation is required for VA loans?",
+      "Top performers this month",
+    ],
+  };
+}
+
+// ============================================================================
+// Main Chat Function
+// ============================================================================
+
+export async function processCohiQuestion(
+  question: string,
+  context: ChatContext,
+  conversationHistory: CohiChatMessage[] = []
+): Promise<CohiChatResponse> {
+  try {
+    console.log(
+      `[CohiChat] Processing: "${question}" for tenant ${context.tenantId}`
+    );
+
+    // Handle simple cases first
+    if (isGreeting(question)) {
+      return generateGreetingResponse();
+    }
+
+    if (isHelp(question)) {
+      return generateHelpResponse();
+    }
+
+    // Gather all context in parallel (the key innovation!)
+    const gathered = await gatherAllContext(
+      question,
+      context,
+      conversationHistory
+    );
+
+    // Generate unified response
+    return await generateUnifiedResponse(question, context, gathered);
+  } catch (error: any) {
+    console.error("[CohiChat] Error processing question:", error);
+
+    let userMessage = "I encountered an error while processing your question.";
+
+    if (error.code === "42703") {
+      userMessage =
+        "I tried to use a field that doesn't exist in your data. Let me try a different approach.";
+    } else if (error.message?.includes("OpenAI")) {
+      userMessage =
+        "I'm having trouble connecting to my AI assistant. Please try again.";
+    }
+
+    return {
+      message: userMessage + " Here are some questions you can try:",
+      error: error.message,
+      suggestedQuestions: [
+        "Show me loan volume by month",
+        "Top 10 loan officers",
+        "Pipeline breakdown",
+        "What are the FHA requirements?",
+      ],
+    };
+  }
+}
+
+// ============================================================================
+// Refine Query
+// ============================================================================
+
+export async function refineCohiQuery(
+  originalQuestion: string,
+  refinement: string,
+  previousResult: CohiChatResponse,
+  context: ChatContext
+): Promise<CohiChatResponse> {
+  const combinedQuestion = `Based on the previous question "${originalQuestion}", ${refinement}`;
+
+  const history: CohiChatMessage[] = [
+    {
+      id: "prev-user",
+      role: "user",
+      content: originalQuestion,
+      timestamp: new Date(),
+    },
+    {
+      id: "prev-assistant",
+      role: "assistant",
+      content: previousResult.message,
+      visualization: previousResult.visualization,
+      timestamp: new Date(),
+    },
+  ];
+
+  return processCohiQuestion(combinedQuestion, context, history);
+}
+
+// ============================================================================
+// Data Formatting Utilities
+// ============================================================================
+
+function isISODateString(value: any): boolean {
+  if (value instanceof Date) return true;
+  if (typeof value !== "string") return false;
+  return /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?)?$/.test(value);
+}
+
+function isNumericString(value: any): boolean {
+  if (typeof value !== "string") return false;
+  return /^-?\d+(\.\d+)?$/.test(value);
+}
+
+function formatDateValue(value: string | Date): string {
+  try {
+    const date = value instanceof Date ? value : new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+
+    const day = date.getDate();
+    const month = date.toLocaleDateString("en-US", { month: "short" });
+    const year = date.getFullYear();
+
+    const dayOfWeek = date.getDay();
+    const isLikelyWeekStart =
+      (dayOfWeek === 0 || dayOfWeek === 1) &&
+      [1, 2, 7, 8, 14, 15, 21, 22, 28, 29].includes(day);
+    const isFirstOfMonth = day === 1;
+
+    if (isFirstOfMonth) {
+      return `${month} ${year}`;
+    } else if (isLikelyWeekStart) {
+      return `Week of ${month} ${day}`;
+    } else {
+      return `${month} ${day}`;
+    }
+  } catch {
+    return String(value);
+  }
+}
+
+function formatDataRows(rows: any[]): any[] {
+  if (!rows || rows.length === 0) return rows;
+
+  return rows.map((row) => {
+    const formatted: Record<string, any> = {};
+
+    for (const [key, value] of Object.entries(row)) {
+      if (value === null || value === undefined) {
+        formatted[key] = null;
+      } else if (isISODateString(value)) {
+        formatted[key] = formatDateValue(value as string);
+      } else if (isNumericString(value)) {
+        const num = parseFloat(value as string);
+        formatted[key] = num % 1 === 0 ? num : Math.round(num * 100) / 100;
+      } else if (typeof value === "number") {
+        formatted[key] =
+          value % 1 === 0 ? value : Math.round(value * 100) / 100;
+      } else {
+        formatted[key] = value;
+      }
+    }
+
+    return formatted;
+  });
+}
+
+// ============================================================================
+// Exports
+// ============================================================================
+
+// Export types with aliases for backwards compatibility
+export type DataChatMessage = CohiChatMessage;
+export type DataChatResponse = CohiChatResponse;
+
+// Export main functions
+export { generateQuery, executeQuery, buildVisualizationConfig };
