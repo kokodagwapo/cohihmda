@@ -4,6 +4,7 @@ import { X, Sparkles, Loader2 } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { api } from '@/lib/api';
+import { useTenantStore } from '@/stores/tenantStore';
 
 interface RiskSummary {
   risks: string[];
@@ -71,6 +72,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
   onClose,
   isDarkMode = false
 }) => {
+  const { selectedTenantId } = useTenantStore();
   const [emailLoading, setEmailLoading] = useState(false);
   const [aiRecommendations, setAiRecommendations] = useState<string[] | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -90,8 +92,9 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
     setAiLoading(true);
     setAiError(null);
     try {
+      const tenantQuery = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : '';
       const response = await api.request<{ recommendations: string[] }>(
-        `/api/loans/${encodeURIComponent(loan.id)}/recommendations`,
+        `/api/predictions/${encodeURIComponent(loan.id)}/recommendations${tenantQuery}`,
         { method: 'GET' }
       );
       setAiRecommendations(response.recommendations || []);

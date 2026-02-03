@@ -14,7 +14,7 @@ import { ClosingFalloutMetricModal } from '@/components/dashboard/modals/Closing
 import { OutcomeLoansModal, type OutcomeModalType } from '@/components/dashboard/modals/OutcomeLoansModal';
 import { LoanRiskDetailModal } from '@/components/dashboard/modals/LoanRiskDetailModal';
 import { PeriodValue, getLoanAmountNumber, isDateInPeriod, isFundedInPeriod, getPeriodRange, inferLoanStatus } from '@/utils/closingFalloutFilters';
-import { transformLoanToCard } from '@/utils/loanDataTransform';
+import { transformLoanToCard, aggregateLoanOfficers } from '@/utils/loanDataTransform';
 import { ExportShareMenu } from '@/components/common/ExportShareMenu';
 import type { ExportData } from '@/utils/exportUtils';
 
@@ -1216,6 +1216,31 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
     }
   };
 
+  useEffect(() => {
+    if (insightsTab === 'officers') {
+      ensureLoansLoaded();
+    }
+  }, [insightsTab, ensureLoansLoaded]);
+
+  const loanOfficerData = useMemo(() => {
+    if (!loansRaw || loansRaw.length === 0) return [];
+    const now = new Date();
+    const filtered = loansRaw.filter((loan) => {
+      if (deferredPeriod === 'all') return true;
+      const date =
+        loan?.application_date ||
+        loan?.started_date ||
+        loan?.start_date ||
+        loan?.closing_date ||
+        loan?.lock_date ||
+        loan?.fund_date ||
+        null;
+      return isDateInPeriod(date, deferredPeriod, now);
+    });
+    const cards = filtered.map((loan) => transformLoanToCard(loan));
+    return aggregateLoanOfficers(cards);
+  }, [loansRaw, deferredPeriod]);
+
   const handleMetricClick = async (label: string) => {
     ensureLoansLoaded(); // Load full set if needed (no refetch if already loaded)
 
@@ -1792,10 +1817,23 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
 
             {insightsTab === 'officers' && (
               (() => {
-                // TODO: Replace with actual loan officer data from API using aggregateLoanOfficers utility
-                const mockOfficers: Array<{ name: string; activeLoans: number; pullThrough: string; volume: string; risk: 'Low' | 'Medium' | 'High' }> = [];
-                
-                return mockOfficers.length === 0 ? (
+                if (loansLoading && !loansRaw) {
+                  return (
+                    <div className={`text-center py-12 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Loading loan officer activity...
+                    </div>
+                  );
+                }
+
+                if (loansError) {
+                  return (
+                    <div className={`text-center py-12 ${isDarkMode ? 'text-rose-400' : 'text-rose-600'}`}>
+                      {loansError}
+                    </div>
+                  );
+                }
+
+                return loanOfficerData.length === 0 ? (
                   <div className={`text-center py-12 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                     <svg className="w-12 h-12 mx-auto mb-4 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -1805,7 +1843,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-                    {mockOfficers.slice(0, 16).map((mlo, index) => (
+                    {loanOfficerData.slice(0, 16).map((mlo, index) => (
                       <div 
                         key={mlo.name} 
                         className={`flex items-center justify-between p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl transition-all duration-200 group cursor-pointer active:scale-[0.98] ${isDarkMode ? 'bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]' : 'bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}

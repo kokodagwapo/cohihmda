@@ -19,6 +19,46 @@ const resolveElement = (ref: RefObject<HTMLElement> | HTMLElement) => {
   return ref?.current || null;
 };
 
+const getCaptureDimensions = (element: HTMLElement) => {
+  const rect = element.getBoundingClientRect();
+  const width = Math.ceil(Math.max(rect.width, element.scrollWidth));
+  const height = Math.ceil(Math.max(rect.height, element.scrollHeight));
+  return { width, height };
+};
+
+const buildCanvasOptions = (element: HTMLElement) => {
+  const { width, height } = getCaptureDimensions(element);
+  const exportId = `export-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  element.setAttribute("data-export-id", exportId);
+
+  return {
+    exportId,
+    options: {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      scrollX: -window.scrollX,
+      scrollY: -window.scrollY,
+      windowWidth: width,
+      windowHeight: height,
+      onclone: (doc: Document) => {
+        const cloned = doc.querySelector(
+          `[data-export-id="${exportId}"]`
+        ) as HTMLElement | null;
+        if (!cloned) return;
+        cloned.style.overflow = "visible";
+        cloned.style.maxWidth = "none";
+        cloned.style.width = `${width}px`;
+        cloned.style.height = `${height}px`;
+        const body = doc.body;
+        body.style.width = `${width}px`;
+        body.style.height = `${height}px`;
+        body.style.overflow = "visible";
+      },
+    },
+  };
+};
+
 export async function exportElementAsImage(
   target: RefObject<HTMLElement> | HTMLElement,
   type: "png" | "jpeg",
@@ -29,11 +69,13 @@ export async function exportElementAsImage(
     throw new Error("Export target not found.");
   }
   const html2canvas = (await import("html2canvas")).default;
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    backgroundColor: "#ffffff",
-    useCORS: true,
-  });
+  const { exportId, options } = buildCanvasOptions(element);
+  let canvas: HTMLCanvasElement;
+  try {
+    canvas = await html2canvas(element, options);
+  } finally {
+    element.removeAttribute("data-export-id");
+  }
   const mime = type === "jpeg" ? "image/jpeg" : "image/png";
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, mime, 0.92)
@@ -57,11 +99,13 @@ export async function exportElementAsPdf(
   }
   const html2canvas = (await import("html2canvas")).default;
   const { jsPDF } = await import("jspdf");
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    backgroundColor: "#ffffff",
-    useCORS: true,
-  });
+  const { exportId, options } = buildCanvasOptions(element);
+  let canvas: HTMLCanvasElement;
+  try {
+    canvas = await html2canvas(element, options);
+  } finally {
+    element.removeAttribute("data-export-id");
+  }
   const imgData = canvas.toDataURL("image/png");
   const pdf = new jsPDF({
     orientation: canvas.width > canvas.height ? "landscape" : "portrait",
@@ -88,11 +132,13 @@ export async function exportElementAsPpt(
   pres.title = fileName || "Export";
   pres.layout = "LAYOUT_WIDE";
 
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    backgroundColor: "#ffffff",
-    useCORS: true,
-  });
+  const { exportId, options } = buildCanvasOptions(element);
+  let canvas: HTMLCanvasElement;
+  try {
+    canvas = await html2canvas(element, options);
+  } finally {
+    element.removeAttribute("data-export-id");
+  }
   const imageData = canvas.toDataURL("image/png");
   const cover = pres.addSlide();
   cover.addImage({ data: imageData, x: 0.3, y: 0.5, w: 12.7, h: 6.8 });
