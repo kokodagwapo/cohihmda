@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { BarChart3, Share2, ChevronLeft, X, Sparkles } from 'lucide-react';
+import { useState, useMemo, useRef } from 'react';
+import { BarChart3, ChevronLeft, X, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
@@ -7,6 +7,8 @@ import { DashboardCard } from '@/components/dashboard/DashboardCard';
 import { DataTable } from '@/components/dashboard/DataTable';
 import { useCompanyData } from '@/hooks/useCompanyData';
 import { useCompanyMetrics } from '@/hooks/useCompanyMetrics';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 
 interface CompanyDetailViewProps {
   onBack: () => void;
@@ -14,6 +16,7 @@ interface CompanyDetailViewProps {
 }
 
 export const CompanyDetailView = ({ onBack, onTabChange }: CompanyDetailViewProps) => {
+  const sectionRef = useRef<HTMLDivElement>(null);
   const [showRawData, setShowRawData] = useState(false);
   const [year, setYear] = useState(new Date().getFullYear());
   const { toast } = useToast();
@@ -87,6 +90,25 @@ export const CompanyDetailView = ({ onBack, onTabChange }: CompanyDetailViewProp
       }
     };
   }, [companyData]);
+
+  const getExportData = (): ExportData => {
+    const toTable = (title: string, headers: Array<{ key: string; label: string }>, rows: any[]) => ({
+      name: title,
+      headers: ["Branch", ...headers.map((h) => h.label)],
+      rows: (rows || []).map((row) => [
+        row.name || row.branch || row.label || row.company || "Unknown",
+        ...headers.map((h) => row?.[h.key] ?? "--"),
+      ]),
+    });
+
+    const tables = [
+      toTable(dashboardData.projectedClosings.title, dashboardData.projectedClosings.headers, dashboardData.projectedClosings.data),
+      toTable(dashboardData.finalDisposition.title, dashboardData.finalDisposition.headers, dashboardData.finalDisposition.data),
+      toTable(dashboardData.activeLoans.title, dashboardData.activeLoans.headers, dashboardData.activeLoans.data),
+    ];
+
+    return { title: "Company Detail", tables };
+  };
 
   // Calculate donut chart data from projected closings
   const donutData = useMemo(() => {
@@ -213,15 +235,21 @@ export const CompanyDetailView = ({ onBack, onTabChange }: CompanyDetailViewProp
         </div>
 
         {/* Company Detail Header */}
-        <div className="bg-white dark:bg-slate-900/70 rounded-xl p-3 sm:p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-4 sm:mb-6">
+        <div
+          ref={sectionRef}
+          className="bg-white dark:bg-slate-900/70 rounded-xl p-3 sm:p-4 md:p-6 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-4 sm:mb-6"
+        >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
             <h2 className="text-lg sm:text-2xl md:text-3xl font-extralight text-slate-900 dark:text-white tracking-tight">
               Company Detail
             </h2>
             <div className="flex items-center gap-2">
-              <button className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors">
-                <Share2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-              </button>
+              <ExportShareMenu
+                title="Company Detail"
+                targetRef={sectionRef}
+                getExportData={getExportData}
+                shareTarget={{ type: "company-detail", label: "Company Detail" }}
+              />
               <button onClick={onBack} className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors" title="Back to Company Overview">
                 <ChevronLeft className="w-4 h-4 text-slate-500 dark:text-slate-400" />
               </button>

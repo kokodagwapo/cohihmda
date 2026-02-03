@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Pin, RefreshCw, Sparkles, ChevronRight, MessageSquare } from 'lucide-react';
 import { useAletheiaData, AletheiaInsight } from '@/hooks/useAletheiaData';
 import { CohiBriefingControl } from '@/components/aletheia/CohiBriefingControl';
 import { Link } from 'react-router-dom';
 import { InsightDetailModal } from './InsightDetailModal';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 
 interface AletheiaPromptsCardProps {
   dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
@@ -30,6 +32,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   briefingContext,
   selectedTenantId
 }: AletheiaPromptsCardProps) {
+  const sectionRef = useRef<HTMLDivElement>(null);
   const [currentSet, setCurrentSet] = useState(0);
   const [expandedInsight, setExpandedInsight] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -144,6 +147,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   return (
     <div className="mb-6 sm:mb-10 aletheia-prompts-card">
       <motion.div
+        ref={sectionRef}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -173,6 +177,30 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           </div>
           {/* Briefing Controls and Refresh - Right side of header */}
           <div className="flex items-center gap-2">
+            <ExportShareMenu
+              title="Cohi Insights"
+              targetRef={sectionRef}
+              getExportData={(): ExportData => ({
+                title: "Cohi Insights",
+                tables: [
+                  {
+                    name: "Insights",
+                    headers: ["Type", "Message", "Reasoning", "Source"],
+                    rows: allInsights.map((insight) => [
+                      insight.type || "--",
+                      insight.message || "--",
+                      insight.reasoning || "--",
+                      insight.source || "--",
+                    ]),
+                  },
+                ],
+              })}
+              shareTarget={{
+                type: "cohi-insights",
+                tenantId: selectedTenantId || undefined,
+                label: "Cohi Insights",
+              }}
+            />
 {/* Documentation links hidden for now */}
             <button
               onClick={handleRefresh}
@@ -270,7 +298,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
             onMouseLeave={() => setIsPaused(false)}
           >
             {currentInsights.map((insight, idx) => {
-              const globalIdx = unpinnedInsights.findIndex(i => i === insight) + (currentSet * 3);
+              const globalIdx = allInsights.indexOf(insight);
               const insightId = getInsightId(insight, globalIdx);
               const InsightIcon = insight.icon;
               const canDrill = isDrillable(insight);

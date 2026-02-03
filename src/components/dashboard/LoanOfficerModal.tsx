@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 
 interface OfficerData {
   name: string;
@@ -47,6 +49,7 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
   onClose,
   isDarkMode = false
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
   const [officer, setOfficer] = useState<OfficerData | null>(null);
   const [riskBreakdown, setRiskBreakdown] = useState<{ veryHigh: number; medium: number; low: number } | null>(null);
   const [loans, setLoans] = useState<LoanDetail[]>([]);
@@ -54,6 +57,26 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
   const [insights, setInsights] = useState<string>('');
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [sortBy, setSortBy] = useState<'risk' | 'amount' | 'borrower'>('risk');
+
+  const getExportData = (): ExportData => ({
+    title: `${officerName} Loans`,
+    tables: [
+      {
+        name: "Loan Officer Detail",
+        headers: ["Borrower", "Amount", "Risk", "Status", "Type", "FICO", "LTV", "DTI"],
+        rows: loans.map((loan) => [
+          loan.borrower,
+          loan.amount,
+          loan.riskLevel,
+          loan.status,
+          loan.loanType,
+          loan.ficoScore ?? "--",
+          loan.ltvRatio ?? "--",
+          loan.dtiRatio ?? "--",
+        ]),
+      },
+    ],
+  });
 
   useEffect(() => {
     if (isOpen && officerName) {
@@ -250,10 +273,21 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-        <DialogHeader>
-          <DialogTitle>{officerName}</DialogTitle>
-          <DialogDescription>Portfolio Analysis</DialogDescription>
+      <DialogContent
+        ref={modalRef}
+        className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+      >
+        <DialogHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <DialogTitle>{officerName}</DialogTitle>
+            <DialogDescription>Portfolio Analysis</DialogDescription>
+          </div>
+          <ExportShareMenu
+            title={`${officerName} Loans`}
+            targetRef={modalRef}
+            getExportData={getExportData}
+            shareTarget={{ type: "loan-officer-detail", id: officerName, label: officerName }}
+          />
         </DialogHeader>
         
         {loading ? (

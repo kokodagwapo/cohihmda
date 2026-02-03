@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, Zap, CalendarDays, ChevronDown, X } from 'lucide-react';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, Zap, CalendarDays, ChevronDown, X, UserRound } from 'lucide-react';
 import { format, subQuarters, subMonths, subYears, startOfQuarter, startOfMonth, startOfYear, endOfQuarter, endOfMonth, endOfYear, startOfWeek, subWeeks } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLeaderboardData, LeaderboardLeader, LeaderboardTimeframe } from '@/hooks/useLeaderboardData';
@@ -7,6 +7,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 
 /** Golden certificate seal icon (scalloped border, star ring, blank center) for rank badge */
 function CertificateSealIcon({ className, size = 32, id: sealId }: { className?: string; size?: number; id: string }) {
@@ -43,8 +45,6 @@ function CertificateSealIcon({ className, size = 32, id: sealId }: { className?:
         }).join(' ');
         return <polygon key={i} points={star} fill="rgba(180,83,9,0.4)" />;
       })}
-      {/* blank center for rank number overlay */}
-      <circle cx={r} cy={r} r={r * 0.36} fill="#fef9c3" stroke="rgba(253,224,71,0.5)" strokeWidth={0.4} />
     </svg>
   );
 }
@@ -72,6 +72,7 @@ interface LeaderBoardSectionProps {
 }
 
 export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = false }: LeaderBoardSectionProps) => {
+  const sectionRef = useRef<HTMLDivElement>(null);
   // Default to Last Quarter (lq)
   const [period, setPeriod] = useState<PeriodType>('lq');
   const [scope, setScope] = useState<'All' | 'Branch' | 'Team'>('All');
@@ -424,7 +425,46 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5);
 
-  return <section className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
+  const getExportData = (): ExportData => {
+    const headers = [
+      "LO Name",
+      "Units",
+      "Ranking",
+      "Volume $",
+      "Ranking",
+      "Pull-Through",
+      "Ranking",
+      "Turn-Time",
+      "Ranking",
+      "Revenue",
+      "Ranking",
+    ];
+    const rows = leadersData.map((leader) => [
+      leader.name,
+      leader.loans,
+      rankMap.units.get(leader.id) || "--",
+      leader.volume,
+      rankMap.volume.get(leader.id) || "--",
+      `${leader.pullThru}%`,
+      rankMap.pullThrough.get(leader.id) || "--",
+      `${leader.cycleTime} days`,
+      rankMap.turnTime.get(leader.id) || "--",
+      leader.revenue,
+      rankMap.revenue.get(leader.id) || "--",
+    ]);
+    return {
+      title: "Leaderboard",
+      tables: [
+        {
+          name: "Leaderboard Rankings",
+          headers,
+          rows,
+        },
+      ],
+    };
+  };
+
+  return <section ref={sectionRef} className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
@@ -445,6 +485,16 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
         
         {/* Period Picker - DatePeriodPicker style */}
         <div className="flex items-center gap-2 flex-wrap">
+          <ExportShareMenu
+            title="Leaderboard"
+            targetRef={sectionRef}
+            getExportData={getExportData}
+            shareTarget={{
+              type: "leaderboard",
+              tenantId: selectedTenantId || undefined,
+              label: "Leaderboard",
+            }}
+          />
           {/* To-Date periods */}
           <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
             {(['wtd', 'mtd', 'qtd'] as const).map(p => (
@@ -662,25 +712,14 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
             <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center justify-center">
               <div className="relative w-7 h-7 sm:w-8 sm:h-8">
                 <CertificateSealIcon id={`seal-${leader.id}`} size={28} className="w-7 h-7 sm:w-8 sm:h-8" />
-                <span className="absolute inset-0 flex items-center justify-center text-lg sm:text-xl font-bold text-slate-900 dark:text-white [-webkit-text-stroke:3px_white] [paint-order:stroke_fill] [text-shadow:0_0_2px_white,0_0_4px_white]">{idx + 1}</span>
+                <span className="absolute inset-0 flex items-center justify-center text-lg sm:text-xl font-bold text-slate-900 dark:text-white/95">{idx + 1}</span>
               </div>
             </div>
 
             {/* Content */}
             <div className="space-y-2 sm:space-y-3">
-              {/* Avatar + Name (avatar hidden when hideAvatar) */}
+              {/* Name */}
               <div className="flex items-center gap-2.5 sm:gap-3 pr-8 sm:pr-9 min-w-0">
-                {!hideAvatar && (
-                  <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden bg-gradient-to-br from-teal-400 to-teal-600 ring-2 ring-white/80 dark:ring-slate-700/80">
-                    {leader.avatarUrl ? (
-                      <img src={leader.avatarUrl} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="w-full h-full flex items-center justify-center text-sm font-semibold text-white">
-                        {leader.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </span>
-                    )}
-                  </div>
-                )}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm sm:text-base font-medium text-slate-900 dark:text-white truncate">{leader.name}</p>
                   <p className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">{leader.role}</p>
@@ -766,17 +805,94 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
                   <table className="w-full min-w-[640px] border-collapse text-left">
                     <thead>
                       <tr className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
-                        <th className="py-2.5 px-2 sm:px-3">LO Name</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Units</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Volume $</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Pull-Through</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Turn-Time</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Revenue</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
+                        <th className="py-2.5 px-2 sm:px-3">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="inline-flex items-center justify-center text-slate-500 dark:text-slate-300">
+                              <UserRound className="w-3.5 h-3.5" />
+                            </span>
+                            LO Name
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-sky-600 dark:text-sky-400">
+                              <Rocket className="w-3.5 h-3.5" />
+                            </span>
+                            Units
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-violet-600 dark:text-violet-400">
+                              <Zap className="w-3.5 h-3.5" />
+                            </span>
+                            Volume $
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                              <Gauge className="w-3.5 h-3.5" />
+                            </span>
+                            Pull-Through
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-blue-600 dark:text-blue-400">
+                              <Timer className="w-3.5 h-3.5" />
+                            </span>
+                            Turn-Time
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-teal-600 dark:text-teal-400">
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                            </span>
+                            Revenue
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
