@@ -1,4 +1,7 @@
+import type { RefObject } from 'react';
 import { PanelLeft } from 'lucide-react';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
@@ -7,10 +10,22 @@ export interface TopTieringTopBarProps {
   title?: string;
   onOpenSidebar?: () => void;
   className?: string;
+  exportTargetRef?: RefObject<HTMLElement>;
+  shareTargetType?: string;
 }
 
-export function TopTieringTopBar({ title = 'Loan Funnel', onOpenSidebar, className }: TopTieringTopBarProps) {
+export function TopTieringTopBar({
+  title = 'Loan Funnel',
+  onOpenSidebar,
+  className,
+  exportTargetRef,
+  shareTargetType = 'toptiering-page',
+}: TopTieringTopBarProps) {
   const isMobile = useIsMobile();
+  const getExportData = (): ExportData => ({
+    title,
+    tables: [],
+  });
 
   return (
     <div
@@ -33,6 +48,16 @@ export function TopTieringTopBar({ title = 'Loan Funnel', onOpenSidebar, classNa
       <h1 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
         {title}
       </h1>
+      <div className="ml-auto">
+        {exportTargetRef && (
+          <ExportShareMenu
+            title={title}
+            targetRef={exportTargetRef}
+            getExportData={getExportData}
+            shareTarget={{ type: shareTargetType, label: title }}
+          />
+        )}
+      </div>
     </div>
   );
 }

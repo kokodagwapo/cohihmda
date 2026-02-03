@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Newspaper,
@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { ExportShareMenu } from "@/components/common/ExportShareMenu";
 
 function MarketIntelligenceTicker() {
   const RATE_INDICES = [
@@ -122,6 +123,7 @@ function MarketIntelligenceTicker() {
  * with source selection, filtering, and detailed article views
  */
 export const IndustryNewsCard = () => {
+  const cardRef = useRef<HTMLDivElement>(null);
   const [newsFeed, setNewsFeed] = useState<any[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError, setNewsError] = useState<string | null>(null);
@@ -595,6 +597,7 @@ export const IndustryNewsCard = () => {
     <div className="mb-6 sm:mb-10">
       {/* Refined Preview Card - Enhanced Typography & Layout */}
       <motion.div
+        ref={cardRef}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -621,17 +624,24 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           {/* Source Selector Button - Mobile First */}
-          <button
-            onClick={() => setShowSourceSelector(true)}
-            className="flex items-center justify-center p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
-            aria-label={`Select news sources (${selectedSources.length}/${availableSources.length})`}
-            title={`Sources (${selectedSources.length}/${availableSources.length})`}
-          >
-            <Settings
-              className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700 dark:text-slate-300"
-              strokeWidth={1.5}
+          <div className="flex items-center gap-2">
+            <ExportShareMenu
+              title="Industry News"
+              targetRef={cardRef}
+              shareTarget={{ type: "industry-news", label: "Industry News" }}
             />
-          </button>
+            <button
+              onClick={() => setShowSourceSelector(true)}
+              className="flex items-center justify-center p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
+              aria-label={`Select news sources (${selectedSources.length}/${availableSources.length})`}
+              title={`Sources (${selectedSources.length}/${availableSources.length})`}
+            >
+              <Settings
+                className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700 dark:text-slate-300"
+                strokeWidth={1.5}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Market Intelligence Ticker - Optimal Blue style */}

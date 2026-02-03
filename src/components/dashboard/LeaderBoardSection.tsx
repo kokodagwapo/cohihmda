@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, Zap, CalendarDays, ChevronDown, X, UserRound } from 'lucide-react';
 import { format, subQuarters, subMonths, subYears, startOfQuarter, startOfMonth, startOfYear, endOfQuarter, endOfMonth, endOfYear, startOfWeek, subWeeks } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7,6 +7,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 
 /** Golden certificate seal icon (scalloped border, star ring, blank center) for rank badge */
 function CertificateSealIcon({ className, size = 32, id: sealId }: { className?: string; size?: number; id: string }) {
@@ -70,6 +72,7 @@ interface LeaderBoardSectionProps {
 }
 
 export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = false }: LeaderBoardSectionProps) => {
+  const sectionRef = useRef<HTMLDivElement>(null);
   // Default to Last Quarter (lq)
   const [period, setPeriod] = useState<PeriodType>('lq');
   const [scope, setScope] = useState<'All' | 'Branch' | 'Team'>('All');
@@ -422,7 +425,46 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
   const top5 = leadersData.slice(0, 5);
   const others = leadersData.slice(5);
 
-  return <section className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
+  const getExportData = (): ExportData => {
+    const headers = [
+      "LO Name",
+      "Units",
+      "Ranking",
+      "Volume $",
+      "Ranking",
+      "Pull-Through",
+      "Ranking",
+      "Turn-Time",
+      "Ranking",
+      "Revenue",
+      "Ranking",
+    ];
+    const rows = leadersData.map((leader) => [
+      leader.name,
+      leader.loans,
+      rankMap.units.get(leader.id) || "--",
+      leader.volume,
+      rankMap.volume.get(leader.id) || "--",
+      `${leader.pullThru}%`,
+      rankMap.pullThrough.get(leader.id) || "--",
+      `${leader.cycleTime} days`,
+      rankMap.turnTime.get(leader.id) || "--",
+      leader.revenue,
+      rankMap.revenue.get(leader.id) || "--",
+    ]);
+    return {
+      title: "Leaderboard",
+      tables: [
+        {
+          name: "Leaderboard Rankings",
+          headers,
+          rows,
+        },
+      ],
+    };
+  };
+
+  return <section ref={sectionRef} className="mt-4 sm:mt-6 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-8">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
@@ -443,6 +485,16 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
         
         {/* Period Picker - DatePeriodPicker style */}
         <div className="flex items-center gap-2 flex-wrap">
+          <ExportShareMenu
+            title="Leaderboard"
+            targetRef={sectionRef}
+            getExportData={getExportData}
+            shareTarget={{
+              type: "leaderboard",
+              tenantId: selectedTenantId || undefined,
+              label: "Leaderboard",
+            }}
+          />
           {/* To-Date periods */}
           <div className="flex gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-lg">
             {(['wtd', 'mtd', 'qtd'] as const).map(p => (

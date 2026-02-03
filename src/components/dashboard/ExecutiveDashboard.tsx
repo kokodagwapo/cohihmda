@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target,
@@ -22,6 +22,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MetricExplainButton } from "@/components/common/MetricExplainButton";
+import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import type { ExportData, ExportTable } from "@/utils/exportUtils";
 import { api } from "@/lib/api";
 
 // Period options for KPI timeframe selectors (mortgage industry standard)
@@ -101,6 +103,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   } = useMetrics(selectedTenantId, year);
   const [metricsData, setMetricsData] = useState<Record<string, any>>({});
   const [loadingKpis, setLoadingKpis] = useState<Set<string>>(new Set());
+  const sectionRef = useRef<HTMLDivElement>(null);
   const [breakdownsData, setBreakdownsData] = useState<any>(null);
 
   // Fetch a single KPI's metrics based on its timeframe
@@ -690,29 +693,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       typeof metricsData.avg_cycle_time?.value === "number"
         ? metricsData.avg_cycle_time.value
         : parseFloat(metricsData.avg_cycle_time?.value as string) || 0;
-    // Stage breakdown: best practice = days in stage / loans funded per stage. Using typical pipeline proportions until stage-level metrics exist.
-    const stageRatios: Record<string, number> = {
-      "App to Lock": 0.21,
-      "Lock to UW": 0.13,
-      "UW to Approval": 0.29,
-      "Approval to CTC": 0.17,
-      "CTC to Closing": 0.2,
-    };
-    const cycleTimeByStage = Object.entries(stageRatios).map(
-      ([label, ratio]) => {
-        const current = Math.round(avgDaysToFunding * ratio);
-        const priorEst = Math.round(current * 1.1);
-        const change = current - priorEst;
-        return {
-          label,
-          values: [
-            formatBusinessValue(current, "days"),
-            formatBusinessValue(priorEst, "days"),
-            formatBusinessValue(change, "days"),
-          ],
-        };
-      }
-    );
+    const cycleTimeByStage: { label: string; values: string[] }[] = [];
 
     // Pull-Through: funded loans / applications (same period). Rolling 90D is industry standard for 30–45 day cycles.
     const pullThroughPercent =
@@ -726,22 +707,21 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         ? metricsData.total_units.value
         : parseFloat(metricsData.total_units?.value as string) || 0;
 
-    // Calculate breakdowns by loan type - use defaults (can be enhanced with additional metrics)
-    const loanTypeDistribution: Record<string, number> = {
-      Conventional: 0.6,
-      FHA: 0.25,
-      VA: 0.1,
-      USDA: 0.03,
-      Jumbo: 0.02,
-    };
-    const loanPurposeDistribution: Record<string, number> = {
-      Purchase: 0.65,
-      Refinance: 0.35,
-    };
-    const loanSizeDistribution: Record<string, number> = {
-      Jumbo: 0.15,
-      "Conforming Balance": 0.85,
-    };
+    const metricsHeadersLocal = [
+      "Units",
+      "Volume",
+      "Avg Rate",
+      "Avg Bal",
+      "FICO",
+      "LTV",
+    ];
+    const cycleTimeHeadersLocal = ["Current", "Prior", "Change"];
+    const pullThroughHeadersLocal = ["Value", "Co. Avg", "Status"];
+    const creditPullHeadersLocal = ["MTD", "Last Mo."];
+
+    const emptyRows = (headers: string[]) => [
+      { label: "No data", values: headers.map(() => "--") },
+    ];
 
     const mapBreakdownRows = (rows: any[] = []) =>
       rows.map((row) => {
@@ -771,201 +751,10 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     const hasClosedBreakdowns =
       breakdownsData?.closed?.byLoanType?.length > 0;
 
-    // Active Loans breakdowns - use defaults (can be enhanced with additional metrics)
-    const activeByLoanType = Object.entries(loanTypeDistribution).map(
-      ([type, pct]) => {
-        const units = Math.round(activeUnits * pct);
-        const volume = units * activeAvgBalance;
-        return {
-          label: type,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(activeAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    const activeByLoanPurpose = Object.entries(loanPurposeDistribution).map(
-      ([purpose, pct]) => {
-        const units = Math.round(activeUnits * pct);
-        const volume = units * activeAvgBalance;
-        return {
-          label: purpose,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(activeAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    const activeByLoanSize = Object.entries(loanSizeDistribution).map(
-      ([size, pct]) => {
-        const units = Math.round(activeUnits * pct);
-        const volume = units * activeAvgBalance;
-        return {
-          label: size,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(activeAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    // Active by stage (estimate distribution)
-    const stageDistribution = {
-      Locked: 0.4,
-      "Submitted to UW": 0.3,
-      Approved: 0.2,
-      CTC: 0.1,
-    };
-
-    const activeByStage = Object.entries(stageDistribution).map(
-      ([stage, pct]) => {
-        const units = Math.round(activeUnits * pct);
-        const volume = units * activeAvgBalance;
-        return {
-          label: stage,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(activeAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    // Closed Loans breakdowns - use defaults (can be enhanced with additional metrics)
-    const closedByLoanType = Object.entries(loanTypeDistribution).map(
-      ([type, pct]) => {
-        const units = Math.round(closedUnits * pct);
-        const volume = units * closedAvgBalance;
-        return {
-          label: type,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(closedAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    const closedByLoanPurpose = Object.entries(loanPurposeDistribution).map(
-      ([purpose, pct]) => {
-        const units = Math.round(closedUnits * pct);
-        const volume = units * closedAvgBalance;
-        return {
-          label: purpose,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(closedAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    const closedByLoanSize = Object.entries(loanSizeDistribution).map(
-      ([size, pct]) => {
-        const units = Math.round(closedUnits * pct);
-        const volume = units * closedAvgBalance;
-        return {
-          label: size,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(closedAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    // Locked Loans by expiration days
-    const expirationDistribution = {
-      "> 30 days": 0.35,
-      "15-29 days": 0.3,
-      "10-14 days": 0.2,
-      "< 9 days": 0.1,
-      Expired: 0.05,
-    };
-
-    const lockedByExpirationDays = Object.entries(expirationDistribution).map(
-      ([days, pct]) => {
-        const units = Math.round(lockedUnits * pct);
-        const volume = units * lockedAvgBalance;
-        return {
-          label: days,
-          values: [
-            formatBusinessValue(units, "units"),
-            formatBusinessValue(volume, "volume"),
-            formatBusinessValue(avgInterestRate, "rate"),
-            formatBusinessValue(lockedAvgBalance, "balance"),
-            formatBusinessValue(avgFICO, "fico"),
-            formatBusinessValue(avgLTV, "ltv"),
-          ],
-        };
-      }
-    );
-
-    // Cycle Time by loan type
-    const cycleTimeByLoanType = Object.keys(loanTypeDistribution).map(
-      (type) => {
-        const baseDays = avgDaysToFunding;
-        const variance =
-          type === "FHA" ? 2 : type === "VA" ? 1 : type === "Jumbo" ? -1 : 0;
-        const days = baseDays + variance;
-        return {
-          label: type,
-          values: [
-            formatBusinessValue(days, "days"),
-            days >= avgDaysToFunding ? "↑" : "↓",
-            days <= avgDaysToFunding ? "On Track" : "Delayed",
-          ],
-        };
-      }
-    );
-
-    // Pull-Through by loan type (fallback to overall rate until backend provides per-type)
-    const pullThroughByLoanType = Object.keys(loanTypeDistribution).map(
-      (type) => {
-        const pct = pullThroughPercent;
-        return {
-          label: type,
-          values: [
-            formatBusinessValue(pct, "percent"),
-            formatBusinessValue(companyAvg, "percent"),
-            pct >= companyAvg ? "Above" : "Below",
-          ],
-        };
-      }
-    );
+    const activeByStage: { label: string; values: string[] }[] = [];
+    const lockedByExpirationDays: { label: string; values: string[] }[] = [];
+    const cycleTimeByLoanType: { label: string; values: string[] }[] = [];
+    const pullThroughByLoanType: { label: string; values: string[] }[] = [];
 
     // Fallout breakdown: Withdrawn + Denied = fallout (inverse of pull-through). Use API metrics when available.
     const withdrawnUnits =
@@ -1006,33 +795,8 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       typeof metricsData.credit_pulls?.value === "number"
         ? metricsData.credit_pulls.value
         : parseFloat(metricsData.credit_pulls?.value as string) || 0;
-    const creditPullsByLoanType = Object.entries(loanTypeDistribution).map(
-      ([type, pct]) => {
-        const mtd = Math.round(creditPullsTotal * pct);
-        const lastMonth = Math.round(mtd * 0.92);
-        return {
-          label: type,
-          values: [
-            formatBusinessValue(mtd, "units"),
-            formatBusinessValue(lastMonth, "units"),
-          ],
-        };
-      }
-    );
-
-    const creditPullsByLoanPurpose = Object.entries(
-      loanPurposeDistribution
-    ).map(([purpose, pct]) => {
-      const mtd = Math.round(creditPullsTotal * pct);
-      const lastMonth = Math.round(mtd * 0.92);
-      return {
-        label: purpose,
-        values: [
-          formatBusinessValue(mtd, "units"),
-          formatBusinessValue(lastMonth, "units"),
-        ],
-      };
-    });
+    const creditPullsByLoanType: { label: string; values: string[] }[] = [];
+    const creditPullsByLoanPurpose: { label: string; values: string[] }[] = [];
 
     return {
       activeLoans: {
@@ -1049,16 +813,19 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         },
         byLoanType: hasActiveBreakdowns
           ? mapBreakdownRows(breakdownsData.active.byLoanType)
-          : activeByLoanType,
+          : emptyRows(metricsHeadersLocal),
         byLoanPurpose:
           breakdownsData?.active?.byLoanPurpose?.length > 0
             ? mapBreakdownRows(breakdownsData.active.byLoanPurpose)
-            : activeByLoanPurpose,
+            : emptyRows(metricsHeadersLocal),
         byLoanSize:
           breakdownsData?.active?.byLoanSize?.length > 0
             ? mapBreakdownRows(breakdownsData.active.byLoanSize)
-            : activeByLoanSize,
-        byStage: activeByStage,
+            : emptyRows(metricsHeadersLocal),
+        byStage:
+          activeByStage.length > 0
+            ? activeByStage
+            : emptyRows(metricsHeadersLocal),
       },
       closedLoans: {
         summary: {
@@ -1071,15 +838,15 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         },
         byLoanType: hasClosedBreakdowns
           ? mapBreakdownRows(breakdownsData.closed.byLoanType)
-          : closedByLoanType,
+          : emptyRows(metricsHeadersLocal),
         byLoanPurpose:
           breakdownsData?.closed?.byLoanPurpose?.length > 0
             ? mapBreakdownRows(breakdownsData.closed.byLoanPurpose)
-            : closedByLoanPurpose,
+            : emptyRows(metricsHeadersLocal),
         byLoanSize:
           breakdownsData?.closed?.byLoanSize?.length > 0
             ? mapBreakdownRows(breakdownsData.closed.byLoanSize)
-            : closedByLoanSize,
+            : emptyRows(metricsHeadersLocal),
       },
       lockedLoans: {
         summary: {
@@ -1090,21 +857,39 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           avgFICO: formatBusinessValue(avgFICO, "fico"),
           avgLTV: formatBusinessValue(avgLTV, "ltv"),
         },
-        byExpirationDays: lockedByExpirationDays,
+        byExpirationDays:
+          lockedByExpirationDays.length > 0
+            ? lockedByExpirationDays
+            : emptyRows(metricsHeadersLocal),
       },
       cycleTime: {
         avgDaysToFunding: formatBusinessValue(avgDaysToFunding, "days"),
-        byStage: cycleTimeByStage,
-        byLoanType: cycleTimeByLoanType,
+        byStage:
+          cycleTimeByStage.length > 0
+            ? cycleTimeByStage
+            : emptyRows(cycleTimeHeadersLocal),
+        byLoanType:
+          cycleTimeByLoanType.length > 0
+            ? cycleTimeByLoanType
+            : emptyRows(cycleTimeHeadersLocal),
       },
       pullThrough: {
         avgPercent: formatBusinessValue(pullThroughPercent, "percent"),
-        byLoanType: pullThroughByLoanType,
+        byLoanType:
+          pullThroughByLoanType.length > 0
+            ? pullThroughByLoanType
+            : emptyRows(pullThroughHeadersLocal),
         falloutBreakdown: falloutBreakdown,
       },
       creditPulls: {
-        byLoanType: creditPullsByLoanType,
-        byLoanPurpose: creditPullsByLoanPurpose,
+        byLoanType:
+          creditPullsByLoanType.length > 0
+            ? creditPullsByLoanType
+            : emptyRows(creditPullHeadersLocal),
+        byLoanPurpose:
+          creditPullsByLoanPurpose.length > 0
+            ? creditPullsByLoanPurpose
+            : emptyRows(creditPullHeadersLocal),
       },
     };
   };
@@ -1135,6 +920,43 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   const cycleTypeHeaders = ["Avg Days", "Trend", "Status"];
   const pullThroughHeaders = ["Value", "Co. Avg", "Status"];
   const creditPullHeaders = ["MTD", "Last Mo."];
+
+  const buildExportTables = (
+    sections: Array<{
+      title: string;
+      headers?: string[];
+      rows?: { label: string; values: string[] }[];
+      summaryData?: Record<string, string>;
+    }>
+  ): ExportTable[] =>
+    sections.map((section) => {
+      const headers = section.headers || metricsHeaders;
+      const rows: Array<Array<string>> = [];
+      if (section.summaryData) {
+        const summaryRow = summaryDataKeys.map(
+          (key) => section.summaryData?.[key] || "--"
+        );
+        rows.push(["Summary", ...summaryRow]);
+      }
+      if (section.rows) {
+        section.rows.forEach((row) => {
+          rows.push([row.label, ...row.values]);
+        });
+      }
+      return {
+        name: section.title,
+        headers: ["Label", ...headers],
+        rows,
+      };
+    });
+
+  const getCardExportData = (cardId: string): ExportData => {
+    const modalContent = getModalContent(cardId);
+    return {
+      title: modalContent.title,
+      tables: buildExportTables(modalContent.sections || []),
+    };
+  };
 
   // Helper to get timeframe label for modal subtitle
   const getTimeframeLabel = (cardId: string): string => {
@@ -1313,7 +1135,10 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   return (
     <div className="mb-8">
       {/* Business Overview Card */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-4 sm:p-6 md:p-8">
+      <div
+        ref={sectionRef}
+        className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900/70 border border-slate-100 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-4 sm:p-6 md:p-8"
+      >
         {/* Section Header - Matching Cohi Dialogues */}
         <div className="flex items-center justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
           <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
@@ -1331,6 +1156,15 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
               </p>
             </div>
           </div>
+          <ExportShareMenu
+            title="Business Overview"
+            targetRef={sectionRef}
+            shareTarget={{
+              type: "executive-dashboard",
+              tenantId: selectedTenantId || undefined,
+              label: "Business Overview",
+            }}
+          />
         </div>
 
         {/* KPI Cards Grid - 6 cards in a row */}

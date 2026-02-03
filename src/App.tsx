@@ -11,6 +11,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
 import Index from "./pages/Index";
+import ShareLink from "./pages/ShareLink";
 import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
@@ -84,6 +85,7 @@ const App = () => (
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
+              <Route path="/share/:token" element={<ShareLink />} />
               
               {/* Protected routes - require authentication */}
                 <Route path="/insights" element={

@@ -15,6 +15,8 @@ import { OutcomeLoansModal, type OutcomeModalType } from '@/components/dashboard
 import { LoanRiskDetailModal } from '@/components/dashboard/modals/LoanRiskDetailModal';
 import { PeriodValue, getLoanAmountNumber, isDateInPeriod, isFundedInPeriod, getPeriodRange, inferLoanStatus } from '@/utils/closingFalloutFilters';
 import { transformLoanToCard } from '@/utils/loanDataTransform';
+import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import type { ExportData } from '@/utils/exportUtils';
 
 interface ClosingFalloutForecastProps {
   dateFilter?: 'today' | 'mtd' | 'ytd' | 'custom';
@@ -508,6 +510,7 @@ const getMetricExplanation = (label: string) => {
  * Displays predictive analytics for loan closings and fallout risk
  */
 export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }: ClosingFalloutForecastProps) => {
+  const forecastRef = useRef<HTMLDivElement>(null);
   // ============================================================================
   // TESTING FLAG: Signal Strength Buckets Table
   // Set to true to display the loan signal strength buckets table
@@ -713,6 +716,30 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
       pipelineValue
     };
   }, [statsData, funnelData, loansRaw, loansError, deferredPeriod, predictions]);
+
+  const getExportData = (): ExportData => ({
+    title: "Closing & Fallout Forecast",
+    tables: [
+      {
+        name: "Key Metrics",
+        headers: ["Metric", "Value"],
+        rows: [
+          ["Active Loans Today", metrics.activeLoansToday],
+          ["Closed Loans MTD", metrics.closedLoansMTD],
+          ["Predicted Closings", metrics.predictedClosing],
+          ["Likely Close Late", metrics.likelyCloseLate],
+          ["Likely Withdraw", metrics.likelyWithdraw],
+          ["Likely Decline", metrics.likelyDecline],
+          ["Predicted Fallout Total", metrics.predictedFalloutTotal],
+          ["Pipeline Value (M)", metrics.pipelineValueM],
+          ["Pull-Through Rate", `${metrics.pullThroughRateDisplay}%`],
+          ["Fallout Rate", `${metrics.falloutRate}%`],
+          ["Locked Loans", metrics.lockedLoans],
+          ["Avg Cycle Time", `${metrics.avgCycleTime} days`],
+        ],
+      },
+    ],
+  });
 
   // Calculate KPIs for Pipeline Snapshot
   const kpis = useMemo(() => {
@@ -1220,7 +1247,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch">
           {/* Main Forecast Section */}
           <div className="md:col-span-8 lg:col-span-9 flex flex-col">
-            <DashboardCard className="relative flex-1 flex flex-col">
+            <div ref={forecastRef}>
+              <DashboardCard className="relative flex-1 flex flex-col">
               <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col">
           {/* Header */}
           <div className="mb-8 md:mb-10 flex items-start justify-between gap-3 sm:gap-4">
@@ -1238,6 +1266,16 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0 flex-wrap">
+              <ExportShareMenu
+                title="Closing & Fallout Forecast"
+                targetRef={forecastRef}
+                getExportData={getExportData}
+                shareTarget={{
+                  type: "closing-fallout-forecast",
+                  tenantId: selectedTenantId || undefined,
+                  label: "Closing & Fallout Forecast",
+                }}
+              />
               {/* Start Prediction - manual trigger; disabled until run completes */}
               <Button
                 type="button"
@@ -1425,7 +1463,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
             </Tooltip>
           </div>
               </div>
-            </DashboardCard>
+              </DashboardCard>
+            </div>
           </div>
 
           {/* Pipeline Snapshot Section */}

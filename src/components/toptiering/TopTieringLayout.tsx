@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Navigation } from '@/components/layout/Navigation';
@@ -25,6 +25,8 @@ export function TopTieringLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
+  const exportRef = useRef<HTMLDivElement>(null);
+  const disableTopBarExport = location.pathname === "/company-scorecard";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80">
@@ -44,11 +46,16 @@ export function TopTieringLayout() {
           onSidebarCollapsedChange={setSidebarCollapsed}
         />
         <div className="flex-1 flex flex-col min-w-0">
-          <TopTieringTopBar title={getTitle(location.pathname)} onOpenSidebar={() => setSidebarOpen(true)} />
+          <TopTieringTopBar
+            title={getTitle(location.pathname)}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            exportTargetRef={disableTopBarExport ? undefined : exportRef}
+          />
           <main className="flex-1 relative w-full min-h-0 overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}
+                ref={exportRef}
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -16 }}
