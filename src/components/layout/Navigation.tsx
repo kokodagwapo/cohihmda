@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3, Home } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -530,7 +530,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            <LayoutDashboard className="w-4 h-4 flex-shrink-0" />
+            <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
             <span>My Workbench</span>
           </button>
         </div>
@@ -580,18 +580,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           {/* Center: Main Navigation with Dropdowns (Desktop) - matches feb1cohi */}
           {isAuthenticated && (
             <div className="hidden lg:flex flex-1 justify-center items-center gap-2">
-              <Link
-                to="/"
-                className={cn(
-                  "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200",
-                  location.pathname === '/'
-                    ? "text-slate-900 dark:text-slate-100"
-                    : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
-                )}
-                aria-label="Home"
-              >
-                Home
-              </Link>
               {/* Insights Dropdown */}
               <div 
                 ref={insightsRef}
@@ -966,7 +954,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 )}
                 aria-label="My Workbench"
               >
-                <LayoutDashboard className={cn(
+                <LayoutPanelLeft className={cn(
                   "w-4 h-4 transition-colors duration-200",
                   isActive('/my-dashboard')
                     ? "text-slate-900 dark:text-slate-100"
@@ -979,7 +967,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           )}
 
           {/* Right: Actions */}
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-2">
             {/* Mobile Menu Button */}
             {isAuthenticated && (
               <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
@@ -1001,27 +989,22 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
 
             {/* Mobile: Current page indicator */}
             {isAuthenticated && (
-              <div className="lg:hidden flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-[120px]">
+              <div className="lg:hidden flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 text-slate-700 dark:text-slate-300 border border-slate-200/50 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
+                <span className="truncate max-w-[120px]">
                   {getCurrentPageLabel()}
                 </span>
               </div>
             )}
 
-            {/* Tenant Selector - Compact in header (visible for admins) */}
+            {/* Tenant + Channel selectors - nav-style pill (visible for admins) */}
             {isAuthenticated && !isAdminPage && (
-              <div className="hidden md:flex items-center">
+              <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/50 px-2 py-1.5">
                 <TenantSelector
                   selectedTenantId={selectedTenantId}
                   onTenantChange={setSelectedTenantId}
                   compact={true}
                 />
-              </div>
-            )}
-
-            {/* Channel Selector - Compact in header (hidden on admin pages) */}
-            {isAuthenticated && !isAdminPage && (
-              <div className="hidden lg:flex items-center">
+                <div className="h-6 w-px bg-slate-200 dark:bg-slate-600" aria-hidden />
                 <ChannelSelector
                   selectedChannel={selectedChannel}
                   onChannelChange={setSelectedChannel}
@@ -1030,6 +1013,11 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   useChannelGroups={true}
                 />
               </div>
+            )}
+
+            {/* Divider before theme + user (matches center nav) */}
+            {isAuthenticated && (
+              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden lg:block" aria-hidden />
             )}
 
             <ThemeIconToggle />

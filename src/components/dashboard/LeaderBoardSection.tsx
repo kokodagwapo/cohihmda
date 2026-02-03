@@ -718,19 +718,8 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
 
             {/* Content */}
             <div className="space-y-2 sm:space-y-3">
-              {/* Avatar + Name (avatar hidden when hideAvatar) */}
+              {/* Name */}
               <div className="flex items-center gap-2.5 sm:gap-3 pr-8 sm:pr-9 min-w-0">
-                {!hideAvatar && (
-                  <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden bg-gradient-to-br from-emerald-500 to-emerald-600 ring-2 ring-white/80 dark:ring-slate-700/80">
-                    {leader.avatarUrl ? (
-                      <img src={leader.avatarUrl} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="w-full h-full flex items-center justify-center text-sm font-semibold text-white">
-                        {leader.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </span>
-                    )}
-                  </div>
-                )}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm sm:text-base font-medium text-slate-900 dark:text-white truncate">{leader.name}</p>
                   <p className="text-[11px] sm:text-xs text-slate-400 dark:text-slate-500 truncate">{leader.role}</p>
