@@ -189,13 +189,17 @@ const INSIGHTS_CHILDREN = [
 ];
 type SubsectionKey = 'dashboard' | 'topTiering' | 'sales' | 'operations' | 'financialModeling';
 
+// Dashboard section only (Leaderboard, Business Overview, Closing & Fallout) - matches feb1cohi
 const DASHBOARD_CHILDREN = [
   { type: 'subheader' as const, label: 'Dashboard', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'leaderboard' as SectionId, label: 'Leaderboard', icon: Trophy, color: 'text-amber-500', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'executiveDashboard' as SectionId, label: 'Business Overview', icon: Target, color: 'text-blue-500', subsectionKey: 'dashboard' as SubsectionKey },
   { type: 'section' as const, id: 'closingFalloutForecast' as SectionId, label: 'Closing & Fallout Forecast', icon: BarChart3, color: 'text-indigo-500', subsectionKey: 'dashboard' as SubsectionKey },
-  { type: 'route' as const, id: 'topTieringLink', label: 'Top Tiering', icon: ArrowLeftRight, path: '/loan-funnel', subsectionKey: 'dashboard' as SubsectionKey, visibilityId: 'topTiering' as SectionId },
-  { type: 'subheader' as const, label: 'Top Tiering', subsectionKey: 'topTiering' as SubsectionKey },
+];
+
+// Top Tiering submenus (Core Analytics, Sales, Operations, Financial Modeling) - matches feb1cohi
+const TOPTIERING_CHILDREN = [
+  { type: 'subheader' as const, label: 'Core Analytics', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'loanFunnel', label: 'Loan Funnel', icon: Filter, path: '/loan-funnel', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, path: '/performance/toptiering-comparison', subsectionKey: 'topTiering' as SubsectionKey },
   { type: 'route' as const, id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, path: '/credit-risk-management', subsectionKey: 'topTiering' as SubsectionKey },
@@ -208,6 +212,14 @@ const DASHBOARD_CHILDREN = [
   { type: 'route' as const, id: 'operationsTrends', label: 'Trends', icon: LineChart, path: '/performance/operation-scorecard-trends', subsectionKey: 'operations' as SubsectionKey },
   { type: 'subheader' as const, label: 'Financial Modeling', subsectionKey: 'financialModeling' as SubsectionKey },
   { type: 'route' as const, id: 'financialModeling', label: 'Financial Modeling Sandbox', icon: Calculator, path: '/performance/financial-modeling-sandbox', subsectionKey: 'financialModeling' as SubsectionKey },
+];
+
+type ToptieringRouteItem = Extract<(typeof TOPTIERING_CHILDREN)[number], { type: 'route' }>;
+const TOPTIERING_GROUPS: Array<{ key: SubsectionKey; label: string; items: ToptieringRouteItem[] }> = [
+  { key: 'topTiering', label: 'Core Analytics', items: TOPTIERING_CHILDREN.filter((it): it is ToptieringRouteItem => it.type === 'route' && it.subsectionKey === 'topTiering') },
+  { key: 'sales', label: 'Sales', items: TOPTIERING_CHILDREN.filter((it): it is ToptieringRouteItem => it.type === 'route' && it.subsectionKey === 'sales') },
+  { key: 'operations', label: 'Operations', items: TOPTIERING_CHILDREN.filter((it): it is ToptieringRouteItem => it.type === 'route' && it.subsectionKey === 'operations') },
+  { key: 'financialModeling', label: 'Financial Modeling', items: TOPTIERING_CHILDREN.filter((it): it is ToptieringRouteItem => it.type === 'route' && it.subsectionKey === 'financialModeling') },
 ];
 
 // Color mapping for section colors
@@ -305,10 +317,11 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [insightsExpanded, setInsightsExpanded] = useState(true);
   const [dashboardExpanded, setDashboardExpanded] = useState(true);
-  const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(false);
-  const [salesSubExpanded, setSalesSubExpanded] = useState(false);
-  const [operationsSubExpanded, setOperationsSubExpanded] = useState(false);
-  const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(false);
+  const [toptieringExpanded, setToptieringExpanded] = useState(false);
+  const [topTieringSubExpanded, setTopTieringSubExpanded] = useState(true);
+  const [salesSubExpanded, setSalesSubExpanded] = useState(true);
+  const [operationsSubExpanded, setOperationsSubExpanded] = useState(true);
+  const [financialModelingSubExpanded, setFinancialModelingSubExpanded] = useState(true);
   const realtimeStats = useRealtimeStats();
 
   const subExpanded: Record<SubsectionKey, boolean> = {
@@ -576,6 +589,59 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   )}
                 </div>
 
+                {/* Top Tiering - matches feb1cohi */}
+                <div>
+                  <button
+                    onClick={() => setToptieringExpanded(!toptieringExpanded)}
+                    className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-all touch-manipulation"
+                  >
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 dark:bg-slate-800/30">
+                      <ArrowLeftRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1 text-left">Top Tiering</p>
+                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform duration-200", !toptieringExpanded && "-rotate-90")} />
+                  </button>
+                  {toptieringExpanded && (
+                    <div className="pl-4 pr-2 pb-2 space-y-1">
+                      {TOPTIERING_GROUPS.map((group) => {
+                        const isExp = subExpanded[group.key];
+                        return (
+                          <div key={group.key}>
+                            <button
+                              type="button"
+                              onClick={() => setSubExpanded(group.key, !isExp)}
+                              className="w-full flex items-center gap-2 px-2 pt-2 pb-1 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation"
+                            >
+                              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex-1">{group.label}</p>
+                              <ChevronDown className={cn("w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform duration-200", !isExp && "-rotate-90")} />
+                            </button>
+                            {isExp && (
+                              <div className="space-y-1">
+                                {group.items.map((it) => {
+                                  const Icon = it.icon;
+                                  const isCurrent = location.pathname === it.path;
+                                  return (
+                                    <button
+                                      key={it.id}
+                                      onClick={() => { navigate(it.path); onMobileMenuToggle?.(); }}
+                                      className={cn("w-full flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 text-left touch-manipulation", isCurrent && "bg-slate-100 dark:bg-slate-800/60")}
+                                    >
+                                      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", isCurrent ? "bg-slate-100 dark:bg-slate-800/60" : "bg-slate-50 dark:bg-slate-800/30")}>
+                                        <Icon className={cn("w-4 h-4", isCurrent ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400")} />
+                                      </div>
+                                      <span className={cn("text-sm", isCurrent ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-700 dark:text-slate-300")}>{it.label}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {/* My Workbench */}
                 <div className={cn("flex items-center gap-2 p-2.5 min-h-[44px] rounded-lg hover:bg-slate-100/80 dark:hover:bg-slate-800/80 touch-manipulation", location.pathname === '/my-dashboard' && "bg-slate-100 dark:bg-slate-800/60")}>
                   <button onClick={() => { navigate('/my-dashboard'); onMobileMenuToggle?.(); }} className="relative flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center">
@@ -779,6 +845,57 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
                 </button>
+              );
+            })}
+          </div>
+
+          {/* Top Tiering - matches feb1cohi */}
+          <div>
+            <button
+              onClick={() => setToptieringExpanded(!toptieringExpanded)}
+              style={{ width: '100%', padding: '16px 20px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
+                <ArrowLeftRight size={20} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+              </div>
+              <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>Top Tiering</h4>
+              <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: toptieringExpanded ? 'none' : 'rotate(-90deg)' }} />
+            </button>
+            {toptieringExpanded && TOPTIERING_GROUPS.map((group) => {
+              const isExp = subExpanded[group.key];
+              return (
+                <div key={group.key}>
+                  <button
+                    type="button"
+                    onClick={() => setSubExpanded(group.key, !isExp)}
+                    style={{ width: '100%', padding: '10px 20px 10px 56px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.2s ease' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <p style={{ fontSize: 10, fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, flex: 1 }}>{group.label}</p>
+                    <ChevronDown size={14} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', flexShrink: 0, transform: isExp ? 'none' : 'rotate(-90deg)' }} />
+                  </button>
+                  {isExp && group.items.map((it) => {
+                    const Icon = it.icon;
+                    const isCurrent = location.pathname === it.path;
+                    return (
+                      <button
+                        key={it.id}
+                        onClick={() => navigate(it.path)}
+                        style={{ width: '100%', padding: '12px 20px 12px 56px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                      >
+                        <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
+                          <Icon size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>

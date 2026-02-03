@@ -23,7 +23,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MetricExplainButton } from "@/components/common/MetricExplainButton";
 
-// Period options for KPI timeframe selectors
+// Period options for KPI timeframe selectors (mortgage industry standard)
 const PERIOD_OPTIONS: Array<{
   value: PeriodValue;
   label: string;
@@ -31,6 +31,7 @@ const PERIOD_OPTIONS: Array<{
 }> = [
   { value: "mtd", label: "Month to Date", shortLabel: "MTD" },
   { value: "ytd", label: "Year to Date", shortLabel: "YTD" },
+  { value: "rolling_90_days", label: "Rolling 90 Days", shortLabel: "R90D" },
   { value: "last_month", label: "Last Month", shortLabel: "Last Mo" },
   { value: "last_year", label: "Last Year", shortLabel: "Last Yr" },
   { value: "all", label: "All Time", shortLabel: "All" },
@@ -540,12 +541,19 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     return value.toString();
   };
 
-  // Calculate business overview data from metricsData
+  /**
+   * Calculate business overview data from metrics (Qlik Logic Dictionary).
+   * Mortgage industry definitions (MBA / best practice):
+   * - Active Loans: Pipeline count/volume (loans in process, not yet funded). Current state.
+   * - Closed Loans: Funded count/volume in period (closed_date in range). MTD/YTD.
+   * - Locked Loans: Rate-locked count/volume in period (lock_date in range). Often a subset of pipeline.
+   * - Cycle Time: Avg days from application to funding (total days / loans funded). Industry typical 45–51 days.
+   * - Pull-Through Rate: Funded / applications in period (e.g. rolling 90 days). Fallout = 1 - pull-through.
+   * Do not sum Active + Locked + Closed for totals (locked is typically a subset of pipeline).
+   */
   const calculateBusinessOverviewData = () => {
-    // Check if we have any metrics data yet
     const hasData = Object.keys(metricsData).length > 0;
 
-    // If no metrics data, return placeholders
     if (!hasData) {
       return {
         activeLoans: {
@@ -623,21 +631,18 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         : parseFloat(metricsData.locked_volume?.value as string) || 0;
     const lockedAvgBalance = lockedUnits > 0 ? lockedVolume / lockedUnits : 0;
 
-    // Calculate average loan balance from total volume / total units
-    const totalUnits = activeUnits + closedUnits + lockedUnits;
-    const totalVolume = activeVolume + closedVolume + lockedVolume;
-    const avgLoanBalance = totalUnits > 0 ? totalVolume / totalUnits : 0;
-    const avgInterestRate = 6.875; // Industry average
-    const avgFICO = 740; // Industry average
-    const avgLTV = 78.5; // Industry average
+    // Industry benchmark placeholders when API does not provide; replace with actual metrics when available
+    const avgInterestRate = 6.875;
+    const avgFICO = 740;
+    const avgLTV = 78.5;
 
-    // Cycle Time - use metrics data
+    // Cycle Time: avg days from application to funding (industry standard: total days / loans funded)
     const avgDaysToFunding =
       typeof metricsData.avg_cycle_time?.value === "number"
         ? metricsData.avg_cycle_time.value
         : parseFloat(metricsData.avg_cycle_time?.value as string) || 0;
-    // Cycle time by stage - estimate based on average cycle time (can be enhanced with stage-specific API endpoint)
-    const stageRatios = {
+    // Stage breakdown: best practice = days in stage / loans funded per stage. Using typical pipeline proportions until stage-level metrics exist.
+    const stageRatios: Record<string, number> = {
       "App to Lock": 0.21,
       "Lock to UW": 0.13,
       "UW to Approval": 0.29,
@@ -647,27 +652,25 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     const cycleTimeByStage = Object.entries(stageRatios).map(
       ([label, ratio]) => {
         const current = Math.round(avgDaysToFunding * ratio);
-        const previous = Math.round(current * 1.1); // Estimate 10% improvement
-        const change = current - previous;
+        const priorEst = Math.round(current * 1.1);
+        const change = current - priorEst;
         return {
           label,
           values: [
             formatBusinessValue(current, "days"),
-            formatBusinessValue(previous, "days"),
+            formatBusinessValue(priorEst, "days"),
             formatBusinessValue(change, "days"),
           ],
         };
       }
     );
 
-    // Pull-Through calculation - use metrics data
+    // Pull-Through: funded loans / applications (same period). Rolling 90D is industry standard for 30–45 day cycles.
     const pullThroughPercent =
       typeof metricsData.pull_through_rate?.value === "number"
         ? metricsData.pull_through_rate.value
         : parseFloat(metricsData.pull_through_rate?.value as string) || 0;
-    const companyAvg = 75.0;
-    const pullThroughStatus =
-      pullThroughPercent >= companyAvg ? "Above" : "Below";
+    const companyAvg = 75.0; // Common benchmark; replace with tenant/co target when available
 
     // Calculate breakdowns by loan type - use defaults (can be enhanced with additional metrics)
     const loanTypeDistribution: Record<string, number> = {
@@ -892,9 +895,9 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       }
     );
 
-    // Fallout breakdown - use defaults (can be enhanced with additional metrics)
-    const withdrawnUnits = 0; // TODO: Add withdrawn loans metric
-    const deniedUnits = 0; // TODO: Add denied loans metric
+    // Fallout breakdown: Withdrawn + Denied = fallout (inverse of pull-through). Use API metrics when available.
+    const withdrawnUnits = 0;
+    const deniedUnits = 0;
     const totalFallout = withdrawnUnits + deniedUnits;
     const withdrawnPct =
       totalFallout > 0 ? (withdrawnUnits / totalFallout) * 100 : 0;
@@ -1025,7 +1028,15 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     "FICO",
     "LTV",
   ];
-  const cycleTimeHeaders = ["Avg Days", "Target", "Variance"];
+  const summaryDataKeys: (keyof typeof businessOverviewData.activeLoans.summary)[] = [
+    "units",
+    "volume",
+    "avgInterestRate",
+    "avgBalance",
+    "avgFICO",
+    "avgLTV",
+  ];
+  const cycleTimeHeaders = ["Avg Days", "Prior Period", "Change"];
   const cycleTypeHeaders = ["Avg Days", "Trend", "Status"];
   const pullThroughHeaders = ["Value", "Co. Avg", "Status"];
   const creditPullHeaders = ["MTD", "Last Mo."];
@@ -1581,7 +1592,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
                           {section.title}
                         </h3>
 
-                        {/* Summary Row (if exists) - Mobile First */}
+                        {/* Summary Row (if exists) - headers and summary keys aligned for correct column order */}
                         {section.summaryData && (
                           <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-6 gap-1.5 sm:gap-1.5 md:gap-2 mb-3 sm:mb-4 w-full">
                             {section.headers.map((header, i) => (
@@ -1593,7 +1604,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
                                   {header}
                                 </p>
                                 <p className="text-[10px] sm:text-[10px] md:text-xs lg:text-sm font-semibold text-slate-900 dark:text-white break-words break-all hyphens-auto line-clamp-2">
-                                  {Object.values(section.summaryData)[i]}
+                                  {(section.summaryData as Record<string, string>)[summaryDataKeys[i]]}
                                 </p>
                               </div>
                             ))}

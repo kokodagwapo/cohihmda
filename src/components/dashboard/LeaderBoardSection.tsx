@@ -43,8 +43,6 @@ function CertificateSealIcon({ className, size = 32, id: sealId }: { className?:
         }).join(' ');
         return <polygon key={i} points={star} fill="rgba(180,83,9,0.4)" />;
       })}
-      {/* blank center for rank number overlay */}
-      <circle cx={r} cy={r} r={r * 0.36} fill="#fef9c3" stroke="rgba(253,224,71,0.5)" strokeWidth={0.4} />
     </svg>
   );
 }
@@ -662,7 +660,7 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
             <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center justify-center">
               <div className="relative w-7 h-7 sm:w-8 sm:h-8">
                 <CertificateSealIcon id={`seal-${leader.id}`} size={28} className="w-7 h-7 sm:w-8 sm:h-8" />
-                <span className="absolute inset-0 flex items-center justify-center text-lg sm:text-xl font-bold text-slate-900 dark:text-white [-webkit-text-stroke:3px_white] [paint-order:stroke_fill] [text-shadow:0_0_2px_white,0_0_4px_white]">{idx + 1}</span>
+                <span className="absolute inset-0 flex items-center justify-center text-lg sm:text-xl font-bold text-slate-900 dark:text-white/95">{idx + 1}</span>
               </div>
             </div>
 

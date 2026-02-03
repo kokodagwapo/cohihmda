@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutDashboard, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3, Home } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -28,6 +28,11 @@ const dashboardSectionsConfig = [
   { id: 'executiveDashboard', label: 'Business Overview', icon: Target },
   { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3 },
 ];
+
+// Insights top nav dropdown: only Cohi Daily Briefings + Mortgage News (Leaderboard, Business Overview, Closing & Fallout hidden)
+const insightsMenuConfig = dashboardSectionsConfig.filter(
+  (s) => s.id === 'aletheiaInsights' || s.id === 'industryNews'
+);
 
 // Reorganized Top Tiering menu structure with better grouping (iconColor matches sidemenu)
 const topTieringMenuGroups = {
@@ -160,7 +165,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
     if (menuType === 'toptiering' && !topTieringOpen) return;
 
     const items = menuType === 'insights' 
-      ? dashboardSectionsConfig 
+      ? insightsMenuConfig 
       : Object.values(topTieringMenuGroups).flatMap(group => 
           group.items.map(item => ({ ...item, groupId: group.label }))
         );
@@ -347,7 +352,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
             Dashboard
           </div>
           <div className="space-y-1">
-            {dashboardSectionsConfig.map((section) => {
+            {insightsMenuConfig.map((section) => {
               const Icon = section.icon;
               const isSectionActive = isInsightsPage && location.hash === `#section-${section.id}`;
               return (
@@ -572,9 +577,21 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
             </Link>
           </div>
 
-          {/* Center: Main Navigation with Dropdowns (Desktop) */}
+          {/* Center: Main Navigation with Dropdowns (Desktop) - matches feb1cohi */}
           {isAuthenticated && (
             <div className="hidden lg:flex flex-1 justify-center items-center gap-2">
+              <Link
+                to="/"
+                className={cn(
+                  "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200",
+                  location.pathname === '/'
+                    ? "text-slate-900 dark:text-slate-100"
+                    : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
+                )}
+                aria-label="Home"
+              >
+                Home
+              </Link>
               {/* Insights Dropdown */}
               <div 
                 ref={insightsRef}
@@ -600,29 +617,26 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   aria-expanded={insightsOpen}
                   aria-label="Insights menu"
                   className={cn(
-                    "relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 group",
+                    "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group",
                     (insightsOpen || isInsightsPage)
-                      ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/30 dark:shadow-blue-500/20 scale-105"
-                      : "text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-950/30 dark:hover:to-indigo-950/30 hover:text-blue-700 dark:hover:text-blue-400 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5"
+                      ? "text-slate-900 dark:text-slate-100"
+                      : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
                   )}
                 >
                   <LayoutGrid className={cn(
-                    "w-4 h-4 transition-all duration-300",
+                    "w-4 h-4 transition-colors duration-200",
                     (insightsOpen || isInsightsPage) 
-                      ? "text-white" 
-                      : "text-slate-500 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:scale-110"
+                      ? "text-slate-900 dark:text-slate-100" 
+                      : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
                   )} />
                   <span>Insights</span>
                   <ChevronDown className={cn(
-                    "w-3.5 h-3.5 transition-all duration-300",
+                    "w-3.5 h-3.5 transition-all duration-200",
                     insightsOpen && "rotate-180",
                     (insightsOpen || isInsightsPage) 
-                      ? "text-white" 
-                      : "text-slate-400 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-400"
+                      ? "text-slate-900 dark:text-slate-100" 
+                      : "text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200"
                   )} />
-                  {(insightsOpen || isInsightsPage) && (
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-white/80 shadow-lg" />
-                  )}
                 </button>
 
                 <AnimatePresence>
@@ -644,7 +658,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
                       <div className="p-4">
                         <div className="flex flex-col gap-2">
-                          {dashboardSectionsConfig.map((section, index) => {
+                          {insightsMenuConfig.map((section, index) => {
                             const Icon = section.icon;
                             const isSectionActive = isInsightsPage && location.hash === `#section-${section.id}`;
                             const isFocused = focusedIndex === index;
@@ -705,29 +719,26 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   aria-expanded={topTieringOpen}
                   aria-label="Dashboard menu"
                   className={cn(
-                    "relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 group",
+                    "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group",
                     (topTieringOpen || isTopTieringPage)
-                      ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 dark:shadow-emerald-500/20 scale-105"
-                      : "text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 dark:hover:from-emerald-950/30 dark:hover:to-teal-950/30 hover:text-emerald-700 dark:hover:text-emerald-400 hover:shadow-md hover:shadow-emerald-500/10 dark:hover:shadow-emerald-500/5"
+                      ? "text-slate-900 dark:text-slate-100"
+                      : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
                   )}
                 >
                   <TrendingUp className={cn(
-                    "w-4 h-4 transition-all duration-300",
+                    "w-4 h-4 transition-colors duration-200",
                     (topTieringOpen || isTopTieringPage) 
-                      ? "text-white" 
-                      : "text-slate-500 dark:text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 group-hover:scale-110"
+                      ? "text-slate-900 dark:text-slate-100" 
+                      : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
                   )} />
                   <span>Dashboard</span>
                   <ChevronDown className={cn(
-                    "w-3.5 h-3.5 transition-all duration-300",
+                    "w-3.5 h-3.5 transition-all duration-200",
                     topTieringOpen && "rotate-180",
                     (topTieringOpen || isTopTieringPage) 
-                      ? "text-white" 
-                      : "text-slate-400 dark:text-slate-500 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
+                      ? "text-slate-900 dark:text-slate-100" 
+                      : "text-slate-400 dark:text-slate-500 group-hover:text-slate-700 dark:group-hover:text-slate-200"
                   )} />
-                  {(topTieringOpen || isTopTieringPage) && (
-                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-white/80 shadow-lg" />
-                  )}
                 </button>
 
                 <AnimatePresence>
@@ -947,26 +958,21 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               {/* My Workbench - Direct Navigation */}
               <button
                 onClick={() => navigate('/my-dashboard')}
-                onMouseEnter={() => setHoveredItem('my-workbench')}
-                onMouseLeave={() => setHoveredItem(null)}
                 className={cn(
-                  "relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 group",
+                  "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group",
                   isActive('/my-dashboard')
-                    ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30 dark:shadow-emerald-500/20 scale-105"
-                    : "text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 dark:hover:from-emerald-950/30 dark:hover:to-teal-950/30 hover:text-emerald-700 dark:hover:text-emerald-400 hover:shadow-md hover:shadow-emerald-500/10 dark:hover:shadow-emerald-500/5"
+                    ? "text-slate-900 dark:text-slate-100"
+                    : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
                 )}
                 aria-label="My Workbench"
               >
                 <LayoutDashboard className={cn(
-                  "w-4 h-4 transition-all duration-300",
+                  "w-4 h-4 transition-colors duration-200",
                   isActive('/my-dashboard')
-                    ? "text-white"
-                    : "text-slate-500 dark:text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 group-hover:scale-110"
+                    ? "text-slate-900 dark:text-slate-100"
+                    : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
                 )} />
                 <span>My Workbench</span>
-                {isActive('/my-dashboard') && (
-                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-white/80 shadow-lg" />
-                )}
               </button>
 
             </div>
