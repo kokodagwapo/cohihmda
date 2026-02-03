@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { api } from '@/lib/api';
-import { VisualizationConfig } from './useDataChat';
+import { VisualizationConfig } from './useCohiChat';
 
 // ============================================================================
 // Types

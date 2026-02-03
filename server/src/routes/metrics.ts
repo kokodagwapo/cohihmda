@@ -20,9 +20,12 @@ import {
   queryFicoDistribution,
   queryLtvDistribution,
   queryDtiDistribution,
+  queryLoanSizeDistribution,
+  queryLockExpirationDistribution,
   queryLoanMix,
   queryCreditRiskStory,
   DistributionBucket,
+  ExtendedDistributionBucket,
   LoanMixRow,
   CreditRiskStoryData,
 } from "../services/metrics/metricsService.js";
@@ -251,11 +254,9 @@ router.post(
           "investor",
         ];
         if (!allowedGroupBy.includes(groupBy)) {
-          return res
-            .status(400)
-            .json({
-              error: `Invalid groupBy. Allowed: ${allowedGroupBy.join(", ")}`,
-            });
+          return res.status(400).json({
+            error: `Invalid groupBy. Allowed: ${allowedGroupBy.join(", ")}`,
+          });
         }
 
         const groupedResults = await queryMetricsGroupedBy(
@@ -397,7 +398,7 @@ router.post(
 /**
  * POST /api/metrics/loan-mix
  * Query Loan Mix data grouped by dimension
- * Body: { groupBy: 'loan_type' | 'loan_purpose' | 'occupancy_type', dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
+ * Body: { groupBy: 'loan_type' | 'loan_purpose' | 'occupancy_type' | 'current_milestone', dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
  */
 router.post(
   "/loan-mix",
@@ -409,13 +410,16 @@ router.post(
       const { groupBy, dateRange, dateField, additionalFilters } = req.body;
       const tenantPool = getTenantContext(req).tenantPool;
 
-      const allowedGroupBy = ["loan_type", "loan_purpose", "occupancy_type"];
+      const allowedGroupBy = [
+        "loan_type",
+        "loan_purpose",
+        "occupancy_type",
+        "current_milestone",
+      ];
       if (!groupBy || !allowedGroupBy.includes(groupBy)) {
-        return res
-          .status(400)
-          .json({
-            error: `groupBy is required. Allowed: ${allowedGroupBy.join(", ")}`,
-          });
+        return res.status(400).json({
+          error: `groupBy is required. Allowed: ${allowedGroupBy.join(", ")}`,
+        });
       }
 
       const parsedDateRange = dateRange
@@ -436,6 +440,86 @@ router.post(
       res
         .status(500)
         .json({ error: error.message || "Failed to query loan mix" });
+    }
+  }
+);
+
+/**
+ * POST /api/metrics/loan-size-distribution
+ * Query Loan Size Distribution
+ * Body: { dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
+ */
+router.post(
+  "/loan-size-distribution",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const { dateRange, dateField, additionalFilters } = req.body;
+      const tenantPool = getTenantContext(req).tenantPool;
+
+      const parsedDateRange = dateRange
+        ? { start: dateRange.start || null, end: dateRange.end || null }
+        : undefined;
+
+      const options = {
+        dateRange: parsedDateRange,
+        dateField,
+        additionalFilters,
+      };
+
+      const distribution = await queryLoanSizeDistribution(tenantPool, options);
+
+      res.json({ distribution });
+    } catch (error: any) {
+      console.error("[Metrics] Error querying loan size distribution:", error);
+      res.status(500).json({
+        error: error.message || "Failed to query loan size distribution",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/metrics/lock-expiration-distribution
+ * Query Lock Expiration Days Distribution (for locked loans)
+ * Body: { dateRange?: { start?: string, end?: string }, dateField?: string, additionalFilters?: object }
+ */
+router.post(
+  "/lock-expiration-distribution",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const { dateRange, dateField, additionalFilters } = req.body;
+      const tenantPool = getTenantContext(req).tenantPool;
+
+      const parsedDateRange = dateRange
+        ? { start: dateRange.start || null, end: dateRange.end || null }
+        : undefined;
+
+      const options = {
+        dateRange: parsedDateRange,
+        dateField,
+        additionalFilters,
+      };
+
+      const distribution = await queryLockExpirationDistribution(
+        tenantPool,
+        options
+      );
+
+      res.json({ distribution });
+    } catch (error: any) {
+      console.error(
+        "[Metrics] Error querying lock expiration distribution:",
+        error
+      );
+      res.status(500).json({
+        error: error.message || "Failed to query lock expiration distribution",
+      });
     }
   }
 );
@@ -907,11 +991,9 @@ router.put(
         // System metric without tenant override - requires platform admin
         const isAdmin = await isPlatformAdmin(req);
         if (!isAdmin) {
-          return res
-            .status(403)
-            .json({
-              error: "Platform admin required to modify system metrics",
-            });
+          return res.status(403).json({
+            error: "Platform admin required to modify system metrics",
+          });
         }
       } else {
         // Custom or tenant-overridden metric
@@ -1067,12 +1149,10 @@ router.delete(
 
       // System metrics cannot be deleted (only overridden)
       if (currentMetric.is_system && !currentMetric.tenant_id) {
-        return res
-          .status(403)
-          .json({
-            error:
-              "System metrics cannot be deleted. Create a tenant override instead.",
-          });
+        return res.status(403).json({
+          error:
+            "System metrics cannot be deleted. Create a tenant override instead.",
+        });
       }
 
       // Check authorization

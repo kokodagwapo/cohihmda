@@ -1470,6 +1470,26 @@ function buildWhereClause(
     );
   }
 
+  // KPI-specific filters - match exact logic from METRICS_CATALOG
+  // Active Loans: current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+  if (filters.active_loan_filter) {
+    clauses.push(
+      `(l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND l.application_date::text != '')`
+    );
+  }
+
+  // Closed Loans: funding_date IS NOT NULL AND funding_date <= CURRENT_DATE
+  if (filters.closed_loan_filter) {
+    clauses.push(
+      `(l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE)`
+    );
+  }
+
+  // Locked Loans: lock_date IS NOT NULL
+  if (filters.locked_loan_filter) {
+    clauses.push(`(l.lock_date IS NOT NULL)`);
+  }
+
   // Loan purpose filter
   if (filters.loan_purpose) {
     clauses.push(`l.loan_purpose = $${paramOffset + params.length + 1}`);
@@ -2274,6 +2294,207 @@ export async function queryDtiDistribution(
 }
 
 /**
+ * Extended Distribution Bucket with weighted averages (for loan size, lock expiration)
+ */
+export interface ExtendedDistributionBucket extends DistributionBucket {
+  wac: number;
+  waFico: number;
+  waLtv: number;
+}
+
+/**
+ * Query Loan Size Distribution
+ * Buckets: <$200K, $200K-$400K, $400K-$600K, $600K-$800K, $800K-$1M, >$1M
+ * Includes weighted averages: WAC, WA FICO, WA LTV
+ */
+export async function queryLoanSizeDistribution(
+  tenantPool: pg.Pool,
+  options: MetricQueryOptions = {}
+): Promise<ExtendedDistributionBucket[]> {
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === "FALSE") {
+    return [];
+  }
+
+  const dateField = options.dateField || "application_date";
+  const {
+    userAccessClause,
+    dateRangeClause,
+    additionalFiltersClause,
+    allParams,
+  } = buildAllFilterClauses(options, dateField);
+
+  const query = `
+    WITH size_buckets AS (
+      SELECT 
+        CASE 
+          WHEN l.loan_amount < 200000 THEN '<$200K'
+          WHEN l.loan_amount < 400000 THEN '$200K-$400K'
+          WHEN l.loan_amount < 600000 THEN '$400K-$600K'
+          WHEN l.loan_amount < 800000 THEN '$600K-$800K'
+          WHEN l.loan_amount < 1000000 THEN '$800K-$1M'
+          ELSE '>$1M'
+        END as range,
+        CASE 
+          WHEN l.loan_amount < 200000 THEN 1
+          WHEN l.loan_amount < 400000 THEN 2
+          WHEN l.loan_amount < 600000 THEN 3
+          WHEN l.loan_amount < 800000 THEN 4
+          WHEN l.loan_amount < 1000000 THEN 5
+          ELSE 6
+        END as sort_order,
+        l.loan_amount,
+        l.interest_rate,
+        l.fico_score,
+        l.ltv_ratio
+      FROM public.loans l
+      WHERE l.loan_amount IS NOT NULL AND l.loan_amount > 0
+        ${userAccessClause}
+        ${dateRangeClause.clause}
+        ${additionalFiltersClause.clause}
+    ),
+    totals AS (
+      SELECT COUNT(*) as total_units FROM size_buckets
+    )
+    SELECT 
+      sb.range,
+      sb.range as range_label,
+      COUNT(*) as units,
+      COALESCE(SUM(sb.loan_amount), 0) as volume,
+      ROUND(COUNT(*) * 100.0 / NULLIF((SELECT total_units FROM totals), 0), 1) as percentage,
+      MIN(sb.sort_order) as sort_order,
+      -- WAC: weighted average interest rate (exclude out of range: <= 0 or > 15)
+      ROUND(
+        SUM(CASE WHEN sb.interest_rate > 0 AND sb.interest_rate <= 15 THEN sb.interest_rate * sb.loan_amount ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN sb.interest_rate > 0 AND sb.interest_rate <= 15 THEN sb.loan_amount ELSE 0 END), 0)
+      , 3) as wac,
+      -- WA FICO: weighted average FICO (exclude out of range: < 350 or > 900)
+      ROUND(
+        SUM(CASE WHEN sb.fico_score >= 350 AND sb.fico_score <= 900 THEN sb.fico_score * sb.loan_amount ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN sb.fico_score >= 350 AND sb.fico_score <= 900 THEN sb.loan_amount ELSE 0 END), 0)
+      , 0) as wa_fico,
+      -- WA LTV: weighted average LTV (exclude out of range: < 0 or > 110)
+      ROUND(
+        SUM(CASE WHEN sb.ltv_ratio >= 0 AND sb.ltv_ratio <= 110 THEN sb.ltv_ratio * sb.loan_amount ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN sb.ltv_ratio >= 0 AND sb.ltv_ratio <= 110 THEN sb.loan_amount ELSE 0 END), 0)
+      , 1) as wa_ltv
+    FROM size_buckets sb
+    GROUP BY sb.range
+    ORDER BY MIN(sb.sort_order)
+  `;
+
+  const result = await tenantPool.query(query, allParams);
+
+  return result.rows.map((row) => ({
+    range: row.range,
+    rangeLabel: row.range_label,
+    units: parseInt(row.units) || 0,
+    volume: parseFloat(row.volume) || 0,
+    percentage: parseFloat(row.percentage) || 0,
+    sortOrder: parseInt(row.sort_order) || 0,
+    wac: parseFloat(row.wac) || 0,
+    waFico: parseFloat(row.wa_fico) || 0,
+    waLtv: parseFloat(row.wa_ltv) || 0,
+  }));
+}
+
+/**
+ * Query Lock Expiration Days Distribution
+ * Buckets: Expired, 0-7 days, 8-14 days, 15-30 days, >30 days
+ * Only for locked loans (lock_date IS NOT NULL)
+ * Includes weighted averages: WAC, WA FICO, WA LTV
+ */
+export async function queryLockExpirationDistribution(
+  tenantPool: pg.Pool,
+  options: MetricQueryOptions = {}
+): Promise<ExtendedDistributionBucket[]> {
+  // Check for no-access filter
+  if (options.userAccessFilter?.sql === "FALSE") {
+    return [];
+  }
+
+  const dateField = options.dateField || "lock_date";
+  const {
+    userAccessClause,
+    dateRangeClause,
+    additionalFiltersClause,
+    allParams,
+  } = buildAllFilterClauses(options, dateField);
+
+  const query = `
+    WITH expiration_buckets AS (
+      SELECT 
+        CASE 
+          WHEN l.lock_expiration_date < CURRENT_DATE THEN 'Expired'
+          WHEN l.lock_expiration_date <= CURRENT_DATE + INTERVAL '7 days' THEN '0-7 days'
+          WHEN l.lock_expiration_date <= CURRENT_DATE + INTERVAL '14 days' THEN '8-14 days'
+          WHEN l.lock_expiration_date <= CURRENT_DATE + INTERVAL '30 days' THEN '15-30 days'
+          ELSE '>30 days'
+        END as range,
+        CASE 
+          WHEN l.lock_expiration_date < CURRENT_DATE THEN 1
+          WHEN l.lock_expiration_date <= CURRENT_DATE + INTERVAL '7 days' THEN 2
+          WHEN l.lock_expiration_date <= CURRENT_DATE + INTERVAL '14 days' THEN 3
+          WHEN l.lock_expiration_date <= CURRENT_DATE + INTERVAL '30 days' THEN 4
+          ELSE 5
+        END as sort_order,
+        l.loan_amount,
+        l.interest_rate,
+        l.fico_score,
+        l.ltv_ratio
+      FROM public.loans l
+      WHERE l.lock_date IS NOT NULL 
+        AND l.lock_expiration_date IS NOT NULL
+        ${userAccessClause}
+        ${dateRangeClause.clause}
+        ${additionalFiltersClause.clause}
+    ),
+    totals AS (
+      SELECT COUNT(*) as total_units FROM expiration_buckets
+    )
+    SELECT 
+      eb.range,
+      eb.range as range_label,
+      COUNT(*) as units,
+      COALESCE(SUM(eb.loan_amount), 0) as volume,
+      ROUND(COUNT(*) * 100.0 / NULLIF((SELECT total_units FROM totals), 0), 1) as percentage,
+      MIN(eb.sort_order) as sort_order,
+      -- WAC: weighted average interest rate (exclude out of range: <= 0 or > 15)
+      ROUND(
+        SUM(CASE WHEN eb.interest_rate > 0 AND eb.interest_rate <= 15 THEN eb.interest_rate * eb.loan_amount ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN eb.interest_rate > 0 AND eb.interest_rate <= 15 THEN eb.loan_amount ELSE 0 END), 0)
+      , 3) as wac,
+      -- WA FICO: weighted average FICO (exclude out of range: < 350 or > 900)
+      ROUND(
+        SUM(CASE WHEN eb.fico_score >= 350 AND eb.fico_score <= 900 THEN eb.fico_score * eb.loan_amount ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN eb.fico_score >= 350 AND eb.fico_score <= 900 THEN eb.loan_amount ELSE 0 END), 0)
+      , 0) as wa_fico,
+      -- WA LTV: weighted average LTV (exclude out of range: < 0 or > 110)
+      ROUND(
+        SUM(CASE WHEN eb.ltv_ratio >= 0 AND eb.ltv_ratio <= 110 THEN eb.ltv_ratio * eb.loan_amount ELSE 0 END) /
+        NULLIF(SUM(CASE WHEN eb.ltv_ratio >= 0 AND eb.ltv_ratio <= 110 THEN eb.loan_amount ELSE 0 END), 0)
+      , 1) as wa_ltv
+    FROM expiration_buckets eb
+    GROUP BY eb.range
+    ORDER BY MIN(eb.sort_order)
+  `;
+
+  const result = await tenantPool.query(query, allParams);
+
+  return result.rows.map((row) => ({
+    range: row.range,
+    rangeLabel: row.range_label,
+    units: parseInt(row.units) || 0,
+    volume: parseFloat(row.volume) || 0,
+    percentage: parseFloat(row.percentage) || 0,
+    sortOrder: parseInt(row.sort_order) || 0,
+    wac: parseFloat(row.wac) || 0,
+    waFico: parseFloat(row.wa_fico) || 0,
+    waLtv: parseFloat(row.wa_ltv) || 0,
+  }));
+}
+
+/**
  * Query Loan Mix data grouped by a dimension (loan_type, loan_purpose, or occupancy_type)
  * Returns units, volume, WAC, WA FICO, WA LTV, WA DTI for each category
  */
@@ -2291,7 +2512,11 @@ export interface LoanMixRow {
 
 export async function queryLoanMix(
   tenantPool: pg.Pool,
-  groupBy: "loan_type" | "loan_purpose" | "occupancy_type",
+  groupBy:
+    | "loan_type"
+    | "loan_purpose"
+    | "occupancy_type"
+    | "current_milestone",
   options: MetricQueryOptions = {}
 ): Promise<LoanMixRow[]> {
   // Check for no-access filter
@@ -2308,7 +2533,12 @@ export async function queryLoanMix(
   } = buildAllFilterClauses(options, dateField);
 
   // Validate groupBy field
-  const allowedGroupByFields = ["loan_type", "loan_purpose", "occupancy_type"];
+  const allowedGroupByFields = [
+    "loan_type",
+    "loan_purpose",
+    "occupancy_type",
+    "current_milestone",
+  ];
   if (!allowedGroupByFields.includes(groupBy)) {
     throw new Error(
       `Invalid groupBy field for Loan Mix: ${groupBy}. Allowed: ${allowedGroupByFields.join(

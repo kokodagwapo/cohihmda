@@ -311,7 +311,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       return 'Top Tiering';
     }
     if (location.pathname === '/my-dashboard') return 'My Workbench';
-    if (location.pathname === '/data-chat') return 'Data Chat';
+    if (location.pathname === '/data-chat') return 'Cohi Chat';
     return 'Navigation';
   };
 
@@ -530,7 +530,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           </button>
         </div>
 
-        {/* Data Chat */}
+        {/* Cohi Chat */}
         <div>
           <button
             onClick={() => {
@@ -545,7 +545,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
             )}
           >
             <Sparkles className="w-4 h-4 flex-shrink-0" />
-            <span>Data Chat</span>
+            <span>Cohi Chat</span>
           </button>
         </div>
 

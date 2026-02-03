@@ -3,7 +3,7 @@
  * Used by platform admins to manage documents that sync to all tenants
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 
 export interface GlobalDocument {
@@ -55,6 +55,9 @@ export interface SyncStatus {
   syncedVersion: number | null;
 }
 
+// Polling interval for documents in processing state
+const POLL_INTERVAL_MS = 3000;
+
 export function useGlobalKnowledge() {
   const [documents, setDocuments] = useState<GlobalDocument[]>([]);
   const [categories, setCategories] = useState<GlobalCategory[]>([]);
@@ -66,6 +69,16 @@ export function useGlobalKnowledge() {
     offset: 0,
   });
 
+  // Track if we need to poll for processing documents
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const lastFetchParamsRef = useRef<{
+    status?: string;
+    category?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }>({});
+
   // Fetch documents
   const fetchDocuments = useCallback(
     async (
@@ -75,11 +88,18 @@ export function useGlobalKnowledge() {
         search?: string;
         limit?: number;
         offset?: number;
-      } = {}
+      } = {},
+      isPolling: boolean = false
     ) => {
       try {
-        setLoading(true);
+        // Only show loading on initial fetch, not polling
+        if (!isPolling) {
+          setLoading(true);
+        }
         setError(null);
+
+        // Store params for polling
+        lastFetchParamsRef.current = params;
 
         const queryParams = new URLSearchParams();
         if (params.status) queryParams.append("status", params.status);
@@ -95,11 +115,36 @@ export function useGlobalKnowledge() {
 
         setDocuments(response.documents);
         setPagination(response.pagination);
+
+        // Check if any documents are still processing
+        const hasProcessing = response.documents.some(
+          (doc) =>
+            doc.processing_status === "pending" ||
+            doc.processing_status === "processing"
+        );
+
+        // Start or stop polling based on processing state
+        if (hasProcessing && !pollingRef.current) {
+          console.log(
+            "[GlobalKnowledge] Starting poll for processing documents..."
+          );
+          pollingRef.current = setInterval(() => {
+            fetchDocuments(lastFetchParamsRef.current, true);
+          }, POLL_INTERVAL_MS);
+        } else if (!hasProcessing && pollingRef.current) {
+          console.log(
+            "[GlobalKnowledge] All documents processed, stopping poll"
+          );
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
       } catch (err: any) {
         setError(err.message || "Failed to fetch documents");
         console.error("Error fetching global documents:", err);
       } finally {
-        setLoading(false);
+        if (!isPolling) {
+          setLoading(false);
+        }
       }
     },
     []
@@ -151,14 +196,17 @@ export function useGlobalKnowledge() {
           "/api/admin/global-knowledge",
           { method: "POST", body: JSON.stringify(data) }
         );
-        await fetchDocuments();
+
+        // Add to list immediately
+        setDocuments((prev) => [response.document, ...prev]);
+
         return response.document;
       } catch (err: any) {
         console.error("Error creating document:", err);
         throw err;
       }
     },
-    [fetchDocuments]
+    []
   );
 
   // Upload document
@@ -175,10 +223,15 @@ export function useGlobalKnowledge() {
         if (metadata.tags)
           formData.append("tags", JSON.stringify(metadata.tags));
 
+        // Get auth token from localStorage
+        const token = localStorage.getItem("auth_token");
+
         const response = await fetch("/api/admin/global-knowledge/upload", {
           method: "POST",
           body: formData,
-          credentials: "include",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
         });
 
         if (!response.ok) {
@@ -187,7 +240,20 @@ export function useGlobalKnowledge() {
         }
 
         const data = await response.json();
-        await fetchDocuments();
+
+        // Add the new document to the list immediately
+        setDocuments((prev) => [data.document, ...prev]);
+
+        // Start polling for processing updates
+        if (!pollingRef.current) {
+          console.log(
+            "[GlobalKnowledge] Starting poll for new document processing..."
+          );
+          pollingRef.current = setInterval(() => {
+            fetchDocuments(lastFetchParamsRef.current, true);
+          }, POLL_INTERVAL_MS);
+        }
+
         return data.document;
       } catch (err: any) {
         console.error("Error uploading document:", err);
@@ -213,51 +279,89 @@ export function useGlobalKnowledge() {
           `/api/admin/global-knowledge/${id}`,
           { method: "PUT", body: JSON.stringify(data) }
         );
-        await fetchDocuments();
+
+        // Optimistic update
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id ? { ...doc, ...response.document } : doc
+          )
+        );
+
         return response.document;
       } catch (err: any) {
         console.error("Error updating document:", err);
         throw err;
       }
     },
-    [fetchDocuments]
+    []
   );
 
   // Delete document
-  const deleteDocument = useCallback(
-    async (id: string): Promise<boolean> => {
-      try {
-        await api.request(`/api/admin/global-knowledge/${id}`, {
-          method: "DELETE",
-        });
-        await fetchDocuments();
-        return true;
-      } catch (err: any) {
-        console.error("Error deleting document:", err);
-        throw err;
-      }
-    },
-    [fetchDocuments]
-  );
+  const deleteDocument = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      await api.request(`/api/admin/global-knowledge/${id}`, {
+        method: "DELETE",
+      });
+
+      // Optimistic update - remove from list
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+
+      return true;
+    } catch (err: any) {
+      console.error("Error deleting document:", err);
+      throw err;
+    }
+  }, []);
 
   // Process document (generate embeddings)
   const processDocument = useCallback(
     async (
       id: string
     ): Promise<{ chunkCount: number; tokenCount: number } | null> => {
+      // Optimistic update - show processing immediately
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.id === id
+            ? { ...doc, processing_status: "processing" as const }
+            : doc
+        )
+      );
+
       try {
         const response = await api.request<{
           chunkCount: number;
           tokenCount: number;
         }>(`/api/admin/global-knowledge/${id}/process`, { method: "POST" });
-        await fetchDocuments();
+
+        // Update with actual results
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  processing_status: "completed" as const,
+                  chunk_count: response.chunkCount,
+                  token_count: response.tokenCount,
+                }
+              : doc
+          )
+        );
+
         return response;
       } catch (err: any) {
+        // Revert on error
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? { ...doc, processing_status: "error" as const }
+              : doc
+          )
+        );
         console.error("Error processing document:", err);
         throw err;
       }
     },
-    [fetchDocuments]
+    []
   );
 
   // Publish document
@@ -281,14 +385,27 @@ export function useGlobalKnowledge() {
             details: SyncResult[];
           };
         }>(`/api/admin/global-knowledge/${id}/publish`, { method: "POST" });
-        await fetchDocuments();
+
+        // Optimistic update - show published immediately
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  status: "published" as const,
+                  published_at: new Date().toISOString(),
+                }
+              : doc
+          )
+        );
+
         return response;
       } catch (err: any) {
         console.error("Error publishing document:", err);
         throw err;
       }
     },
-    [fetchDocuments]
+    []
   );
 
   // Archive document
@@ -316,14 +433,28 @@ export function useGlobalKnowledge() {
           method: "POST",
           body: JSON.stringify({ reason }),
         });
-        await fetchDocuments();
+
+        // Optimistic update
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  status: "archived" as const,
+                  archived_at: new Date().toISOString(),
+                  archive_reason: reason || null,
+                }
+              : doc
+          )
+        );
+
         return response;
       } catch (err: any) {
         console.error("Error archiving document:", err);
         throw err;
       }
     },
-    [fetchDocuments]
+    []
   );
 
   // Restore document
@@ -347,14 +478,28 @@ export function useGlobalKnowledge() {
             details: SyncResult[];
           };
         }>(`/api/admin/global-knowledge/${id}/restore`, { method: "POST" });
-        await fetchDocuments();
+
+        // Optimistic update
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  status: "published" as const,
+                  archived_at: null,
+                  archive_reason: null,
+                }
+              : doc
+          )
+        );
+
         return response;
       } catch (err: any) {
         console.error("Error restoring document:", err);
         throw err;
       }
     },
-    [fetchDocuments]
+    []
   );
 
   // Get sync status
@@ -407,6 +552,14 @@ export function useGlobalKnowledge() {
   useEffect(() => {
     fetchDocuments();
     fetchCategories();
+
+    // Cleanup polling on unmount
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
   }, [fetchDocuments, fetchCategories]);
 
   return {
