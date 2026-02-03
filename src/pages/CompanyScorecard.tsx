@@ -5,8 +5,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
-import { TrendingUp, TrendingDown, BarChart3, Building2, FileText, Users, Trophy, AlertTriangle, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3, Building2, FileText, Users, Trophy, AlertTriangle, Loader2, Maximize2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
 import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
@@ -16,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
 import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
 import { ExportShareMenu } from '@/components/common/ExportShareMenu';
+import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';
 
 const CompanyScorecard = () => {
@@ -30,6 +32,12 @@ const CompanyScorecard = () => {
   const [selectedApplication, setSelectedApplication] = useState<string>('all');
   const [selectedLoanOfficer, setSelectedLoanOfficer] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'summary' | 'detail'>('summary');
+  const [detailActor, setDetailActor] = useState<'branch' | 'loan_officer'>('branch');
+  const [detailFullscreenOpen, setDetailFullscreenOpen] = useState(false);
+  const [detailPage, setDetailPage] = useState(1);
+  const [detailPageSize, setDetailPageSize] = useState(10);
+  const [drilldownTitle, setDrilldownTitle] = useState<string | null>(null);
+  const [drilldownSortKey, setDrilldownSortKey] = useState<SortKey | undefined>(undefined);
   // Date field selector - which date to filter all metrics on
   // Default to 'application_date' to match Qlik Company Scorecard behavior (DateType={'Application'})
   const [selectedDateField, setSelectedDateField] = useState<string>('application_date');
@@ -112,6 +120,27 @@ const CompanyScorecard = () => {
     
     return { topPerformer, needsAttention, fastestGrowth };
   }, [data?.byBranch]);
+
+  const detailRows = useMemo(() => {
+    if (!data) return [];
+    return detailActor === 'branch' ? (data.byBranch ?? []) : (data.byLoanOfficer ?? []);
+  }, [data, detailActor]);
+
+  const detailPageCount = Math.max(1, Math.ceil(detailRows.length / detailPageSize));
+  const detailPageSafe = Math.min(detailPage, detailPageCount);
+  const detailStartIndex = (detailPageSafe - 1) * detailPageSize;
+  const detailEndIndex = Math.min(detailStartIndex + detailPageSize, detailRows.length);
+  const detailPagedRows = detailRows.slice(detailStartIndex, detailEndIndex);
+
+  const openDrilldown = (title: string, sortKey: SortKey, actorOverride?: 'branch' | 'loan_officer') => {
+    if (actorOverride) {
+      setDetailActor(actorOverride);
+      setDetailPage(1);
+    }
+    setDrilldownTitle(title);
+    setDrilldownSortKey(sortKey);
+    setDetailFullscreenOpen(true);
+  };
 
   // Compute summary table data from branch metrics
   const summaryData = useMemo(() => {
@@ -387,6 +416,9 @@ const CompanyScorecard = () => {
     avgCycleTime: 0,
     creditPulls: 0
   };
+  const averageLoanSize = kpiData.totalLoansWithRespa > 0
+    ? kpiData.totalVolume / kpiData.totalLoansWithRespa
+    : 0;
 
   const getExportData = (): ExportData => ({
     title: "Company Scorecard",
@@ -432,13 +464,13 @@ const CompanyScorecard = () => {
               <th className={`text-right py-3 px-4 text-sm font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                 Totals
               </th>
-              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-teal-500 via-teal-600 to-teal-700 text-white shadow-[0_2px_8px_rgba(20,184,166,0.3)]">
+              <th className="text-right py-3 px-4 text-sm font-bold bg-tier-top text-white">
                 Top Tier
               </th>
-              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 text-white shadow-[0_2px_8px_rgba(16,185,129,0.3)]">
+              <th className="text-right py-3 px-4 text-sm font-bold bg-tier-second text-white">
                 Second Tier
               </th>
-              <th className="text-right py-3 px-4 text-sm font-bold bg-gradient-to-br from-red-400 via-red-500 to-red-600 text-white shadow-[0_2px_8px_rgba(239,68,68,0.3)]">
+              <th className="text-right py-3 px-4 text-sm font-bold bg-tier-bottom text-slate-800">
                 Bottom Tier
               </th>
             </tr>
@@ -727,80 +759,88 @@ const CompanyScorecard = () => {
           </div>
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('Units (Applications Taken)', 'applicationsTaken')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">TOTAL LOANS</p>
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">UNITS</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(kpiData.totalLoansWithRespa)}</p>
-
               </CardContent>
             </Card>
 
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('Volume (Applications Taken $)', 'applicationsTakenDollar')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">VOLUME</p>
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">VOLUME</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(kpiData.totalVolume)}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  YTD
-                </p>
               </CardContent>
             </Card>
 
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('Average Loan Size', 'avgLoanSize')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">REVENUE</p>
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(kpiData.totalRevenue)}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  YTD
-                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">AVERAGE LOAN SIZE</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(Math.round(averageLoanSize))}</p>
               </CardContent>
             </Card>
 
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('WAC', 'wac')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">PULL THROUGH</p>
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{kpiData.pullThroughRate.toFixed(1)}%</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Conversion rate
-                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WAC</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{kpiData.wac.toFixed(3)}</p>
               </CardContent>
             </Card>
 
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('WA FICO', 'waFico')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">CYCLE TIME</p>
-                  <TrendingDown className="h-4 w-4 text-emerald-500" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{Math.round(kpiData.avgCycleTime)}d</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Avg days
-                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA FICO</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{Math.round(kpiData.waFico || 0)}</p>
               </CardContent>
             </Card>
 
-            <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('WA LTV', 'waLtv')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">CREDIT PULLS</p>
-                  <TrendingUp className="h-4 w-4 text-emerald-500" />
-                </div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(kpiData.creditPulls)}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  YTD
-                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA LTV</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waLtv || 0).toFixed(1)}</p>
+              </CardContent>
+            </Card>
+
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => openDrilldown('WA DTI', 'waDti')}
+              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            >
+              <CardContent className="pt-6">
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA DTI</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waDti || 0).toFixed(1)}</p>
               </CardContent>
             </Card>
           </div>
@@ -808,7 +848,12 @@ const CompanyScorecard = () => {
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+          <Card
+            role="button"
+            tabIndex={0}
+            onClick={() => openDrilldown('Volume by Branch', 'applicationsTakenDollar', 'branch')}
+            className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+          >
             <CardHeader>
               <CardTitle className="text-lg">Volume by Branch ($M)</CardTitle>
             </CardHeader>
@@ -836,7 +881,12 @@ const CompanyScorecard = () => {
             </CardContent>
           </Card>
 
-          <Card className={`rounded-xl backdrop-blur-sm ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}>
+          <Card
+            role="button"
+            tabIndex={0}
+            onClick={() => openDrilldown('Pull-Through by Branch', 'originatedUnitsPct', 'branch')}
+            className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+          >
             <CardHeader>
               <CardTitle className="text-lg">Pull-Through by Branch (%)</CardTitle>
             </CardHeader>
@@ -882,7 +932,162 @@ const CompanyScorecard = () => {
                   <SummaryTable />
                 </TabsContent>
                 <TabsContent value="detail" className="mt-0">
-                  <SummaryTable />
+                    <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Choose Scorecard Actor</span>
+                      <div className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDetailActor('branch');
+                            setDetailPage(1);
+                          }}
+                          className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all ${detailActor === 'branch' ? 'bg-background text-foreground shadow' : ''}`}
+                        >
+                          Branch
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDetailActor('loan_officer');
+                            setDetailPage(1);
+                          }}
+                          className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all ${detailActor === 'loan_officer' ? 'bg-background text-foreground shadow' : ''}`}
+                        >
+                          Loan Officer
+                        </button>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDetailFullscreenOpen(true)}
+                        className="h-9"
+                      >
+                        <Maximize2 className="h-4 w-4 mr-2" />
+                        Fullscreen
+                      </Button>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        Company Scorecard by {detailActor === 'branch' ? 'Branch' : 'Loan Officer'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 dark:text-slate-400">Rows per page</span>
+                        <Select
+                          value={String(detailPageSize)}
+                          onValueChange={(value) => {
+                            setDetailPageSize(Number(value));
+                            setDetailPage(1);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-[90px] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="5">5</SelectItem>
+                            <SelectItem value="10">10</SelectItem>
+                            <SelectItem value="15">15</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span>
+                          {detailRows.length === 0
+                            ? '0'
+                            : `${detailStartIndex + 1}-${detailEndIndex}`} of {detailRows.length}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          disabled={detailPageSafe <= 1}
+                          onClick={() => setDetailPage(detailPageSafe - 1)}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          disabled={detailPageSafe >= detailPageCount}
+                          onClick={() => setDetailPage(detailPageSafe + 1)}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                    {data?.totals && (
+                      <CompanyScorecardDetailTable
+                        rows={detailPagedRows}
+                        totals={data.totals}
+                        actor={detailActor}
+                        isDarkMode={isDarkMode}
+                        formatNumber={formatNumber}
+                        formatLargeNumber={formatLargeNumber}
+                      />
+                    )}
+                    <Dialog
+                      open={detailFullscreenOpen}
+                      onOpenChange={(open) => {
+                        setDetailFullscreenOpen(open);
+                        if (!open) {
+                          setDrilldownTitle(null);
+                          setDrilldownSortKey(undefined);
+                        }
+                      }}
+                    >
+                      <DialogContent className="!fixed !inset-0 !left-0 !top-0 !right-0 !bottom-0 !translate-x-0 !translate-y-0 !max-w-none !max-h-none w-screen h-screen rounded-none border-0 p-4 sm:p-6 gap-4 overflow-hidden">
+                        <DialogHeader className="items-start">
+                          <DialogTitle className="text-lg sm:text-xl">{drilldownTitle || 'Company Scorecard Detail'}</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Choose Scorecard Actor</span>
+                          <div className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDetailActor('branch');
+                                setDetailPage(1);
+                              }}
+                              className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all ${detailActor === 'branch' ? 'bg-background text-foreground shadow' : ''}`}
+                            >
+                              Branch
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDetailActor('loan_officer');
+                                setDetailPage(1);
+                              }}
+                              className={`inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all ${detailActor === 'loan_officer' ? 'bg-background text-foreground shadow' : ''}`}
+                            >
+                              Loan Officer
+                            </button>
+                          </div>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            Company Scorecard by {detailActor === 'branch' ? 'Branch' : 'Loan Officer'}
+                          </span>
+                        </div>
+                        <div className="flex-1 overflow-auto">
+                          {data?.totals && (
+                            <CompanyScorecardDetailTable
+                              rows={detailPagedRows}
+                              totals={data.totals}
+                              actor={detailActor}
+                              isDarkMode={isDarkMode}
+                              formatNumber={formatNumber}
+                              formatLargeNumber={formatLargeNumber}
+                              containerClassName="h-full"
+                              initialSortKey={drilldownSortKey}
+                            />
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
                 </TabsContent>
               </Tabs>
             </CardContent>

@@ -21,10 +21,19 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
 
+const OBMMI_WIDGET_URL = "https://www2.optimalblue.com/OBMMI/widgetConfig.php";
+
 function MarketIntelligenceTicker() {
+  const [obModalOpen, setObModalOpen] = useState(false);
   const RATE_INDICES = [
     { label: "30-Yr. Conforming", rate: 6.092, delta: 0.026, trend: "up" as const },
     { label: "30-Yr. Jumbo", rate: 6.263, delta: 0.017, trend: "up" as const },
@@ -54,66 +63,119 @@ function MarketIntelligenceTicker() {
     );
   };
 
+  const tickerTooltip = "Click for details on Rate Indices, Credit and LTV, Rate Trends";
+
   return (
-    <div
-      className="flex items-center w-full max-w-[920px] min-w-0 box-border mx-auto rounded-md overflow-hidden relative border border-slate-200/60 dark:border-slate-700/50"
-      style={{ background: "rgba(243, 249, 252, 0.85)" }}
-    >
-      <div className="relative flex-1 min-w-0 h-10 sm:h-11 overflow-hidden">
-        <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#f3f9fc] to-transparent pointer-events-none" />
-        <div className="absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#f3f9fc] to-transparent pointer-events-none" />
-        <div className="ticker-track">
-          {[...RATE_INDICES, ...RATE_INDICES].map((item, idx) => {
-            const isUp = item.trend === "up";
-            return (
-              <div
-                key={`${item.label}-${idx}`}
-                className="flex items-center gap-3 px-6 h-full border-r border-slate-200/70 shrink-0"
-              >
-                <span className="text-[11px] sm:text-xs md:text-[13px] font-medium text-slate-700">
-                  {item.label}
-                </span>
-                {renderSparkline(item.trend)}
-                <span className="text-[11px] sm:text-xs md:text-[13px] font-semibold text-slate-800">
-                  {item.rate.toFixed(3)}%
-                </span>
-                <span
-                  className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium ${
-                    isUp ? "text-emerald-600" : "text-red-500"
-                  }`}
+    <>
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className="flex items-center w-full max-w-[920px] min-w-0 box-border mx-auto rounded-md overflow-hidden relative border border-slate-200/60 dark:border-slate-700/50 cursor-pointer"
+              style={{ background: "rgba(243, 249, 252, 0.85)" }}
+            >
+              <div className="relative flex-1 min-w-0 h-10 sm:h-11 overflow-hidden">
+          <div className="absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-[#f3f9fc] to-transparent pointer-events-none" />
+          <div className="absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[#f3f9fc] to-transparent pointer-events-none" />
+          <div className="ticker-track">
+            {[...RATE_INDICES, ...RATE_INDICES].map((item, idx) => {
+              const isUp = item.trend === "up";
+              return (
+                <button
+                  type="button"
+                  key={`${item.label}-${idx}`}
+                  onClick={() => setObModalOpen(true)}
+                  className="flex items-center gap-3 px-6 h-full border-r border-slate-200/70 shrink-0 cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/30 transition-colors duration-150 text-left touch-manipulation focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-400/30 rounded-none"
+                  aria-label={`View rate details: ${item.label} ${item.rate.toFixed(3)}%`}
                 >
-                  {isUp ? "+" : ""}
-                  {item.delta.toFixed(3)}
-                </span>
+                  <span className="text-[11px] sm:text-xs md:text-[13px] font-medium text-slate-700 dark:text-slate-300">
+                    {item.label}
+                  </span>
+                  {renderSparkline(item.trend)}
+                  <span className="text-[11px] sm:text-xs md:text-[13px] font-semibold text-slate-800 dark:text-slate-200">
+                    {item.rate.toFixed(3)}%
+                  </span>
+                  <span
+                    className={`text-[10px] sm:text-[11px] md:text-[12px] font-medium ${
+                      isUp ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
+                    }`}
+                  >
+                    {isUp ? "+" : ""}
+                    {item.delta.toFixed(3)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <a
+            href="https://www2.optimalblue.com/obmmi"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute right-1 bottom-0.5 text-[8px] sm:text-[9px] text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-900/70 px-1 py-0.5 rounded-full border border-slate-200/60 dark:border-slate-700/50 backdrop-blur"
+          >
+            Powered by OBMMI
+          </a>
+          <style>{`
+            @keyframes ticker-left {
+              0% { transform: translateX(0); }
+              100% { transform: translateX(-50%); }
+            }
+            .ticker-track {
+              display: inline-flex;
+              align-items: center;
+              height: 100%;
+              width: max-content;
+              white-space: nowrap;
+              animation: ticker-left 42s linear infinite;
+              will-change: transform;
+            }
+          `}</style>
               </div>
-            );
-          })}
-        </div>
-        <a
-          href="https://www2.optimalblue.com/obmmi"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="absolute right-1 bottom-0.5 text-[8px] sm:text-[9px] text-slate-500 dark:text-slate-400 bg-white/70 dark:bg-slate-900/70 px-1 py-0.5 rounded-full border border-slate-200/60 dark:border-slate-700/50 backdrop-blur"
-        >
-          Powered by OBMMI
-        </a>
-        <style>{`
-          @keyframes ticker-left {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
-          }
-          .ticker-track {
-            display: inline-flex;
-            align-items: center;
-            height: 100%;
-            width: max-content;
-            white-space: nowrap;
-            animation: ticker-left 42s linear infinite;
-            will-change: transform;
-          }
-        `}</style>
-      </div>
-    </div>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent
+            side="bottom"
+            className="max-w-[280px] text-center px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 shadow-lg"
+          >
+            {tickerTooltip}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      {/* OBMMI widget modal – sized so 750×462 widget fits without scroll */}
+      <Dialog open={obModalOpen} onOpenChange={setObModalOpen}>
+        <DialogContent className="p-0 gap-0 w-[min(95vw,820px)] max-w-[820px] max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/50 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.12)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.4)] [&>button]:right-4 [&>button]:top-4">
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-200/60 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-800/50">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
+                  <TrendingUp className="w-4 h-4 text-white" strokeWidth={2} />
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-semibold text-slate-900 dark:text-white tracking-tight">
+                    Mortgage Rate Index
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Optimal Blue OBMMI – live rates and indices
+                  </DialogDescription>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 p-4 sm:p-5 bg-slate-50/30 dark:bg-slate-800/30 flex flex-col">
+              <div className="rounded-xl overflow-hidden border border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900 shadow-sm flex-1 min-h-0 flex flex-col">
+                <iframe
+                  src={OBMMI_WIDGET_URL}
+                  title="Optimal Blue Mortgage Market Index (OBMMI)"
+                  width="750"
+                  height="462"
+                  className="w-full flex-1 min-h-[462px] border-0 block"
+                />
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

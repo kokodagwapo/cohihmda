@@ -1312,11 +1312,10 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                 <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
                 {predictionsLoading ? 'Running…' : 'Start Prediction'}
               </Button>
-              {/* Predictive Insights Badge */}
-              <div className="px-2 sm:px-3 md:px-4 py-1 sm:py-1.5 md:py-2 rounded-full border flex items-center space-x-1.5 sm:space-x-2 w-fit backdrop-blur-sm bg-emerald-50/90 dark:bg-emerald-500/10 border-emerald-200/60 dark:border-emerald-500/30">
-                <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 md:w-2 md:h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]"></span>
-                <span className="text-[8px] sm:text-[9px] md:text-[10px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Predictive Insights</span>
-              </div>
+              {/* Predictive Insights - minimal label */}
+              <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 tracking-wide">
+                Predictive Insights
+              </span>
               <PeriodDropdown
                 period={period}
                 onPeriodChange={(p) => {
