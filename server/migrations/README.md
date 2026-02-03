@@ -2,6 +2,45 @@
 
 This directory contains SQL migrations for the Coheus database schema.
 
+## Quick Start for New Developers
+
+**One-command setup** - Initialize your local database with all migrations and test data:
+
+```bash
+# 1. Start PostgreSQL (from project root)
+docker compose -f docker/dev/docker-compose.dev.yml up -d postgres
+
+# 2. Initialize database (from server folder)
+cd server
+npm install
+npm run init:local
+```
+
+This creates:
+
+- `coheus_management` database with all platform tables
+- `tenant_acme_mortgage` test tenant database
+- Test accounts:
+  - Super Admin: `superadmin` / `super123`
+  - Tenant Admin: `admin@acme.local` / `admin123`
+  - Loan Officer: `user@acme.local` / `user123`
+
+### Alternative: Platform-specific scripts
+
+**Windows (PowerShell):**
+
+```powershell
+.\scripts\init-local-db.ps1
+```
+
+**Mac/Linux (Bash):**
+
+```bash
+./scripts/init-local-db.sh
+```
+
+---
+
 ## Directory Structure
 
 ```
@@ -24,16 +63,19 @@ migrations/
 ## Migration Naming Convention
 
 Migrations must follow this naming pattern:
+
 ```
 NNN_description.sql
 ```
 
 Where:
+
 - `NNN` is a 3-digit version number (001, 002, 003, etc.)
 - `description` is a lowercase snake_case description
 - Extension must be `.sql`
 
 Examples:
+
 - `001_initial_schema.sql`
 - `002_add_user_preferences.sql`
 - `003_fix_loan_indexes.sql`
@@ -82,6 +124,7 @@ npm run migrate:create -- add_tenant_feature --tenant
 ## How Migrations Work
 
 1. **Tracking**: Applied migrations are recorded in a `schema_migrations` table:
+
    ```sql
    CREATE TABLE schema_migrations (
      id SERIAL PRIMARY KEY,
@@ -106,6 +149,7 @@ npm run migrate:create -- add_tenant_feature --tenant
 ### Best Practices
 
 1. **Make migrations idempotent** where possible:
+
    ```sql
    CREATE TABLE IF NOT EXISTS ...
    CREATE INDEX IF NOT EXISTS ...
@@ -156,8 +200,8 @@ When modifying existing tables, always check if the change is needed first:
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT FROM information_schema.columns 
-    WHERE table_schema = 'public' 
+    SELECT FROM information_schema.columns
+    WHERE table_schema = 'public'
     AND table_name = 'users'
     AND column_name = 'new_column'
   ) THEN
@@ -169,11 +213,13 @@ END $$;
 ## Management vs Tenant Migrations
 
 ### Management Database (`coheus_management`)
+
 - Single database for the entire platform
 - Stores tenant registry, super admins, subscriptions
 - Migrations in `migrations/management/`
 
 ### Tenant Databases (`tenant_*`)
+
 - One database per tenant
 - Stores tenant-specific data (users, loans, etc.)
 - Migrations in `migrations/tenant/`
@@ -199,11 +245,13 @@ The Aurora database is in a **private VPC subnet** - your local machine cannot c
 ### Running Migrations via ECS Exec
 
 **Prerequisites:**
+
 - ECS service deployed with `EnableExecuteCommand: true`
 - AWS Session Manager plugin installed locally
 - Task role has SSM permissions (included in CloudFormation)
 
 **Step 1: Get the running task ARN**
+
 ```powershell
 $taskArn = aws ecs list-tasks `
     --cluster coheus-dev-cluster `
@@ -217,6 +265,7 @@ echo $taskArn
 ```
 
 **Step 2: Connect to the container**
+
 ```powershell
 aws ecs execute-command `
     --cluster coheus-dev-cluster `
@@ -229,6 +278,7 @@ aws ecs execute-command `
 ```
 
 **Step 3: Run migrations inside the container**
+
 ```bash
 # Check migration status
 npm run migrate:status
@@ -241,6 +291,7 @@ npm run migrate:all
 ```
 
 **Step 4: Create super admin (first time only)**
+
 ```bash
 SEED_SUPER_ADMIN_EMAIL=admin@example.com \
 SEED_SUPER_ADMIN_PASSWORD='SecurePassword123!' \
@@ -255,39 +306,47 @@ For automated deployments, add a migration step to your GitHub Actions workflow 
 ## Troubleshooting
 
 ### "ETIMEDOUT" or "Connection refused" from local machine
+
 **This is expected.** Aurora is in a private VPC - your local machine cannot connect.
 
 **Solution:** Run migrations via ECS Exec (see "Running Migrations via ECS Exec" above).
 
 ### "Checksum mismatch" error
+
 A migration file was modified after being applied. Options:
+
 1. Restore the original file
 2. Create a new migration to make the desired changes
 
 ### "Table already exists" error
+
 The migration wasn't properly tracked. Check `schema_migrations` table.
 
 ### ECS Exec not working
 
 **"Session Manager plugin not found"**
 Install the AWS Session Manager plugin:
+
 - Windows: `choco install session-manager-plugin` or download from AWS
 - Mac: `brew install session-manager-plugin`
 
 **"Unable to start command" or "TargetNotConnectedException"**
+
 - Ensure ECS service has `EnableExecuteCommand: true`
 - Ensure task role has SSM permissions
 - Wait 1-2 minutes after deployment for agent to initialize
 - Check task is in RUNNING state: `aws ecs describe-tasks --cluster <cluster> --tasks <task-arn>`
 
 ### Viewing migration status
+
 ```bash
 npm run migrate:status
 ```
 
 Or query directly:
+
 ```sql
-SELECT version, name, applied_at, execution_time_ms 
-FROM schema_migrations 
+SELECT version, name, applied_at, execution_time_ms
+FROM schema_migrations
 ORDER BY version;
 ```

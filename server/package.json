@@ -17,6 +17,7 @@
     "migrate:repair": "tsx scripts/repair-tenant-schemas.ts",
     "seed:super-admin": "tsx scripts/seed-super-admin.ts",
     "seed:local": "tsx scripts/seed-local-dev.ts",
+    "init:local": "tsx scripts/init-local-database.ts",
     "create-admin": "node ../scripts/create-admin-user.js",
     "check-user": "tsx scripts/check-user-and-create-super-admin.js"
   },
