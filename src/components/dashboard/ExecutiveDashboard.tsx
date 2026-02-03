@@ -131,6 +131,12 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         const effectivePeriod = kpiId === "activeLoans" ? "all" : period;
 
         let results;
+        let dateFieldOverride: string | undefined;
+        if (kpiId === "lockedLoans") {
+          dateFieldOverride = "lock_date";
+        } else if (kpiId === "closedLoans") {
+          dateFieldOverride = "funding_date";
+        }
         if (
           effectivePeriod === "custom" &&
           customDates?.start &&
@@ -140,10 +146,15 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
           results = await queryMetricsWithDateRange(
             metricsToFetch,
             customDates.start,
-            customDates.end
+            customDates.end,
+            dateFieldOverride
           );
         } else {
-          results = await queryMetrics(metricsToFetch, effectivePeriod as any);
+          results = await queryMetrics(
+            metricsToFetch,
+            effectivePeriod as any,
+            dateFieldOverride
+          );
         }
 
         setMetricsData((prev) => ({
@@ -736,7 +747,9 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
       rows.map((row) => {
         const units = Number(row.units ?? row.count ?? 0);
         const volume = Number(row.volume ?? 0);
-        const avgBalance = Number(row.avg_balance ?? row.avgBalance ?? 0);
+        const avgBalance =
+          Number(row.avg_balance ?? row.avgBalance ?? 0) ||
+          (units > 0 ? volume / units : 0);
         const wac = Number(row.wac ?? row.avgInterestRate ?? 0);
         const waFico = Number(row.wa_fico ?? row.waFico ?? row.avgFICO ?? 0);
         const waLtv = Number(row.wa_ltv ?? row.waLtv ?? row.avgLTV ?? 0);

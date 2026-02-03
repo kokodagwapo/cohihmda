@@ -279,12 +279,23 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "locked_volume",
     name: "Locked Loans Volume",
     description:
-      "Sum of loan amounts for loans locked within the selected date range",
+      "Sum of loan amounts for locked loans within the selected date range",
     category: "volume",
     formula: "Sum({<[Locked Flag]={Yes}>}[Loan Amount])",
     sqlQuery: `SUM(CASE 
       WHEN l.lock_date IS NOT NULL 
-      THEN COALESCE(l.loan_amount, 0) 
+        OR LOWER(l.current_loan_status) LIKE '%locked%'
+      THEN COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) 
       ELSE 0
     END)`,
     dependencies: [],
@@ -566,8 +577,90 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     formula:
       "Sum({<[FICO Out of Range Flag]={No}>}[FICO Score] * [Loan Amount]) / Sum([Loan Amount])",
     sqlQuery: `ROUND(
-      SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.fico_score * l.loan_amount ELSE 0 END) / 
-      NULLIF(SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.loan_amount ELSE 0 END), 0)
+      SUM(CASE WHEN COALESCE(
+        l.fico_score,
+        (l.raw_data->>'fico_score')::numeric,
+        (l.raw_data->>'fico')::numeric,
+        (l.raw_data->>'credit_score')::numeric,
+        (l.raw_data->>'creditScore')::numeric,
+        (l.raw_data->>'ficoScore')::numeric,
+        (l.raw_data->>'middle_fico')::numeric,
+        (l.raw_data->>'middleFICO')::numeric,
+        (l.raw_data->>'middle_fico_score')::numeric,
+        (l.raw_data->>'mid_fico')::numeric,
+        (l.raw_data->>'midFico')::numeric
+      ) >= 350 AND COALESCE(
+        l.fico_score,
+        (l.raw_data->>'fico_score')::numeric,
+        (l.raw_data->>'fico')::numeric,
+        (l.raw_data->>'credit_score')::numeric,
+        (l.raw_data->>'creditScore')::numeric,
+        (l.raw_data->>'ficoScore')::numeric,
+        (l.raw_data->>'middle_fico')::numeric,
+        (l.raw_data->>'middleFICO')::numeric,
+        (l.raw_data->>'middle_fico_score')::numeric,
+        (l.raw_data->>'mid_fico')::numeric,
+        (l.raw_data->>'midFico')::numeric
+      ) <= 900
+      THEN COALESCE(
+        l.fico_score,
+        (l.raw_data->>'fico_score')::numeric,
+        (l.raw_data->>'fico')::numeric,
+        (l.raw_data->>'credit_score')::numeric,
+        (l.raw_data->>'creditScore')::numeric,
+        (l.raw_data->>'ficoScore')::numeric,
+        (l.raw_data->>'middle_fico')::numeric,
+        (l.raw_data->>'middleFICO')::numeric,
+        (l.raw_data->>'middle_fico_score')::numeric,
+        (l.raw_data->>'mid_fico')::numeric,
+        (l.raw_data->>'midFico')::numeric
+      ) * COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) ELSE 0 END) /
+      NULLIF(SUM(CASE WHEN COALESCE(
+        l.fico_score,
+        (l.raw_data->>'fico_score')::numeric,
+        (l.raw_data->>'fico')::numeric,
+        (l.raw_data->>'credit_score')::numeric,
+        (l.raw_data->>'creditScore')::numeric,
+        (l.raw_data->>'ficoScore')::numeric,
+        (l.raw_data->>'middle_fico')::numeric,
+        (l.raw_data->>'middleFICO')::numeric,
+        (l.raw_data->>'middle_fico_score')::numeric,
+        (l.raw_data->>'mid_fico')::numeric,
+        (l.raw_data->>'midFico')::numeric
+      ) >= 350 AND COALESCE(
+        l.fico_score,
+        (l.raw_data->>'fico_score')::numeric,
+        (l.raw_data->>'fico')::numeric,
+        (l.raw_data->>'credit_score')::numeric,
+        (l.raw_data->>'creditScore')::numeric,
+        (l.raw_data->>'ficoScore')::numeric,
+        (l.raw_data->>'middle_fico')::numeric,
+        (l.raw_data->>'middleFICO')::numeric,
+        (l.raw_data->>'middle_fico_score')::numeric,
+        (l.raw_data->>'mid_fico')::numeric,
+        (l.raw_data->>'midFico')::numeric
+      ) <= 900
+      THEN COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) ELSE 0 END), 0)
     , 0)`,
     dependencies: [],
     defaultDateField: "application_date",
@@ -581,8 +674,65 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     formula:
       "Sum({<[LTV Out of Range Flag]={No}>}[LTV Ratio] * [Loan Amount]) / Sum([Loan Amount])",
     sqlQuery: `ROUND(
-      SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.ltv_ratio * l.loan_amount ELSE 0 END) / 
-      NULLIF(SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.loan_amount ELSE 0 END), 0)
+      SUM(CASE WHEN COALESCE(
+        l.ltv_ratio,
+        (l.raw_data->>'ltv')::numeric,
+        (l.raw_data->>'loan_to_value')::numeric,
+        (l.raw_data->>'loanToValue')::numeric,
+        (l.raw_data->>'ltv_ratio')::numeric,
+        (l.raw_data->>'ltvRatio')::numeric
+      ) >= 0 AND COALESCE(
+        l.ltv_ratio,
+        (l.raw_data->>'ltv')::numeric,
+        (l.raw_data->>'loan_to_value')::numeric,
+        (l.raw_data->>'loanToValue')::numeric,
+        (l.raw_data->>'ltv_ratio')::numeric,
+        (l.raw_data->>'ltvRatio')::numeric
+      ) <= 110
+      THEN COALESCE(
+        l.ltv_ratio,
+        (l.raw_data->>'ltv')::numeric,
+        (l.raw_data->>'loan_to_value')::numeric,
+        (l.raw_data->>'loanToValue')::numeric,
+        (l.raw_data->>'ltv_ratio')::numeric,
+        (l.raw_data->>'ltvRatio')::numeric
+      ) * COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) ELSE 0 END) /
+      NULLIF(SUM(CASE WHEN COALESCE(
+        l.ltv_ratio,
+        (l.raw_data->>'ltv')::numeric,
+        (l.raw_data->>'loan_to_value')::numeric,
+        (l.raw_data->>'loanToValue')::numeric,
+        (l.raw_data->>'ltv_ratio')::numeric,
+        (l.raw_data->>'ltvRatio')::numeric
+      ) >= 0 AND COALESCE(
+        l.ltv_ratio,
+        (l.raw_data->>'ltv')::numeric,
+        (l.raw_data->>'loan_to_value')::numeric,
+        (l.raw_data->>'loanToValue')::numeric,
+        (l.raw_data->>'ltv_ratio')::numeric,
+        (l.raw_data->>'ltvRatio')::numeric
+      ) <= 110
+      THEN COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) ELSE 0 END), 0)
     , 1)`,
     dependencies: [],
     defaultDateField: "application_date",
@@ -611,8 +761,75 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     formula:
       "Sum({<[Interest Rate Out of Range Flag]={No}>}[Interest Rate] * [Loan Amount]) / Sum([Loan Amount])",
     sqlQuery: `ROUND(
-      SUM(CASE WHEN l.interest_rate > 0 AND l.interest_rate <= 15 THEN l.interest_rate * l.loan_amount ELSE 0 END) / 
-      NULLIF(SUM(CASE WHEN l.interest_rate > 0 AND l.interest_rate <= 15 THEN l.loan_amount ELSE 0 END), 0)
+      SUM(CASE WHEN COALESCE(
+        l.interest_rate,
+        (l.raw_data->>'interest_rate')::numeric,
+        (l.raw_data->>'interestRate')::numeric,
+        (l.raw_data->>'rate')::numeric,
+        (l.raw_data->>'apr')::numeric,
+        (l.raw_data->>'APR')::numeric,
+        (l.raw_data->>'note_rate')::numeric,
+        (l.raw_data->>'noteRate')::numeric
+      ) > 0 AND COALESCE(
+        l.interest_rate,
+        (l.raw_data->>'interest_rate')::numeric,
+        (l.raw_data->>'interestRate')::numeric,
+        (l.raw_data->>'rate')::numeric,
+        (l.raw_data->>'apr')::numeric,
+        (l.raw_data->>'APR')::numeric,
+        (l.raw_data->>'note_rate')::numeric,
+        (l.raw_data->>'noteRate')::numeric
+      ) <= 15
+      THEN COALESCE(
+        l.interest_rate,
+        (l.raw_data->>'interest_rate')::numeric,
+        (l.raw_data->>'interestRate')::numeric,
+        (l.raw_data->>'rate')::numeric,
+        (l.raw_data->>'apr')::numeric,
+        (l.raw_data->>'APR')::numeric,
+        (l.raw_data->>'note_rate')::numeric,
+        (l.raw_data->>'noteRate')::numeric
+      ) * COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) ELSE 0 END) /
+      NULLIF(SUM(CASE WHEN COALESCE(
+        l.interest_rate,
+        (l.raw_data->>'interest_rate')::numeric,
+        (l.raw_data->>'interestRate')::numeric,
+        (l.raw_data->>'rate')::numeric,
+        (l.raw_data->>'apr')::numeric,
+        (l.raw_data->>'APR')::numeric,
+        (l.raw_data->>'note_rate')::numeric,
+        (l.raw_data->>'noteRate')::numeric
+      ) > 0 AND COALESCE(
+        l.interest_rate,
+        (l.raw_data->>'interest_rate')::numeric,
+        (l.raw_data->>'interestRate')::numeric,
+        (l.raw_data->>'rate')::numeric,
+        (l.raw_data->>'apr')::numeric,
+        (l.raw_data->>'APR')::numeric,
+        (l.raw_data->>'note_rate')::numeric,
+        (l.raw_data->>'noteRate')::numeric
+      ) <= 15
+      THEN COALESCE(
+        l.loan_amount,
+        (l.raw_data->>'loan_amount')::numeric,
+        (l.raw_data->>'loanAmount')::numeric,
+        (l.raw_data->>'amount')::numeric,
+        (l.raw_data->>'principal_amount')::numeric,
+        (l.raw_data->>'principalAmount')::numeric,
+        (l.raw_data->>'requested_amount')::numeric,
+        (l.raw_data->>'requestedAmount')::numeric,
+        0
+      ) ELSE 0 END), 0)
     , 3)`,
     dependencies: [],
     defaultDateField: "application_date",

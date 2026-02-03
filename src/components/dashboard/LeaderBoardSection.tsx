@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, Zap, CalendarDays, ChevronDown, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ChevronUp, Medal, Rocket, Timer, ShieldCheck, Gauge, Zap, CalendarDays, ChevronDown, X, UserRound } from 'lucide-react';
 import { format, subQuarters, subMonths, subYears, startOfQuarter, startOfMonth, startOfYear, endOfQuarter, endOfMonth, endOfYear, startOfWeek, subWeeks } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLeaderboardData, LeaderboardLeader, LeaderboardTimeframe } from '@/hooks/useLeaderboardData';
@@ -669,7 +669,7 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
               {/* Avatar + Name (avatar hidden when hideAvatar) */}
               <div className="flex items-center gap-2.5 sm:gap-3 pr-8 sm:pr-9 min-w-0">
                 {!hideAvatar && (
-                  <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden bg-gradient-to-br from-teal-400 to-teal-600 ring-2 ring-white/80 dark:ring-slate-700/80">
+                  <div className="flex-shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden bg-gradient-to-br from-emerald-500 to-emerald-600 ring-2 ring-white/80 dark:ring-slate-700/80">
                     {leader.avatarUrl ? (
                       <img src={leader.avatarUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
@@ -764,17 +764,94 @@ export const LeaderBoardSection = ({ dateFilter, selectedTenantId, hideAvatar = 
                   <table className="w-full min-w-[640px] border-collapse text-left">
                     <thead>
                       <tr className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
-                        <th className="py-2.5 px-2 sm:px-3">LO Name</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Units</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Volume $</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Pull-Through</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Turn-Time</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right">Revenue</th>
-                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">Ranking</th>
+                        <th className="py-2.5 px-2 sm:px-3">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="inline-flex items-center justify-center text-slate-500 dark:text-slate-300">
+                              <UserRound className="w-3.5 h-3.5" />
+                            </span>
+                            LO Name
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-sky-600 dark:text-sky-400">
+                              <Rocket className="w-3.5 h-3.5" />
+                            </span>
+                            Units
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-violet-600 dark:text-violet-400">
+                              <Zap className="w-3.5 h-3.5" />
+                            </span>
+                            Volume $
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                              <Gauge className="w-3.5 h-3.5" />
+                            </span>
+                            Pull-Through
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-blue-600 dark:text-blue-400">
+                              <Timer className="w-3.5 h-3.5" />
+                            </span>
+                            Turn-Time
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-teal-600 dark:text-teal-400">
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                            </span>
+                            Revenue
+                          </span>
+                        </th>
+                        <th className="py-2.5 px-2 sm:px-3 text-right w-14">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            <span className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+                              <Medal className="w-3.5 h-3.5" />
+                            </span>
+                            Ranking
+                          </span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>

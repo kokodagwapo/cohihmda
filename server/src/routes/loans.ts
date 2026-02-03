@@ -763,14 +763,263 @@ router.get(
         SELECT
           ${groupExpr} as category,
           COUNT(*) as units,
-          SUM(l.loan_amount) as volume,
-          AVG(l.loan_amount) as avg_balance,
-          SUM(CASE WHEN l.interest_rate > 0 AND l.interest_rate < 15 THEN l.interest_rate * l.loan_amount ELSE 0 END) /
-            NULLIF(SUM(CASE WHEN l.interest_rate > 0 AND l.interest_rate < 15 THEN l.loan_amount ELSE 0 END), 0) as wac,
-          SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.fico_score * l.loan_amount ELSE 0 END) /
-            NULLIF(SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.loan_amount ELSE 0 END), 0) as wa_fico,
-          SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.ltv_ratio * l.loan_amount ELSE 0 END) /
-            NULLIF(SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.loan_amount ELSE 0 END), 0) as wa_ltv
+          SUM(COALESCE(
+            l.loan_amount,
+            (l.raw_data->>'loan_amount')::numeric,
+            (l.raw_data->>'loanAmount')::numeric,
+            (l.raw_data->>'amount')::numeric,
+            (l.raw_data->>'principal_amount')::numeric,
+            (l.raw_data->>'principalAmount')::numeric,
+            (l.raw_data->>'requested_amount')::numeric,
+            (l.raw_data->>'requestedAmount')::numeric,
+            0
+          )) as volume,
+          AVG(COALESCE(
+            l.loan_amount,
+            (l.raw_data->>'loan_amount')::numeric,
+            (l.raw_data->>'loanAmount')::numeric,
+            (l.raw_data->>'amount')::numeric,
+            (l.raw_data->>'principal_amount')::numeric,
+            (l.raw_data->>'principalAmount')::numeric,
+            (l.raw_data->>'requested_amount')::numeric,
+            (l.raw_data->>'requestedAmount')::numeric
+          )) as avg_balance,
+          SUM(CASE 
+              WHEN COALESCE(
+                l.interest_rate,
+                (l.raw_data->>'interest_rate')::numeric,
+                (l.raw_data->>'interestRate')::numeric,
+                (l.raw_data->>'rate')::numeric,
+                (l.raw_data->>'apr')::numeric,
+                (l.raw_data->>'APR')::numeric,
+                (l.raw_data->>'note_rate')::numeric,
+                (l.raw_data->>'noteRate')::numeric
+              ) > 0 
+              AND COALESCE(
+                l.interest_rate,
+                (l.raw_data->>'interest_rate')::numeric,
+                (l.raw_data->>'interestRate')::numeric,
+                (l.raw_data->>'rate')::numeric,
+                (l.raw_data->>'apr')::numeric,
+                (l.raw_data->>'APR')::numeric,
+                (l.raw_data->>'note_rate')::numeric,
+                (l.raw_data->>'noteRate')::numeric
+              ) < 15 
+              THEN COALESCE(
+                l.interest_rate,
+                (l.raw_data->>'interest_rate')::numeric,
+                (l.raw_data->>'interestRate')::numeric,
+                (l.raw_data->>'rate')::numeric,
+                (l.raw_data->>'apr')::numeric,
+                (l.raw_data->>'APR')::numeric,
+                (l.raw_data->>'note_rate')::numeric,
+                (l.raw_data->>'noteRate')::numeric
+              ) * COALESCE(
+                l.loan_amount,
+                (l.raw_data->>'loan_amount')::numeric,
+                (l.raw_data->>'loanAmount')::numeric,
+                (l.raw_data->>'amount')::numeric,
+                (l.raw_data->>'principal_amount')::numeric,
+                (l.raw_data->>'principalAmount')::numeric,
+                (l.raw_data->>'requested_amount')::numeric,
+                (l.raw_data->>'requestedAmount')::numeric,
+                0
+              )
+              ELSE 0 
+            END) /
+            NULLIF(SUM(CASE 
+              WHEN COALESCE(
+                l.interest_rate,
+                (l.raw_data->>'interest_rate')::numeric,
+                (l.raw_data->>'interestRate')::numeric,
+                (l.raw_data->>'rate')::numeric,
+                (l.raw_data->>'apr')::numeric,
+                (l.raw_data->>'APR')::numeric,
+                (l.raw_data->>'note_rate')::numeric,
+                (l.raw_data->>'noteRate')::numeric
+              ) > 0 
+              AND COALESCE(
+                l.interest_rate,
+                (l.raw_data->>'interest_rate')::numeric,
+                (l.raw_data->>'interestRate')::numeric,
+                (l.raw_data->>'rate')::numeric,
+                (l.raw_data->>'apr')::numeric,
+                (l.raw_data->>'APR')::numeric,
+                (l.raw_data->>'note_rate')::numeric,
+                (l.raw_data->>'noteRate')::numeric
+              ) < 15 
+              THEN COALESCE(
+                l.loan_amount,
+                (l.raw_data->>'loan_amount')::numeric,
+                (l.raw_data->>'loanAmount')::numeric,
+                (l.raw_data->>'amount')::numeric,
+                (l.raw_data->>'principal_amount')::numeric,
+                (l.raw_data->>'principalAmount')::numeric,
+                (l.raw_data->>'requested_amount')::numeric,
+                (l.raw_data->>'requestedAmount')::numeric,
+                0
+              )
+              ELSE 0 
+            END), 0) as wac,
+          SUM(CASE 
+              WHEN COALESCE(
+                l.fico_score,
+                (l.raw_data->>'fico_score')::numeric,
+                (l.raw_data->>'fico')::numeric,
+                (l.raw_data->>'credit_score')::numeric,
+                (l.raw_data->>'creditScore')::numeric,
+                (l.raw_data->>'ficoScore')::numeric,
+                (l.raw_data->>'middle_fico')::numeric,
+                (l.raw_data->>'middleFICO')::numeric,
+                (l.raw_data->>'middle_fico_score')::numeric,
+                (l.raw_data->>'mid_fico')::numeric,
+                (l.raw_data->>'midFico')::numeric
+              ) >= 350 
+              AND COALESCE(
+                l.fico_score,
+                (l.raw_data->>'fico_score')::numeric,
+                (l.raw_data->>'fico')::numeric,
+                (l.raw_data->>'credit_score')::numeric,
+                (l.raw_data->>'creditScore')::numeric,
+                (l.raw_data->>'ficoScore')::numeric,
+                (l.raw_data->>'middle_fico')::numeric,
+                (l.raw_data->>'middleFICO')::numeric,
+                (l.raw_data->>'middle_fico_score')::numeric,
+                (l.raw_data->>'mid_fico')::numeric,
+                (l.raw_data->>'midFico')::numeric
+              ) <= 900 
+              THEN COALESCE(
+                l.fico_score,
+                (l.raw_data->>'fico_score')::numeric,
+                (l.raw_data->>'fico')::numeric,
+                (l.raw_data->>'credit_score')::numeric,
+                (l.raw_data->>'creditScore')::numeric,
+                (l.raw_data->>'ficoScore')::numeric,
+                (l.raw_data->>'middle_fico')::numeric,
+                (l.raw_data->>'middleFICO')::numeric,
+                (l.raw_data->>'middle_fico_score')::numeric,
+                (l.raw_data->>'mid_fico')::numeric,
+                (l.raw_data->>'midFico')::numeric
+              ) * COALESCE(
+                l.loan_amount,
+                (l.raw_data->>'loan_amount')::numeric,
+                (l.raw_data->>'loanAmount')::numeric,
+                (l.raw_data->>'amount')::numeric,
+                (l.raw_data->>'principal_amount')::numeric,
+                (l.raw_data->>'principalAmount')::numeric,
+                (l.raw_data->>'requested_amount')::numeric,
+                (l.raw_data->>'requestedAmount')::numeric,
+                0
+              )
+              ELSE 0 
+            END) /
+            NULLIF(SUM(CASE 
+              WHEN COALESCE(
+                l.fico_score,
+                (l.raw_data->>'fico_score')::numeric,
+                (l.raw_data->>'fico')::numeric,
+                (l.raw_data->>'credit_score')::numeric,
+                (l.raw_data->>'creditScore')::numeric,
+                (l.raw_data->>'ficoScore')::numeric,
+                (l.raw_data->>'middle_fico')::numeric,
+                (l.raw_data->>'middleFICO')::numeric,
+                (l.raw_data->>'middle_fico_score')::numeric,
+                (l.raw_data->>'mid_fico')::numeric,
+                (l.raw_data->>'midFico')::numeric
+              ) >= 350 
+              AND COALESCE(
+                l.fico_score,
+                (l.raw_data->>'fico_score')::numeric,
+                (l.raw_data->>'fico')::numeric,
+                (l.raw_data->>'credit_score')::numeric,
+                (l.raw_data->>'creditScore')::numeric,
+                (l.raw_data->>'ficoScore')::numeric,
+                (l.raw_data->>'middle_fico')::numeric,
+                (l.raw_data->>'middleFICO')::numeric,
+                (l.raw_data->>'middle_fico_score')::numeric,
+                (l.raw_data->>'mid_fico')::numeric,
+                (l.raw_data->>'midFico')::numeric
+              ) <= 900 
+              THEN COALESCE(
+                l.loan_amount,
+                (l.raw_data->>'loan_amount')::numeric,
+                (l.raw_data->>'loanAmount')::numeric,
+                (l.raw_data->>'amount')::numeric,
+                (l.raw_data->>'principal_amount')::numeric,
+                (l.raw_data->>'principalAmount')::numeric,
+                (l.raw_data->>'requested_amount')::numeric,
+                (l.raw_data->>'requestedAmount')::numeric,
+                0
+              )
+              ELSE 0 
+            END), 0) as wa_fico,
+          SUM(CASE 
+              WHEN COALESCE(
+                l.ltv_ratio,
+                (l.raw_data->>'ltv')::numeric,
+                (l.raw_data->>'loan_to_value')::numeric,
+                (l.raw_data->>'loanToValue')::numeric,
+                (l.raw_data->>'ltv_ratio')::numeric,
+                (l.raw_data->>'ltvRatio')::numeric
+              ) >= 0 
+              AND COALESCE(
+                l.ltv_ratio,
+                (l.raw_data->>'ltv')::numeric,
+                (l.raw_data->>'loan_to_value')::numeric,
+                (l.raw_data->>'loanToValue')::numeric,
+                (l.raw_data->>'ltv_ratio')::numeric,
+                (l.raw_data->>'ltvRatio')::numeric
+              ) <= 110 
+              THEN COALESCE(
+                l.ltv_ratio,
+                (l.raw_data->>'ltv')::numeric,
+                (l.raw_data->>'loan_to_value')::numeric,
+                (l.raw_data->>'loanToValue')::numeric,
+                (l.raw_data->>'ltv_ratio')::numeric,
+                (l.raw_data->>'ltvRatio')::numeric
+              ) * COALESCE(
+                l.loan_amount,
+                (l.raw_data->>'loan_amount')::numeric,
+                (l.raw_data->>'loanAmount')::numeric,
+                (l.raw_data->>'amount')::numeric,
+                (l.raw_data->>'principal_amount')::numeric,
+                (l.raw_data->>'principalAmount')::numeric,
+                (l.raw_data->>'requested_amount')::numeric,
+                (l.raw_data->>'requestedAmount')::numeric,
+                0
+              )
+              ELSE 0 
+            END) /
+            NULLIF(SUM(CASE 
+              WHEN COALESCE(
+                l.ltv_ratio,
+                (l.raw_data->>'ltv')::numeric,
+                (l.raw_data->>'loan_to_value')::numeric,
+                (l.raw_data->>'loanToValue')::numeric,
+                (l.raw_data->>'ltv_ratio')::numeric,
+                (l.raw_data->>'ltvRatio')::numeric
+              ) >= 0 
+              AND COALESCE(
+                l.ltv_ratio,
+                (l.raw_data->>'ltv')::numeric,
+                (l.raw_data->>'loan_to_value')::numeric,
+                (l.raw_data->>'loanToValue')::numeric,
+                (l.raw_data->>'ltv_ratio')::numeric,
+                (l.raw_data->>'ltvRatio')::numeric
+              ) <= 110 
+              THEN COALESCE(
+                l.loan_amount,
+                (l.raw_data->>'loan_amount')::numeric,
+                (l.raw_data->>'loanAmount')::numeric,
+                (l.raw_data->>'amount')::numeric,
+                (l.raw_data->>'principal_amount')::numeric,
+                (l.raw_data->>'principalAmount')::numeric,
+                (l.raw_data->>'requested_amount')::numeric,
+                (l.raw_data->>'requestedAmount')::numeric,
+                0
+              )
+              ELSE 0 
+            END), 0) as wa_ltv
         FROM public.loans l
         WHERE 1=1 ${accessClause} AND ${statusClause}
         GROUP BY category
