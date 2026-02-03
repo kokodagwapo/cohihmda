@@ -13,6 +13,7 @@ export interface RiskSummary {
 
 export interface LoanCard {
   id: string;
+  loan_number?: string | null;
   officer: string;
   amount: string;
   amountValue?: number;
@@ -234,6 +235,9 @@ export function transformLoanToCard(loan: any): LoanCard {
                  rawData.loan_id ??
                  loan.id ?? 
                  'UNKNOWN';
+
+  // Human-readable loan number (for display) - differs from GUID
+  const loanNumber = loan.loan_number ?? loan.loanNumber ?? metadata.loan_number ?? rawData.loan_number ?? null;
   
   // For display, use full loan_id if it's a real GUID (not auto-generated), otherwise truncate
   const isRealGuid = typeof loanId === 'string' && (
@@ -310,7 +314,8 @@ export function transformLoanToCard(loan: any): LoanCard {
   ]);
 
   return {
-    id: loanIdDisplay,
+    id: String(loanId),
+    loan_number: loanNumber,
     officer: loan.loan_officer_name ?? loan.officer ?? loan.loName ?? 'Unassigned',
     amount: formatAmount(amountValue),
     amountValue,

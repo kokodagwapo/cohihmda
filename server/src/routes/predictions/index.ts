@@ -43,10 +43,10 @@ router.post('/', authenticateToken, attachTenantContext, apiLimiter, async (req:
     const activeLoansQuery = `
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, closing_date, funding_date,
+        application_date, lock_date, lock_expiration_date, closing_date, funding_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
-        loan_purpose, property_type, occupancy_type,
+        loan_purpose, property_type, occupancy_type, channel,
         underwriter, closer, processor
       FROM public.loans 
       WHERE current_loan_status = 'Active Loan'
@@ -140,6 +140,26 @@ router.post('/', authenticateToken, attachTenantContext, apiLimiter, async (req:
     // Limit response size
     const LOANS_PER_BUCKET = 50;
 
+    // Enrich bucketed loans with loan_purpose and channel from raw DB when missing
+    // (avoids "--" in UI when values exist in DB but are lost in prepareLoanData/bucketLoanData)
+    const rawByLoanId = new Map(activeLoans.map((l: any) => [l.loan_id, l]));
+    if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
+      result.bucketedLoans.forEach((loan: any) => {
+        const raw = rawByLoanId.get(loan.loan_id);
+        if (raw) {
+          const lp = loan.loan_purpose ?? loan.loanPurpose;
+          const ch = loan.channel;
+          if ((lp == null || String(lp).trim() === '') && raw.loan_purpose) {
+            loan.loan_purpose = raw.loan_purpose;
+            loan.loanPurpose = raw.loan_purpose;
+          }
+          if ((ch == null || String(ch).trim() === '') && raw.channel) {
+            loan.channel = raw.channel;
+          }
+        }
+      });
+    }
+
     // Extract bucket summary
     const bucketSummary: Record<string, number> = {};
     if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
@@ -151,9 +171,9 @@ router.post('/', authenticateToken, attachTenantContext, apiLimiter, async (req:
 
     // Essential fields for response
     const essentialFields = [
-      'loan_id', 'loan_number', 'loan_amount', 'loan_type',
+      'loan_id', 'loan_number', 'loan_amount', 'loan_type', 'loan_purpose', 'loanPurpose', 'channel',
       'bucket', 'current_loan_status', 'status', 'branch',
-      'application_date', 'lock_date', 'closing_date', 'funding_date',
+      'application_date', 'lock_date', 'lock_expiration_date', 'closing_date', 'funding_date',
       'estimated_closing_date',
       'fico_score', 'ltv_ratio', 'be_dti_ratio',
       'loan_officer', 'underwriter', 'closer', 'processor',
@@ -171,7 +191,26 @@ router.post('/', authenticateToken, attachTenantContext, apiLimiter, async (req:
       'riskSummary'
     ];
 
-    // Group by bucket and limit
+    const rawByLoanIdPred = new Map<string, any>();
+    activeLoans.forEach((l: any) => {
+      const id = l.loan_id ?? l.loanId;
+      if (id != null && String(id).trim() !== '') rawByLoanIdPred.set(String(id), l);
+    });
+    // Debug: log first raw row after building rawByLoanIdPred
+    const firstRawPred = activeLoans[0];
+    if (firstRawPred) {
+      const fid = firstRawPred.loan_id ?? firstRawPred.loanId;
+      logInfo('[PredictDebug] predictions first raw row', {
+        'raw.loan_id': fid,
+        typeof_loan_id: typeof fid,
+        'raw.loan_purpose': firstRawPred.loan_purpose,
+        'raw.channel': firstRawPred.channel,
+        'raw.lock_date': firstRawPred.lock_date,
+        rawByLoanIdSize: rawByLoanIdPred.size,
+        sampleMapKeys: Array.from(rawByLoanIdPred.keys()).slice(0, 3),
+      });
+    }
+    let firstStrippedBackfillLogged = false;
     const bucketGroups: Record<string, any[]> = {};
     if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
       result.bucketedLoans.forEach((loan: any) => {
@@ -182,6 +221,44 @@ router.post('/', authenticateToken, attachTenantContext, apiLimiter, async (req:
           essentialFields.forEach(f => {
             if (loan[f] !== undefined) stripped[f] = loan[f];
           });
+          const lid = loan.loan_id ?? loan.loanId;
+          let rawFound = false;
+          const backfillSet: Record<string, any> = {};
+          if (lid != null) {
+            const raw = rawByLoanIdPred.get(String(lid));
+            rawFound = !!raw;
+            if (raw) {
+              if (raw.loan_purpose != null && String(raw.loan_purpose).trim() !== '') {
+                stripped.loan_purpose = raw.loan_purpose;
+                stripped.loanPurpose = raw.loan_purpose;
+                backfillSet.loan_purpose = raw.loan_purpose;
+              }
+              if (raw.channel != null && String(raw.channel).trim() !== '') {
+                stripped.channel = raw.channel;
+                backfillSet.channel = raw.channel;
+              }
+              if (raw.lock_expiration_date != null) {
+                stripped.lock_expiration_date = raw.lock_expiration_date;
+                backfillSet.lock_expiration_date = raw.lock_expiration_date;
+              }
+              if (raw.lock_date != null) {
+                stripped.lock_date = raw.lock_date;
+                backfillSet.lock_date = raw.lock_date;
+              }
+            }
+          }
+          if (!firstStrippedBackfillLogged) {
+            firstStrippedBackfillLogged = true;
+            logInfo('[PredictDebug] predictions first stripped backfill', {
+              loan_id: lid,
+              lookupKey: lid != null ? String(lid) : null,
+              rawFound,
+              backfillSet,
+              strippedBeforeBackfill_loan_purpose: loan.loan_purpose ?? loan.loanPurpose,
+              strippedBeforeBackfill_channel: loan.channel,
+              strippedBeforeBackfill_lock_date: loan.lock_date,
+            });
+          }
           bucketGroups[bucket].push(stripped);
         }
       });

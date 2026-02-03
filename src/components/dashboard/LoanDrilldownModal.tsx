@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, memo } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
-import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { api } from '@/lib/api';
 
 interface RiskSummary {
@@ -15,6 +14,7 @@ interface RiskSummary {
 
 interface LoanData {
   id: string;
+  loan_number?: string | null;
   guid?: string;
   officer: string;
   amount: string;
@@ -23,6 +23,8 @@ interface LoanData {
   riskScore: number;
   reason: string;
   loanType?: string;
+  loanPurpose?: string | null;
+  channel?: string | null;
   status?: string;
   ficoScore: number | null;
   ltvRatio: number | null;
@@ -34,6 +36,8 @@ interface LoanData {
   interestRate?: number | null;
   marketRate?: number | null;
   marketChangeDelta?: number | null;
+  lockDate?: string | null;
+  lockExpirationDate?: string | null;
   // Pullthrough percentages (actual values)
   loPullthroughPct?: number | null;
   uwPullthroughPct?: number | null;
@@ -139,21 +143,6 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
     return 'text-slate-400 bg-slate-100 dark:text-slate-500 dark:bg-slate-800';
   };
 
-  // Helper functions for signal bucket colors (1-6 scale: 1-2=low risk, 3-4=medium, 5-6=high)
-  const getBucketBgColor = (bucket: number | null | undefined): string => {
-    if (bucket === null || bucket === undefined) return isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100';
-    if (bucket <= 2) return isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50';
-    if (bucket <= 4) return isDarkMode ? 'bg-amber-900/30' : 'bg-amber-50';
-    return isDarkMode ? 'bg-rose-900/30' : 'bg-rose-50';
-  };
-
-  const getBucketTextColor = (bucket: number | null | undefined): string => {
-    if (bucket === null || bucket === undefined) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
-    if (bucket <= 2) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
-    if (bucket <= 4) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
-    return isDarkMode ? 'text-rose-400' : 'text-rose-600';
-  };
-
   const riskStyles = getRiskStyles(loan.riskLevel);
   const riskLabel = getRiskLabel(loan.riskLevel);
 
@@ -251,7 +240,12 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
             <div className="flex items-center justify-between">
             <div>
               <p className="text-2xl font-light tracking-tight">{loan.amount}</p>
-              <p className="text-xs font-light mt-0.5 text-slate-500 dark:text-slate-400">Loan #{loan.id}</p>
+              <p className="text-xs font-light mt-0.5 text-slate-500 dark:text-slate-400">
+                Loan #{loan.loan_number || loan.id}
+              </p>
+              <p className="text-[10px] sm:text-[11px] mt-0.5 break-all text-slate-500 dark:text-slate-400">
+                {loan.id}
+              </p>
             </div>
             <div className="flex flex-col items-end gap-1 mr-10">
               {/* Predicted outcome badge - only show for withdraw/deny */}
@@ -292,156 +286,38 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
             </div>
           </div>
 
-          {/* Signal Bucket Scores - Only show if we have signal data */}
-          {(loan.creditMetricsSignalStrength || loan.loanCharacteristicsSignalStrength || 
-            loan.timeInMotionSignalStrength || loan.mloAeFalloutProneSignalStrength || 
-            loan.interestLockVsMarketSignalStrength || loan.loPullthroughSignal || loan.marketChangeDeltaSignal) && (
-            <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-              <p className={`text-[10px] uppercase tracking-wider font-medium mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                Signal Bucket Scores (1=Low Risk, 6=High Risk)
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                {loan.creditMetricsSignalStrength && (
-                  <div className={`p-2 rounded-lg text-center ${getBucketBgColor(loan.creditMetricsSignalStrength)}`}>
-                    <p className={`text-base font-semibold ${getBucketTextColor(loan.creditMetricsSignalStrength)}`}>{loan.creditMetricsSignalStrength}</p>
-                    <p className={`text-[8px] uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Credit</p>
-                  </div>
-                )}
-                {loan.loanCharacteristicsSignalStrength && (
-                  <div className={`p-2 rounded-lg text-center ${getBucketBgColor(loan.loanCharacteristicsSignalStrength)}`}>
-                    <p className={`text-base font-semibold ${getBucketTextColor(loan.loanCharacteristicsSignalStrength)}`}>{loan.loanCharacteristicsSignalStrength}</p>
-                    <p className={`text-[8px] uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loan Char</p>
-                  </div>
-                )}
-                {loan.timeInMotionSignalStrength && (
-                  <div className={`p-2 rounded-lg text-center ${getBucketBgColor(loan.timeInMotionSignalStrength)}`}>
-                    <p className={`text-base font-semibold ${getBucketTextColor(loan.timeInMotionSignalStrength)}`}>{loan.timeInMotionSignalStrength}</p>
-                    <p className={`text-[8px] uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Time Motion</p>
-                  </div>
-                )}
-                {loan.loPullthroughSignal && (
-                  <div className={`p-2 rounded-lg text-center ${getBucketBgColor(loan.loPullthroughSignal)}`}>
-                    <p className={`text-base font-semibold ${getBucketTextColor(loan.loPullthroughSignal)}`}>{loan.loPullthroughSignal}</p>
-                    <p className={`text-[8px] uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>LO Pull</p>
-                  </div>
-                )}
-                {loan.marketChangeDeltaSignal && (
-                  <div className={`p-2 rounded-lg text-center ${getBucketBgColor(loan.marketChangeDeltaSignal)}`}>
-                    <p className={`text-base font-semibold ${getBucketTextColor(loan.marketChangeDeltaSignal)}`}>{loan.marketChangeDeltaSignal}</p>
-                    <p className={`text-[8px] uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Market Δ</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Loan Info Section */}
+          {/* Pullthrough Rates Section - always show LO, UW, Processor, Closer */}
           <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
             <p className={`text-[10px] uppercase tracking-wider font-semibold mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-              Loan Information
+              Pullthrough Rates
             </p>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-4 gap-3">
               <div>
-                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Officer</p>
-                <p className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{loan.officer || 'Unassigned'}</p>
+                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>LO</p>
+                <p className={`font-medium text-sm ${loan.loPullthroughPct != null && !Number.isNaN(loan.loPullthroughPct) ? (loan.loPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.loPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')}`}>
+                  {loan.loPullthroughPct != null && !Number.isNaN(loan.loPullthroughPct) ? `${loan.loPullthroughPct.toFixed(1)}%` : '—'}
+                </p>
               </div>
               <div>
-                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Type</p>
-                <p className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{loan.loanType || '—'}</p>
+                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>UW</p>
+                <p className={`font-medium text-sm ${loan.uwPullthroughPct != null && !Number.isNaN(loan.uwPullthroughPct) ? (loan.uwPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.uwPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')}`}>
+                  {loan.uwPullthroughPct != null && !Number.isNaN(loan.uwPullthroughPct) ? `${loan.uwPullthroughPct.toFixed(1)}%` : '—'}
+                </p>
               </div>
               <div>
-                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Milestone</p>
-                <p className={`font-medium text-sm truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{loan.currentMilestone || '—'}</p>
+                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Processor</p>
+                <p className={`font-medium text-sm ${loan.processorPullthroughPct != null && !Number.isNaN(loan.processorPullthroughPct) ? (loan.processorPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.processorPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')}`}>
+                  {loan.processorPullthroughPct != null && !Number.isNaN(loan.processorPullthroughPct) ? `${loan.processorPullthroughPct.toFixed(1)}%` : '—'}
+                </p>
               </div>
               <div>
-                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Active Days</p>
-                <p className={`font-medium text-sm ${loan.activeDays && loan.activeDays > 45 ? 'text-rose-600 dark:text-rose-400' : loan.activeDays && loan.activeDays > 30 ? 'text-amber-600 dark:text-amber-400' : isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                  {loan.activeDays !== null && loan.activeDays !== undefined ? `${loan.activeDays} days` : '—'}
+                <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Closer</p>
+                <p className={`font-medium text-sm ${loan.closerPullthroughPct != null && !Number.isNaN(loan.closerPullthroughPct) ? (loan.closerPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.closerPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400') : (isDarkMode ? 'text-slate-400' : 'text-slate-500')}`}>
+                  {loan.closerPullthroughPct != null && !Number.isNaN(loan.closerPullthroughPct) ? `${loan.closerPullthroughPct.toFixed(1)}%` : '—'}
                 </p>
               </div>
             </div>
           </div>
-
-          {/* Rate & Market Section */}
-          {(loan.interestRate !== null || loan.marketRate !== null) && (
-            <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-              <p className={`text-[10px] uppercase tracking-wider font-semibold mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                Rate & Market
-              </p>
-              <div className="grid grid-cols-3 gap-4">
-                {(loan.interestRate !== null && loan.interestRate !== undefined) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Lock Rate</p>
-                    <p className={`font-medium text-sm ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{loan.interestRate.toFixed(3)}%</p>
-                  </div>
-                )}
-                {(loan.marketRate !== null && loan.marketRate !== undefined) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Market (FRED)</p>
-                    <p className={`font-medium text-sm ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{loan.marketRate.toFixed(3)}%</p>
-                  </div>
-                )}
-                {(loan.marketChangeDelta !== null && loan.marketChangeDelta !== undefined) ? (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Market Delta</p>
-                    <p className={`font-medium text-sm ${loan.marketChangeDelta > 0.2 ? 'text-rose-600 dark:text-rose-400' : loan.marketChangeDelta < -0.1 ? 'text-emerald-600 dark:text-emerald-400' : isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {loan.marketChangeDelta > 0 ? '+' : ''}{loan.marketChangeDelta.toFixed(3)}%
-                    </p>
-                  </div>
-                ) : (loan.interestRate && loan.marketRate) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Rate Delta</p>
-                    <p className={`font-medium text-sm ${(loan.interestRate - loan.marketRate) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {(loan.interestRate - loan.marketRate) > 0 ? '+' : ''}{(loan.interestRate - loan.marketRate).toFixed(3)}%
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Pullthrough Rates Section */}
-          {(loan.loPullthroughPct !== null || loan.uwPullthroughPct !== null || loan.closerPullthroughPct !== null || loan.processorPullthroughPct !== null) && (
-            <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-              <p className={`text-[10px] uppercase tracking-wider font-semibold mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                Pullthrough Rates
-              </p>
-              <div className="grid grid-cols-4 gap-3">
-                {(loan.loPullthroughPct !== null && loan.loPullthroughPct !== undefined) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>LO</p>
-                    <p className={`font-medium text-sm ${loan.loPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.loPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {loan.loPullthroughPct.toFixed(1)}%
-                    </p>
-                  </div>
-                )}
-                {(loan.uwPullthroughPct !== null && loan.uwPullthroughPct !== undefined) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>UW</p>
-                    <p className={`font-medium text-sm ${loan.uwPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.uwPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {loan.uwPullthroughPct.toFixed(1)}%
-                    </p>
-                  </div>
-                )}
-                {(loan.closerPullthroughPct !== null && loan.closerPullthroughPct !== undefined) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Closer</p>
-                    <p className={`font-medium text-sm ${loan.closerPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.closerPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {loan.closerPullthroughPct.toFixed(1)}%
-                    </p>
-                  </div>
-                )}
-                {(loan.processorPullthroughPct !== null && loan.processorPullthroughPct !== undefined) && (
-                  <div>
-                    <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Processor</p>
-                    <p className={`font-medium text-sm ${loan.processorPullthroughPct < 60 ? 'text-rose-600 dark:text-rose-400' : loan.processorPullthroughPct < 75 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {loan.processorPullthroughPct.toFixed(1)}%
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Risk Assessment - Side by side columns */}
           {(successes.length > 0 || warnings.length > 0 || criticals.length > 0) ? (
@@ -486,13 +362,6 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
               </p>
             </div>
           )}
-
-          <LoanRiskDistribution
-            ficoScore={loan.ficoScore}
-            ltvRatio={loan.ltvRatio}
-            dtiRatio={loan.dtiRatio}
-            isDarkMode={isDarkMode}
-          />
 
           {/* AI Recommendations Section */}
           <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>

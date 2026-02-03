@@ -388,7 +388,7 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
     const query = `
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate,
-        loan_type, loan_purpose, property_type, property_state, property_city,
+        loan_type, loan_purpose, channel, property_type, property_state, property_city,
         property_street, property_zip, occupancy_type,
         application_date, lock_date, closing_date, funding_date,
         current_loan_status, branch, loan_officer, underwriter, closer, processor,
@@ -5527,10 +5527,10 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     const activeLoansQuery = `
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, closing_date, funding_date,
+        application_date, lock_date, lock_expiration_date, closing_date, funding_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
-        loan_purpose, property_type, occupancy_type,
+        loan_purpose, property_type, occupancy_type, channel,
         underwriter, closer, processor
       FROM public.loans 
       WHERE current_loan_status = 'Active Loan'
@@ -5635,6 +5635,42 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
       tenantPool // Pass tenant pool for isolated tenant database queries
     }, tenantApiKey);
 
+    const rawByLoanId = new Map<string, any>();
+    activeLoans.forEach((l: any) => {
+      const id = l.loan_id ?? l.loanId;
+      if (id != null && String(id).trim() !== '') rawByLoanId.set(String(id), l);
+    });
+    // Debug: log first raw row after building rawByLoanId
+    const firstRaw = activeLoans[0];
+    if (firstRaw) {
+      const fid = firstRaw.loan_id ?? firstRaw.loanId;
+      logInfo('[PredictDebug] loans/predict first raw row', {
+        'raw.loan_id': fid,
+        typeof_loan_id: typeof fid,
+        'raw.loan_purpose': firstRaw.loan_purpose,
+        'raw.channel': firstRaw.channel,
+        'raw.lock_date': firstRaw.lock_date,
+        rawByLoanIdSize: rawByLoanId.size,
+        sampleMapKeys: Array.from(rawByLoanId.keys()).slice(0, 3),
+      });
+    }
+    if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
+      result.bucketedLoans.forEach((loan: any) => {
+        const raw = rawByLoanId.get(loan.loan_id);
+        if (raw) {
+          const lp = loan.loan_purpose ?? loan.loanPurpose;
+          const ch = loan.channel;
+          if ((lp == null || String(lp).trim() === '') && raw.loan_purpose) {
+            loan.loan_purpose = raw.loan_purpose;
+            loan.loanPurpose = raw.loan_purpose;
+          }
+          if ((ch == null || String(ch).trim() === '') && raw.channel) {
+            loan.channel = raw.channel;
+          }
+        }
+      });
+    }
+
     // DRASTICALLY reduce response size - frontend only needs summary + limited loan data
     // Don't send full bucketed loans - send counts by bucket and only top N loans per bucket
     const LOANS_PER_BUCKET = 50; // Limit loans returned per bucket
@@ -5652,11 +5688,11 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     // Use snake_case to match database column naming convention
     const essentialFields = [
       // Core loan identifiers (snake_case matching DB)
-      'loan_id', 'loan_number', 'loan_amount', 'loan_type',
+      'loan_id', 'loan_number', 'loan_amount', 'loan_type', 'loan_purpose', 'loanPurpose', 'channel',
       
       // Status and dates (snake_case matching DB)
       'bucket', 'current_loan_status', 'status', 'branch',
-      'application_date', 'lock_date', 'closing_date', 'funding_date',
+      'application_date', 'lock_date', 'lock_expiration_date', 'closing_date', 'funding_date',
       'estimated_closing_date',
       
       // Credit metrics (snake_case matching DB)
@@ -5688,18 +5724,57 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
       'riskSummary'
     ];
     
-    // Group by bucket and take top N from each
+    // Group by bucket and take top N from each; ensure loan_purpose and channel come from DB
     const bucketGroups: Record<string, any[]> = {};
+    let firstStrippedBackfillLogged = false;
     if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
       result.bucketedLoans.forEach((loan: any) => {
         const bucket = loan.bucket || 'unknown';
         if (!bucketGroups[bucket]) bucketGroups[bucket] = [];
         if (bucketGroups[bucket].length < LOANS_PER_BUCKET) {
-          // Strip to essential fields only
           const stripped: Record<string, any> = {};
           essentialFields.forEach(f => {
             if (loan[f] !== undefined) stripped[f] = loan[f];
           });
+          // Always backfill loan_purpose and channel from raw DB row so UI never shows "—" when DB has values
+          const lid = loan.loan_id ?? loan.loanId;
+          let rawFound = false;
+          const backfillSet: Record<string, any> = {};
+          if (lid != null) {
+            const raw = rawByLoanId.get(String(lid));
+            rawFound = !!raw;
+            if (raw) {
+              if (raw.loan_purpose != null && String(raw.loan_purpose).trim() !== '') {
+                stripped.loan_purpose = raw.loan_purpose;
+                stripped.loanPurpose = raw.loan_purpose;
+                backfillSet.loan_purpose = raw.loan_purpose;
+              }
+              if (raw.channel != null && String(raw.channel).trim() !== '') {
+                stripped.channel = raw.channel;
+                backfillSet.channel = raw.channel;
+              }
+              if (raw.lock_expiration_date != null) {
+                stripped.lock_expiration_date = raw.lock_expiration_date;
+                backfillSet.lock_expiration_date = raw.lock_expiration_date;
+              }
+              if (raw.lock_date != null) {
+                stripped.lock_date = raw.lock_date;
+                backfillSet.lock_date = raw.lock_date;
+              }
+            }
+          }
+          if (!firstStrippedBackfillLogged) {
+            firstStrippedBackfillLogged = true;
+            logInfo('[PredictDebug] loans/predict first stripped backfill', {
+              loan_id: lid,
+              lookupKey: lid != null ? String(lid) : null,
+              rawFound,
+              backfillSet,
+              strippedBeforeBackfill_loan_purpose: loan.loan_purpose ?? loan.loanPurpose,
+              strippedBeforeBackfill_channel: loan.channel,
+              strippedBeforeBackfill_lock_date: loan.lock_date,
+            });
+          }
           bucketGroups[bucket].push(stripped);
         }
       });

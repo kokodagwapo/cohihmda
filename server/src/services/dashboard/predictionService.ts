@@ -709,7 +709,7 @@ async function callAIModel(
  * compatibility during migration but should be empty.
  */
 export function prepareLoanData(loans: any[]): any[] {
-  return loans.map(loan => {
+  return loans.map((loan, idx) => {
     // Legacy raw_data support - will be empty after migration
     // Kept for backward compatibility during transition
     const rawData = loan.raw_data 
@@ -744,9 +744,33 @@ export function prepareLoanData(loans: any[]): any[] {
     const closingDate = parseDate(loan.closing_date || rawData.closing_date);
     const fundDate = parseDate(loan.fund_date || rawData.fund_date || rawData.funding_date || rawData['Funding Date']);
 
+    // Debug: log first raw row and prepared output for loan_purpose, channel, lock_date
+    const preparedLoanPurpose = String(loan.loan_purpose || rawData.loan_purpose || rawData['Fields.19'] || '');
+    const preparedChannel = String(
+      loan.channel ||
+      rawData.channel ||
+      rawData['Channel'] ||
+      rawData['Fields.2626'] ||
+      ''
+    );
+    if (idx === 0) {
+      const rawKeys = loan && typeof loan === 'object' ? Object.keys(loan).filter(k => /loan_purpose|channel|lock_date|loan_id/i.test(k)) : [];
+      logInfo('[PredictDebug] prepareLoanData first row', {
+        rawRowKeysSample: rawKeys,
+        'rawRow.loan_id': loan?.loan_id,
+        typeof_loan_id: typeof loan?.loan_id,
+        'rawRow.loan_purpose': loan?.loan_purpose,
+        'rawRow.channel': loan?.channel,
+        'rawRow.lock_date': loan?.lock_date,
+        preparedLockDate: lockDate != null ? (lockDate instanceof Date ? lockDate.toISOString() : String(lockDate)) : null,
+        prepared_loanPurpose: preparedLoanPurpose || '(empty)',
+        prepared_channel: preparedChannel || '(empty)',
+      });
+    }
+
     return {
       loanId: String(loan.loan_id || loan.id || rawData.GUID || rawData.guid || ''),
-      loanNumber: String(loan.loan_number || rawData.loan_number || loan.loan_id || ''),
+      loanNumber: String(loan.loan_number ?? rawData.loan_number ?? '').trim() || null,
       loanAmount: parseNumeric(loan.loan_amount || rawData.loan_amount) || 0,
       loanType: String(loan.loan_type || rawData.loan_type || 'Unknown'),
       status: String(loan.status || rawData.status || 'Active'),
@@ -840,7 +864,8 @@ export function prepareLoanData(loans: any[]): any[] {
         rawData.combined_ltv ||
         rawData['Fields.976']                     // Encompass: CLTV (if available)
       ), // Combined Loan-to-Value
-      loanPurpose: String(loan.loan_purpose || rawData.loan_purpose || rawData['Fields.19'] || ''),
+      loanPurpose: preparedLoanPurpose,
+      loan_purpose: preparedLoanPurpose,
       branch: String(loan.branch || rawData.branch || ''),
       cycleTimeDays: parseNumeric(loan.cycle_time_days || rawData.cycle_time_days),
       // Person names for pullthrough calculations - check schema columns, aliases, and Encompass field IDs
@@ -888,13 +913,7 @@ export function prepareLoanData(loans: any[]): any[] {
         rawData['Fields.1811'] ||                     // Encompass: Occupancy Type (if available)
         ''
       ),
-      channel: String(
-        loan.channel ||
-        rawData.channel || 
-        rawData['Channel'] ||
-        rawData['Fields.2626'] ||                     // Encompass: Channel (if available)
-        ''
-      ),
+      channel: preparedChannel,
       // Commission fields (if available in data)
       commissionAssumption: parseNumeric(rawData.commission_assumption || rawData.commissionAssumption),
       commissionAtRisk: parseNumeric(rawData.commission_at_risk || rawData.commissionAtRisk),
@@ -1941,7 +1960,8 @@ export async function bucketLoanData(
   // Smaller batches ensure connections are released between batches
   const BUCKETING_BATCH_SIZE = 200; // Process 200 loans at a time (reduced from 500 to prevent pool exhaustion)
   const bucketedLoans: any[] = [];
-  
+  let missingFieldsLogCount = 0;
+
   for (let i = 0; i < loans.length; i += BUCKETING_BATCH_SIZE) {
     const batch = loans.slice(i, i + BUCKETING_BATCH_SIZE);
     const batchResults = await Promise.all(batch.map(async (loan) => {
@@ -2331,6 +2351,25 @@ export async function bucketLoanData(
       return reasons.length > 0 ? reasons : ['No significant risk factors'];
     };
 
+    // Debug: log when purpose, channel, or lock_date is missing (up to 5 occurrences)
+    const outPurpose = (loan.loanPurpose ?? (loan as any).loan_purpose ?? '').toString().trim() || null;
+    const outChannel = (loan.channel ?? (loan as any).channel ?? '').toString().trim() || null;
+    const outLockDate = loan.lockDate != null ? (loan.lockDate instanceof Date ? loan.lockDate.toISOString().split('T')[0] : String(loan.lockDate).split('T')[0]) : (loan as any).lock_date ?? null;
+    const anyMissing = !outPurpose || !outChannel || !outLockDate;
+    if (anyMissing && missingFieldsLogCount < 5) {
+      missingFieldsLogCount += 1;
+      logInfo('[PredictDebug] bucketLoanData output missing fields', {
+        occurrence: missingFieldsLogCount,
+        loanId: loan.loanId,
+        prepared_loanPurpose: loan.loanPurpose,
+        prepared_channel: loan.channel,
+        prepared_lockDate: loan.lockDate,
+        out_purpose: outPurpose,
+        out_channel: outChannel,
+        out_lock_date: outLockDate,
+      });
+    }
+
     // Final output structure - use snake_case to match database columns
     // NOTE: loan spread includes prepared data (camelCase from prepareLoanData)
     // We add snake_case aliases for frontend consistency with DB schema
@@ -2341,7 +2380,9 @@ export async function bucketLoanData(
       loan_number: loan.loanNumber,
       loan_amount: loanAmount,
       loan_type: loan.loanType,
-      
+      loan_purpose: (loan.loanPurpose ?? (loan as any).loan_purpose ?? '').toString().trim() || null,
+      channel: (loan.channel ?? (loan as any).channel ?? '').toString().trim() || null,
+
       // Credit metrics (snake_case matching DB)
       fico_score: loan.ficoScore,
       ltv_ratio: loan.ltv,
@@ -2361,9 +2402,12 @@ export async function bucketLoanData(
       commission_at_risk: commissionAtRisk,
       commission_personalization_override: commissionPersonalizationOverride,
       
-      // Dates
+      // Dates (snake_case for API/frontend)
       estimated_closing_date: loan.closingDate || loan.estimatedClosingDate,
-      
+      lock_date: loan.lockDate != null
+        ? (loan.lockDate instanceof Date ? loan.lockDate.toISOString().split('T')[0] : String(loan.lockDate).split('T')[0])
+        : (loan as any).lock_date ?? null,
+
       // Individual signal buckets
       ficoScoreSignal: ficoBucket,
       ltvSignal: ltvBucket,

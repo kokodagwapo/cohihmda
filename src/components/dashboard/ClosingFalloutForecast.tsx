@@ -573,6 +573,9 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
   const [outcomeModalType, setOutcomeModalType] = useState<OutcomeModalType | null>(null);
   const [selectedLoanForDetail, setSelectedLoanForDetail] = useState<any | null>(null);
 
+  // Loan officer name -> TTS (Top Tier Score) for display on critical loan cards
+  const [officerTtsMap, setOfficerTtsMap] = useState<Record<string, number>>({});
+
   const availableYears = useMemo(() => {
     // Prefer years from loaded loans (if available); otherwise provide a small recent range.
     const years = new Set<number>();
@@ -963,31 +966,60 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
     fetchLockedLoans();
   }, [queryMetrics]);
 
+  // Fetch sales scorecard to get loan officer TTS (Top Tier Score) for critical loan cards
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOfficerTts = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set('actor', 'loan_officer');
+        if (selectedTenantId) params.set('tenant_id', selectedTenantId);
+        const res = await api.request<{ actors?: Array<{ name: string; ttsScore: number }> }>(
+          `/api/loans/sales-scorecard?${params.toString()}`
+        );
+        if (cancelled || !res?.actors) return;
+        const map: Record<string, number> = {};
+        res.actors.forEach((a) => {
+          if (a.name != null && !Number.isNaN(Number(a.ttsScore))) map[String(a.name).trim()] = Number(a.ttsScore);
+        });
+        setOfficerTtsMap(map);
+      } catch (e) {
+        if (!cancelled) setOfficerTtsMap({});
+      }
+    };
+    fetchOfficerTts();
+    return () => { cancelled = true; };
+  }, [selectedTenantId]);
+
   const criticalLoanCards = useMemo(() => {
+    // Build map of raw loan data by loan_id for filling loan_purpose/channel when missing from bucketed data
+    const rawByLoanId = new Map<string, { loan_purpose?: string | null; channel?: string | null }>();
+    if (loansRaw && Array.isArray(loansRaw)) {
+      loansRaw.forEach((r: any) => {
+        const id = r.loan_id ?? r.id;
+        if (id != null) {
+          rawByLoanId.set(String(id), {
+            loan_purpose: r.loan_purpose ?? r.loanPurpose ?? null,
+            channel: r.channel ?? null
+          });
+        }
+      });
+    }
+
     // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
     // Fall back to loansRaw if no bucketed data
     if (bucketedLoans && bucketedLoans.length > 0) {
       // Filter to high-risk loans from bucketed data
       const highRiskLoans = bucketedLoans.filter((l: any) => l.bucket === 'high');
-      
-      // Debug: Log first high-risk loan to see available fields (snake_case from backend)
-      if (highRiskLoans.length > 0) {
-        console.log('[CriticalLoans Debug] First high-risk loan fields:', {
-          loan_officer: highRiskLoans[0].loan_officer,
-          fico_score: highRiskLoans[0].fico_score,
-          ltv_ratio: highRiskLoans[0].ltv_ratio,
-          be_dti_ratio: highRiskLoans[0].be_dti_ratio,
-          interest_rate: highRiskLoans[0].interest_rate,
-          market_rate: highRiskLoans[0].market_rate,
-          current_milestone: highRiskLoans[0].current_milestone,
-          allKeys: Object.keys(highRiskLoans[0]).slice(0, 30)
-        });
-      }
-      
+
       return highRiskLoans.map((l: any) => {
         // Use snake_case field names matching database columns
         const loanId = l.loan_id || l.id || '';
-        const loanAmount = typeof l.loan_amount === 'number' ? l.loan_amount : 
+        const raw = rawByLoanId.get(String(loanId));
+        const loanPurpose = l.loan_purpose ?? l.loanPurpose ?? raw?.loan_purpose ?? null;
+        const channel = l.channel ?? raw?.channel ?? null;
+
+        const loanAmount = typeof l.loan_amount === 'number' ? l.loan_amount :
                           parseFloat(l.loan_amount || '0');
         
         // Extract reason from riskSummary object (it has {risks, positives, overallRisk, predictedOutcome, confidence})
@@ -1027,9 +1059,12 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
         
         // Return in LoanCardsContainer expected format
         // Use snake_case field names matching database columns
+        const officerName = (l.loan_officer || '').trim();
         return {
           id: String(loanId),
+          loan_number: l.loan_number || null,
           officer: l.loan_officer || '',
+          officerTtsScore: officerName ? (officerTtsMap[officerName] ?? null) : null,
           amount: loanAmount ? `$${(loanAmount / 1000).toFixed(0)}K` : '$0',
           amountValue: loanAmount,
           riskLevel: 'Very High',
@@ -1046,6 +1081,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
           interestRate: l.interest_rate ?? null,
           marketRate: l.market_rate ?? null,
           marketChangeDelta: l.marketChangeDelta ?? null,
+          lockDate: l.lock_date ?? l.lockDate ?? null,
+          lockExpirationDate: l.lock_expiration_date ?? l.lockExpirationDate ?? null,
           // Pullthrough percentages (actual values)
           loPullthroughPct: l.loPullthroughPercentage ?? null,
           uwPullthroughPct: l.uwPullthroughPercentage ?? null,
@@ -1068,10 +1105,12 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
           loPullthroughSignal: l.loPullthroughSignal ?? null,
           marketChangeDeltaSignal: l.marketChangeDeltaSignal ?? null,
           loanType: l.loan_type || null,
+          loanPurpose: loanPurpose,
+          channel: channel,
         };
       });
     }
-    
+
     // Fallback: use loansRaw if no bucketed data available
     if (!loansRaw || loansRaw.length === 0) return [];
 
@@ -1123,9 +1162,10 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
         riskLevel,
         riskScore,
         reason,
+        officerTtsScore: base.officer ? (officerTtsMap[(base.officer || '').trim()] ?? null) : null,
       };
     });
-  }, [bucketedLoans, loansRaw, loanPredictions]);
+  }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap]);
 
   // Animated values for main metrics
   const animatedActiveLoans = useCountUp(metrics.activeLoansToday, 1500, 0, isAnimating);
