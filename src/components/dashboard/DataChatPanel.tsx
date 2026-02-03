@@ -1963,12 +1963,11 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         </DialogContent>
       </Dialog>
 
-      {/* Drilldown Sheet – appears on top of Cohi panel; clean UI with pastel icons */}
+      {/* Drilldown Sheet – appears in front of chat overlay (z-[110] above chat z-[100]) */}
       <Sheet open={drilldownOpen} onOpenChange={setDrilldownOpen}>
         <SheetContent
-          priority="max"
-          overlayVariant="light"
-          className="w-[400px] sm:w-[420px] max-h-[100vh] h-full overflow-hidden p-0 flex flex-col bg-slate-50/95 dark:bg-slate-900/95 border-l border-slate-200/80 dark:border-slate-700/80"
+          overlayClassName="z-[110]"
+          className="z-[110] w-[400px] sm:w-[420px] max-h-[100vh] h-full overflow-hidden p-0 flex flex-col bg-slate-50/95 dark:bg-slate-900/95 border-l border-slate-200/80 dark:border-slate-700/80"
         >
           {drilldownData && (
             <>

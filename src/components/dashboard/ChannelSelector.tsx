@@ -142,13 +142,8 @@ export const ChannelSelector = ({
 
   if (compact) {
     return (
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Radio className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            Channel:
-          </span>
-        </div>
+      <div className="flex items-center gap-2">
+        <Radio className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-shrink-0" />
         <Select
           value={selectedChannel || "All"}
           onValueChange={(value) => {
@@ -160,14 +155,14 @@ export const ChannelSelector = ({
           }}
           disabled={loading}
         >
-          <SelectTrigger className="w-44 h-8 text-sm font-light">
+          <SelectTrigger className="w-[160px] h-8 rounded-lg border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200 focus:ring-2 focus:ring-slate-400/20">
             {loading ? (
               <div className="flex items-center gap-2">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 <span>Loading...</span>
               </div>
             ) : (
-              <SelectValue placeholder="Select channel..." />
+              <SelectValue placeholder="Channel" />
             )}
           </SelectTrigger>
           <SelectContent>

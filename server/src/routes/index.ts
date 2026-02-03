@@ -29,6 +29,7 @@ import newsRoutes from "./news.js";
 import globalKnowledgeRoutes from "./admin/globalKnowledge.js";
 import aiPromptsRoutes from "./admin/aiPrompts.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
+import shareLinksRoutes from "./shareLinks.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -77,6 +78,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
   app.use("/api/admin/ai-prompts", aiPromptsRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
+  app.use("/api/share-links", shareLinksRoutes);
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

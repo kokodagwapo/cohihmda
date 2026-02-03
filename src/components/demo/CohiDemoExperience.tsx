@@ -298,25 +298,9 @@ export function CohiDemoExperience() {
     }
   }, [isPaused, currentStepIndex, speak]);
 
+  // Fixed "COHI DEMO 2.0" button hidden for now; demo can still be started via Index "Watch Cohi Demo" (start-cohi-demo event)
   if (!isPlaying) {
-    return (
-      <div className="fixed bottom-6 left-6 z-[100]">
-        <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} whileHover={{ scale: 1.05 }}>
-          <Button
-            onClick={() => setIsPlaying(true)}
-            className="h-14 px-6 rounded-2xl bg-slate-900 text-white shadow-2xl border border-white/10 flex items-center gap-3"
-          >
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg">
-              <Sparkles className="w-5 h-5 text-white fill-current animate-pulse" />
-            </div>
-            <div className="text-left">
-              <div className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70 tracking-tighter">Strategic Tour</div>
-              <div className="text-sm font-black leading-tight uppercase tracking-tighter">COHI DEMO 2.0</div>
-            </div>
-          </Button>
-        </motion.div>
-      </div>
-    );
+    return null;
   }
 
   const currentStep = DEMO_STEPS[currentStepIndex];
