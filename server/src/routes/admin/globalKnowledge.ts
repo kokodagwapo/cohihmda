@@ -220,7 +220,7 @@ router.get(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       const result = await managementPool.query(
         `SELECT 
@@ -385,7 +385,7 @@ router.put(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const updates = updateDocumentSchema.parse(req.body);
 
       // Check document exists
@@ -478,7 +478,7 @@ router.delete(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Check document status - only allow deleting drafts or archived
       const existing = await managementPool.query(
@@ -507,7 +507,7 @@ router.delete(
         userEmail: req.userEmail,
         action: "delete",
         resource: "global_knowledge_library",
-        resourceId: id,
+        resourceId: id as string,
         description: `Deleted global knowledge document: ${existing.rows[0].title}`,
         status: "success",
         ipAddress: req.ip,
@@ -536,7 +536,7 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Check document exists
       const existing = await managementPool.query(
@@ -581,7 +581,7 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Check document exists and has embeddings
       const existing = await managementPool.query(
@@ -632,7 +632,7 @@ router.post(
         userEmail: req.userEmail,
         action: "publish",
         resource: "global_knowledge_library",
-        resourceId: id,
+        resourceId: id as string,
         description: `Published global knowledge document: ${doc.title}`,
         changes: { syncedTenants: successCount, failedTenants: failureCount },
         status: "success",
@@ -668,7 +668,7 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const { reason } = req.body;
 
       // Check document exists
@@ -695,7 +695,7 @@ router.post(
         userEmail: req.userEmail,
         action: "archive",
         resource: "global_knowledge_library",
-        resourceId: id,
+        resourceId: id as string,
         description: `Archived global knowledge document: ${existing.rows[0].title}`,
         changes: { reason, removedFromTenants: successCount },
         status: "success",
@@ -731,7 +731,7 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Check document is archived
       const existing = await managementPool.query(
@@ -757,7 +757,7 @@ router.post(
         userEmail: req.userEmail,
         action: "restore",
         resource: "global_knowledge_library",
-        resourceId: id,
+        resourceId: id as string,
         description: `Restored global knowledge document: ${existing.rows[0].title}`,
         changes: { resyncedTenants: successCount },
         status: "success",
@@ -797,7 +797,7 @@ router.get(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       const syncStatus = await getDocumentSyncStatus(id);
 
@@ -843,7 +843,7 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Check document is published
       const existing = await managementPool.query(

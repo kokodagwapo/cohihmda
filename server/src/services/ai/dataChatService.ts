@@ -1483,13 +1483,15 @@ ${contextString}`;
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = (await response.json()) as { error?: { message?: string } };
       throw new Error(
         `OpenAI API error: ${error.error?.message || "Unknown error"}`
       );
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
     const answer =
       data.choices?.[0]?.message?.content || "Unable to generate response.";
 
@@ -1612,13 +1614,15 @@ ${contextParts.join("\n\n")}`;
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = (await response.json()) as { error?: { message?: string } };
       throw new Error(
         `OpenAI API error: ${error.error?.message || "Unknown error"}`
       );
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
     const answer =
       data.choices?.[0]?.message?.content || "Unable to generate response.";
 

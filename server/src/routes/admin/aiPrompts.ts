@@ -164,7 +164,7 @@ router.get(
   requirePlatformAdmin,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const prompt = await promptConfigService.getPromptConfig(id);
       res.json(prompt);
     } catch (error: any) {
@@ -191,7 +191,7 @@ router.put(
   requirePlatformAdmin,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const updates: PromptUpdateInput = req.body;
 
       // Validate required fields
@@ -220,11 +220,10 @@ router.put(
           .json({ error: "Max tokens must be between 1 and 128000" });
       }
 
-      const user = { id: req.userId };
       const updated = await promptConfigService.updatePromptConfig(
         id,
         updates,
-        user?.id
+        req.userId
       );
 
       res.json(updated);
@@ -254,10 +253,9 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
-      const user = { id: req.userId };
+      const id = req.params.id as string;
 
-      const reset = await promptConfigService.resetToDefault(id, user?.id);
+      const reset = await promptConfigService.resetToDefault(id, req.userId);
 
       res.json({
         success: true,
@@ -293,7 +291,7 @@ router.get(
   requirePlatformAdmin,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const versions = await promptConfigService.getPromptVersionHistory(id);
 
       res.json({
@@ -322,13 +320,13 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id, version } = req.params;
-      const user = { id: req.userId };
+      const id = req.params.id as string;
+      const version = req.params.version as string;
 
       const restored = await promptConfigService.restoreVersion(
         id,
         parseInt(version, 10),
-        user?.id
+        req.userId
       );
 
       res.json({
@@ -362,7 +360,7 @@ router.post(
   requirePlatformAdmin,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const { variables, testInput } = req.body;
 
       // Get the prompt config
