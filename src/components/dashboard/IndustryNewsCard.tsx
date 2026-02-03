@@ -4,6 +4,7 @@ import {
   Newspaper,
   Building2,
   TrendingUp,
+  TrendingDown,
   BarChart3,
   Activity,
   AlertTriangle,
@@ -21,6 +22,111 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+
+/** Mock rate indices for ticker (Optimal Blue OBMMI-style). Replace with API when available. */
+const RATE_INDICES = [
+  { label: "30-Yr. FHA", rate: 5.88, change: -0.107, trend: "down" as const },
+  { label: "30-Yr. VA", rate: 5.692, change: 0.054, trend: "up" as const },
+  { label: "30-Yr. USDA", rate: 6.035, change: -0.027, trend: "down" as const },
+  { label: "15-Yr. Conf", rate: 5.245, change: 0.031, trend: "up" as const },
+  { label: "30-Yr. Conf", rate: 6.125, change: -0.015, trend: "down" as const },
+];
+
+function TickerItem({
+  item,
+  showLeftBorder,
+}: {
+  item: (typeof RATE_INDICES)[0];
+  showLeftBorder: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center gap-2 sm:gap-3 px-4 sm:px-5 md:px-6 py-3 flex-shrink-0 min-w-0"
+      style={{
+        borderLeft: showLeftBorder ? "1px solid #add8e6" : "none",
+      }}
+    >
+      <span
+        className="text-xs sm:text-sm font-medium whitespace-nowrap"
+        style={{ color: "#1e3a8a" }}
+      >
+        {item.label}
+      </span>
+      {item.trend === "down" ? (
+        <TrendingDown
+          className="w-4 h-4 flex-shrink-0"
+          style={{ color: "#ef4444" }}
+          strokeWidth={2}
+        />
+      ) : (
+        <TrendingUp
+          className="w-4 h-4 flex-shrink-0"
+          style={{ color: "#22c55e" }}
+          strokeWidth={2}
+        />
+      )}
+      <span
+        className="text-xs sm:text-sm font-medium tabular-nums"
+        style={{ color: "#1e3a8a" }}
+      >
+        {item.rate.toFixed(3)}%
+      </span>
+      <span
+        className="text-xs sm:text-sm font-medium tabular-nums"
+        style={{
+          color: item.change >= 0 ? "#22c55e" : "#ef4444",
+        }}
+      >
+        {item.change >= 0 ? "+" : ""}
+        {item.change.toFixed(3)}
+      </span>
+    </div>
+  );
+}
+
+function MarketIntelligenceTicker() {
+  return (
+    <div
+      className="flex items-center rounded-lg mb-4 sm:mb-5 md:mb-6 lg:mb-7 min-h-[56px] sm:min-h-[64px] overflow-hidden relative"
+      style={{
+        background: "#f3f9fc",
+        border: "1px solid #e0eef5",
+      }}
+    >
+      {/* Minimalist icon - fixed on the left */}
+      <div
+        className="flex items-center justify-center flex-shrink-0 z-10 pl-3 pr-2 sm:pl-4 sm:pr-3 h-full bg-[#f3f9fc] dark:bg-slate-800/80 border-r border-[#e0eef5] dark:border-slate-600/50"
+        aria-hidden
+      >
+        <BarChart3
+          className="w-4 h-4 sm:w-5 sm:h-5 text-slate-500 dark:text-slate-400"
+          strokeWidth={1.5}
+        />
+      </div>
+      {/* Marquee track - scrolls left */}
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <div className="flex items-center w-max animate-ticker-left">
+          {[...RATE_INDICES, ...RATE_INDICES].map((item, i) => (
+            <TickerItem
+              key={`${item.label}-${i}`}
+              item={item}
+              showLeftBorder={i > 0}
+            />
+          ))}
+        </div>
+      </div>
+      <style>{`
+        @keyframes ticker-left {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .animate-ticker-left {
+          animation: ticker-left 45s linear infinite;
+        }
+      `}</style>
+    </div>
+  );
+}
 
 /**
  * Industry News Card Component
@@ -529,18 +635,19 @@ export const IndustryNewsCard = () => {
           {/* Source Selector Button - Mobile First */}
           <button
             onClick={() => setShowSourceSelector(true)}
-            className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
-            aria-label="Select news sources"
+            className="flex items-center justify-center p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
+            aria-label={`Select news sources (${selectedSources.length}/${availableSources.length})`}
+            title={`Sources (${selectedSources.length}/${availableSources.length})`}
           >
             <Settings
-              className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 text-slate-700 dark:text-slate-300"
+              className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700 dark:text-slate-300"
               strokeWidth={1.5}
             />
-            <span className="text-[10px] sm:text-xs md:text-sm font-light text-slate-700 dark:text-slate-300 tracking-tight whitespace-nowrap">
-              Sources ({selectedSources.length}/{availableSources.length})
-            </span>
           </button>
         </div>
+
+        {/* Market Intelligence Ticker - Optimal Blue style */}
+        <MarketIntelligenceTicker />
 
         {/* Enhanced Multi-column Layout - Display All Sources - Mobile First with Perfect Alignment */}
         <div
