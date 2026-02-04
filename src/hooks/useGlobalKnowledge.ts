@@ -13,6 +13,7 @@ export interface GlobalDocument {
   file_type: string | null;
   category: string;
   tags: string[];
+  source_url: string | null;
   version: number;
   status: "draft" | "published" | "archived";
   chunk_count: number;
@@ -213,7 +214,12 @@ export function useGlobalKnowledge() {
   const uploadDocument = useCallback(
     async (
       file: File,
-      metadata: { title?: string; category?: string; tags?: string[] }
+      metadata: {
+        title?: string;
+        category?: string;
+        tags?: string[];
+        source_url?: string;
+      }
     ): Promise<GlobalDocument | null> => {
       try {
         const formData = new FormData();
@@ -222,6 +228,8 @@ export function useGlobalKnowledge() {
         if (metadata.category) formData.append("category", metadata.category);
         if (metadata.tags)
           formData.append("tags", JSON.stringify(metadata.tags));
+        if (metadata.source_url)
+          formData.append("source_url", metadata.source_url);
 
         // Get auth token from localStorage
         const token = localStorage.getItem("auth_token");
@@ -272,6 +280,7 @@ export function useGlobalKnowledge() {
         category: string;
         content: string;
         tags: string[];
+        source_url: string | null;
       }>
     ): Promise<GlobalDocument | null> => {
       try {
