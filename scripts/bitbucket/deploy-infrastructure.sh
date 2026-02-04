@@ -2,26 +2,22 @@
 # ============================================================================
 # Infrastructure Deployment Script for Bitbucket Pipelines
 # ============================================================================
-# This script is triggered when CloudFormation templates change.
-# 
-# IMPORTANT: CloudFormation deployments are intentionally NOT automated
-# because infrastructure changes require careful review and planning.
+# This script deploys CloudFormation stack updates when infrastructure files change.
 #
-# This script will:
-# 1. List the changed CloudFormation templates
-# 2. Validate the templates
-# 3. Output instructions for manual deployment
+# Required Environment Variables:
+#   - AWS_ROLE_ARN             - IAM role ARN for OIDC (repository variable)
+#   - AWS_REGION               - AWS region (repository variable, e.g., us-east-2)
+#   - CF_STACK_BACKEND         - CloudFormation stack name for backend (e.g., coheus-dev-backend)
 #
-# For automated infrastructure deployment, you would need to add:
-#   - AWS CloudFormation deploy commands
-#   - Proper parameter handling for each environment
-#   - Rollback strategies
+# OIDC Environment (set by pipeline setup-oidc script):
+#   - AWS_WEB_IDENTITY_TOKEN_FILE - Path to OIDC token
+#   - AWS_ROLE_SESSION_NAME    - Session name for assume role
 # ============================================================================
 
 set -euo pipefail
 
 echo "========================================="
-echo "Infrastructure Change Detection"
+echo "Infrastructure Deployment Script"
 echo "========================================="
 echo ""
 echo "Environment: ${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-unknown}"
@@ -29,8 +25,11 @@ echo "Commit: ${BITBUCKET_COMMIT:-unknown}"
 echo "Branch: ${BITBUCKET_BRANCH:-unknown}"
 echo ""
 
+# Use AWS_REGION or AWS_DEFAULT_REGION
+export AWS_DEFAULT_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-2}}"
+
 # ============================================================================
-# Install AWS CLI (if needed for validation)
+# Install AWS CLI
 # ============================================================================
 install_aws_cli() {
     if command -v aws &> /dev/null; then
@@ -38,7 +37,7 @@ install_aws_cli() {
         return
     fi
     
-    echo "Installing AWS CLI for template validation..."
+    echo "Installing AWS CLI..."
     apt-get update -qq
     apt-get install -y -qq unzip curl > /dev/null
     
@@ -51,23 +50,19 @@ install_aws_cli() {
 }
 
 # ============================================================================
-# List Changed Templates
+# Verify AWS Credentials
 # ============================================================================
-list_templates() {
+verify_aws_credentials() {
     echo ""
-    echo "========================================="
-    echo "CloudFormation Templates"
-    echo "========================================="
-    echo ""
+    echo "Verifying AWS credentials..."
     
-    if [ -d "infrastructure/cloudformation" ]; then
-        echo "Templates in infrastructure/cloudformation/:"
-        echo ""
-        ls -la infrastructure/cloudformation/*.yaml 2>/dev/null || echo "  No .yaml files found"
-        echo ""
-    else
-        echo "WARNING: infrastructure/cloudformation/ directory not found"
+    if ! AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>&1); then
+        echo "ERROR: Failed to authenticate with AWS."
+        echo "Error: $AWS_ACCOUNT"
+        exit 1
     fi
+    
+    echo "Authenticated to AWS Account: $AWS_ACCOUNT"
 }
 
 # ============================================================================
@@ -80,11 +75,6 @@ validate_templates() {
     echo "========================================="
     echo ""
     
-    if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-        echo "WARNING: AWS credentials not configured - skipping validation"
-        return
-    fi
-    
     VALIDATION_ERRORS=0
     
     for template in infrastructure/cloudformation/*.yaml; do
@@ -93,7 +83,7 @@ validate_templates() {
             
             if aws cloudformation validate-template \
                 --template-body "file://$template" \
-                --region "${AWS_DEFAULT_REGION:-us-east-2}" \
+                --region "$AWS_DEFAULT_REGION" \
                 > /dev/null 2>&1; then
                 echo "✓ Valid"
             else
@@ -103,7 +93,7 @@ validate_templates() {
                 # Show the actual error
                 aws cloudformation validate-template \
                     --template-body "file://$template" \
-                    --region "${AWS_DEFAULT_REGION:-us-east-2}" 2>&1 || true
+                    --region "$AWS_DEFAULT_REGION" 2>&1 || true
                 echo ""
             fi
         fi
@@ -119,43 +109,194 @@ validate_templates() {
 }
 
 # ============================================================================
-# Display Manual Deployment Instructions
+# Get Existing Stack Parameters
 # ============================================================================
-show_instructions() {
+get_stack_parameters() {
+    local stack_name=$1
+    
+    echo "Getting existing parameters from stack: $stack_name"
+    
+    # Get current parameters and format them for update
+    aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].Parameters[*].{ParameterKey:ParameterKey,UsePreviousValue:``}' \
+        --output json 2>/dev/null | jq -c '[.[] | {ParameterKey: .ParameterKey, UsePreviousValue: true}]' || echo "[]"
+}
+
+# ============================================================================
+# Deploy Backend Stack
+# ============================================================================
+deploy_backend_stack() {
     echo ""
     echo "========================================="
-    echo "MANUAL DEPLOYMENT REQUIRED"
+    echo "Deploying Backend CloudFormation Stack"
+    echo "========================================="
+    
+    local stack_name="${CF_STACK_BACKEND:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-backend}"
+    local template_file="infrastructure/cloudformation/coheus_ecs_fargate_stack.yaml"
+    
+    echo "Stack name: $stack_name"
+    echo "Template: $template_file"
+    echo ""
+    
+    # Check if stack exists
+    if ! aws cloudformation describe-stacks --stack-name "$stack_name" --region "$AWS_DEFAULT_REGION" > /dev/null 2>&1; then
+        echo "ERROR: Stack '$stack_name' does not exist."
+        echo "This script only updates existing stacks. For initial creation, use the PowerShell scripts."
+        exit 1
+    fi
+    
+    # Get current stack status
+    STACK_STATUS=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].StackStatus' \
+        --output text)
+    
+    echo "Current stack status: $STACK_STATUS"
+    
+    # Only proceed if stack is in a stable state
+    if [[ ! "$STACK_STATUS" =~ ^(CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)$ ]]; then
+        echo "ERROR: Stack is not in a stable state. Cannot update."
+        exit 1
+    fi
+    
+    # Update stack using existing parameter values
+    # This preserves all existing parameters (like secrets) while applying template changes
+    echo ""
+    echo "Updating stack with template changes..."
+    echo "(Using existing parameter values)"
+    echo ""
+    
+    # Create a change set first to see what will change
+    CHANGE_SET_NAME="pipeline-update-$(date +%Y%m%d%H%M%S)"
+    
+    echo "Creating change set: $CHANGE_SET_NAME"
+    
+    aws cloudformation create-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --template-body "file://$template_file" \
+        --use-previous-template false \
+        --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+        --parameters "$(get_stack_parameters "$stack_name")" \
+        --region "$AWS_DEFAULT_REGION" \
+        --output json > /dev/null
+    
+    # Wait for change set to be created
+    echo "Waiting for change set to be created..."
+    
+    aws cloudformation wait change-set-create-complete \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION" 2>/dev/null || true
+    
+    # Check change set status
+    CHANGE_SET_STATUS=$(aws cloudformation describe-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Status' \
+        --output text)
+    
+    echo "Change set status: $CHANGE_SET_STATUS"
+    
+    if [ "$CHANGE_SET_STATUS" == "FAILED" ]; then
+        # Check if it failed because there are no changes
+        CHANGE_SET_REASON=$(aws cloudformation describe-change-set \
+            --stack-name "$stack_name" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_DEFAULT_REGION" \
+            --query 'StatusReason' \
+            --output text)
+        
+        if [[ "$CHANGE_SET_REASON" == *"didn't contain changes"* ]] || [[ "$CHANGE_SET_REASON" == *"No updates"* ]]; then
+            echo ""
+            echo "No infrastructure changes detected - stack is up to date."
+            
+            # Delete the empty change set
+            aws cloudformation delete-change-set \
+                --stack-name "$stack_name" \
+                --change-set-name "$CHANGE_SET_NAME" \
+                --region "$AWS_DEFAULT_REGION" || true
+            
+            return 0
+        else
+            echo "ERROR: Change set creation failed: $CHANGE_SET_REASON"
+            exit 1
+        fi
+    fi
+    
+    # Show what changes will be made
+    echo ""
+    echo "Changes to be applied:"
+    aws cloudformation describe-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Changes[*].{Action:ResourceChange.Action,Resource:ResourceChange.LogicalResourceId,Type:ResourceChange.ResourceType}' \
+        --output table
+    echo ""
+    
+    # Execute the change set
+    echo "Executing change set..."
+    
+    aws cloudformation execute-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION"
+    
+    # Wait for stack update to complete
+    echo "Waiting for stack update to complete..."
+    echo "(This may take several minutes)"
+    echo ""
+    
+    if aws cloudformation wait stack-update-complete \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION"; then
+        echo ""
+        echo "✓ Stack update completed successfully!"
+    else
+        echo ""
+        echo "ERROR: Stack update failed or timed out."
+        
+        # Get stack events for debugging
+        echo ""
+        echo "Recent stack events:"
+        aws cloudformation describe-stack-events \
+            --stack-name "$stack_name" \
+            --region "$AWS_DEFAULT_REGION" \
+            --query 'StackEvents[0:10].{Time:Timestamp,Status:ResourceStatus,Resource:LogicalResourceId,Reason:ResourceStatusReason}' \
+            --output table
+        
+        exit 1
+    fi
+}
+
+# ============================================================================
+# Display Summary
+# ============================================================================
+display_summary() {
+    local stack_name="${CF_STACK_BACKEND:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-backend}"
+    
+    echo ""
+    echo "========================================="
+    echo "Infrastructure Deployment Complete!"
     echo "========================================="
     echo ""
-    echo "CloudFormation changes have been detected but NOT automatically deployed."
-    echo "Infrastructure changes require manual review and deployment."
+    
+    # Get final stack status
+    echo "Stack Status:"
+    aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].{StackName:StackName,Status:StackStatus,LastUpdated:LastUpdatedTime}' \
+        --output table
+    
     echo ""
-    echo "To deploy these changes:"
-    echo ""
-    echo "1. Review the changed templates in infrastructure/cloudformation/"
-    echo ""
-    echo "2. Use the PowerShell deployment scripts (from Windows):"
-    echo "   cd scripts/deploy"
-    echo "   .\\deploy-all.ps1"
-    echo ""
-    echo "   Or deploy individual stacks:"
-    echo "   .\\01-deploy-aurora.ps1      # Database"
-    echo "   .\\02-deploy-backend.ps1     # ECS Fargate"
-    echo "   .\\03-deploy-waf-cloudfront.ps1  # WAF + CDN"
-    echo "   .\\04-deploy-monitoring.ps1  # CloudWatch"
-    echo "   .\\05-deploy-tenant-provisioning.ps1  # Lambda automation"
-    echo ""
-    echo "3. Or use AWS CLI directly:"
-    echo "   aws cloudformation deploy \\"
-    echo "     --template-file infrastructure/cloudformation/TEMPLATE.yaml \\"
-    echo "     --stack-name STACK_NAME \\"
-    echo "     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \\"
-    echo "     --parameter-overrides Key1=Value1 Key2=Value2"
-    echo ""
-    echo "4. Or use the AWS Console:"
-    echo "   https://console.aws.amazon.com/cloudformation/"
-    echo ""
-    echo "========================================="
+    echo "Deployment Environment: ${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-unknown}"
+    echo "Region: $AWS_DEFAULT_REGION"
     echo ""
 }
 
@@ -164,11 +305,12 @@ show_instructions() {
 # ============================================================================
 main() {
     install_aws_cli
-    list_templates
+    verify_aws_credentials
     validate_templates
-    show_instructions
+    deploy_backend_stack
+    display_summary
     
-    echo "Infrastructure change detection completed."
+    echo "Infrastructure deployment completed."
     echo ""
 }
 
