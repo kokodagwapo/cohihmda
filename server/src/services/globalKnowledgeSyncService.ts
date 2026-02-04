@@ -15,6 +15,7 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { generateEmbeddings } from "./embeddingService.js";
 import { chunkDocument } from "./documentChunker.js";
 import { parseDocument } from "./documentParser.js";
+import { getPlatformOpenAIKey } from "./platformSettingsService.js";
 import pg from "pg";
 
 // =============================================================================
@@ -700,11 +701,20 @@ export async function processGlobalDocument(
       throw new Error("Document produced no chunks");
     }
 
+    // Get platform API key for embeddings
+    const platformApiKey = await getPlatformOpenAIKey();
+    if (!platformApiKey) {
+      throw new Error(
+        "OpenAI API key not configured. Please set it in Platform Settings or OPENAI_API_KEY environment variable."
+      );
+    }
+
     // Generate embeddings
     const texts = chunks.map((c) => c.text);
     const embeddingResults = await generateEmbeddings(
       texts,
-      "openai/text-embedding-3-large"
+      "openai/text-embedding-3-large",
+      platformApiKey
     );
 
     // Delete old embeddings

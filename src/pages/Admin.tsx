@@ -27,6 +27,7 @@ import { TenantSelectorCard } from "@/components/admin/TenantSelectorCard";
 import { GlobalKnowledgeLibrary } from "@/components/admin/GlobalKnowledgeLibrary";
 import { KnowledgeCenterSection } from "@/components/admin/KnowledgeCenterSection";
 import { AIPromptManager } from "@/components/admin/AIPromptManager";
+import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings, Crown, Briefcase, Building2 } from "lucide-react";
@@ -293,6 +294,7 @@ export const Admin = () => {
       { id: "metrics-catalog", label: "Metrics Catalog" },
       { id: "dev-tools", label: "Developer Tools" },
       { id: "ai-prompts", label: "AI Prompts" },
+      { id: "platform-settings", label: "Platform Settings" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
   };
@@ -705,6 +707,17 @@ export const Admin = () => {
                   transition={{ duration: 0.3 }}
                 >
                   <AIPromptManager />
+                </motion.div>
+              )}
+
+              {/* Platform Settings Section (Platform Admin) */}
+              {activeSection === "platform-settings" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <PlatformSettingsSection />
                 </motion.div>
               )}
             </AdminLayoutWithContext>
