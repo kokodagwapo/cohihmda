@@ -43,7 +43,7 @@ $DB_INSTANCE_CLASS = "db.t3.small"
 
 # ECS Configuration
 $CONTAINER_CPU = 512
-$CONTAINER_MEMORY = 1024
+$CONTAINER_MEMORY = 4096
 $DESIRED_COUNT = 2
 
 # Domain Configuration (coheus1.com subdomains)

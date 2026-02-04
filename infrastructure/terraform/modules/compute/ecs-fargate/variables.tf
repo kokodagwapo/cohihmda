@@ -55,7 +55,7 @@ variable "cpu" {
 variable "memory" {
   description = "Memory for the task in MB"
   type        = number
-  default     = 1024
+  default     = 4096
 }
 
 variable "desired_count" {

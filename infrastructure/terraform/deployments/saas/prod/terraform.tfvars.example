@@ -21,7 +21,7 @@ tenant_max_acu = 8
 # ECS
 container_image   = "123456789012.dkr.ecr.us-east-1.amazonaws.com/coheus-backend:latest"
 ecs_cpu           = 512
-ecs_memory        = 1024
+ecs_memory        = 4096
 ecs_desired_count = 2
 ecs_min_count     = 2
 ecs_max_count     = 10
