@@ -121,7 +121,7 @@ if ($Interactive) {
     Write-Status "Opening interactive shell in container..."
     Write-Host ""
     Write-Host "You're now inside the container. Run migrations with:" -ForegroundColor Cyan
-    Write-Host "  cd /app/server && node dist/migrations/cli.js up --verbose" -ForegroundColor Gray
+    Write-Host "  cd /app/server && node dist/migrations/cli.js all --verbose" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Type 'exit' to leave the container." -ForegroundColor Yellow
     Write-Host ""
@@ -136,10 +136,11 @@ if ($Interactive) {
         --region $env:AWS_REGION
 } else {
     # Build migration command (use compiled JS in production container)
-    $migrationCmd = "cd /app/server && node dist/migrations/cli.js up --verbose"
+    # Use 'all' command to run both management AND tenant migrations
+    $migrationCmd = "cd /app/server && node dist/migrations/cli.js all --verbose"
     
     if ($DryRun) {
-        $migrationCmd = "cd /app/server && node dist/migrations/cli.js up --dry-run --verbose"
+        $migrationCmd = "cd /app/server && node dist/migrations/cli.js all --dry-run --verbose"
         Write-Status "DRY RUN MODE - No changes will be made" "Yellow"
     }
     
