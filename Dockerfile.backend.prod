@@ -32,6 +32,9 @@ COPY --from=builder /app/server/node_modules ./node_modules
 COPY --from=builder /app/server/dist ./dist
 COPY --from=builder /app/server/package*.json ./
 
+# Copy migration SQL files (needed for database migrations)
+COPY --from=builder /app/server/migrations ./migrations
+
 EXPOSE 3001
 
 CMD ["npm", "start"]
