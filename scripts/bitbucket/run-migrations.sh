@@ -119,10 +119,11 @@ get_running_task() {
 run_migrations() {
     local container_name="coheus-backend"
     # Use compiled JS in production container (no src/ directory)
-    local migration_cmd="cd /app/server && node dist/migrations/cli.js up --verbose"
+    # Use 'all' command to run both management AND tenant migrations
+    local migration_cmd="cd /app/server && node dist/migrations/cli.js all --verbose"
     
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
-        migration_cmd="cd /app/server && node dist/migrations/cli.js up --dry-run --verbose"
+        migration_cmd="cd /app/server && node dist/migrations/cli.js all --dry-run --verbose"
         log_warning "DRY RUN MODE - No changes will be made"
     fi
     
