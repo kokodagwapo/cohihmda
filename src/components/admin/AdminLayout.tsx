@@ -165,6 +165,16 @@ const allAdminSections: AdminSectionDef[] = [
     category: "Developer",
     mode: "platform",
   },
+  {
+    id: "platform-settings" as AdminSection,
+    label: "Platform Settings",
+    icon: Settings,
+    description: "API keys and platform-wide configuration",
+    color: "text-slate-300 dark:text-slate-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
+    mode: "platform",
+  },
 
   // ============ TENANT CONTEXT (mode: tenant) ============
   // These sections are for managing a specific tenant (impersonation for platform admins)
