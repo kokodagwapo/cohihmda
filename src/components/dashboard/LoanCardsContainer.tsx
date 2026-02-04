@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, memo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { LoanCardContent } from './LoanCardContent';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { LoanDrilldownModal } from './LoanDrilldownModal';
@@ -17,6 +18,7 @@ interface LoanCard {
   loan_number?: string | null;
   officer: string;
   officerTtsScore?: number | null;
+  officerTier?: string | null;
   amount: string;
   amountValue?: number;
   riskLevel: string;
@@ -31,9 +33,11 @@ interface LoanCard {
   // Milestone and time in motion
   currentMilestone?: string | null;
   activeDays?: number | null;
+  estimatedClosingDate?: string | null;
   // Rates and market
   interestRate?: number | null;
   marketRate?: number | null;
+  lockMarketRate?: number | null;
   marketChangeDelta?: number | null;
   lockDate?: string | null;
   lockExpirationDate?: string | null;
@@ -127,233 +131,13 @@ const LoanCardItem = memo(({
     onClick={() => onSelectLoan(loan)}
     className={`group p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl overflow-hidden active:scale-[0.99] transition-all cursor-pointer ${isDarkMode ? 'bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]' : 'bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}
   >
-    <div className="flex items-start justify-between gap-3 mb-2 sm:mb-3">
-      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
-          <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className={`font-medium text-[13px] sm:text-sm tracking-tight break-words ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-            Loan #{(() => {
-              const num = loan.loan_number?.trim();
-              if (!num) return '—';
-              if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(num)) return '—';
-              return num;
-            })()}
-          </p>
-          <p className={`text-[10px] sm:text-[11px] mt-0.5 break-all ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-            {loan.id}
-          </p>
-          <button
-            onClick={(e) => { e.stopPropagation(); onSelectOfficer(loan.officer); }}
-            className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1 hover:underline ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
-          >
-            <svg className="w-3 h-3 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            <span className="whitespace-nowrap">{loan.officer || 'Unknown LO'}</span>
-            {loan.officerTtsScore != null && !Number.isNaN(loan.officerTtsScore) && (
-              <span className={`flex-shrink-0 text-[9px] sm:text-[10px] font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                (TTS {Math.round(loan.officerTtsScore)})
-              </span>
-            )}
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-col items-end gap-1 flex-shrink-0">
-        <div className="flex items-baseline gap-3 sm:gap-4">
-          <p className={`text-[11px] sm:text-[12px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-            Commission At Risk: ${((): string => {
-              const amt = loan.amountValue ?? (() => {
-                const s = String(loan.amount);
-                const num = parseFloat(s.replace(/[$,KkMm]/g, '')) || 0;
-                if (s.toLowerCase().includes('m')) return num * 1e6;
-                if (s.toLowerCase().includes('k')) return num * 1000;
-                return num;
-              })();
-              const commission = amt * 0.01;
-              return commission >= 1000 ? `${(commission / 1000).toFixed(2)}K` : commission.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            })()}
-          </p>
-          <p className={`font-semibold text-sm sm:text-base tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-            Loan Amount: ${loan.amount.replace(/^\$/, '')}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-0.5 mt-0.5">
-          {loan.riskSummary?.predictedOutcome && loan.riskSummary.predictedOutcome !== 'originate' && (
-            <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
-              loan.riskSummary.predictedOutcome === 'deny'
-                ? (isDarkMode ? 'bg-red-600/30 text-red-300' : 'bg-red-100 text-red-700')
-                : loan.riskSummary.predictedOutcome === 'withdraw'
-                  ? (isDarkMode ? 'bg-orange-500/30 text-orange-300' : 'bg-orange-100 text-orange-700')
-                  : (isDarkMode ? 'bg-amber-500/30 text-amber-300' : 'bg-amber-100 text-amber-700')
-            }`}>
-              {loan.riskSummary.predictedOutcome === 'deny' ? '⚠ Likely Decline' : 
-               loan.riskSummary.predictedOutcome === 'withdraw' ? '↩ Likely Withdraw' : 
-               '⚡ At Risk'}
-            </span>
-          )}
-          <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
-            loan.riskLevel === 'Very High' 
-              ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
-              : loan.riskLevel === 'Medium' 
-                ? (isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-50 text-amber-600')
-                : (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
-          }`}>
-            {loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW'}
-          </span>
-        </div>
-      </div>
-    </div>
-    <div className="flex items-center justify-between text-[11px] sm:text-[12px] mb-2">
-      <div className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${
-          loan.riskLevel === 'Very High' ? 'bg-rose-500' : loan.riskLevel === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'
-        }`}></span>
-        <span className="font-medium">Risk Score: {loan.riskScore}/100</span>
-        <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} title="Score scale: 40 (lowest) to 100 (highest)">(40–100)</span>
-      </div>
-    </div>
-    {/* Signal bucket scores - own row with titles (1=low risk, 6=high risk) */}
-    {(() => {
-      const bucketBg = (b: number | null | undefined) => {
-        if (b === null || b === undefined) return isDarkMode ? 'bg-slate-700/50' : 'bg-slate-100';
-        if (b <= 2) return isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50';
-        if (b <= 4) return isDarkMode ? 'bg-amber-900/30' : 'bg-amber-50';
-        return isDarkMode ? 'bg-rose-900/30' : 'bg-rose-50';
-      };
-      const bucketText = (b: number | null | undefined) => {
-        if (b === null || b === undefined) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
-        if (b <= 2) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
-        if (b <= 4) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
-        return isDarkMode ? 'text-rose-400' : 'text-rose-600';
-      };
-      const lockVsMarketBucket = loan.interestLockVsMarketSignalStrength ?? (() => {
-        const delta = loan.marketChangeDelta ?? (loan.interestRate != null && loan.marketRate != null ? loan.interestRate - loan.marketRate : null);
-        if (delta === null || delta === undefined || Number.isNaN(delta)) return null;
-        const d = Number(delta);
-        if (d <= -0.3) return 1;
-        if (d <= -0.1) return 2;
-        if (d <= 0.05) return 3;
-        if (d <= 0.2) return 4;
-        if (d <= 0.5) return 5;
-        return 6;
-      })();
-      const hasAny = loan.creditMetricsSignalStrength != null || loan.loanCharacteristicsSignalStrength != null
-        || loan.timeInMotionSignalStrength != null || loan.mloAeFalloutProneSignalStrength != null
-        || loan.loPullthroughSignal != null || lockVsMarketBucket != null;
-      if (!hasAny) return null;
-      const items: { label: string; value: number | null }[] = [
-        { label: 'Credit', value: loan.creditMetricsSignalStrength ?? null },
-        { label: 'Loan Char', value: loan.loanCharacteristicsSignalStrength ?? null },
-        { label: 'Time Motion', value: loan.timeInMotionSignalStrength ?? null },
-        { label: 'MLO Fallout', value: loan.mloAeFalloutProneSignalStrength ?? loan.loPullthroughSignal ?? null },
-        { label: 'Lock vs Mkt', value: lockVsMarketBucket },
-      ];
-      return (
-        <div className="mb-3 pt-2.5 pb-2 border-t border-transparent">
-          <p className={`text-[9px] uppercase tracking-wider font-medium mb-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-            Signal buckets (1=low, 6=high)
-          </p>
-          <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-            {items.map(({ label, value }) => (
-              <div
-                key={label}
-                className={`rounded-lg px-1.5 py-2 sm:px-2 sm:py-2.5 text-center min-w-0 break-words ${bucketBg(value)}`}
-              >
-                <p className={`text-[9px] sm:text-[10px] font-medium uppercase tracking-wide break-words mb-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {label}
-                </p>
-                <p className={`text-sm sm:text-base font-semibold break-words ${bucketText(value)}`}>
-                  {value != null ? value : '—'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    })()}
-    <LoanRiskDistribution
-      ficoScore={loan.ficoScore}
-      ltvRatio={loan.ltvRatio}
-      dtiRatio={loan.dtiRatio}
+    <LoanCardContent
+      loan={loan}
       isDarkMode={isDarkMode}
-      loanType={loan.loanType}
-      loanPurpose={loan.loanPurpose}
-      channel={loan.channel}
-      activeDays={loan.activeDays}
-      currentMilestone={loan.currentMilestone}
-      loPullthroughPct={loan.loPullthroughPct}
-      interestRate={loan.interestRate}
-      marketRate={loan.marketRate}
-      marketChangeDelta={loan.marketChangeDelta}
+      onSelectOfficer={onSelectOfficer}
+      showTapForDetails={true}
+      compact={true}
     />
-    {/* Rate & Market - same content as modal, below metrics grid */}
-    {(loan.lockDate != null || loan.interestRate != null || loan.marketRate != null || loan.lockExpirationDate != null) && (
-      <div className={`mt-3 p-4 rounded-xl ${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-        <p className={`text-[10px] uppercase tracking-wider font-semibold mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-          Rate & Market
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-          <div>
-            <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Lock Rate</p>
-            {loan.lockDate == null || loan.lockDate === '' ? (
-              <>
-                <p className={`font-medium text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Locked: No</p>
-                {loan.interestRate != null && !Number.isNaN(loan.interestRate) && (
-                  <p className={`text-[10px] mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Rate: {loan.interestRate.toFixed(3)}%
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className={`font-medium text-sm ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                {loan.interestRate != null && !Number.isNaN(loan.interestRate) ? `${loan.interestRate.toFixed(3)}%` : '—'}
-              </p>
-            )}
-          </div>
-          {loan.marketRate != null && loan.marketRate !== undefined && (
-            <div>
-              <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Market (FRED)</p>
-              <p className={`font-medium text-sm ${isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>{loan.marketRate.toFixed(3)}%</p>
-            </div>
-          )}
-          {(loan.marketChangeDelta != null && loan.marketChangeDelta !== undefined) ? (
-            <div>
-              <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Market Delta</p>
-              <p className={`font-medium text-sm ${loan.marketChangeDelta > 0.2 ? 'text-rose-600 dark:text-rose-400' : loan.marketChangeDelta < -0.1 ? 'text-emerald-600 dark:text-emerald-400' : isDarkMode ? 'text-slate-100' : 'text-slate-900'}`}>
-                {loan.marketChangeDelta > 0 ? '+' : ''}{loan.marketChangeDelta.toFixed(3)}%
-              </p>
-            </div>
-          ) : (loan.interestRate != null && loan.marketRate != null) && (
-            <div>
-              <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Market Delta</p>
-              <p className={`font-medium text-sm ${(loan.interestRate - loan.marketRate) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                {(loan.interestRate - loan.marketRate) > 0 ? '+' : ''}{(loan.interestRate - loan.marketRate).toFixed(3)}%
-              </p>
-            </div>
-          )}
-          {loan.lockExpirationDate && (
-            <div>
-              <p className={`text-[9px] uppercase tracking-wider mb-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Expires</p>
-              <p className={`font-medium text-sm ${getExpirationDateColorClass(loan.lockExpirationDate, isDarkMode)}`}>
-                {formatLockExpirationDate(loan.lockExpirationDate)}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-    )}
-    <div className={`mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t flex items-center justify-between ${isDarkMode ? 'border-slate-700/50' : 'border-slate-100'}`}>
-      <span className={`text-[9px] sm:text-[10px] ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-        Tap for details
-      </span>
-      <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-      </svg>
-    </div>
   </div>
 ));
 
@@ -772,6 +556,10 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
           isOpen={!!selectedLoan}
           onClose={() => setSelectedLoan(null)}
           isDarkMode={isDarkMode}
+          onSelectOfficer={(officer) => {
+            setSelectedLoan(null);
+            setSelectedOfficer(officer);
+          }}
         />
       )}
     </div>

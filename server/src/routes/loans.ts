@@ -390,7 +390,7 @@ router.get('/', authenticateToken, attachTenantContext, apiLimiter, async (req: 
         loan_id, loan_number, loan_amount, interest_rate,
         loan_type, loan_purpose, channel, property_type, property_state, property_city,
         property_street, property_zip, occupancy_type,
-        application_date, lock_date, closing_date, funding_date,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
         current_loan_status, branch, loan_officer, underwriter, closer, processor,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
         created_at, updated_at
@@ -5526,8 +5526,9 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
     //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
     const activeLoansQuery = `
       SELECT 
-        loan_id, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, lock_expiration_date, closing_date, funding_date,
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
         loan_purpose, property_type, occupancy_type, channel,
@@ -5637,8 +5638,8 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
 
     const rawByLoanId = new Map<string, any>();
     activeLoans.forEach((l: any) => {
-      const id = l.loan_id ?? l.loanId;
-      if (id != null && String(id).trim() !== '') rawByLoanId.set(String(id), l);
+      const ids = [l.loan_id, l.loanId, l.guid].filter((x): x is string => x != null && String(x).trim() !== '');
+      ids.forEach((id) => rawByLoanId.set(String(id), l));
     });
     // Debug: log first raw row after building rawByLoanId
     const firstRaw = activeLoans[0];
@@ -5660,12 +5661,17 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
         if (raw) {
           const lp = loan.loan_purpose ?? loan.loanPurpose;
           const ch = loan.channel;
+          const estClose = loan.estimated_closing_date ?? loan.estimatedClosingDate;
           if ((lp == null || String(lp).trim() === '') && raw.loan_purpose) {
             loan.loan_purpose = raw.loan_purpose;
             loan.loanPurpose = raw.loan_purpose;
           }
           if ((ch == null || String(ch).trim() === '') && raw.channel) {
             loan.channel = raw.channel;
+          }
+          if ((estClose == null || String(estClose).trim() === '') && raw.estimated_closing_date) {
+            loan.estimated_closing_date = raw.estimated_closing_date;
+            loan.estimatedClosingDate = raw.estimated_closing_date;
           }
         }
       });
@@ -5744,6 +5750,10 @@ router.post('/predict', authenticateToken, attachTenantContext, apiLimiter, asyn
             const raw = rawByLoanId.get(String(lid));
             rawFound = !!raw;
             if (raw) {
+              if (raw.loan_number != null && String(raw.loan_number).trim() !== '') {
+                stripped.loan_number = raw.loan_number;
+                backfillSet.loan_number = raw.loan_number;
+              }
               if (raw.loan_purpose != null && String(raw.loan_purpose).trim() !== '') {
                 stripped.loan_purpose = raw.loan_purpose;
                 stripped.loanPurpose = raw.loan_purpose;

@@ -573,8 +573,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
   const [outcomeModalType, setOutcomeModalType] = useState<OutcomeModalType | null>(null);
   const [selectedLoanForDetail, setSelectedLoanForDetail] = useState<any | null>(null);
 
-  // Loan officer name -> TTS (Top Tier Score) for display on critical loan cards
-  const [officerTtsMap, setOfficerTtsMap] = useState<Record<string, number>>({});
+  // Loan officer name -> TTS (Top Tier Score) + tier for display on critical loan cards
+  const [officerTtsMap, setOfficerTtsMap] = useState<Record<string, { ttsScore: number; tier: string }>>({});
 
   const availableYears = useMemo(() => {
     // Prefer years from loaded loans (if available); otherwise provide a small recent range.
@@ -974,13 +974,18 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
         const params = new URLSearchParams();
         params.set('actor', 'loan_officer');
         if (selectedTenantId) params.set('tenant_id', selectedTenantId);
-        const res = await api.request<{ actors?: Array<{ name: string; ttsScore: number }> }>(
+        const res = await api.request<{ actors?: Array<{ name: string; ttsScore: number; tier?: string }> }>(
           `/api/loans/sales-scorecard?${params.toString()}`
         );
         if (cancelled || !res?.actors) return;
-        const map: Record<string, number> = {};
+        const map: Record<string, { ttsScore: number; tier: string }> = {};
         res.actors.forEach((a) => {
-          if (a.name != null && !Number.isNaN(Number(a.ttsScore))) map[String(a.name).trim()] = Number(a.ttsScore);
+          if (a.name != null && !Number.isNaN(Number(a.ttsScore))) {
+            const tier = a.tier && ['top', 'second', 'bottom'].includes(String(a.tier).toLowerCase())
+              ? String(a.tier).toLowerCase()
+              : 'bottom';
+            map[String(a.name).trim()] = { ttsScore: Number(a.ttsScore), tier };
+          }
         });
         setOfficerTtsMap(map);
       } catch (e) {
@@ -992,19 +997,33 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
   }, [selectedTenantId]);
 
   const criticalLoanCards = useMemo(() => {
-    // Build map of raw loan data by loan_id for filling loan_purpose/channel when missing from bucketed data
-    const rawByLoanId = new Map<string, { loan_purpose?: string | null; channel?: string | null }>();
+    // Build map of raw loan data by loan_id/guid for filling missing fields when bucketed data is incomplete
+    // Index by loan_id, id, and guid so we can match regardless of which identifier the bucketed loan uses
+    type RawLoan = {
+      loan_purpose?: string | null;
+      channel?: string | null;
+      loan_number?: string | null;
+      lock_date?: string | null;
+      lock_expiration_date?: string | null;
+      estimated_closing_date?: string | null;
+    };
+    const rawByLoanId = new Map<string, RawLoan>();
     if (loansRaw && Array.isArray(loansRaw)) {
       loansRaw.forEach((r: any) => {
-        const id = r.loan_id ?? r.id;
-        if (id != null) {
-          rawByLoanId.set(String(id), {
-            loan_purpose: r.loan_purpose ?? r.loanPurpose ?? null,
-            channel: r.channel ?? null
-          });
-        }
+        const raw: RawLoan = {
+          loan_purpose: r.loan_purpose ?? r.loanPurpose ?? null,
+          channel: r.channel ?? null,
+          loan_number: r.loan_number ?? r.loanNumber ?? null,
+          lock_date: r.lock_date ?? r.lockDate ?? null,
+          lock_expiration_date: r.lock_expiration_date ?? r.lockExpirationDate ?? null,
+          estimated_closing_date: r.estimated_closing_date ?? r.estimatedClosingDate ?? null,
+        };
+        const ids = [r.loan_id, r.id, r.guid].filter((x): x is string => x != null && String(x).trim() !== '');
+        ids.forEach((id) => rawByLoanId.set(String(id), raw));
       });
     }
+
+    const getRaw = (loanId: string) => rawByLoanId.get(String(loanId));
 
     // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
     // Fall back to loansRaw if no bucketed data
@@ -1014,10 +1033,14 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
 
       return highRiskLoans.map((l: any) => {
         // Use snake_case field names matching database columns
-        const loanId = l.loan_id || l.id || '';
-        const raw = rawByLoanId.get(String(loanId));
+        const loanId = l.loan_id || l.id || l.guid || '';
+        const raw = getRaw(loanId);
         const loanPurpose = l.loan_purpose ?? l.loanPurpose ?? raw?.loan_purpose ?? null;
         const channel = l.channel ?? raw?.channel ?? null;
+        const loanNumber = l.loan_number ?? l.loanNumber ?? raw?.loan_number ?? null;
+        const lockDate = l.lock_date ?? l.lockDate ?? raw?.lock_date ?? null;
+        const lockExpirationDate = l.lock_expiration_date ?? l.lockExpirationDate ?? raw?.lock_expiration_date ?? null;
+        const estimatedClosingDate = l.estimated_closing_date ?? l.estimatedClosingDate ?? raw?.estimated_closing_date ?? null;
 
         const loanAmount = typeof l.loan_amount === 'number' ? l.loan_amount :
                           parseFloat(l.loan_amount || '0');
@@ -1036,8 +1059,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
           reason = l.riskSummary;
         }
         
-        // Calculate risk score from signal strengths (1-6 scale → 0-100 scale)
-        // Higher signal = higher risk, so we scale: (avgSignal / 6) * 100
+        // Calculate risk score aligned with backend count-based bucket logic
+        // Same logic as predictionService bucketLoanData: severeCount (>=5), elevatedCount (>=4)
         const signals = [
           l.creditMetricsSignalStrength,
           l.loanCharacteristicsSignalStrength,
@@ -1049,22 +1072,37 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
         let riskScore = 75; // Default for high-risk loans
         if (signals.length > 0) {
           const avgSignal = signals.reduce((sum, s) => sum + s, 0) / signals.length;
-          // Scale 1-6 to roughly 50-100 range for high-risk loans
-          // Signal 1 → ~50, Signal 6 → ~100
-          riskScore = Math.round(40 + (avgSignal / 6) * 60);
+          const severeCount = signals.filter(s => s >= 5).length;
+          const elevatedCount = signals.filter(s => s >= 4).length;
+          // Same bucket logic as backend (no hasMaxSignal)
+          let bucket: 'low' | 'medium' | 'high';
+          if (severeCount >= 3) bucket = 'high';
+          else if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5) bucket = 'medium';
+          else if (avgSignal <= 3) bucket = 'low';
+          else bucket = 'medium';
+          // Map bucket to 40-100, use avgSignal for within-bucket spread
+          if (bucket === 'low') {
+            riskScore = Math.round(40 + (avgSignal / 3) * 15);
+          } else if (bucket === 'medium') {
+            riskScore = Math.round(55 + (avgSignal / 6) * 20);
+          } else {
+            riskScore = Math.round(75 + (avgSignal / 6) * 25);
+          }
+          riskScore = Math.min(100, Math.max(40, riskScore));
         } else if (l.riskSummary?.confidence) {
-          // Fall back to confidence if no signals available
           riskScore = l.riskSummary.confidence;
         }
         
         // Return in LoanCardsContainer expected format
         // Use snake_case field names matching database columns
         const officerName = (l.loan_officer || '').trim();
+        const ttsData = officerName ? officerTtsMap[officerName] : null;
         return {
           id: String(loanId),
-          loan_number: l.loan_number || null,
+          loan_number: loanNumber || null,
           officer: l.loan_officer || '',
-          officerTtsScore: officerName ? (officerTtsMap[officerName] ?? null) : null,
+          officerTtsScore: ttsData?.ttsScore ?? null,
+          officerTier: ttsData?.tier ?? null,
           amount: loanAmount ? `$${(loanAmount / 1000).toFixed(0)}K` : '$0',
           amountValue: loanAmount,
           riskLevel: 'Very High',
@@ -1079,10 +1117,12 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
           activeDays: l.activeDays ?? null,
           // Rates and market delta
           interestRate: l.interest_rate ?? null,
-          marketRate: l.market_rate ?? null,
+          marketRate: l.market_rate ?? l.closeMarketRate ?? null,
+          lockMarketRate: l.lockMarketRate ?? null,
           marketChangeDelta: l.marketChangeDelta ?? null,
-          lockDate: l.lock_date ?? l.lockDate ?? null,
-          lockExpirationDate: l.lock_expiration_date ?? l.lockExpirationDate ?? null,
+          lockDate: lockDate ?? null,
+          lockExpirationDate: lockExpirationDate ?? null,
+          estimatedClosingDate: estimatedClosingDate ?? null,
           // Pullthrough percentages (actual values)
           loPullthroughPct: l.loPullthroughPercentage ?? null,
           uwPullthroughPct: l.uwPullthroughPercentage ?? null,
@@ -1157,12 +1197,20 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
           : 'Past expected closing window';
       }
       
+      const ttsData = base.officer ? officerTtsMap[(base.officer || '').trim()] : null;
+      const estimatedClosing = l.estimated_closing_date ?? l.estimatedClosingDate ?? null;
       return {
         ...base,
         riskLevel,
         riskScore,
         reason,
-        officerTtsScore: base.officer ? (officerTtsMap[(base.officer || '').trim()] ?? null) : null,
+        officerTtsScore: ttsData?.ttsScore ?? null,
+        officerTier: ttsData?.tier ?? null,
+        currentMilestone: l.current_milestone || l.lastCompletedMilestone || null,
+        activeDays: l.activeDays ?? null,
+        loanPurpose: l.loan_purpose ?? l.loanPurpose ?? null,
+        channel: l.channel ?? null,
+        estimatedClosingDate: estimatedClosing,
       };
     });
   }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap]);
@@ -1178,7 +1226,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
   const animatedWithdraw = useCountUp(metrics.likelyWithdraw, 1500, 200, isAnimating);
   const animatedDecline = useCountUp(metrics.likelyDecline, 1500, 400, isAnimating);
 
-  const ensureLoansLoaded = async (periodToUse?: PeriodValue) => {
+  const ensureLoansLoaded = async (periodToUse?: PeriodValue): Promise<void> => {
     // If no period specified, only load when we don't have loans yet (session cache uses one "all" set)
     if (!periodToUse && (loansRaw || loansLoading)) return;
     
@@ -1230,7 +1278,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
   };
 
   const handleMetricClick = async (label: string) => {
-    ensureLoansLoaded(); // Load full set if needed (no refetch if already loaded)
+    await ensureLoansLoaded(); // Load full set if needed before opening modal
 
     // Outcome list modals - show predicted loans
     if (label === 'Predicted Fallout') {
@@ -1258,8 +1306,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
     <TooltipProvider>
       <div className="mb-8 md:mb-12">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch">
-          {/* Main Forecast Section */}
-          <div className="md:col-span-8 lg:col-span-9 flex flex-col">
+          {/* Main Forecast Section - full width (Pipeline Snapshot removed) */}
+          <div className="md:col-span-12 flex flex-col">
             <DashboardCard className="relative flex-1 flex flex-col">
               <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col">
           {/* Header */}
@@ -1305,15 +1353,12 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
             </div>
           </div>
 
-          {/* Main Metrics Grid - 3 KPIs centered */}
-          <div className="grid grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-4xl mx-auto">
+          {/* Main Metrics Grid - 3 KPIs (matches Outcome Metrics Grid width/gap for alignment) */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mb-8 md:mb-12">
             {/* Active Loans Today */}
             <Tooltip>
                 <TooltipTrigger asChild>
-                  <div 
-                    className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
-                    onClick={() => handleMetricClick("Active Loans Today")}
-                  >
+                  <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
                     <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                       <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                         Active Loans Today
@@ -1326,7 +1371,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                       {isAnimating ? animatedActiveLoans.toLocaleString() : metrics.activeLoansToday.toLocaleString()}
                     </p>
                     <p className="text-[8px] md:text-[9px] lg:text-xs text-slate-500/60 dark:text-slate-400/70 font-medium group-hover/stat:text-blue-500 dark:group-hover/stat:text-blue-400 transition-colors duration-300">
-                      ${metrics.pipelineValueM}M Pipeline
+                      Units
                     </p>
                   </div>
                 </TooltipTrigger>
@@ -1339,10 +1384,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
             {/* Predicted Closing */}
             <Tooltip>
                 <TooltipTrigger asChild>
-                  <div 
-                    className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
-                    onClick={() => handleMetricClick("Predicted Closing")}
-                  >
+                  <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
                     <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                       <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                         Predicted Closing
@@ -1352,7 +1394,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                       {isAnimating ? animatedPredictedClosing.toLocaleString() : metrics.predictedClosing.toLocaleString()}
                     </p>
                     <p className="text-[8px] md:text-[9px] lg:text-xs text-slate-500/60 dark:text-slate-400/70 font-medium group-hover/stat:text-blue-500 dark:group-hover/stat:text-blue-400 transition-colors duration-300">
-                      {metrics.predictedClosing > 0 ? `${metrics.pullThroughRateDisplay}% Pull-Through (R90D)` : '% Pull-Through'}
+                      Units
                     </p>
                   </div>
                 </TooltipTrigger>
@@ -1366,10 +1408,7 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
             {/* Likely Close Late */}
             <Tooltip>
                 <TooltipTrigger asChild>
-                  <div 
-                    className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer group/stat transition-all duration-300"
-                    onClick={() => handleMetricClick("Likely Close Late")}
-                  >
+                  <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
                     <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                       <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                         Likely Close Late
@@ -1387,6 +1426,58 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                   <p className="font-semibold mb-1 text-white">{getMetricExplanation("Likely Close Late").title}</p>
                   <p className="text-xs text-slate-300">{getMetricExplanation("Likely Close Late").desc}</p>
                 </TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* Pipeline Volume / Projected Pullthrough / Locked Loans row (matches Outcome Metrics Grid width/gap for alignment) */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mb-8 md:mb-12">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                  <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                    Pipeline Volume
+                  </p>
+                  <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                    {kpis[0].value}
+                  </p>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                <p className="font-semibold mb-1 text-white">Pipeline Volume</p>
+                <p className="text-xs text-slate-300">{kpis[0].explanation}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                  <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                    Projected Pullthrough
+                  </p>
+                  <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                    {kpis[2].value}
+                  </p>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                <p className="font-semibold mb-1 text-white">Projected Pullthrough</p>
+                <p className="text-xs text-slate-300">{kpis[2].explanation}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                  <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                    Locked Loans
+                  </p>
+                  <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                    {kpis[1].value}
+                  </p>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                <p className="font-semibold mb-1 text-white">Locked Loans</p>
+                <p className="text-xs text-slate-300">{kpis[1].explanation}</p>
+              </TooltipContent>
             </Tooltip>
           </div>
 
@@ -1466,39 +1557,6 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
           </div>
               </div>
             </DashboardCard>
-          </div>
-
-          {/* Pipeline Snapshot Section */}
-          <div className="md:col-span-4 lg:col-span-3 flex flex-col order-first md:order-none">
-            <section className="bg-[#1A56DB] rounded-xl md:rounded-2xl p-6 md:p-10 lg:p-12 text-white shadow-[0_20px_50px_-15px_rgba(26,86,219,0.4)] flex-1 flex flex-col">
-              <h3 className="text-[10px] md:text-[11px] font-semibold uppercase tracking-widest mb-6 opacity-80">Pipeline Snapshot</h3>
-              <div className="space-y-6 md:space-y-8 flex-1 flex flex-col justify-between">
-                {kpis.map((kpi) => (
-                  <Tooltip key={kpi.label}>
-                    <TooltipTrigger asChild>
-                      <div 
-                        className="group cursor-pointer hover:bg-white/5 rounded-xl p-3 -mx-3 transition-all duration-200"
-                        onClick={() => handleMetricClick(kpi.label)}
-                      >
-                        <p className="text-[9px] md:text-[10px] font-semibold uppercase tracking-[0.2em] mb-2 opacity-60 group-hover:opacity-90 transition-opacity">{kpi.label}</p>
-                        <div className="flex items-baseline justify-between">
-                          <p className="text-2xl md:text-4xl lg:text-5xl font-thin tracking-tight group-hover:scale-[1.02] transition-transform">{kpi.value}</p>
-                          <div className="text-right">
-                            <span className="text-[7px] md:text-[8px] font-medium uppercase tracking-wider opacity-50 block">{kpi.secondaryLabel}</span>
-                            <span className="text-[10px] md:text-xs font-semibold text-white/90">{kpi.secondaryValue}</span>
-                          </div>
-                        </div>
-                        <div className="mt-3 md:mt-4 h-px w-full bg-white/10 group-hover:bg-white/20 transition-colors"></div>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
-                      <p className="font-semibold mb-1 text-white">{kpi.label}</p>
-                      <p className="text-xs text-slate-300">{kpi.explanation}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-            </section>
           </div>
         </div>
 
@@ -1881,6 +1939,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                     ? `${metrics.falloutRate}%`
                     : undefined
           }
+          fallbackActiveVolume={metrics.pipelineValue}
+          fallbackActiveCount={metrics.activeLoansToday}
         />
 
         <OutcomeLoansModal

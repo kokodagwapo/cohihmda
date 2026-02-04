@@ -44,6 +44,7 @@ router.post('/', authenticateToken, attachTenantContext, apiLimiter, async (req:
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate, loan_type,
         application_date, lock_date, lock_expiration_date, closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
         loan_purpose, property_type, occupancy_type, channel,
