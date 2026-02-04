@@ -12,12 +12,14 @@
 # Options:
 # -DryRun           Preview migrations without applying
 # -Interactive      Open interactive shell in container (for manual commands)
+# -FixChecksums     Fix checksum mismatches for already-applied migrations
 # ============================================================================
 
 param(
     [switch]$DryRun,
     [switch]$Interactive,
-    [switch]$EnableExec
+    [switch]$EnableExec,
+    [switch]$FixChecksums
 )
 
 # Load configuration
@@ -137,12 +139,19 @@ if ($Interactive) {
 } else {
     # Build migration command (use compiled JS in production container)
     # Use 'all' command to run both management AND tenant migrations
-    $migrationCmd = "cd /app/server && node dist/migrations/cli.js all --verbose"
+    $migrationFlags = "--verbose"
     
     if ($DryRun) {
-        $migrationCmd = "cd /app/server && node dist/migrations/cli.js all --dry-run --verbose"
+        $migrationFlags += " --dry-run"
         Write-Status "DRY RUN MODE - No changes will be made" "Yellow"
     }
+    
+    if ($FixChecksums) {
+        $migrationFlags += " --fix-checksums"
+        Write-Status "FIX CHECKSUMS MODE - Will update checksums for modified migrations" "Yellow"
+    }
+    
+    $migrationCmd = "cd /app/server && node dist/migrations/cli.js all $migrationFlags"
     
     Write-Status "Running migrations inside ECS task..."
     Write-Host "  Command: $migrationCmd" -ForegroundColor Gray
