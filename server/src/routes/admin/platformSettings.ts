@@ -59,7 +59,7 @@ router.put(
   requirePlatformAdmin,
   async (req, res) => {
     try {
-      const { key } = req.params;
+      const key = req.params.key as string;
 
       // Validate request body
       const validation = updateSettingSchema.safeParse(req.body);
@@ -113,7 +113,7 @@ router.get(
   requirePlatformAdmin,
   async (req, res) => {
     try {
-      const { key } = req.params;
+      const key = req.params.key as string;
 
       if (key !== "openai_api_key") {
         return res.status(400).json({
@@ -144,7 +144,9 @@ router.get(
             message: "API key is valid",
           });
         } else {
-          const errorData = await response.json().catch(() => ({}));
+          const errorData = (await response.json().catch(() => ({}))) as {
+            error?: { message?: string };
+          };
           res.json({
             valid: false,
             message: errorData.error?.message || "API key is invalid",
