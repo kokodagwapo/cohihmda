@@ -451,10 +451,37 @@ async function callOpenAI(
 // RAG Context Retrieval
 // ============================================================================
 
+interface RAGSource {
+  name: string;
+  url: string | null;
+  category: string | null;
+  isGlobal: boolean;
+}
+
 interface RAGContext {
   chunks: string[];
-  sources: string[];
+  sources: RAGSource[];
   totalChunks: number;
+}
+
+/**
+ * Format sources with markdown links when URLs are available
+ */
+function formatSourcesWithLinks(sources: RAGSource[]): string {
+  return sources
+    .map((source) => {
+      const categoryStr = source.category ? ` (${source.category})` : "";
+      const typeStr = source.isGlobal ? " [Global]" : "";
+
+      if (source.url) {
+        // Return as markdown link
+        return `[${source.name}${categoryStr}](${source.url})${typeStr}`;
+      } else {
+        // Return plain text
+        return `${source.name}${categoryStr}${typeStr}`;
+      }
+    })
+    .join(", ");
 }
 
 /**
@@ -504,6 +531,7 @@ async function retrieveRAGContext(
         d.title,
         d.is_global,
         d.category,
+        d.source_url,
         1 - (e.embedding <=> $1::vector) as similarity
        FROM rag_embeddings e
        JOIN rag_documents d ON e.document_id = d.id
@@ -525,16 +553,25 @@ async function retrieveRAGContext(
     }
 
     const chunks = results.rows.map((r: any) => r.chunk_text);
-    const sources = results.rows.map((r: any) => {
+
+    // Build structured sources with URLs (deduplicated)
+    const sourceMap = new Map<string, RAGSource>();
+    for (const r of results.rows) {
       const docName = r.title || r.filename;
-      const type = r.is_global ? "Global" : "Tenant";
-      const category = r.category ? ` (${r.category})` : "";
-      return `${docName}${category} [${type}]`;
-    });
+      if (!sourceMap.has(docName)) {
+        sourceMap.set(docName, {
+          name: docName,
+          url: r.source_url || null,
+          category: r.category || null,
+          isGlobal: r.is_global || false,
+        });
+      }
+    }
+    const sources = Array.from(sourceMap.values());
 
     return {
       chunks,
-      sources: [...new Set(sources)],
+      sources,
       totalChunks: chunks.length,
     };
   } catch (error: any) {
@@ -674,8 +711,16 @@ async function generateQuery(
       visualizationType: parsed.visualizationType || "table",
       chartConfig: parsed.chartConfig || {},
     };
-  } catch (error) {
-    console.log("[CohiChat] Failed to generate query:", error);
+  } catch (error: any) {
+    // This is expected for knowledge-only questions - not a real error
+    if (error instanceof SyntaxError) {
+      console.log("[CohiChat] No data query needed (knowledge-only question)");
+    } else {
+      console.log(
+        "[CohiChat] Query generation skipped:",
+        error.message || error
+      );
+    }
     return null;
   }
 }
@@ -1051,9 +1096,13 @@ async function generateUnifiedResponse(
   // Add knowledge base context if available
   if (gathered.ragContext.totalChunks > 0) {
     contextParts.push("## Knowledge Base Information");
+    // List source names for context
+    const sourceNames = gathered.ragContext.sources
+      .map((s) => s.name)
+      .join(", ");
+    contextParts.push(`Sources: ${sourceNames}`);
     gathered.ragContext.chunks.forEach((chunk, i) => {
-      const source = gathered.ragContext.sources[i] || `Source ${i + 1}`;
-      contextParts.push(`[${source}]:\n${chunk}`);
+      contextParts.push(`[Excerpt ${i + 1}]:\n${chunk}`);
     });
   }
 
@@ -1130,10 +1179,12 @@ async function generateUnifiedResponse(
     data = gathered.dataQueryResult.formattedData;
   }
 
-  // Add source attribution
+  // Add source attribution with links
   let message = response;
   if (gathered.ragContext.sources.length > 0) {
-    message += `\n\n📚 **Sources:** ${gathered.ragContext.sources.join(", ")}`;
+    message += `\n\n📚 **Sources:** ${formatSourcesWithLinks(
+      gathered.ragContext.sources
+    )}`;
   }
 
   return {
@@ -1148,7 +1199,13 @@ async function generateUnifiedResponse(
       dataQuery: !!gathered.dataQueryResult,
       knowledgeBase:
         gathered.ragContext.sources.length > 0
-          ? gathered.ragContext.sources
+          ? gathered.ragContext.sources.map((s) => {
+              const categoryStr = s.category ? ` (${s.category})` : "";
+              const typeStr = s.isGlobal ? " [Global]" : "";
+              return s.url
+                ? `[${s.name}${categoryStr}](${s.url})${typeStr}`
+                : `${s.name}${categoryStr}${typeStr}`;
+            })
           : undefined,
     },
   };

@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Loader2,
   BookOpen,
+  Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,6 +117,7 @@ export function GlobalKnowledgeLibrary() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadCategory, setUploadCategory] = useState("Regulations");
+  const [uploadSourceUrl, setUploadSourceUrl] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
   // Sync status
@@ -147,6 +149,7 @@ export function GlobalKnowledgeLibrary() {
       await uploadDocument(uploadFile, {
         title: uploadTitle || uploadFile.name,
         category: uploadCategory,
+        source_url: uploadSourceUrl || undefined,
       });
       toast({
         title: "Document uploaded",
@@ -156,6 +159,7 @@ export function GlobalKnowledgeLibrary() {
       setUploadDialogOpen(false);
       setUploadFile(null);
       setUploadTitle("");
+      setUploadSourceUrl("");
     } catch (err: any) {
       toast({
         title: "Upload failed",
@@ -695,6 +699,23 @@ export function GlobalKnowledgeLibrary() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Link2 className="h-4 w-4" />
+                Source URL (optional)
+              </Label>
+              <Input
+                value={uploadSourceUrl}
+                onChange={(e) => setUploadSourceUrl(e.target.value)}
+                placeholder="https://example.com/document-source"
+                type="url"
+              />
+              <p className="text-xs text-slate-500">
+                Link to the original source. This will be shown when the
+                document is cited.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>
@@ -717,6 +738,117 @@ export function GlobalKnowledgeLibrary() {
               ) : (
                 "Upload"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Document Details</DialogTitle>
+            <DialogDescription>
+              Update the document metadata. Changes to published documents will
+              be synced to all tenants on next resync.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Title</Label>
+              <Input
+                value={selectedDoc?.title || ""}
+                onChange={(e) =>
+                  setSelectedDoc(
+                    selectedDoc
+                      ? { ...selectedDoc, title: e.target.value }
+                      : null
+                  )
+                }
+                placeholder="Document title"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select
+                value={selectedDoc?.category || ""}
+                onValueChange={(value) =>
+                  setSelectedDoc(
+                    selectedDoc ? { ...selectedDoc, category: value } : null
+                  )
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.name}>
+                      {cat.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Link2 className="h-4 w-4" />
+                Source URL
+              </Label>
+              <Input
+                value={selectedDoc?.source_url || ""}
+                onChange={(e) =>
+                  setSelectedDoc(
+                    selectedDoc
+                      ? { ...selectedDoc, source_url: e.target.value || null }
+                      : null
+                  )
+                }
+                placeholder="https://example.com/document-source"
+                type="url"
+              />
+              <p className="text-xs text-slate-500">
+                Link to the original source. This will be shown when the
+                document is cited.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!selectedDoc) return;
+                try {
+                  await updateDocument(selectedDoc.id, {
+                    title: selectedDoc.title,
+                    category: selectedDoc.category,
+                    source_url: selectedDoc.source_url,
+                  });
+                  toast({
+                    title: "Document updated",
+                    description:
+                      selectedDoc.status === "published"
+                        ? "Changes saved. Resync to update tenant copies."
+                        : "Changes saved.",
+                  });
+                  setEditDialogOpen(false);
+                } catch (err: any) {
+                  toast({
+                    title: "Update failed",
+                    description: err.message,
+                    variant: "destructive",
+                  });
+                }
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700"
+            >
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

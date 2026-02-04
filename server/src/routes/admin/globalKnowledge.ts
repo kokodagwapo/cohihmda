@@ -58,6 +58,7 @@ const createDocumentSchema = z.object({
   category: z.string().min(1).max(100),
   content: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  source_url: z.string().url().optional().nullable(),
 });
 
 const updateDocumentSchema = z.object({
@@ -65,6 +66,7 @@ const updateDocumentSchema = z.object({
   category: z.string().min(1).max(100).optional(),
   content: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  source_url: z.string().url().optional().nullable(),
 });
 
 // Middleware: Require platform admin role
@@ -315,7 +317,7 @@ router.post(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const { title, category, tags } = req.body;
+      const { title, category, tags, source_url } = req.body;
       const parsedTags = tags ? JSON.parse(tags) : [];
 
       // Parse the document to extract text
@@ -328,8 +330,8 @@ router.post(
       // Create document record
       const result = await managementPool.query(
         `INSERT INTO global_knowledge_library 
-       (title, filename, file_type, file_size_bytes, content, category, tags, created_by, status, processing_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', 'pending')
+       (title, filename, file_type, file_size_bytes, content, category, tags, source_url, created_by, status, processing_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', 'pending')
        RETURNING *`,
         [
           title || req.file.originalname,
@@ -339,6 +341,7 @@ router.post(
           parsed.text,
           category || "General",
           parsedTags,
+          source_url || null,
           req.userId,
         ]
       );

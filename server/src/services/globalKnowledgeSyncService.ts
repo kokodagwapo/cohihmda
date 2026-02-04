@@ -37,6 +37,7 @@ export interface GlobalDocument {
   content: string | null;
   category: string;
   tags: string[];
+  source_url: string | null;
   version: number;
   status: string;
   chunk_count: number;
@@ -68,7 +69,7 @@ async function getGlobalDocument(
   documentId: string
 ): Promise<GlobalDocument | null> {
   const result = await managementPool.query(
-    `SELECT id, title, filename, file_type, content, category, tags, version, status, chunk_count, token_count
+    `SELECT id, title, filename, file_type, content, category, tags, source_url, version, status, chunk_count, token_count
      FROM global_knowledge_library
      WHERE id = $1`,
     [documentId]
@@ -195,9 +196,9 @@ async function syncDocumentToTenant(
       await tenantPool.query(
         `UPDATE rag_documents 
          SET title = $1, filename = $2, file_type = $3, content = $4, category = $5, 
-             tags = $6, global_version = $7, chunk_count = $8, token_count = $9,
+             tags = $6, source_url = $7, global_version = $8, chunk_count = $9, token_count = $10,
              status = 'indexed', updated_at = NOW()
-         WHERE id = $10`,
+         WHERE id = $11`,
         [
           doc.title,
           doc.filename,
@@ -205,6 +206,7 @@ async function syncDocumentToTenant(
           doc.content,
           doc.category,
           doc.tags,
+          doc.source_url,
           doc.version,
           doc.chunk_count,
           doc.token_count,
@@ -240,9 +242,9 @@ async function syncDocumentToTenant(
       // Insert new document
       const newDoc = await tenantPool.query(
         `INSERT INTO rag_documents 
-         (source_id, title, filename, file_type, content, category, tags,
+         (source_id, title, filename, file_type, content, category, tags, source_url,
           is_global, global_doc_id, global_version, chunk_count, token_count, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, $11, 'indexed')
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, 'indexed')
          RETURNING id`,
         [
           sourceId,
@@ -252,6 +254,7 @@ async function syncDocumentToTenant(
           doc.content,
           doc.category,
           doc.tags,
+          doc.source_url,
           doc.id,
           doc.version,
           doc.chunk_count,

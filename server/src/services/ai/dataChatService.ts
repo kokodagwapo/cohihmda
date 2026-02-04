@@ -841,10 +841,47 @@ interface QuestionClassification {
   suggestedRephrase?: string;
 }
 
+interface RAGSource {
+  name: string;
+  url: string | null;
+  category: string | null;
+  isGlobal: boolean;
+}
+
 interface RAGContext {
   chunks: string[];
-  sources: string[];
+  sources: RAGSource[];
   totalChunks: number;
+}
+
+/**
+ * Format sources with markdown links when URLs are available
+ */
+function formatSourcesWithLinks(sources: RAGSource[]): string {
+  // Debug: log what we're receiving
+  console.log(
+    "[DataChat] Formatting sources:",
+    JSON.stringify(sources, null, 2)
+  );
+
+  return sources
+    .map((source) => {
+      const categoryStr = source.category ? ` (${source.category})` : "";
+      const typeStr = source.isGlobal ? " [Global]" : "";
+
+      if (source.url) {
+        // Return as markdown link
+        console.log(
+          `[DataChat] Source "${source.name}" has URL: ${source.url}`
+        );
+        return `[${source.name}${categoryStr}](${source.url})${typeStr}`;
+      } else {
+        // Return plain text
+        console.log(`[DataChat] Source "${source.name}" has no URL`);
+        return `${source.name}${categoryStr}${typeStr}`;
+      }
+    })
+    .join(", ");
 }
 
 /**
@@ -914,6 +951,7 @@ async function retrieveRAGContext(
         d.title,
         d.is_global,
         d.category,
+        d.source_url,
         1 - (e.embedding <=> $1::vector) as similarity
        FROM rag_embeddings e
        JOIN rag_documents d ON e.document_id = d.id
@@ -958,18 +996,35 @@ async function retrieveRAGContext(
     }
 
     const chunks = results.rows.map((r: any) => r.chunk_text);
-    const sources = results.rows.map((r: any) => {
-      const docName = r.title || r.filename;
-      const type = r.is_global ? "Global" : "Tenant";
-      const category = r.category ? ` (${r.category})` : "";
-      return `${docName}${category} [${type}]`;
-    });
 
-    console.log(`[DataChat RAG] Retrieved ${chunks.length} relevant chunks`);
+    // Build structured sources with URLs
+    const sourceMap = new Map<string, RAGSource>();
+    for (const r of results.rows) {
+      const docName = r.title || r.filename;
+      // Debug: log raw row data
+      console.log(
+        `[DataChat RAG] Raw row source_url: "${
+          r.source_url
+        }" (type: ${typeof r.source_url})`
+      );
+      if (!sourceMap.has(docName)) {
+        sourceMap.set(docName, {
+          name: docName,
+          url: r.source_url || null,
+          category: r.category || null,
+          isGlobal: r.is_global || false,
+        });
+      }
+    }
+    const sources = Array.from(sourceMap.values());
+
+    console.log(
+      `[DataChat RAG] Retrieved ${chunks.length} relevant chunks from ${sources.length} sources`
+    );
 
     return {
       chunks,
-      sources: [...new Set(sources)], // Deduplicate sources
+      sources,
       totalChunks: chunks.length,
     };
   } catch (error: any) {
@@ -1495,10 +1550,10 @@ ${contextString}`;
     const answer =
       data.choices?.[0]?.message?.content || "Unable to generate response.";
 
-    // Format source references
+    // Format source references with links
     const sourceNote =
       ragContext.sources.length > 0
-        ? `\n\n📚 **Sources:** ${ragContext.sources.join(", ")}`
+        ? `\n\n📚 **Sources:** ${formatSourcesWithLinks(ragContext.sources)}`
         : "";
 
     return {
@@ -1568,10 +1623,11 @@ async function handleHybridQuery(
 
     if (ragContext.totalChunks > 0) {
       contextParts.push("**Knowledge Base Context:**");
+      // Include source names for context
+      const sourceNames = ragContext.sources.map((s) => s.name).join(", ");
+      contextParts.push(`Sources: ${sourceNames}`);
       ragContext.chunks.forEach((chunk, i) => {
-        contextParts.push(
-          `[${ragContext.sources[i] || `Source ${i + 1}`}]: ${chunk}`
-        );
+        contextParts.push(`[Excerpt ${i + 1}]: ${chunk}`);
       });
     }
 
@@ -1626,10 +1682,12 @@ ${contextParts.join("\n\n")}`;
     const answer =
       data.choices?.[0]?.message?.content || "Unable to generate response.";
 
-    // Format source references
+    // Format source references with links
     const sourceNote =
       ragContext.sources.length > 0
-        ? `\n\n📚 **Knowledge Sources:** ${ragContext.sources.join(", ")}`
+        ? `\n\n📚 **Knowledge Sources:** ${formatSourcesWithLinks(
+            ragContext.sources
+          )}`
         : "";
 
     return {

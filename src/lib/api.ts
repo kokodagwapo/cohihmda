@@ -337,13 +337,16 @@ export class ApiClient {
       endpoint.includes("/loans/funnel") ||
       endpoint.includes("/dashboard/analytics") ||
       endpoint.includes("/dashboard/insights");
+    const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
         ? 600000
+        : isChatEndpoint
+        ? 120000
         : isSlowEndpoint
         ? 60000
         : 30000;
-    // 10 minutes for imports/uploads, 60 seconds for slow endpoints, 30 seconds for regular requests
+    // 10 minutes for imports/uploads, 2 minutes for AI chat, 60 seconds for slow endpoints, 30 seconds for regular requests
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();
@@ -439,7 +442,11 @@ export class ApiClient {
 
       // Handle abort/timeout errors
       if (error.name === "AbortError" || error.message?.includes("timeout")) {
-        const timeoutDuration = isSlowEndpoint ? "60 seconds" : "30 seconds";
+        const timeoutDuration = isChatEndpoint
+          ? "2 minutes"
+          : isSlowEndpoint
+          ? "60 seconds"
+          : "30 seconds";
         if (retries < 1) {
           console.warn(
             `Request timeout for ${endpoint} after ${timeoutDuration}. Retrying... (attempt ${
@@ -459,6 +466,11 @@ export class ApiClient {
         }
         // Provide more helpful error message for slow endpoints
         const baseUrlInfo = this.baseUrl || "CloudFront proxy";
+        if (isChatEndpoint) {
+          throw new Error(
+            `Request timed out after ${timeoutDuration}. The AI is taking longer than expected to process your question. Please try again.`
+          );
+        }
         if (isSlowEndpoint) {
           throw new Error(
             `Request timed out after ${timeoutDuration}. This endpoint may be processing a large dataset. The backend may be slow or unavailable. Please try again in a moment.`
