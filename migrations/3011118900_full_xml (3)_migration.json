@@ -1,0 +1,354 @@
+{
+  "clientInfo": {
+    "instanceId": "3011118900",
+    "sourceFile": "3011118900_full_xml (3).xml",
+    "migratedAt": "2026-02-04T16:12:37.558Z"
+  },
+  "fieldSwaps": [
+    {
+      "coheusAlias": "CD Applied Cure",
+      "defaultFieldId": "Fields.CD2.X2",
+      "newFieldId": "Fields.FV.X366"
+    },
+    {
+      "coheusAlias": "CD Lender Credits",
+      "defaultFieldId": "Fields.CD2.XSTLC",
+      "newFieldId": "Fields.CX.SUMLENDERCR"
+    },
+    {
+      "coheusAlias": "Hedged Loan",
+      "defaultFieldId": "Fields.2401",
+      "newFieldId": "Fields.2287"
+    },
+    {
+      "coheusAlias": "Closer",
+      "defaultFieldId": "Fields.LoanTeamMember.Name.Closer",
+      "newFieldId": "Fields.1855"
+    },
+    {
+      "coheusAlias": "Funding Date",
+      "defaultFieldId": "Fields.MS.FUN",
+      "newFieldId": "Fields.1999"
+    },
+    {
+      "coheusAlias": "Processor",
+      "defaultFieldId": "Fields.LoanTeamMember.Name.Loan Processor",
+      "newFieldId": "Fields.362"
+    },
+    {
+      "coheusAlias": "Submitted To Underwriting Date",
+      "defaultFieldId": "Fields.Log.MS.Date.Submittal",
+      "newFieldId": "Fields.2298"
+    },
+    {
+      "coheusAlias": "Underwriter",
+      "defaultFieldId": "Fields.LoanTeamMember.Name.Underwriter",
+      "newFieldId": "Fields.984"
+    },
+    {
+      "coheusAlias": "UW Touches",
+      "defaultFieldId": "Fields.CX.Count.UWSub",
+      "newFieldId": "Fields.CX.UW.NUMTIMERESUB"
+    }
+  ],
+  "additionalFields": [
+    {
+      "fieldId": "Fields.5",
+      "alias": "P&amp;I Payment"
+    },
+    {
+      "fieldId": "Fields.325",
+      "alias": "Term Due In"
+    },
+    {
+      "fieldId": "Fields.1041",
+      "alias": "Subject Property Type"
+    },
+    {
+      "fieldId": "Fields.1500",
+      "alias": "Flood Insurance Company Name"
+    },
+    {
+      "fieldId": "Fields.1758",
+      "alias": "Income Total Income Borr"
+    },
+    {
+      "fieldId": "Fields.1759",
+      "alias": "Income Total Income Co-Borr"
+    },
+    {
+      "fieldId": "Fields.2311",
+      "alias": "Underwriting Suspended Reasons"
+    },
+    {
+      "fieldId": "Fields.2317",
+      "alias": "Underwriting Exception Sign Off Date"
+    },
+    {
+      "fieldId": "Fields.2318",
+      "alias": "Underwriting Exception Sign Off By"
+    },
+    {
+      "fieldId": "Fields.2984",
+      "alias": "Underwriting Approved By"
+    },
+    {
+      "fieldId": "Fields.CX.ORIGINATINGAE",
+      "alias": "Originating AE on the File"
+    },
+    {
+      "fieldId": "Fields.TPO.X14",
+      "alias": "TPO Company Name"
+    },
+    {
+      "fieldId": "Fields.TPO.X38",
+      "alias": "TPO Branch Name"
+    },
+    {
+      "fieldId": "Fields.TPO.X62",
+      "alias": "TPO Loan Officer ID"
+    },
+    {
+      "fieldId": "Fields.TPO.X75",
+      "alias": "TPO Loan Processor ID"
+    },
+    {
+      "fieldId": "Fields.TPO.X90",
+      "alias": "Initial TPO Submittal Date"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Loan Processor",
+      "alias": "Loan Team Member Name - Loan Processor"
+    },
+    {
+      "fieldId": "Fields.1855",
+      "alias": "Loan Team Member Name - Closer"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.File Starter",
+      "alias": "Loan Team Member Name - File Starter"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Funder",
+      "alias": "Loan Team Member Name - Funder"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Loan Officer",
+      "alias": "Loan Team Member Name - Loan Officer"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Loan Opener",
+      "alias": "Loan Team Member Name - Loan Opener"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Post Closer",
+      "alias": "Loan Team Member Name - Post Closer"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Underwriter",
+      "alias": "Loan Team Member Name - Underwriter"
+    },
+    {
+      "fieldId": "Fields.CUST85FV",
+      "alias": "Q File Starter"
+    },
+    {
+      "fieldId": "Fields.CX.ACCTDIVISION",
+      "alias": "Region"
+    },
+    {
+      "fieldId": "Fields.CX.SA28",
+      "alias": "AC NET SELL PRICE"
+    },
+    {
+      "fieldId": "Fields.CX.SA32",
+      "alias": "AC NET BUY PRICE"
+    },
+    {
+      "fieldId": "Fields.CX.SA40",
+      "alias": "AC  NET SELL PRICE"
+    },
+    {
+      "fieldId": "Fields.CX.SA44",
+      "alias": "AC NET BUY PRICE$"
+    },
+    {
+      "fieldId": "Fields.1999",
+      "alias": "Funds Released"
+    },
+    {
+      "fieldId": "Fields.2014",
+      "alias": "Shipping Date"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Started",
+      "alias": "Milestone Date - Started"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Processing",
+      "alias": "Milestone Date - Processing"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Submittal",
+      "alias": "Milestone Date - Submittal"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Suspended",
+      "alias": "Milestone Date - Suspended"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Cond. Approval",
+      "alias": "Milestone Date - Cond. Approval"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Resubmittal",
+      "alias": "Milestone Date - Resubmittal"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Approval",
+      "alias": "Milestone Date - Approval"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Clear to Close",
+      "alias": "Milestone Date - Clear to Close"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.HUD Approval",
+      "alias": "Milestone Date - HUD Approval"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Funding",
+      "alias": "Milestone Date - Funding"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Ship 2 Investor",
+      "alias": "Milestone Date - Ship 2 Investor"
+    },
+    {
+      "fieldId": "Fields.CX.PREAPP.REQ.DT",
+      "alias": "PreApproval Req. Dt"
+    },
+    {
+      "fieldId": "Fields.HMDA.X12",
+      "alias": "Preapproval Flag"
+    },
+    {
+      "fieldId": "Fields.CX.LNDR.FEES",
+      "alias": "Lender Fees Charged - Sum"
+    },
+    {
+      "fieldId": "Fields.LENPCC",
+      "alias": "Fees Total Closing Costs Lender"
+    },
+    {
+      "fieldId": "Fields.CX.LSC.31",
+      "alias": "Overall Grade"
+    },
+    {
+      "fieldId": "Fields.CX.LSC.37",
+      "alias": "Initial UW Grade Comments"
+    },
+    {
+      "fieldId": "Fields.CX.SA32.1",
+      "alias": "CX.SA32 without Discount removed. Show true branch margin."
+    },
+    {
+      "fieldId": "Fields.CX.SA44.1",
+      "alias": "CX.SA44.1 without Discount"
+    },
+    {
+      "fieldId": "Fields.3375",
+      "alias": "Rate Lock Buy Side Branch Price Concession"
+    },
+    {
+      "fieldId": "Fields.LE2.XLC",
+      "alias": "Loan Estimate - Lender Credits"
+    },
+    {
+      "fieldId": "Fields.1619",
+      "alias": "Fees Loan Origination Fee + $"
+    },
+    {
+      "fieldId": "Fields.CX.SA76",
+      "alias": "AC BRANCH CONCESSION"
+    },
+    {
+      "fieldId": "Fields.MS.START",
+      "alias": "Date File Started"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Suspended",
+      "alias": "Suspended"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Clear to Close",
+      "alias": "Clear to Close"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.HUD Approval",
+      "alias": "HUD Approval"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Ship 2 Investor",
+      "alias": "Ship 2 Investor"
+    },
+    {
+      "fieldId": "Fields.MS.PROC",
+      "alias": "Processed Milestone Date"
+    },
+    {
+      "fieldId": "Fields.2298",
+      "alias": "Underwriting Submitted Date"
+    },
+    {
+      "fieldId": "Fields.2305",
+      "alias": "Clear to Close Date"
+    },
+    {
+      "fieldId": "Fields.MS.START",
+      "alias": "File Started Date"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Processing",
+      "alias": "Sent to Processing Date"
+    },
+    {
+      "fieldId": "Fields.2303",
+      "alias": "Underwriting Suspended Date"
+    },
+    {
+      "fieldId": "Fields.MS.START",
+      "alias": "File Starte Date"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Cond Approval",
+      "alias": "Cond Approval"
+    },
+    {
+      "fieldId": "Fields.2305",
+      "alias": "Underwriting Clear to Close Date"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Cond Approval",
+      "alias": "Milestone Date - Cond Approval"
+    },
+    {
+      "fieldId": "Fields.763",
+      "alias": "Est Closing Date"
+    },
+    {
+      "fieldId": "Fields.Document.DateOrdered.Appraisal",
+      "alias": "Document Date Ordered - Appraisal"
+    },
+    {
+      "fieldId": "Fields.Document.DateOrdered.Credit Report",
+      "alias": "Document Date Ordered - Credit Report"
+    }
+  ],
+  "summary": {
+    "totalFieldsInLegacy": 339,
+    "matchingDefaults": 257,
+    "fieldSwaps": 9,
+    "additionalFields": 73
+  }
+}
