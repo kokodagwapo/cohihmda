@@ -17,17 +17,431 @@ export interface FieldMappingDefinition {
   fieldId: string;
   alias: string;
   description?: string;
-  category?:
-    | "loan"
-    | "borrower"
-    | "property"
-    | "pricing"
-    | "dates"
-    | "compliance"
-    | "fees"
-    | "team"
-    | "other";
+  category?: FieldCategory;
 }
+
+// ============================================================================
+// FIELD CATEGORIES
+// ============================================================================
+
+/**
+ * Field category types matching the sections in DEFAULT_ENCOMPASS_FIELD_MAPPINGS
+ */
+export type FieldCategory =
+  | "loan_info"
+  | "property"
+  | "borrower"
+  | "pricing"
+  | "investor"
+  | "underwriting"
+  | "dates"
+  | "team"
+  | "arm"
+  | "payment_mi"
+  | "heloc"
+  | "compliance"
+  | "fees";
+
+/**
+ * Category metadata with labels and descriptions for UI display
+ */
+export const FIELD_CATEGORIES: Record<
+  FieldCategory,
+  { label: string; description: string; order: number }
+> = {
+  loan_info: {
+    label: "Loan Information",
+    description: "Core loan details like amount, rate, term, and status",
+    order: 1,
+  },
+  property: {
+    label: "Property",
+    description: "Property address, type, and characteristics",
+    order: 2,
+  },
+  borrower: {
+    label: "Borrower",
+    description: "Borrower and co-borrower employment, income, and assets",
+    order: 3,
+  },
+  pricing: {
+    label: "Pricing & Rate Lock",
+    description: "Lock details, margins, and price adjustments",
+    order: 4,
+  },
+  investor: {
+    label: "Investor & Servicing",
+    description: "Investor info, servicing fees, and warehouse details",
+    order: 5,
+  },
+  underwriting: {
+    label: "Underwriting",
+    description: "AUS decisions, risk scores, and conditions",
+    order: 6,
+  },
+  dates: {
+    label: "Key Dates",
+    description: "Milestone dates, disclosures, and timeline events",
+    order: 7,
+  },
+  team: {
+    label: "Team Members",
+    description: "Loan officers, processors, underwriters, and branch info",
+    order: 8,
+  },
+  arm: {
+    label: "ARM Fields",
+    description: "Adjustable rate mortgage parameters and caps",
+    order: 9,
+  },
+  payment_mi: {
+    label: "Payment & MI",
+    description: "Payment amounts and mortgage insurance details",
+    order: 10,
+  },
+  heloc: {
+    label: "HELOC",
+    description: "Home equity line of credit specific fields",
+    order: 11,
+  },
+  compliance: {
+    label: "Compliance",
+    description: "QM, ATR, HMDA, and Mavent compliance results",
+    order: 12,
+  },
+  fees: {
+    label: "Fees",
+    description: "Origination, appraisal, credit report, and other fees",
+    order: 13,
+  },
+};
+
+/**
+ * Map each Coheus alias to its category
+ */
+export const FIELD_CATEGORY_MAP: Record<string, FieldCategory> = {
+  // LOAN INFORMATION
+  "Loan Amount": "loan_info",
+  "Interest Rate": "loan_info",
+  "Loan Term": "loan_info",
+  "Sales Price": "loan_info",
+  "LTV Ratio": "loan_info",
+  "Appraised Value": "loan_info",
+  "Loan Number": "loan_info",
+  "Lien Position": "loan_info",
+  "Product Type": "loan_info",
+  CLTV: "loan_info",
+  "Loan Type": "loan_info",
+  "Current Loan Status": "loan_info",
+  "Loan Program": "loan_info",
+  "Base Loan Amount": "loan_info",
+  HCLTV: "loan_info",
+  "Loan Purpose": "loan_info",
+  Channel: "loan_info",
+  "Loan Source": "loan_info",
+  GUID: "loan_info",
+  "Loan Folder": "loan_info",
+  "Last Modified Date": "loan_info",
+  "Current Milestone": "loan_info",
+
+  // PROPERTY INFORMATION
+  "Property Street": "property",
+  "Property City": "property",
+  "Property County": "property",
+  "Property State": "property",
+  "Property Zip": "property",
+  "Number of Units": "property",
+  "County FIPS Code": "property",
+  "State FIPS Code": "property",
+  "Property Rights": "property",
+  "Property Type": "property",
+  "Occupancy Type": "property",
+  "Property Valuation Method Type": "property",
+  "Property Valuation Effective Date": "property",
+  "Total Mortgaged Properties Count": "property",
+
+  // BORROWER INFORMATION
+  "FICO Score": "borrower",
+  "Income Total Mo Income": "borrower",
+  "BE DTI Ratio": "borrower",
+  "BORR EMPLOYER": "borrower",
+  "Borr Position": "borrower",
+  "Borr Position - 2nd": "borrower",
+  "Borr Yrs on Job": "borrower",
+  "Borr Yrs on Job - 2nd": "borrower",
+  "Borr Self Employed": "borrower",
+  "Borr Self Employed - 2nd": "borrower",
+  "Co-Borr Employer": "borrower",
+  "Co-Borr Position": "borrower",
+  "Co-Borr Yrs on Job": "borrower",
+  "Co-Borr Self Employed": "borrower",
+  "Borrower Type": "borrower",
+  "CoBorrower Type": "borrower",
+  "Borrower Mailing Address is same as the Property Address": "borrower",
+  "CoBorrower Mailing Address is same as the Property Address": "borrower",
+  "Combined Assets All Borrowers": "borrower",
+  "Assets Subtotal Liquid Assets": "borrower",
+
+  // PRICING & RATE LOCK
+  "Lock Days": "pricing",
+  "Lock Date": "pricing",
+  "Lock Expiration Date": "pricing",
+  "Rate Lock Buy Side Net Buy Rate": "pricing",
+  "Rate Lock Buy Side Base Price Rate": "pricing",
+  "Net Buy": "pricing",
+  "Net Sell": "pricing",
+  "SRP from investor": "pricing",
+  "Discount / Yield Spread Premium": "pricing",
+  "Rate Lock Buy Side Adjusted Buy Price": "pricing",
+  "Corporate Price Concession": "pricing",
+  "Branch Price Concession": "pricing",
+  "Buy Side Lock Date": "pricing",
+  "Buy Side Lock # Days": "pricing",
+  "Buy Side Lock Expiration": "pricing",
+  "Sell Side Lock # Days": "pricing",
+  "Sell Side Lock Expiration": "pricing",
+  "Last Rate Set Date": "pricing",
+  "Rate Lock Sell Side Last Rate Set Date": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 1 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 1 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 2 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 2 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 3 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 3 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 4 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 4 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 5 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 5 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 6 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 6 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 7 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 7 Rate": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 8 Desc": "pricing",
+  "Rate Lock Buy Side Profit Margin Adjustment 8 Rate": "pricing",
+
+  // INVESTOR & SERVICING
+  Investor: "investor",
+  "Investor Status": "investor",
+  "Investor Lock Date": "investor",
+  "Investor Purchase Date": "investor",
+  "Service Fee": "investor",
+  "Guaranty Fee": "investor",
+  "MSR Value": "investor",
+  "Hedged Loan": "investor",
+  "Warehouse Co Name": "investor",
+  "Date Warehoused": "investor",
+  "Repurchase Date": "investor",
+  "Date Sold to Third Party": "investor",
+  "PA Payout 1": "investor",
+  "PA Payout 2": "investor",
+  "PA Payout 3": "investor",
+  "PA Payout 4": "investor",
+  "PA Payout 5": "investor",
+  "PA Payout 6": "investor",
+  "PA Payout 7": "investor",
+  "PA Payout 8": "investor",
+  "PA Payout 9": "investor",
+  "PA Payout 10": "investor",
+  "PA Payout 11": "investor",
+  "PA Payout 12": "investor",
+  "PA Sell Amt": "investor",
+  "PA SRP Amt": "investor",
+
+  // UNDERWRITING
+  "Underwriter Risk Assess Type": "underwriting",
+  "Underwriter Risk Assess AUS Recomm": "underwriting",
+  "Underwriting Description": "underwriting",
+  "Underwriting AUS Source": "underwriting",
+  "AU Decision Date": "underwriting",
+  "Underwriting AUS Number": "underwriting",
+  "DU/LP Case ID": "underwriting",
+  "Fannie AU Decision": "underwriting",
+  "Fannie Property Valuation Form Type": "underwriting",
+  "Freddie AU Decision": "underwriting",
+  "Freddie AVM Model Name Type Other Description": "underwriting",
+  "Freddie Property Valuation Form Type": "underwriting",
+  "Freddie Loan Level Credit Score Value": "underwriting",
+  "Freddie Loan Level Credit Score Method": "underwriting",
+  "Freddie Underwriting Type Other": "underwriting",
+  "CU Risk Score": "underwriting",
+  "Number Of Conditions": "underwriting",
+  "UW Touches": "underwriting",
+
+  // KEY DATES
+  "Application Date": "dates",
+  "Current Status Date": "dates",
+  "Loan Estimate Sent Date": "dates",
+  "Loan Estimate Received Date": "dates",
+  "Revised LE Sent Date": "dates",
+  "Revised LE Received Date": "dates",
+  "Closing Disclosure Sent Date": "dates",
+  "Closing Disclosure Received Date": "dates",
+  "Revised CD Sent Date": "dates",
+  "Revised CD Received Date": "dates",
+  "Closing Date": "dates",
+  "Estimated Closing Date": "dates",
+  "Funds Sent Date": "dates",
+  "Disbursement Date": "dates",
+  "Funding Date": "dates",
+  "Shipped Date": "dates",
+  "Appraisal Ordered Date": "dates",
+  "Appraisal Completed Date": "dates",
+  "Appraisal Received Date": "dates",
+  "UW Suspended Date": "dates",
+  "UW Denied Date": "dates",
+  "Conditional Approval Date": "dates",
+  "UW Final Approval Date": "dates",
+  "CTC Date": "dates",
+  "Credit Pull Date": "dates",
+  "Loan First Payment Date": "dates",
+  "Flood Certification Date": "dates",
+  "Note Date": "dates",
+  "Maturity Date": "dates",
+  "Closing Docs 1003 Signature Date": "dates",
+  "GFE Application Date": "dates",
+  "Initial Disclosure Due Date": "dates",
+  "GFE Initial GFE Disclosure Provided Date": "dates",
+  "TIL Intl Disclosure Provided Date": "dates",
+  "Submitted To Processing Date": "dates",
+  "Started Date": "dates",
+  "Submitted To Underwriting Date": "dates",
+  "GFE Initial GFE Disclosure Affiliated Business Disclosure Provided Date":
+    "dates",
+  "GFE Initial GFE Disclosure CHARM Booklet Provided Date": "dates",
+  "GFE Initial GFE Disclosure HUD Special Booklet Provided Date": "dates",
+  "GFE Initial GFE Disclosure HELOC Brochure Provided Date": "dates",
+  PreApproval: "dates",
+  "Disclosure Prep": "dates",
+  Signed: "dates",
+  Scrubbed: "dates",
+  Processing: "dates",
+  Submittal: "dates",
+  "Cond. Approval": "dates",
+  Resubmittal: "dates",
+  Approval: "dates",
+  "Ready for Docs": "dates",
+  "Closer Assignment": "dates",
+  "Docs Out": "dates",
+  "Docs Signing": "dates",
+  Shipping: "dates",
+  Purchased: "dates",
+  Reconciled: "dates",
+  Completion: "dates",
+  "Appt Reset": "dates",
+  "Appt Set": "dates",
+  "Doc Preparation": "dates",
+  "Post Closing": "dates",
+
+  // TEAM MEMBERS
+  "Loan Officer": "team",
+  "Loan Officer ID": "team",
+  "Legacy Loan Officer ID": "team",
+  "Loan Interviewer": "team",
+  "Loan Processor ID": "team",
+  "Underwriter ID": "team",
+  "Closer ID": "team",
+  "Account Executive": "team",
+  Closer: "team",
+  Processor: "team",
+  Underwriter: "team",
+  "Broker Lender Name": "team",
+  Branch: "team",
+  "Referral Name": "team",
+  "Company NMLS ID": "team",
+  "NMLS ID": "team",
+  ORGID: "team",
+  "Mers Min": "team",
+
+  // ARM FIELDS
+  "First Rate Adjustment Cap": "arm",
+  "First Rate Adjustment Date": "arm",
+  "Floor Rate": "arm",
+  "Life Cap": "arm",
+  Margin: "arm",
+  "ARM Program": "arm",
+  "Margin Index": "arm",
+  Rounding: "arm",
+  Lookback: "arm",
+  "1st Change Months": "arm",
+  "Maximum Rate Adjustment Cap": "arm",
+  "Adjustment Period Months": "arm",
+  "Description of the ARM index type": "arm",
+  "Interest Only Payments": "arm",
+  "Number of Months Interest Only Payments": "arm",
+  "Balloon Payments": "arm",
+
+  // PAYMENT & MI
+  "P&I Payment": "payment_mi",
+  "PITI Payment": "payment_mi",
+  "PMI Flag": "payment_mi",
+  "Mortgage Insurance Company Name": "payment_mi",
+  "Private Mortgage Insurance Indicator": "payment_mi",
+  "MI % Coverage 1": "payment_mi",
+  "MI Coverage 1 Months": "payment_mi",
+  "Mi % Coverage 2": "payment_mi",
+  "MI Coverage 2 Months": "payment_mi",
+  "MI Cancel %": "payment_mi",
+  "Number of Months Reserves": "payment_mi",
+
+  // HELOC
+  "HELOC Intial Draw": "heloc",
+  "HELOC Draw Period": "heloc",
+  "HELOC Repayment Period": "heloc",
+
+  // COMPLIANCE
+  "Interest Only Indicator": "compliance",
+  "Business or Commercial Purpose": "compliance",
+  "Document Type": "compliance",
+  "Frefinance Cash Out Type": "compliance",
+  "Exempt from Reg. Z": "compliance",
+  "ATR Loan Type": "compliance",
+  "QM Loan Type": "compliance",
+  "Safe Harbor": "compliance",
+  "Meets Agency/GSE QM": "compliance",
+  "CD Applied Cure": "compliance",
+  "CD Lender Credits": "compliance",
+  "Mavent - GSE Result": "compliance",
+  "Mavent - High-Cost result": "compliance",
+  "Mavent - Enterprise Result": "compliance",
+  "Mavent - ATR-QM Result": "compliance",
+  "Mavent - TILA Tolerance Result": "compliance",
+  "Mavent - NMLS Licensing Result": "compliance",
+  "Mavent - State Rules Result": "compliance",
+  "Mavent - HMDA Result": "compliance",
+  "Mavent - HPML Result": "compliance",
+  "Mavent - License Reviewer Result": "compliance",
+  "Mavent - Other Result": "compliance",
+  "Mavent - Overall Result": "compliance",
+
+  // FEES
+  "Orig Fees Seller": "fees",
+  "Origination Points": "fees",
+  "Orig Fee Borr Pd": "fees",
+  "Fee Details - Line 804 - Borrower Amount - Appraisal Fee": "fees",
+  "Fee Details - Line 804 - Seller Amount - Appraisal Fee": "fees",
+  "Fee Details - Line 804 Appraisal Fee PAC": "fees",
+  "Fee Details - Line 804 - Borrower POC Amount - Appraisal": "fees",
+  "Fee Details - Line 804 - Seller POC Amount - Appraisal": "fees",
+  "Fee Details - Line 804 - Broker POC Amount - Appraisal": "fees",
+  "Fee Details - Line 804 - Lender POC Amount - Appraisal": "fees",
+  "Fee Details - Line 804 - Other POC Amount - Appraisal": "fees",
+  "Fee Details - Line 805 - Borrower Amount - Credit Report": "fees",
+  "Fee Details - Line 805 - Seller Amount - Credit Report": "fees",
+  "Fee Details - Line 805 Credit Report Fee PAC": "fees",
+  "Fee Details - Line 805 - Borrower POC Amount - Cred Report": "fees",
+  "Fee Details - Line 805 - Seller POC Amount - Cred Report": "fees",
+  "Fee Details - Line 805 - Broker POC Amount - Cred Report": "fees",
+  "Fee Details - Line 805 - Lender POC Amount - Cred Report": "fees",
+  "Fee Details - Line 805 - Other POC Amount - Cred Report": "fees",
+  "Fee Details - Line 807 - Borrower Amount - Flood Cert": "fees",
+  "Fee Details - Line 807 - Seller Amount - Flood Cert": "fees",
+  "Fee Details - Line 807 Flood Certification Fee PAC": "fees",
+  "Fee Details - Line 807 - Borrower POC Amount - Flood Cert": "fees",
+  "Fee Details - Line 807 - Seller POC Amount - Flood Cert": "fees",
+  "Fee Details - Line 807 - Broker POC Amount - Flood Cert": "fees",
+  "Fee Details - Line 807 - Lender POC Amount - Flood Cert": "fees",
+  "Fee Details - Line 807 - Other POC Amount - Flood Cert": "fees",
+};
 
 /**
  * Default Encompass field mappings
@@ -462,7 +876,175 @@ export function getAllMappingsAsArray(): Array<{
   );
 }
 
+// ============================================================================
+// CATEGORY HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Get the category for a Coheus alias
+ */
+export function getFieldCategory(alias: string): FieldCategory {
+  return FIELD_CATEGORY_MAP[alias] || "loan_info"; // Default to loan_info if not found
+}
+
+/**
+ * Get the category metadata (label, description) for an alias
+ */
+export function getFieldCategoryInfo(alias: string): {
+  category: FieldCategory;
+  label: string;
+  description: string;
+  order: number;
+} {
+  const category = getFieldCategory(alias);
+  const info = FIELD_CATEGORIES[category];
+  return {
+    category,
+    label: info.label,
+    description: info.description,
+    order: info.order,
+  };
+}
+
+/**
+ * Get all categories sorted by order
+ */
+export function getAllCategories(): Array<{
+  category: FieldCategory;
+  label: string;
+  description: string;
+  order: number;
+}> {
+  return Object.entries(FIELD_CATEGORIES)
+    .map(([category, info]) => ({
+      category: category as FieldCategory,
+      label: info.label,
+      description: info.description,
+      order: info.order,
+    }))
+    .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Field data types for UI display
+ */
+export type FieldDataType =
+  | "date"
+  | "number"
+  | "string"
+  | "boolean"
+  | "currency"
+  | "percentage";
+
+/**
+ * Infer the data type from the alias name and field ID
+ */
+export function inferFieldDataType(
+  alias: string,
+  fieldId: string
+): FieldDataType {
+  const lowerAlias = alias.toLowerCase();
+  const lowerFieldId = fieldId.toLowerCase();
+
+  // Date fields
+  if (
+    lowerAlias.includes("date") ||
+    lowerAlias.includes("maturity") ||
+    lowerFieldId.includes(".date.") ||
+    lowerFieldId.includes("lastmodified") ||
+    FIELD_CATEGORY_MAP[alias] === "dates"
+  ) {
+    return "date";
+  }
+
+  // Currency/amount fields
+  if (
+    lowerAlias.includes("amount") ||
+    lowerAlias.includes("payment") ||
+    lowerAlias.includes("fee") ||
+    lowerAlias.includes("price") ||
+    lowerAlias.includes("value") ||
+    lowerAlias.includes("payout") ||
+    lowerAlias.includes("income") ||
+    lowerAlias.includes("assets")
+  ) {
+    return "currency";
+  }
+
+  // Percentage fields
+  if (
+    lowerAlias.includes("rate") ||
+    lowerAlias.includes("ratio") ||
+    lowerAlias.includes("ltv") ||
+    lowerAlias.includes("dti") ||
+    lowerAlias.includes("%") ||
+    lowerAlias.includes("coverage") ||
+    lowerAlias.includes("margin")
+  ) {
+    return "percentage";
+  }
+
+  // Number fields
+  if (
+    lowerAlias.includes("number") ||
+    lowerAlias.includes("count") ||
+    lowerAlias.includes("score") ||
+    lowerAlias.includes("months") ||
+    lowerAlias.includes("days") ||
+    lowerAlias.includes("term") ||
+    lowerAlias.includes("units") ||
+    lowerAlias.includes("cap") ||
+    lowerAlias.includes("touches")
+  ) {
+    return "number";
+  }
+
+  // Boolean fields
+  if (
+    lowerAlias.includes("flag") ||
+    lowerAlias.includes("indicator") ||
+    lowerAlias.includes("self employed") ||
+    lowerAlias.includes("hedged") ||
+    lowerAlias.includes("same as")
+  ) {
+    return "boolean";
+  }
+
+  // Default to string
+  return "string";
+}
+
+/**
+ * Get field count per category
+ */
+export function getFieldCountsByCategory(): Record<FieldCategory, number> {
+  const counts: Record<FieldCategory, number> = {
+    loan_info: 0,
+    property: 0,
+    borrower: 0,
+    pricing: 0,
+    investor: 0,
+    underwriting: 0,
+    dates: 0,
+    team: 0,
+    arm: 0,
+    payment_mi: 0,
+    heloc: 0,
+    compliance: 0,
+    fees: 0,
+  };
+
+  for (const alias of Object.keys(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
+    const category = getFieldCategory(alias);
+    counts[category]++;
+  }
+
+  return counts;
+}
+
 // Log mapping count at import time
 console.log(
-  `[DefaultEncompassFieldMappings] Loaded ${getFieldMappingCount()} default field mappings`
+  `[DefaultEncompassFieldMappings] Loaded ${getFieldMappingCount()} default field mappings across ${
+    Object.keys(FIELD_CATEGORIES).length
+  } categories`
 );

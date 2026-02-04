@@ -70,8 +70,29 @@ import {
   Upload,
   FileJson,
   X,
+  Calendar,
+  Hash,
+  Type,
+  ToggleLeft,
+  DollarSign,
+  Percent,
+  ChevronDown,
+  ChevronRight,
+  Layers,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -101,12 +122,49 @@ interface SuggestionsResponse {
   generatedAt: string;
 }
 
+// Field data types for UI display
+type FieldDataType =
+  | "date"
+  | "number"
+  | "string"
+  | "boolean"
+  | "currency"
+  | "percentage";
+
+// Field category type
+type FieldCategory =
+  | "loan_info"
+  | "property"
+  | "borrower"
+  | "pricing"
+  | "investor"
+  | "underwriting"
+  | "dates"
+  | "team"
+  | "arm"
+  | "payment_mi"
+  | "heloc"
+  | "compliance"
+  | "fees";
+
+// Category info from API
+interface CategoryInfo {
+  category: FieldCategory;
+  label: string;
+  description: string;
+  order: number;
+}
+
 interface FieldMapping {
   coheusAlias: string;
   defaultEncompassFieldId: string;
   postgresqlColumn: string;
   isValid?: boolean; // Whether default field ID exists in RDB
   swappedFieldId?: string; // Current swapped field ID if exists
+  category: FieldCategory;
+  categoryLabel: string;
+  categoryOrder: number;
+  fieldType: FieldDataType;
 }
 
 interface FieldSwap {
@@ -208,6 +266,15 @@ export function EncompassFieldMapping({
   const [isApplyingImport, setIsApplyingImport] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Category state
+  const [categories, setCategories] = useState<CategoryInfo[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<
+    FieldCategory | "all"
+  >("all");
+  const [expandedCategories, setExpandedCategories] = useState<
+    Set<FieldCategory>
+  >(new Set());
+
   // Load field mappings and swaps
   useEffect(() => {
     if (losConnectionId && tenantId) {
@@ -263,18 +330,26 @@ export function EncompassFieldMapping({
         tenantId,
       });
 
-      // Load field mappings (from XML) - this should always work
+      // Load field mappings (with categories) - this should always work
       console.log(
-        "[EncompassFieldMapping] Step 1: Loading field mappings from XML..."
+        "[EncompassFieldMapping] Step 1: Loading field mappings with categories..."
       );
-      const mappingsResponse = await api.request<{ mappings: FieldMapping[] }>(
-        "/api/encompass/field-mappings"
-      );
+      const mappingsResponse = await api.request<{
+        mappings: FieldMapping[];
+        categories: CategoryInfo[];
+      }>("/api/encompass/field-mappings");
       console.log(
         "[EncompassFieldMapping] Step 1 complete: Loaded",
         mappingsResponse.mappings?.length || 0,
-        "mappings"
+        "mappings across",
+        mappingsResponse.categories?.length || 0,
+        "categories"
       );
+
+      // Store categories
+      if (mappingsResponse.categories) {
+        setCategories(mappingsResponse.categories);
+      }
 
       // Load saved field swaps - this should always work (just returns empty array if none)
       console.log(
@@ -790,6 +865,60 @@ export function EncompassFieldMapping({
   // Calculate invalid fields count
   const invalidFieldsCount = mappings.filter((m) => !m.isValid).length;
 
+  // Calculate category stats
+  const categoryStats = React.useMemo(() => {
+    const stats: Record<FieldCategory, { total: number; invalid: number }> =
+      {} as Record<FieldCategory, { total: number; invalid: number }>;
+    for (const mapping of mappings) {
+      if (!stats[mapping.category]) {
+        stats[mapping.category] = { total: 0, invalid: 0 };
+      }
+      stats[mapping.category].total++;
+      if (!mapping.isValid) {
+        stats[mapping.category].invalid++;
+      }
+    }
+    return stats;
+  }, [mappings]);
+
+  // Group mappings by category
+  const mappingsByCategory = React.useMemo(() => {
+    const grouped: Record<FieldCategory, FieldMapping[]> = {} as Record<
+      FieldCategory,
+      FieldMapping[]
+    >;
+    for (const mapping of mappings) {
+      if (!grouped[mapping.category]) {
+        grouped[mapping.category] = [];
+      }
+      grouped[mapping.category].push(mapping);
+    }
+    return grouped;
+  }, [mappings]);
+
+  // Toggle category expansion
+  const toggleCategory = (category: FieldCategory) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  };
+
+  // Expand all categories
+  const expandAllCategories = () => {
+    setExpandedCategories(new Set(categories.map((c) => c.category)));
+  };
+
+  // Collapse all categories
+  const collapseAllCategories = () => {
+    setExpandedCategories(new Set());
+  };
+
   // Filter and sort mappings
   const filteredMappings = mappings
     .filter((mapping) => {
@@ -803,11 +932,15 @@ export function EncompassFieldMapping({
           .toLowerCase()
           .includes(searchQuery.toLowerCase());
 
+      // Apply category filter
+      const matchesCategory =
+        selectedCategory === "all" || mapping.category === selectedCategory;
+
       // Apply invalid filter
       if (filterMode === "invalid") {
-        return matchesSearch && !mapping.isValid;
+        return matchesSearch && matchesCategory && !mapping.isValid;
       }
-      return matchesSearch;
+      return matchesSearch && matchesCategory;
     })
     .sort((a, b) => {
       let comparison = 0;
@@ -862,6 +995,42 @@ export function EncompassFieldMapping({
     ) : (
       <ArrowDown className="h-3 w-3 ml-1" />
     );
+  };
+
+  // Get icon for field data type
+  const getFieldTypeIcon = (fieldType: FieldDataType) => {
+    switch (fieldType) {
+      case "date":
+        return <Calendar className="h-3.5 w-3.5 text-blue-500" />;
+      case "currency":
+        return <DollarSign className="h-3.5 w-3.5 text-green-500" />;
+      case "percentage":
+        return <Percent className="h-3.5 w-3.5 text-purple-500" />;
+      case "number":
+        return <Hash className="h-3.5 w-3.5 text-orange-500" />;
+      case "boolean":
+        return <ToggleLeft className="h-3.5 w-3.5 text-pink-500" />;
+      default:
+        return <Type className="h-3.5 w-3.5 text-slate-400" />;
+    }
+  };
+
+  // Get label for field data type
+  const getFieldTypeLabel = (fieldType: FieldDataType) => {
+    switch (fieldType) {
+      case "date":
+        return "Date";
+      case "currency":
+        return "Currency";
+      case "percentage":
+        return "Percentage";
+      case "number":
+        return "Number";
+      case "boolean":
+        return "Boolean";
+      default:
+        return "Text";
+    }
   };
 
   // ============================================================================
@@ -1092,6 +1261,39 @@ export function EncompassFieldMapping({
               </Button>
             </div>
 
+            {/* Category Filter Dropdown */}
+            <Select
+              value={selectedCategory}
+              onValueChange={(value) =>
+                setSelectedCategory(value as FieldCategory | "all")
+              }
+            >
+              <SelectTrigger className="w-[180px]">
+                <Layers className="h-3 w-3 mr-2" />
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
+                  All Categories ({mappings.length})
+                </SelectItem>
+                {categories.map((cat) => (
+                  <SelectItem key={cat.category} value={cat.category}>
+                    <div className="flex items-center justify-between w-full">
+                      <span>{cat.label}</span>
+                      <span className="ml-2 text-xs text-slate-500">
+                        ({categoryStats[cat.category]?.total || 0})
+                        {(categoryStats[cat.category]?.invalid || 0) > 0 && (
+                          <span className="text-red-500 ml-1">
+                            • {categoryStats[cat.category]?.invalid} invalid
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             {/* Invalid Fields Count Badge */}
             {invalidFieldsCount > 0 && (
               <Badge variant="destructive" className="shrink-0">
@@ -1129,6 +1331,28 @@ export function EncompassFieldMapping({
               </Button>
             )}
 
+            {/* Expand/Collapse All */}
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={expandAllCategories}
+                className="shrink-0 h-8 px-2"
+                title="Expand all categories"
+              >
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={collapseAllCategories}
+                className="shrink-0 h-8 px-2"
+                title="Collapse all categories"
+              >
+                <ChevronRight className="h-3 w-3" />
+              </Button>
+            </div>
+
             {/* Import Legacy Config Button */}
             <Button
               size="sm"
@@ -1141,409 +1365,550 @@ export function EncompassFieldMapping({
             </Button>
           </div>
 
-          {/* Field Mappings Table */}
-          <div className="border rounded-lg overflow-hidden">
-            <div className="w-full overflow-x-auto">
-              <Table className="table-fixed w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead
-                      className="w-[15%] min-w-[120px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                      onClick={() => handleSort("coheusAlias")}
+          {/* Category Summary Stats */}
+          {mappings.length > 0 && (
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-medium flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-slate-500" />
+                  Field Categories Overview
+                </h4>
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-slate-600 dark:text-slate-400">
+                    <strong>{categories.length}</strong> categories
+                  </span>
+                  <span className="text-slate-600 dark:text-slate-400">
+                    <strong>{mappings.length}</strong> total fields
+                  </span>
+                  {invalidFieldsCount > 0 && (
+                    <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      <strong>{invalidFieldsCount}</strong> invalid
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-2">
+                {categories.map((cat) => {
+                  const stats = categoryStats[cat.category];
+                  if (!stats || stats.total === 0) return null;
+                  return (
+                    <button
+                      key={cat.category}
+                      onClick={() => {
+                        setSelectedCategory(cat.category);
+                        setExpandedCategories(new Set([cat.category]));
+                      }}
+                      className={cn(
+                        "p-2 rounded-md text-left transition-colors text-xs",
+                        selectedCategory === cat.category
+                          ? "bg-blue-100 dark:bg-blue-900/50 border-blue-300 border"
+                          : "bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700",
+                        stats.invalid > 0 && "border-l-2 border-l-amber-400"
+                      )}
                     >
-                      <div className="flex items-center">
-                        Coheus Alias
-                        {getSortIcon("coheusAlias")}
+                      <div className="font-medium truncate" title={cat.label}>
+                        {cat.label}
                       </div>
-                    </TableHead>
-                    <TableHead
-                      className="w-[18%] min-w-[140px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                      onClick={() => handleSort("postgresqlColumn")}
-                    >
-                      <div className="flex items-center">
-                        PostgreSQL Column
-                        {getSortIcon("postgresqlColumn")}
+                      <div className="flex items-center gap-2 mt-1 text-slate-500">
+                        <span>{stats.total} fields</span>
+                        {stats.invalid > 0 && (
+                          <span className="text-red-500 text-xs">
+                            {stats.invalid} invalid
+                          </span>
+                        )}
                       </div>
-                    </TableHead>
-                    <TableHead
-                      className="w-[18%] min-w-[140px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                      onClick={() => handleSort("defaultFieldId")}
-                    >
-                      <div className="flex items-center">
-                        Default Field ID
-                        {getSortIcon("defaultFieldId")}
-                      </div>
-                    </TableHead>
-                    <TableHead
-                      className="w-[10%] min-w-[80px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                      onClick={() => handleSort("status")}
-                    >
-                      <div className="flex items-center">
-                        Status
-                        {getSortIcon("status")}
-                      </div>
-                    </TableHead>
-                    <TableHead
-                      className="w-[12%] min-w-[90px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
-                      onClick={() => handleSort("confidence")}
-                      title="Confidence of best available suggestion (requires analysis)"
-                    >
-                      <div className="flex items-center">
-                        Suggestion
-                        {getSortIcon("confidence")}
-                      </div>
-                    </TableHead>
-                    <TableHead className="w-[18%] min-w-[140px]">
-                      Current Field ID
-                    </TableHead>
-                    <TableHead className="w-[12%] min-w-[80px]">
-                      Actions
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredMappings.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="text-center text-slate-500 py-8"
-                      >
-                        {validating
-                          ? "Validating fields..."
-                          : "No field mappings found"}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredMappings.map((mapping) => {
-                      const swappedFieldId = mapping.swappedFieldId;
-                      const effectiveFieldId =
-                        swappedFieldId || mapping.defaultEncompassFieldId;
-                      const isValid = mapping.isValid ?? false;
-                      const isSwapped = !!swappedFieldId;
-                      const fieldSuggestions = getSuggestionsForAlias(
-                        mapping.coheusAlias
-                      );
+                    </button>
+                  );
+                })}
+                {selectedCategory !== "all" && (
+                  <button
+                    onClick={() => setSelectedCategory("all")}
+                    className="p-2 rounded-md text-left transition-colors text-xs bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
+                  >
+                    <div className="font-medium">Clear Filter</div>
+                    <div className="text-slate-500 mt-1">Show all</div>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
-                      return (
-                        <TableRow
-                          key={mapping.coheusAlias}
+          {/* Field Mappings - Categorized Accordion */}
+          <div className="space-y-2">
+            {filteredMappings.length === 0 ? (
+              <div className="text-center text-slate-500 py-8 border rounded-lg">
+                {validating
+                  ? "Validating fields..."
+                  : "No field mappings found"}
+              </div>
+            ) : (
+              categories
+                .filter((cat) => {
+                  // Only show categories that have filtered mappings
+                  return filteredMappings.some(
+                    (m) => m.category === cat.category
+                  );
+                })
+                .map((cat) => {
+                  const categoryMappings = filteredMappings.filter(
+                    (m) => m.category === cat.category
+                  );
+                  const categoryInvalidCount = categoryMappings.filter(
+                    (m) => !m.isValid
+                  ).length;
+                  const isExpanded = expandedCategories.has(cat.category);
+
+                  return (
+                    <Collapsible
+                      key={cat.category}
+                      open={isExpanded}
+                      onOpenChange={() => toggleCategory(cat.category)}
+                    >
+                      <CollapsibleTrigger className="w-full">
+                        <div
                           className={cn(
-                            "transition-colors",
-                            !isValid &&
-                              "bg-red-50 dark:bg-red-900/20 border-l-4 border-l-red-500"
+                            "flex items-center justify-between p-3 rounded-lg border bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors",
+                            categoryInvalidCount > 0 &&
+                              "border-l-4 border-l-amber-400"
                           )}
                         >
-                          <TableCell
-                            className="font-medium break-words"
-                            title={mapping.coheusAlias}
-                          >
-                            <div className="break-words">
-                              {mapping.coheusAlias}
-                            </div>
-                          </TableCell>
-                          <TableCell
-                            className="font-mono text-xs text-slate-500 break-words"
-                            title={mapping.postgresqlColumn}
-                          >
-                            <div className="break-words">
-                              {mapping.postgresqlColumn}
-                            </div>
-                          </TableCell>
-                          <TableCell
-                            className="font-mono text-xs break-words"
-                            title={mapping.defaultEncompassFieldId}
-                          >
-                            <div className="break-words">
-                              {mapping.defaultEncompassFieldId}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {isValid ? (
-                              <div className="flex items-center gap-1 flex-wrap">
-                                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                                <span className="text-xs text-green-600">
-                                  Valid
-                                </span>
-                              </div>
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-slate-500" />
                             ) : (
+                              <ChevronRight className="h-4 w-4 text-slate-500" />
+                            )}
+                            <span className="font-medium">{cat.label}</span>
+                            <Badge variant="secondary" className="text-xs">
+                              {categoryMappings.length} field
+                              {categoryMappings.length !== 1 ? "s" : ""}
+                            </Badge>
+                            {categoryInvalidCount > 0 && (
                               <Badge variant="destructive" className="text-xs">
                                 <AlertTriangle className="h-3 w-3 mr-1" />
-                                Not Found
+                                {categoryInvalidCount} invalid
                               </Badge>
                             )}
-                          </TableCell>
-                          {/* Suggestion/Confidence column */}
-                          <TableCell>
-                            {(() => {
-                              const confidence = getConfidenceForMapping(
-                                mapping.coheusAlias
-                              );
-                              const analyzed = hasAnalysisRun(
-                                mapping.coheusAlias
-                              );
-
-                              if (!analyzed) {
-                                return (
-                                  <span className="text-xs text-slate-400 italic">
-                                    Not analyzed
-                                  </span>
-                                );
-                              }
-
-                              if (
-                                confidence < 0 ||
-                                fieldSuggestions.length === 0
-                              ) {
-                                return (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs bg-amber-50 text-amber-700 border-amber-200"
-                                  >
-                                    Add to RDB?
-                                  </Badge>
-                                );
-                              }
-
-                              if (confidence >= 70) {
-                                return (
-                                  <Badge className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                    {confidence}% match
-                                  </Badge>
-                                );
-                              }
-
-                              return (
-                                <Badge
-                                  variant="outline"
-                                  className="text-xs bg-amber-50 text-amber-700 border-amber-200"
-                                >
-                                  {confidence}% low
-                                </Badge>
-                              );
-                            })()}
-                          </TableCell>
-                          <TableCell>
-                            {isSwapped ? (
-                              <div className="flex items-center gap-1 flex-wrap">
-                                <Badge
-                                  variant="secondary"
-                                  className="font-mono text-xs break-words"
-                                  title={swappedFieldId}
-                                >
-                                  <span className="break-all">
-                                    {swappedFieldId}
-                                  </span>
-                                </Badge>
-                                <Badge
-                                  variant="outline"
-                                  className="text-xs shrink-0"
-                                >
-                                  Swapped
-                                </Badge>
-                              </div>
-                            ) : (
-                              <span
-                                className="font-mono text-xs text-slate-500 break-words"
-                                title={effectiveFieldId}
-                              >
-                                <div className="break-words">
-                                  {effectiveFieldId}
-                                </div>
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1 flex-wrap">
-                              {/* Fix button with suggestion popover for invalid fields */}
-                              {!isValid && (
-                                <Popover
-                                  open={fixPopoverOpen === mapping.coheusAlias}
-                                  onOpenChange={(open) =>
-                                    setFixPopoverOpen(
-                                      open ? mapping.coheusAlias : null
-                                    )
-                                  }
-                                >
-                                  <PopoverTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-8 px-2 shrink-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                                      title="Quick fix suggestions"
-                                    >
-                                      <Sparkles className="h-4 w-4 mr-1" />
-                                      <span className="text-xs">Fix</span>
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent
-                                    className="w-96 p-0"
-                                    align="start"
-                                  >
-                                    <div className="p-3 border-b">
-                                      <h4 className="font-medium text-sm">
-                                        Fix: {mapping.coheusAlias}
-                                      </h4>
-                                      <p className="text-xs text-slate-500 mt-1">
-                                        Default field:{" "}
-                                        <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">
-                                          {mapping.defaultEncompassFieldId}
-                                        </code>
-                                      </p>
-                                    </div>
-
-                                    {/* High confidence suggestions */}
-                                    {fieldSuggestions.length > 0 && (
-                                      <>
-                                        <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border-b">
-                                          <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                                            High Confidence Matches
-                                          </p>
-                                        </div>
-                                        <div className="max-h-48 overflow-y-auto">
-                                          {fieldSuggestions.map((s) => (
-                                            <div
-                                              key={s.suggestedFieldId}
-                                              className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer border-b last:border-b-0"
-                                              onClick={() => {
-                                                handleSaveSwap(
-                                                  mapping.coheusAlias,
-                                                  s.suggestedFieldId!
-                                                );
-                                                setFixPopoverOpen(null);
-                                              }}
-                                            >
-                                              <div className="flex-1 min-w-0">
-                                                <p className="font-mono text-sm truncate">
-                                                  {s.suggestedFieldId}
-                                                </p>
-                                                {s.suggestedFieldDescription && (
-                                                  <p className="text-xs text-slate-500 truncate">
-                                                    {
-                                                      s.suggestedFieldDescription
-                                                    }
-                                                  </p>
-                                                )}
-                                              </div>
-                                              <Badge className="ml-2 shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                                {s.confidence}%
-                                              </Badge>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </>
-                                    )}
-
-                                    {/* No good matches found - suggest field may need to be added */}
-                                    {hasAnalysisRun(mapping.coheusAlias) &&
-                                      fieldSuggestions.length === 0 && (
-                                        <div className="p-4 bg-amber-50 dark:bg-amber-900/20">
-                                          <div className="flex items-start gap-2">
-                                            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                                            <div>
-                                              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                                                No confident match found
-                                              </p>
-                                              <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                                                This field may need to be added
-                                                to the Encompass Reporting
-                                                Database (RDB). Contact your
-                                                Encompass administrator to add
-                                                the field, or use the Edit
-                                                button to manually select a
-                                                field if you know the correct
-                                                ID.
-                                              </p>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )}
-
-                                    {/* Analysis not run yet */}
-                                    {!hasAnalysisRun(mapping.coheusAlias) && (
-                                      <div className="p-4 text-center">
-                                        <p className="text-sm text-slate-500 mb-3">
-                                          Click to analyze and find suggestions
-                                        </p>
-                                        <Button
-                                          size="sm"
-                                          onClick={() => {
-                                            setFixPopoverOpen(null);
-                                            handleAnalyzeFields();
-                                          }}
-                                        >
-                                          <Sparkles className="h-3 w-3 mr-1" />
-                                          Analyze Fields
-                                        </Button>
-                                      </div>
-                                    )}
-
-                                    {/* Manual selection option */}
-                                    <div className="p-3 border-t bg-slate-50 dark:bg-slate-800/50">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full"
-                                        onClick={() => {
-                                          setFixPopoverOpen(null);
-                                          openEditDialog(
-                                            mapping.coheusAlias,
-                                            swappedFieldId ||
-                                              mapping.defaultEncompassFieldId
-                                          );
-                                        }}
-                                      >
-                                        <Edit2 className="h-3 w-3 mr-2" />
-                                        Browse All RDB Fields
-                                      </Button>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 shrink-0"
-                                onClick={() =>
-                                  openEditDialog(
-                                    mapping.coheusAlias,
+                          </div>
+                          <span className="text-xs text-slate-500">
+                            {cat.description}
+                          </span>
+                        </div>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="mt-1 border rounded-lg overflow-hidden">
+                          <div className="w-full overflow-x-auto">
+                            <Table className="table-fixed w-full">
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="w-[14%] min-w-[110px]">
+                                    Coheus Alias
+                                  </TableHead>
+                                  <TableHead className="w-[6%] min-w-[50px]">
+                                    Type
+                                  </TableHead>
+                                  <TableHead className="w-[14%] min-w-[110px]">
+                                    PostgreSQL Column
+                                  </TableHead>
+                                  <TableHead className="w-[16%] min-w-[130px]">
+                                    Default Field ID
+                                  </TableHead>
+                                  <TableHead className="w-[10%] min-w-[70px]">
+                                    Status
+                                  </TableHead>
+                                  <TableHead className="w-[10%] min-w-[80px]">
+                                    Suggestion
+                                  </TableHead>
+                                  <TableHead className="w-[18%] min-w-[140px]">
+                                    Current Field ID
+                                  </TableHead>
+                                  <TableHead className="w-[12%] min-w-[80px]">
+                                    Actions
+                                  </TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {categoryMappings.map((mapping) => {
+                                  const swappedFieldId = mapping.swappedFieldId;
+                                  const effectiveFieldId =
                                     swappedFieldId ||
-                                      mapping.defaultEncompassFieldId
-                                  )
-                                }
-                                title={
-                                  isValid
-                                    ? "Change field mapping"
-                                    : "Select valid field"
-                                }
-                              >
-                                <Edit2
-                                  className={`h-4 w-4 ${
-                                    !isValid ? "text-amber-500" : ""
-                                  }`}
-                                />
-                              </Button>
-                              {isSwapped && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0 shrink-0"
-                                  onClick={() =>
-                                    handleDeleteSwap(mapping.coheusAlias)
-                                  }
-                                  title="Remove swap (use default)"
-                                >
-                                  <Trash2 className="h-4 w-4 text-red-500" />
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                                    mapping.defaultEncompassFieldId;
+                                  const isValid = mapping.isValid ?? false;
+                                  const isSwapped = !!swappedFieldId;
+                                  const fieldSuggestions =
+                                    getSuggestionsForAlias(mapping.coheusAlias);
+
+                                  return (
+                                    <TableRow
+                                      key={mapping.coheusAlias}
+                                      className={cn(
+                                        "transition-colors",
+                                        !isValid &&
+                                          "bg-red-50 dark:bg-red-900/20 border-l-4 border-l-red-500"
+                                      )}
+                                    >
+                                      <TableCell
+                                        className="font-medium break-words"
+                                        title={mapping.coheusAlias}
+                                      >
+                                        <div className="break-words text-sm">
+                                          {mapping.coheusAlias}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell>
+                                        <div
+                                          className="flex items-center gap-1"
+                                          title={getFieldTypeLabel(
+                                            mapping.fieldType
+                                          )}
+                                        >
+                                          {getFieldTypeIcon(mapping.fieldType)}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell
+                                        className="font-mono text-xs text-slate-500 break-words"
+                                        title={mapping.postgresqlColumn}
+                                      >
+                                        <div className="break-words">
+                                          {mapping.postgresqlColumn}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell
+                                        className="font-mono text-xs break-words"
+                                        title={mapping.defaultEncompassFieldId}
+                                      >
+                                        <div className="break-words">
+                                          {mapping.defaultEncompassFieldId}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell>
+                                        {isValid ? (
+                                          <div className="flex items-center gap-1 flex-wrap">
+                                            <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                                            <span className="text-xs text-green-600">
+                                              Valid
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <Badge
+                                            variant="destructive"
+                                            className="text-xs"
+                                          >
+                                            <AlertTriangle className="h-3 w-3 mr-1" />
+                                            Not Found
+                                          </Badge>
+                                        )}
+                                      </TableCell>
+                                      {/* Suggestion/Confidence column */}
+                                      <TableCell>
+                                        {(() => {
+                                          const confidence =
+                                            getConfidenceForMapping(
+                                              mapping.coheusAlias
+                                            );
+                                          const analyzed = hasAnalysisRun(
+                                            mapping.coheusAlias
+                                          );
+
+                                          if (!analyzed) {
+                                            return (
+                                              <span className="text-xs text-slate-400 italic">
+                                                Not analyzed
+                                              </span>
+                                            );
+                                          }
+
+                                          if (
+                                            confidence < 0 ||
+                                            fieldSuggestions.length === 0
+                                          ) {
+                                            return (
+                                              <Badge
+                                                variant="outline"
+                                                className="text-xs bg-amber-50 text-amber-700 border-amber-200"
+                                              >
+                                                Add to RDB?
+                                              </Badge>
+                                            );
+                                          }
+
+                                          if (confidence >= 70) {
+                                            return (
+                                              <Badge className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                {confidence}% match
+                                              </Badge>
+                                            );
+                                          }
+
+                                          return (
+                                            <Badge
+                                              variant="outline"
+                                              className="text-xs bg-amber-50 text-amber-700 border-amber-200"
+                                            >
+                                              {confidence}% low
+                                            </Badge>
+                                          );
+                                        })()}
+                                      </TableCell>
+                                      <TableCell>
+                                        {isSwapped ? (
+                                          <div className="flex items-center gap-1 flex-wrap">
+                                            <Badge
+                                              variant="secondary"
+                                              className="font-mono text-xs break-words"
+                                              title={swappedFieldId}
+                                            >
+                                              <span className="break-all">
+                                                {swappedFieldId}
+                                              </span>
+                                            </Badge>
+                                            <Badge
+                                              variant="outline"
+                                              className="text-xs shrink-0"
+                                            >
+                                              Swapped
+                                            </Badge>
+                                          </div>
+                                        ) : (
+                                          <span
+                                            className="font-mono text-xs text-slate-500 break-words"
+                                            title={effectiveFieldId}
+                                          >
+                                            <div className="break-words">
+                                              {effectiveFieldId}
+                                            </div>
+                                          </span>
+                                        )}
+                                      </TableCell>
+                                      <TableCell>
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                          {/* Fix button with suggestion popover for invalid fields */}
+                                          {!isValid && (
+                                            <Popover
+                                              open={
+                                                fixPopoverOpen ===
+                                                mapping.coheusAlias
+                                              }
+                                              onOpenChange={(open) =>
+                                                setFixPopoverOpen(
+                                                  open
+                                                    ? mapping.coheusAlias
+                                                    : null
+                                                )
+                                              }
+                                            >
+                                              <PopoverTrigger asChild>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-8 px-2 shrink-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                                  title="Quick fix suggestions"
+                                                >
+                                                  <Sparkles className="h-4 w-4 mr-1" />
+                                                  <span className="text-xs">
+                                                    Fix
+                                                  </span>
+                                                </Button>
+                                              </PopoverTrigger>
+                                              <PopoverContent
+                                                className="w-96 p-0"
+                                                align="start"
+                                              >
+                                                <div className="p-3 border-b">
+                                                  <h4 className="font-medium text-sm">
+                                                    Fix: {mapping.coheusAlias}
+                                                  </h4>
+                                                  <p className="text-xs text-slate-500 mt-1">
+                                                    Default field:{" "}
+                                                    <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">
+                                                      {
+                                                        mapping.defaultEncompassFieldId
+                                                      }
+                                                    </code>
+                                                  </p>
+                                                </div>
+
+                                                {/* High confidence suggestions */}
+                                                {fieldSuggestions.length >
+                                                  0 && (
+                                                  <>
+                                                    <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border-b">
+                                                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                                                        High Confidence Matches
+                                                      </p>
+                                                    </div>
+                                                    <div className="max-h-48 overflow-y-auto">
+                                                      {fieldSuggestions.map(
+                                                        (s) => (
+                                                          <div
+                                                            key={
+                                                              s.suggestedFieldId
+                                                            }
+                                                            className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer border-b last:border-b-0"
+                                                            onClick={() => {
+                                                              handleSaveSwap(
+                                                                mapping.coheusAlias,
+                                                                s.suggestedFieldId!
+                                                              );
+                                                              setFixPopoverOpen(
+                                                                null
+                                                              );
+                                                            }}
+                                                          >
+                                                            <div className="flex-1 min-w-0">
+                                                              <p className="font-mono text-sm truncate">
+                                                                {
+                                                                  s.suggestedFieldId
+                                                                }
+                                                              </p>
+                                                              {s.suggestedFieldDescription && (
+                                                                <p className="text-xs text-slate-500 truncate">
+                                                                  {
+                                                                    s.suggestedFieldDescription
+                                                                  }
+                                                                </p>
+                                                              )}
+                                                            </div>
+                                                            <Badge className="ml-2 shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                              {s.confidence}%
+                                                            </Badge>
+                                                          </div>
+                                                        )
+                                                      )}
+                                                    </div>
+                                                  </>
+                                                )}
+
+                                                {/* No good matches found - suggest field may need to be added */}
+                                                {hasAnalysisRun(
+                                                  mapping.coheusAlias
+                                                ) &&
+                                                  fieldSuggestions.length ===
+                                                    0 && (
+                                                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20">
+                                                      <div className="flex items-start gap-2">
+                                                        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                                                        <div>
+                                                          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                                                            No confident match
+                                                            found
+                                                          </p>
+                                                          <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                                                            This field may need
+                                                            to be added to the
+                                                            Encompass Reporting
+                                                            Database (RDB).
+                                                            Contact your
+                                                            Encompass
+                                                            administrator to add
+                                                            the field, or use
+                                                            the Edit button to
+                                                            manually select a
+                                                            field if you know
+                                                            the correct ID.
+                                                          </p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                {/* Analysis not run yet */}
+                                                {!hasAnalysisRun(
+                                                  mapping.coheusAlias
+                                                ) && (
+                                                  <div className="p-4 text-center">
+                                                    <p className="text-sm text-slate-500 mb-3">
+                                                      Click to analyze and find
+                                                      suggestions
+                                                    </p>
+                                                    <Button
+                                                      size="sm"
+                                                      onClick={() => {
+                                                        setFixPopoverOpen(null);
+                                                        handleAnalyzeFields();
+                                                      }}
+                                                    >
+                                                      <Sparkles className="h-3 w-3 mr-1" />
+                                                      Analyze Fields
+                                                    </Button>
+                                                  </div>
+                                                )}
+
+                                                {/* Manual selection option */}
+                                                <div className="p-3 border-t bg-slate-50 dark:bg-slate-800/50">
+                                                  <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="w-full"
+                                                    onClick={() => {
+                                                      setFixPopoverOpen(null);
+                                                      openEditDialog(
+                                                        mapping.coheusAlias,
+                                                        swappedFieldId ||
+                                                          mapping.defaultEncompassFieldId
+                                                      );
+                                                    }}
+                                                  >
+                                                    <Edit2 className="h-3 w-3 mr-2" />
+                                                    Browse All RDB Fields
+                                                  </Button>
+                                                </div>
+                                              </PopoverContent>
+                                            </Popover>
+                                          )}
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 w-8 p-0 shrink-0"
+                                            onClick={() =>
+                                              openEditDialog(
+                                                mapping.coheusAlias,
+                                                swappedFieldId ||
+                                                  mapping.defaultEncompassFieldId
+                                              )
+                                            }
+                                            title={
+                                              isValid
+                                                ? "Change field mapping"
+                                                : "Select valid field"
+                                            }
+                                          >
+                                            <Edit2
+                                              className={`h-4 w-4 ${
+                                                !isValid ? "text-amber-500" : ""
+                                              }`}
+                                            />
+                                          </Button>
+                                          {isSwapped && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-8 w-8 p-0 shrink-0"
+                                              onClick={() =>
+                                                handleDeleteSwap(
+                                                  mapping.coheusAlias
+                                                )
+                                              }
+                                              title="Remove swap (use default)"
+                                            >
+                                              <Trash2 className="h-4 w-4 text-red-500" />
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  );
+                })
+            )}
           </div>
 
           {/* Edit Dialog */}
