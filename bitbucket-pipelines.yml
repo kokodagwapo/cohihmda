@@ -18,6 +18,7 @@
 #   - ECS_CLUSTER                  - ECS cluster name
 #   - ECS_SERVICE                  - ECS service name
 #   - VITE_API_URL                 - Backend API URL for frontend build
+#   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
 # ============================================================================
 
 image: node:20
@@ -85,8 +86,19 @@ definitions:
           - |
             FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
             BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config)' || true)
             echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
             echo "Backend changed: ${BACKEND_CHANGED:-none}"
+            echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
+          # Deploy infrastructure first if changed (updates task definitions, memory, etc.)
+          - |
+            if [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Deploying Infrastructure (CloudFormation)..."
+              chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+              ./scripts/bitbucket/deploy-infrastructure.sh
+            else
+              echo ">>> Skipping Infrastructure (no changes)"
+            fi
           # Deploy frontend if changed
           - |
             if [ -n "$FRONTEND_CHANGED" ]; then
@@ -96,9 +108,9 @@ definitions:
             else
               echo ">>> Skipping Frontend (no changes)"
             fi
-          # Deploy backend if changed
+          # Deploy backend if changed (or if infra changed - to pick up new task definition)
           - |
-            if [ -n "$BACKEND_CHANGED" ]; then
+            if [ -n "$BACKEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
               echo ">>> Deploying Backend..."
               chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
               ./scripts/bitbucket/deploy-backend-ecs.sh
@@ -119,8 +131,19 @@ definitions:
           - |
             FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
             BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config)' || true)
             echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
             echo "Backend changed: ${BACKEND_CHANGED:-none}"
+            echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
+          # Deploy infrastructure first if changed (updates task definitions, memory, etc.)
+          - |
+            if [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Deploying Infrastructure (CloudFormation)..."
+              chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+              ./scripts/bitbucket/deploy-infrastructure.sh
+            else
+              echo ">>> Skipping Infrastructure (no changes)"
+            fi
           # Deploy frontend if changed
           - |
             if [ -n "$FRONTEND_CHANGED" ]; then
@@ -130,9 +153,9 @@ definitions:
             else
               echo ">>> Skipping Frontend (no changes)"
             fi
-          # Deploy backend if changed
+          # Deploy backend if changed (or if infra changed - to pick up new task definition)
           - |
-            if [ -n "$BACKEND_CHANGED" ]; then
+            if [ -n "$BACKEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
               echo ">>> Deploying Backend..."
               chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
               ./scripts/bitbucket/deploy-backend-ecs.sh
@@ -183,6 +206,25 @@ definitions:
           - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
           - ./scripts/bitbucket/deploy-backend-ecs.sh
 
+    - step: &deploy-infra-dev
+        name: Deploy Infrastructure to Dev
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+
+    - step: &deploy-infra-prod
+        name: Deploy Infrastructure to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+
 pipelines:
   # Branch-based deployments
   branches:
@@ -228,6 +270,13 @@ pipelines:
     backend-prod:
       - step: *build-backend
       - step: *deploy-backend-prod
+
+    # Infrastructure only (CloudFormation updates)
+    infrastructure-dev:
+      - step: *deploy-infra-dev
+
+    infrastructure-prod:
+      - step: *deploy-infra-prod
 
     # Full deploy (skip build if you want)
     deploy-all-dev:
