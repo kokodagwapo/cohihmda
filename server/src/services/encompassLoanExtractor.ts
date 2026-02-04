@@ -31,6 +31,13 @@ export interface ExtractOptions {
   fields?: string[]; // Coheus aliases to extract (if not provided, extracts all)
   folderName?: string; // Deprecated: use folderNames instead
   folderNames?: string[]; // Array of folder names to sync
+  // Chunked processing options
+  chunkSize?: number; // Process loans in chunks of this size (default: 5000)
+  onChunkProcessed?: (
+    chunk: LoanRecord[],
+    chunkIndex: number,
+    totalProcessed: number
+  ) => Promise<void>; // Callback for each processed chunk
 }
 
 export class EncompassLoanExtractor {
@@ -389,10 +396,25 @@ export class EncompassLoanExtractor {
       `[EncompassLoanExtractor] Lookup maps ready: ${columnToAliasMap.size} columns, ${fieldIdToColumnMap.size} field IDs`
     );
 
+    // =========================================================================
+    // CHUNKED PROCESSING: Process loans in chunks to limit memory usage
+    // This allows processing 100K+ loans without running out of memory
+    // =========================================================================
+    const chunkSize = options.chunkSize || 5000;
+    const useChunkedProcessing = !!options.onChunkProcessed;
+    const totalLoans = response.data.length;
+
+    if (useChunkedProcessing) {
+      console.log(
+        `[EncompassLoanExtractor] Using CHUNKED processing (chunk size: ${chunkSize}, total loans: ${totalLoans})`
+      );
+    }
+
     // Map Encompass loans to PostgreSQL records
     const records: LoanRecord[] = [];
+    let currentChunk: LoanRecord[] = [];
     let processedCount = 0;
-    const totalLoans = response.data.length;
+    let chunkIndex = 0;
 
     for (const loan of response.data) {
       try {
@@ -409,7 +431,12 @@ export class EncompassLoanExtractor {
           getDefaultFieldId,
           aliasToColumn
         );
-        records.push(record);
+
+        if (useChunkedProcessing) {
+          currentChunk.push(record);
+        } else {
+          records.push(record);
+        }
         processedCount++;
 
         // Log progress every 1000 loans with memory usage
@@ -419,6 +446,38 @@ export class EncompassLoanExtractor {
           const rssMB = Math.round(memUsage.rss / 1024 / 1024);
           console.log(
             `[EncompassLoanExtractor] Processed ${processedCount}/${totalLoans} loans (heap: ${heapMB}MB, rss: ${rssMB}MB)`
+          );
+        }
+
+        // CHUNKED PROCESSING: When chunk is full, process it and clear memory
+        if (useChunkedProcessing && currentChunk.length >= chunkSize) {
+          console.log(
+            `[EncompassLoanExtractor] Processing chunk ${chunkIndex + 1} (${
+              currentChunk.length
+            } loans, total: ${processedCount}/${totalLoans})`
+          );
+
+          // Call the callback to process this chunk (e.g., write to database)
+          await options.onChunkProcessed!(
+            currentChunk,
+            chunkIndex,
+            processedCount
+          );
+
+          // Clear the chunk to free memory
+          currentChunk = [];
+          chunkIndex++;
+
+          // Force garbage collection hint (Node.js may or may not honor this)
+          if (global.gc) {
+            global.gc();
+          }
+
+          const memAfterChunk = process.memoryUsage();
+          console.log(
+            `[EncompassLoanExtractor] Chunk ${chunkIndex} complete, memory after clear: heap=${Math.round(
+              memAfterChunk.heapUsed / 1024 / 1024
+            )}MB`
           );
         }
       } catch (error: any) {
@@ -431,16 +490,28 @@ export class EncompassLoanExtractor {
       }
     }
 
+    // Process any remaining loans in the final chunk
+    if (useChunkedProcessing && currentChunk.length > 0) {
+      console.log(
+        `[EncompassLoanExtractor] Processing final chunk ${chunkIndex + 1} (${
+          currentChunk.length
+        } loans)`
+      );
+      await options.onChunkProcessed!(currentChunk, chunkIndex, processedCount);
+      currentChunk = [];
+    }
+
     // Final memory usage log
     const finalMem = process.memoryUsage();
     console.log(
-      `[EncompassLoanExtractor] Completed mapping ${
-        records.length
-      }/${totalLoans} loans (final heap: ${Math.round(
+      `[EncompassLoanExtractor] Completed mapping ${processedCount}/${totalLoans} loans (final heap: ${Math.round(
         finalMem.heapUsed / 1024 / 1024
       )}MB)`
     );
-    return records;
+
+    // If chunked processing was used, return empty array (chunks were processed via callback)
+    // Otherwise return all records (backward compatible)
+    return useChunkedProcessing ? [] : records;
   }
 
   /**
