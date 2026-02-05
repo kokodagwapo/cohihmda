@@ -31,6 +31,9 @@ import {
   formatDateForSQL,
   formatMonthKey,
   assignTTSTier,
+  getActorColumnForChannel,
+  getActorLabelForChannel,
+  isTPOChannel,
   OPERATIONS_ACTOR_CONFIGS,
   SALES_ACTOR_CONFIGS,
   REVENUE_SQL_EXPRESSION,
@@ -96,14 +99,19 @@ router.get(
 
       // Validate actor type
       if (!["branch", "loan_officer"].includes(actor)) {
-        return res
-          .status(400)
-          .json({
-            error: 'Invalid actor type. Must be "branch" or "loan_officer"',
-          });
+        return res.status(400).json({
+          error: 'Invalid actor type. Must be "branch" or "loan_officer"',
+        });
       }
 
-      const actorColumn = actor === "branch" ? "branch" : "loan_officer";
+      // For TPO channels, use account_executive instead of loan_officer
+      // Branch remains the same regardless of channel
+      const actorColumn =
+        actor === "branch" ? "branch" : getActorColumnForChannel(channelGroup);
+
+      // Label for display purposes
+      const actorLabel =
+        actor === "branch" ? "Branch" : getActorLabelForChannel(channelGroup);
 
       // Get vMaxDate from data (matching Qlik's Max("Last Modified Date"))
       const vMaxDate = await getVMaxDate(tenantPool);
@@ -601,11 +609,9 @@ router.get(
       logError("Error fetching sales scorecard data", error, {
         userId: req.userId,
       });
-      res
-        .status(500)
-        .json({
-          error: error.message || "Failed to fetch sales scorecard data",
-        });
+      res.status(500).json({
+        error: error.message || "Failed to fetch sales scorecard data",
+      });
     }
   }
 );
@@ -644,12 +650,10 @@ router.get(
 
       // Validate actor type
       if (!["processor", "underwriter", "closer"].includes(actorType)) {
-        return res
-          .status(400)
-          .json({
-            error:
-              'Invalid actor_type. Must be "processor", "underwriter", or "closer"',
-          });
+        return res.status(400).json({
+          error:
+            'Invalid actor_type. Must be "processor", "underwriter", or "closer"',
+        });
       }
 
       const monthsMap: Record<string, number> = {
@@ -1030,11 +1034,9 @@ router.get(
       logError("Error fetching operations scorecard data", error, {
         userId: req.userId,
       });
-      res
-        .status(500)
-        .json({
-          error: error.message || "Failed to fetch operations scorecard data",
-        });
+      res.status(500).json({
+        error: error.message || "Failed to fetch operations scorecard data",
+      });
     }
   }
 );
@@ -1192,11 +1194,9 @@ router.get(
       logError("Error fetching operations trends data", error, {
         userId: req.userId,
       });
-      res
-        .status(500)
-        .json({
-          error: error.message || "Failed to fetch operations trends data",
-        });
+      res.status(500).json({
+        error: error.message || "Failed to fetch operations trends data",
+      });
     }
   }
 );
@@ -1701,11 +1701,9 @@ router.get(
         userId: req.userId,
         loName: req.params.loName,
       });
-      res
-        .status(500)
-        .json({
-          error: error.message || "Failed to fetch sales trends drilldown",
-        });
+      res.status(500).json({
+        error: error.message || "Failed to fetch sales trends drilldown",
+      });
     }
   }
 );

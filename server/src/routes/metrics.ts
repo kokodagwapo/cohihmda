@@ -150,6 +150,9 @@ router.get(
       if (req.query.loan_officer_id)
         additionalFilters.loan_officer_id = req.query.loan_officer_id;
       if (req.query.status) additionalFilters.status = req.query.status;
+      // Channel filter - supports consolidated channel groups (Retail, TPO) or specific channels
+      if (req.query.consolidated_channel)
+        additionalFilters.consolidated_channel = req.query.consolidated_channel;
 
       const result = await queryMetric(tenantPool, metricId, {
         dateRange,

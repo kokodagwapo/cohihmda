@@ -11,7 +11,13 @@ import {
   clearCache as clearInsightsCache,
 } from "../insights/index.js";
 import type { GeneratedInsight } from "../insights/index.js";
-import { REVENUE_SQL_EXPRESSION } from "../../utils/scorecard-utils.js";
+import {
+  REVENUE_SQL_EXPRESSION,
+  getActorColumnForChannel,
+  getActorSqlExpression,
+  getActorLabelForChannel,
+  buildChannelWhereClause,
+} from "../../utils/scorecard-utils.js";
 
 /**
  * Analytics Service
@@ -409,7 +415,9 @@ function getPreviousPeriodRange(
 
 /**
  * Get leaderboard data for a specific timeframe
- * Groups loans by loan_officer (name) field directly - no employees table required
+ * Groups loans by the appropriate actor field based on channel:
+ * - Retail channels: loan_officer
+ * - TPO channels: account_executive
  */
 export async function getLeaderboardData(
   tenantPool: pg.Pool,
@@ -419,6 +427,7 @@ export async function getLeaderboardData(
     scope?: "all" | "branch" | "team";
     startDate?: string; // For custom date range
     endDate?: string; // For custom date range
+    channelGroup?: string; // Channel filter (Retail, TPO, or specific channel)
   }
 ): Promise<{ leaderboard: LeaderboardEntry[]; timeframe: string }> {
   try {
@@ -435,6 +444,11 @@ export async function getLeaderboardData(
       filters?.endDate
     );
 
+    // Determine the actor column based on channel group
+    // TPO channels use account_executive, Retail uses loan_officer
+    const actorColumn = getActorColumnForChannel(filters?.channelGroup);
+    const actorExpression = getActorSqlExpression(filters?.channelGroup, "l");
+
     // Build WHERE clause for filters
     const conditions: string[] = [];
     const params: any[] = [startDate, endDate];
@@ -447,15 +461,22 @@ export async function getLeaderboardData(
       paramIndex++;
     }
 
+    // Channel filter - use shared utility for consistent behavior
+    const channelClause = buildChannelWhereClause(filters?.channelGroup);
+    if (channelClause) {
+      // Remove leading 'AND ' since we'll add it back with other conditions
+      conditions.push(channelClause.replace(/^AND\s+/i, ""));
+    }
+
     const branchFilter =
       conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
 
-    // Query performance metrics grouped by loan_officer name
-    // This works even if employees table doesn't exist
-    // Uses both start and end dates for proper date range filtering
+    // Query performance metrics grouped by the appropriate actor field
+    // For TPO: account_executive, For Retail: loan_officer
+    // Uses COALESCE to show 'Unassigned' for missing values
     const leaderboardResult = await tenantPool.query(
       `SELECT 
-        l.loan_officer as name,
+        ${actorExpression} as name,
         l.branch,
         COUNT(*) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
@@ -511,10 +532,9 @@ export async function getLeaderboardData(
           ), 0
         ) * 100 as pull_through_rate
        FROM public.loans l
-       WHERE l.loan_officer IS NOT NULL 
-         AND TRIM(l.loan_officer) != ''
+       WHERE 1=1
          ${branchFilter}
-       GROUP BY l.loan_officer, l.branch
+       GROUP BY ${actorExpression}, l.branch
        HAVING COUNT(*) FILTER (
          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
@@ -546,19 +566,21 @@ export async function getLeaderboardData(
       ? `AND l.branch = $${prevParamIndex}`
       : "";
 
+    // Build channel clause for previous period query
+    const prevChannelClause = buildChannelWhereClause(filters?.channelGroup);
+
     const prevPeriodResult = await tenantPool.query(
       `SELECT 
-        l.loan_officer as name,
+        ${actorExpression} as name,
         COUNT(*) FILTER (
           WHERE (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
         ) as loans_closed
        FROM public.loans l
-       WHERE l.loan_officer IS NOT NULL 
-         AND TRIM(l.loan_officer) != ''
-         AND COALESCE(l.started_date, l.application_date, l.created_at) >= $1
+       WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
          AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
          ${prevBranchFilter}
-       GROUP BY l.loan_officer`,
+         ${prevChannelClause}
+       GROUP BY ${actorExpression}`,
       prevParams
     );
 
@@ -1135,12 +1157,14 @@ export async function getInsights(
     tenantId?: string;
     forceRefresh?: boolean;
     userAccessFilter?: LoanAccessFilter;
+    channelGroup?: string; // Channel filter (Retail, TPO, or specific channel)
   } = {}
 ): Promise<{
   insights: Insight[];
   generatedAt: string;
   dateFilter: string;
   usedLLM?: boolean;
+  channelGroup?: string;
   summaryForPodcast?: string;
   summary: {
     totalLoans: number;
@@ -1157,7 +1181,12 @@ export async function getInsights(
     };
   };
 }> {
-  const { useLLM = true, tenantId, forceRefresh = false } = options;
+  const {
+    useLLM = true,
+    tenantId,
+    forceRefresh = false,
+    channelGroup,
+  } = options;
 
   // Try LLM-based insights first if enabled
   if (useLLM) {
@@ -1165,7 +1194,7 @@ export async function getInsights(
       console.log(
         `[Insights] Attempting LLM-based insight generation (dateFilter: ${dateFilter}, tenantId: ${
           tenantId || "default"
-        })`
+        }, channelGroup: ${channelGroup || "all"})`
       );
 
       // Clear cache if force refresh
@@ -1173,10 +1202,11 @@ export async function getInsights(
         clearInsightsCache(tenantId);
       }
 
-      // Collect metrics from all sources
+      // Collect metrics from all sources with optional channel filter
       const metricsPayload = await collectInsightMetrics(
         tenantPool,
-        dateFilter
+        dateFilter,
+        { channelGroup }
       );
 
       // Generate insights via LLM

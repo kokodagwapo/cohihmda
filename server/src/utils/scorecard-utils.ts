@@ -206,6 +206,90 @@ export const buildChannelWhereClause = (
 };
 
 // ============================================================================
+// Channel-Aware Actor Selection
+// ============================================================================
+
+/**
+ * Get the appropriate actor column for a given channel group.
+ *
+ * TPO (Third Party Origination) channels use Account Executive as the primary
+ * sales contact, while Retail channels use Loan Officer.
+ *
+ * @param channelGroup - The channel group ('Retail', 'TPO', etc.)
+ * @returns The database column name for the actor ('loan_officer' or 'account_executive')
+ */
+export const getActorColumnForChannel = (channelGroup?: string): string => {
+  const cg = (channelGroup || "").toLowerCase();
+  if (cg === "tpo") {
+    return "account_executive";
+  }
+  return "loan_officer";
+};
+
+/**
+ * Get the display label for the actor type based on channel.
+ *
+ * @param channelGroup - The channel group ('Retail', 'TPO', etc.)
+ * @returns Display label ('Loan Officer' or 'Account Executive')
+ */
+export const getActorLabelForChannel = (channelGroup?: string): string => {
+  const cg = (channelGroup || "").toLowerCase();
+  if (cg === "tpo") {
+    return "Account Executive";
+  }
+  return "Loan Officer";
+};
+
+/**
+ * SQL COALESCE expression to get actor with 'Unassigned' fallback.
+ * Use this in SELECT clauses for database-level computation.
+ *
+ * @param channelGroup - The channel group ('Retail', 'TPO', etc.)
+ * @param tableAlias - Optional table alias (default: 'l')
+ * @returns SQL expression that returns actor name or 'Unassigned'
+ */
+export const getActorSqlExpression = (
+  channelGroup?: string,
+  tableAlias: string = "l"
+): string => {
+  const column = getActorColumnForChannel(channelGroup);
+  return `COALESCE(NULLIF(TRIM(${tableAlias}.${column}), ''), 'Unassigned')`;
+};
+
+/**
+ * SQL WHERE clause fragment for non-missing actor filtering with channel awareness.
+ * Excludes records where the actor is NULL, empty, or 'Unassigned'.
+ *
+ * @param channelGroup - The channel group ('Retail', 'TPO', etc.)
+ * @param tableAlias - Optional table alias (default: 'l')
+ * @param includeUnassigned - Whether to include 'Unassigned' actors (default: true)
+ * @returns SQL WHERE clause fragment
+ */
+export const buildActorNotMissingClauseForChannel = (
+  channelGroup?: string,
+  tableAlias: string = "l",
+  includeUnassigned: boolean = true
+): string => {
+  const column = getActorColumnForChannel(channelGroup);
+  if (includeUnassigned) {
+    // Include all records, just transform empty to 'Unassigned' in SELECT
+    return `(${tableAlias}.${column} IS NOT NULL OR 1=1)`;
+  }
+  // Exclude records with missing actor values
+  return `${tableAlias}.${column} IS NOT NULL AND TRIM(${tableAlias}.${column}) != ''`;
+};
+
+/**
+ * Check if a channel group is TPO.
+ *
+ * @param channelGroup - The channel group to check
+ * @returns true if the channel is TPO
+ */
+export const isTPOChannel = (channelGroup?: string): boolean => {
+  return (channelGroup || "").toLowerCase() === "tpo";
+};
+
+// ============================================================================
 // Revenue Calculation
 // ============================================================================
 
