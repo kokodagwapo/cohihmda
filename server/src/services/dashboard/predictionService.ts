@@ -2433,34 +2433,9 @@ export async function bucketLoanData(
       closerPullthroughPercentage: closerPct,
       processorPullthroughPercentage: processorPct,
       
-      // Overall bucket (high/medium/low) based on composite signal strengths
-      bucket: (() => {
-        const compositeSignals = [
-          creditSignal, 
-          loanCharacteristicsSignal, 
-          timeInMotionSignal, 
-          mloAeFalloutProneSignal,
-          interestLockVsMarketSignal
-        ].filter(s => s !== null) as number[];
-        
-        if (compositeSignals.length === 0) return 'unknown';
-        
-        // Original: average-based thresholds
-        // const avgSignal = compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length;
-        // if (avgSignal <= 3) return 'low';
-        // if (avgSignal <= 4) return 'medium';
-        // return 'high';
-        
-        // Count-based: severe (>=5), elevated (>=4), any at max (6)
-        const avgSignal = compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length;
-        const severeCount = compositeSignals.filter(s => s >= 5).length;
-        const elevatedCount = compositeSignals.filter(s => s >= 4).length;
-        
-        if (severeCount >= 3) return 'high';
-        if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5) return 'medium';
-        if (avgSignal <= 3) return 'low';
-        return 'medium';
-      })(),
+      // Overall bucket (high/medium/low) - will be set after generateRuleBasedSummary is called
+      // Bucket calculation moved to generateRuleBasedSummary to avoid duplicate logic
+      bucket: 'medium', // Placeholder - will be overwritten after riskSummary is calculated
       
       // Signal strength for sorting (average of composite signals, higher = more risk)
       signal_strength: (() => {
@@ -2788,10 +2763,17 @@ async function runPredictFlow(
     bucketedLoans = await bucketLoanData(preparedLoans, allLoansForPullthrough, { logContext: 'active' });
     
     // Add rule-based risk summaries to each loan
-    bucketedLoans = bucketedLoans.map(loan => ({
-      ...loan,
-      riskSummary: generateRuleBasedSummary(loan)
-    }));
+    // generateRuleBasedSummary now calculates bucket and riskScore, so we use those values
+    bucketedLoans = bucketedLoans.map(loan => {
+      const riskSummary = generateRuleBasedSummary(loan);
+      
+      return {
+        ...loan,
+        riskSummary,
+        bucket: riskSummary.bucket, // Use bucket from riskSummary (calculated in generateRuleBasedSummary)
+        riskScore: riskSummary.riskScore // Store riskScore on loan object
+      };
+    });
     
     logInfo('Step 3/3: Active loan bucketing done', {
       activeCount: bucketedLoans.length,
@@ -2896,6 +2878,8 @@ export function generateRuleBasedSummary(loan: any): {
   overallRisk: string;
   predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk';
   confidence: number;
+  bucket: 'high' | 'medium' | 'low';
+  riskScore: number;
 } {
   const risks: string[] = [];
   const positives: string[] = [];
@@ -2925,6 +2909,10 @@ export function generateRuleBasedSummary(loan: any): {
     risks.push('Loan characteristics indicate higher risk (jumbo, investment, cash-out refi)');
     creditRiskScore += 2;
   }
+  if (loan.uwPullthroughSignalStrength >= 4) {
+    risks.push('Underwriter has moderate historical fallout rate');
+    creditRiskScore += 1;
+  }
   
   // Process Risk Score (withdrawal risk): Time in Motion ≥ 5: +2, ≥ 4: +1; MLO pullthrough ≥ 5: +2; Interest Lock vs Market ≥ 5: +3, ≥ 4: +1; FICO ≤ 2: +2 (shop/withdraw risk)
   if (loan.timeInMotionSignalStrength >= 5) {
@@ -2948,10 +2936,7 @@ export function generateRuleBasedSummary(loan: any): {
   if (loan.ficoScoreSignal <= 2) {
     processRiskScore += 2; // Strong borrower - shop/withdraw risk
   }
-  if (loan.uwPullthroughSignalStrength >= 4) {
-    risks.push('Underwriter has moderate historical fallout rate');
-    creditRiskScore += 1;
-  }
+
   
   // Low risk signals (bucket 1-2) - indicates likely to close
   if (loan.creditMetricsSignalStrength <= 2) {
@@ -2971,28 +2956,89 @@ export function generateRuleBasedSummary(loan: any): {
   }
   
   // Determine overall prediction based on risk bucket AND risk category
-  const overallRisk = loan.bucket || 'unknown';
+  // COMMENTED OUT: Original bucket-based overall risk calculation
+  // const overallRisk = loan.bucket || 'unknown';
+  
+  // COMMENTED OUT: Overall risk level calculation (high/medium/low)
+  // const totalRiskScore = creditRiskScore + processRiskScore;
+  // let overallRisk: string;
+  // if (totalRiskScore >= 8) {
+  //   overallRisk = 'high';
+  // } else if (totalRiskScore >= 4) {
+  //   overallRisk = 'medium';
+  // } else {
+  //   overallRisk = 'low';
+  // }
+  
+  // COMMENTED OUT: Outer overall risk check
+  // if (overallRisk === 'high') {
+  //   ...
+  // } else if (overallRisk === 'medium') {
+  //   predictedOutcome = 'at_risk';
+  //   confidence = 50 + Math.min(positives.length * 5, 20);
+  // } else if (overallRisk === 'low') {
+  //   predictedOutcome = 'originate';
+  //   confidence = 70 + Math.min(positives.length * 5, 25);
+  // }
+  
+  // NEW: Determine prediction directly from creditRiskScore and processRiskScore
+  // No overall risk level calculation - predictions based solely on credit vs process risk scores
   let predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk' = 'originate';
   let confidence = 70;
   
-  if (overallRisk === 'high') {
-    // Determine whether likely to be denied (credit issues) or withdrawn (process/market issues)
-    if (creditRiskScore > 6 || creditRiskScore > processRiskScore) {
-      predictedOutcome = 'deny';
-      confidence = 55 + Math.min(creditRiskScore * 5, 30);
-    } else if (processRiskScore > 6 || processRiskScore > creditRiskScore) {
-      predictedOutcome = 'withdraw';
-      confidence = 55 + Math.min(processRiskScore * 5, 30);
-    } else {
-      predictedOutcome = 'withdraw';
-      confidence = 55 + Math.min(processRiskScore * 5, 30);
-    }
-  } else if (overallRisk === 'medium') {
-    predictedOutcome = 'at_risk';
-    confidence = 50 + Math.min(positives.length * 5, 20);
-  } else if (overallRisk === 'low') {
+  // Determine whether likely to be denied (credit issues) or withdrawn (process/market issues)
+  if (creditRiskScore > 6 && creditRiskScore > processRiskScore) {
+    predictedOutcome = 'deny';
+    confidence = 55 + Math.min(creditRiskScore * 5, 30);
+  } else if (processRiskScore > 6 && processRiskScore > creditRiskScore) {
+    predictedOutcome = 'withdraw';
+    confidence = 55 + Math.min(processRiskScore * 5, 30);
+  } else if ((creditRiskScore > 6 && processRiskScore > 6) || creditRiskScore === processRiskScore) {
+    // Both scores are high, or they're equal - default to withdraw as process risk
+    predictedOutcome = 'withdraw';
+    confidence = 55 + Math.min(Math.max(creditRiskScore, processRiskScore) * 5, 30);
+  } else {
+    // Both scores are low/balanced - default to originate
     predictedOutcome = 'originate';
     confidence = 70 + Math.min(positives.length * 5, 25);
+  }
+  
+  // Derive overallRisk from predictedOutcome for API response (not used in prediction logic)
+  // COMMENTED OUT: Overall risk calculation based on total score
+  // const totalRiskScore = creditRiskScore + processRiskScore;
+  // let overallRisk: string;
+  // if (totalRiskScore >= 8) {
+  //   overallRisk = 'high';
+  // } else if (totalRiskScore >= 4) {
+  //   overallRisk = 'medium';
+  // } else {
+  //   overallRisk = 'low';
+  // }
+  
+  // Derive overallRisk from predictedOutcome for return value
+  let overallRisk: string;
+  if (predictedOutcome === 'deny' || predictedOutcome === 'withdraw') {
+    overallRisk = 'high';
+  } else {
+    // 'originate' or any other case
+    overallRisk = 'low';
+  }
+  
+  // Calculate bucket and riskScore based on predictedOutcome
+  // Bucket matches predictedOutcome: withdraw/deny = high, otherwise medium/low
+  const maxRiskScore = Math.max(creditRiskScore, processRiskScore);
+  let bucket: 'high' | 'medium' | 'low';
+  let riskScore: number;
+  
+  if (predictedOutcome === 'deny' || predictedOutcome === 'withdraw') {
+    // High risk: risk score above 75
+    bucket = 'high';
+    riskScore = 75 + Math.min(maxRiskScore * 2, 25); // Range: 75-100
+  } else {
+    // Medium and low thresholds will be set in next message
+    // For now, defaulting to medium for loans that are not predicted fallout
+    bucket = 'medium'; // Will be updated in next message
+    riskScore = 50 + Math.min(maxRiskScore * 3, 25); // Placeholder: Range: 50-75
   }
   
   return {
@@ -3000,7 +3046,9 @@ export function generateRuleBasedSummary(loan: any): {
     positives,
     overallRisk,
     predictedOutcome,
-    confidence
+    confidence,
+    bucket,
+    riskScore
   };
 }
 
