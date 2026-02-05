@@ -5,18 +5,22 @@ function safeUpper(v: unknown): string {
 }
 
 export function inferLoanStatus(loan: any): InferredLoanStatus {
-  if (loan?.closing_date) return 'Closed';
+  if (loan?.closing_date || loan?.funding_date) return 'Closed';
   if (loan?.lock_date) return 'Locked';
 
-  const rawStatus = safeUpper(loan?.status);
+  // Check both status and current_loan_status (API returns current_loan_status)
+  const rawStatus = safeUpper(loan?.current_loan_status ?? loan?.status ?? '');
 
-  if (['WITHDRAWN', 'CANCELLED'].includes(rawStatus)) return 'Withdrawn';
-  if (['DENIED', 'DECLINED', 'REJECTED'].includes(rawStatus)) return 'Denied';
-  if (['ORIGINATED', 'FUNDED', 'CLOSED', 'COMPLETE', 'COMPLETED'].includes(rawStatus)) return 'Closed';
+  if (['WITHDRAWN', 'CANCELLED', 'APPLICATION WITHDRAWN', 'FILE CLOSED FOR INCOMPLETENESS'].some((x) => rawStatus.includes(x))) return 'Withdrawn';
+  if (['DENIED', 'DECLINED', 'REJECTED'].some((x) => rawStatus.includes(x))) return 'Denied';
+  if (['ORIGINATED', 'FUNDED', 'CLOSED', 'COMPLETE', 'COMPLETED', 'LOAN ORIGINATED'].some((x) => rawStatus.includes(x))) return 'Closed';
   if (['LOCKED'].includes(rawStatus)) return 'Locked';
 
   // LOS imports sometimes store state codes as status; treat as active if not closed.
   if (/^[A-Z]{2}$/.test(rawStatus)) return 'Active';
+
+  // Active Loan and other in-pipeline statuses
+  if (['ACTIVE LOAN', 'ACTIVE'].some((x) => rawStatus.includes(x)) || !rawStatus) return 'Active';
 
   return 'Active';
 }

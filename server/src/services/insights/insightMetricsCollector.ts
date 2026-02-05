@@ -251,9 +251,9 @@ async function fetchCreditRiskCount(
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
         AND (
-          CAST(fico_score AS INTEGER) < 620
-          OR CAST(ltv AS DECIMAL) > 95
-          OR CAST(dti AS DECIMAL) > 50
+          (fico_score IS NOT NULL AND CAST(fico_score AS DECIMAL) < 620)
+          OR (ltv_ratio IS NOT NULL AND CAST(ltv_ratio AS DECIMAL) > 95)
+          OR (be_dti_ratio IS NOT NULL AND CAST(be_dti_ratio AS DECIMAL) > 50)
         )
         ${channelClause}
     `);

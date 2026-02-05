@@ -600,9 +600,9 @@ router.get(
       const query = `
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate,
-        loan_type, loan_purpose, property_type, property_state, property_city,
+        loan_type, loan_purpose, channel, property_type, property_state, property_city,
         property_street, property_zip, occupancy_type,
-        application_date, lock_date, closing_date, funding_date,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
         current_loan_status, branch, loan_officer, underwriter, closer, processor,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
         created_at, updated_at
@@ -6865,11 +6865,12 @@ router.post(
       //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
       const activeLoansQuery = `
       SELECT 
-        loan_id, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, closing_date, funding_date,
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
-        loan_purpose, property_type, occupancy_type,
+        loan_purpose, property_type, occupancy_type, channel,
         underwriter, closer, processor
       FROM public.loans 
       WHERE current_loan_status = 'Active Loan'

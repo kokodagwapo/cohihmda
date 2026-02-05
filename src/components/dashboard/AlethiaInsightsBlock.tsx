@@ -107,7 +107,7 @@ export function AlethiaInsightsBlock(props: {
           </div>
           <div className="min-w-0">
             <h3 className={`font-medium text-[13px] sm:text-[14px] uppercase tracking-widest ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>
-              Alethia
+              Cohi
             </h3>
             <p className={`text-[11px] sm:text-[12px] font-light truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
               {subtitle}

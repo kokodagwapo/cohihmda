@@ -775,6 +775,11 @@ export const ClosingFalloutForecast = ({
     any | null
   >(null);
 
+  // Loan officer name -> TTS (Top Tier Score) + tier for display on critical loan cards
+  const [officerTtsMap, setOfficerTtsMap] = useState<
+    Record<string, { ttsScore: number; tier: string }>
+  >({});
+
   const availableYears = useMemo(() => {
     // Prefer years from loaded loans (if available); otherwise provide a small recent range.
     const years = new Set<number>();
@@ -1272,7 +1277,73 @@ export const ClosingFalloutForecast = ({
     fetchLockedLoans();
   }, [queryMetrics]);
 
+  // Fetch sales scorecard to get loan officer TTS (Top Tier Score) for critical loan cards
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOfficerTts = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("actor", "loan_officer");
+        if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+        const res = await api.request<{
+          actors?: Array<{ name: string; ttsScore: number; tier?: string }>;
+        }>(`/api/loans/sales-scorecard?${params.toString()}`);
+        if (cancelled || !res?.actors) return;
+        const map: Record<string, { ttsScore: number; tier: string }> = {};
+        res.actors.forEach((a) => {
+          if (a.name != null && !Number.isNaN(Number(a.ttsScore))) {
+            const tier =
+              a.tier &&
+              ["top", "second", "bottom"].includes(String(a.tier).toLowerCase())
+                ? String(a.tier).toLowerCase()
+                : "bottom";
+            map[String(a.name).trim()] = { ttsScore: Number(a.ttsScore), tier };
+          }
+        });
+        setOfficerTtsMap(map);
+      } catch (e) {
+        if (!cancelled) setOfficerTtsMap({});
+      }
+    };
+    fetchOfficerTts();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTenantId]);
+
   const criticalLoanCards = useMemo(() => {
+    // Build map of raw loan data by loan_id/guid for filling missing fields when bucketed data is incomplete
+    // Index by loan_id, id, and guid so we can match regardless of which identifier the bucketed loan uses
+    type RawLoan = {
+      loan_purpose?: string | null;
+      channel?: string | null;
+      loan_number?: string | null;
+      lock_date?: string | null;
+      lock_expiration_date?: string | null;
+      estimated_closing_date?: string | null;
+    };
+    const rawByLoanId = new Map<string, RawLoan>();
+    if (loansRaw && Array.isArray(loansRaw)) {
+      loansRaw.forEach((r: any) => {
+        const raw: RawLoan = {
+          loan_purpose: r.loan_purpose ?? r.loanPurpose ?? null,
+          channel: r.channel ?? null,
+          loan_number: r.loan_number ?? r.loanNumber ?? null,
+          lock_date: r.lock_date ?? r.lockDate ?? null,
+          lock_expiration_date:
+            r.lock_expiration_date ?? r.lockExpirationDate ?? null,
+          estimated_closing_date:
+            r.estimated_closing_date ?? r.estimatedClosingDate ?? null,
+        };
+        const ids = [r.loan_id, r.id, r.guid].filter(
+          (x): x is string => x != null && String(x).trim() !== ""
+        );
+        ids.forEach((id) => rawByLoanId.set(String(id), raw));
+      });
+    }
+
+    const getRaw = (loanId: string) => rawByLoanId.get(String(loanId));
+
     // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
     // Fall back to loansRaw if no bucketed data
     if (bucketedLoans && bucketedLoans.length > 0) {
@@ -1281,23 +1352,27 @@ export const ClosingFalloutForecast = ({
         (l: any) => l.bucket === "high"
       );
 
-      // Debug: Log first high-risk loan to see available fields (snake_case from backend)
-      if (highRiskLoans.length > 0) {
-        console.log("[CriticalLoans Debug] First high-risk loan fields:", {
-          loan_officer: highRiskLoans[0].loan_officer,
-          fico_score: highRiskLoans[0].fico_score,
-          ltv_ratio: highRiskLoans[0].ltv_ratio,
-          be_dti_ratio: highRiskLoans[0].be_dti_ratio,
-          interest_rate: highRiskLoans[0].interest_rate,
-          market_rate: highRiskLoans[0].market_rate,
-          current_milestone: highRiskLoans[0].current_milestone,
-          allKeys: Object.keys(highRiskLoans[0]).slice(0, 30),
-        });
-      }
-
       return highRiskLoans.map((l: any) => {
         // Use snake_case field names matching database columns
-        const loanId = l.loan_id || l.id || "";
+        const loanId = l.loan_id || l.id || l.guid || "";
+        const raw = getRaw(loanId);
+        const loanPurpose =
+          l.loan_purpose ?? l.loanPurpose ?? raw?.loan_purpose ?? null;
+        const channel = l.channel ?? raw?.channel ?? null;
+        const loanNumber =
+          l.loan_number ?? l.loanNumber ?? raw?.loan_number ?? null;
+        const lockDate = l.lock_date ?? l.lockDate ?? raw?.lock_date ?? null;
+        const lockExpirationDate =
+          l.lock_expiration_date ??
+          l.lockExpirationDate ??
+          raw?.lock_expiration_date ??
+          null;
+        const estimatedClosingDate =
+          l.estimated_closing_date ??
+          l.estimatedClosingDate ??
+          raw?.estimated_closing_date ??
+          null;
+
         const loanAmount =
           typeof l.loan_amount === "number"
             ? l.loan_amount
@@ -1317,8 +1392,8 @@ export const ClosingFalloutForecast = ({
           reason = l.riskSummary;
         }
 
-        // Calculate risk score from signal strengths (1-6 scale → 0-100 scale)
-        // Higher signal = higher risk, so we scale: (avgSignal / 6) * 100
+        // Calculate risk score aligned with backend count-based bucket logic
+        // Same logic as predictionService bucketLoanData: severeCount (>=5), elevatedCount (>=4)
         const signals = [
           l.creditMetricsSignalStrength,
           l.loanCharacteristicsSignalStrength,
@@ -1331,19 +1406,38 @@ export const ClosingFalloutForecast = ({
         if (signals.length > 0) {
           const avgSignal =
             signals.reduce((sum, s) => sum + s, 0) / signals.length;
-          // Scale 1-6 to roughly 50-100 range for high-risk loans
-          // Signal 1 → ~50, Signal 6 → ~100
-          riskScore = Math.round(40 + (avgSignal / 6) * 60);
+          const severeCount = signals.filter((s) => s >= 5).length;
+          const elevatedCount = signals.filter((s) => s >= 4).length;
+          // Same bucket logic as backend (no hasMaxSignal)
+          let bucket: "low" | "medium" | "high";
+          if (severeCount >= 3) bucket = "high";
+          else if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5)
+            bucket = "medium";
+          else if (avgSignal <= 3) bucket = "low";
+          else bucket = "medium";
+          // Map bucket to 40-100, use avgSignal for within-bucket spread
+          if (bucket === "low") {
+            riskScore = Math.round(40 + (avgSignal / 3) * 15);
+          } else if (bucket === "medium") {
+            riskScore = Math.round(55 + (avgSignal / 6) * 20);
+          } else {
+            riskScore = Math.round(75 + (avgSignal / 6) * 25);
+          }
+          riskScore = Math.min(100, Math.max(40, riskScore));
         } else if (l.riskSummary?.confidence) {
-          // Fall back to confidence if no signals available
           riskScore = l.riskSummary.confidence;
         }
 
         // Return in LoanCardsContainer expected format
         // Use snake_case field names matching database columns
+        const officerName = (l.loan_officer || "").trim();
+        const ttsData = officerName ? officerTtsMap[officerName] : null;
         return {
           id: String(loanId),
+          loan_number: loanNumber || null,
           officer: l.loan_officer || "",
+          officerTtsScore: ttsData?.ttsScore ?? null,
+          officerTier: ttsData?.tier ?? null,
           amount: loanAmount ? `$${(loanAmount / 1000).toFixed(0)}K` : "$0",
           amountValue: loanAmount,
           riskLevel: "Very High",
@@ -1359,8 +1453,12 @@ export const ClosingFalloutForecast = ({
           activeDays: l.activeDays ?? null,
           // Rates and market delta
           interestRate: l.interest_rate ?? null,
-          marketRate: l.market_rate ?? null,
+          marketRate: l.market_rate ?? l.closeMarketRate ?? null,
+          lockMarketRate: l.lockMarketRate ?? null,
           marketChangeDelta: l.marketChangeDelta ?? null,
+          lockDate: lockDate ?? null,
+          lockExpirationDate: lockExpirationDate ?? null,
+          estimatedClosingDate: estimatedClosingDate ?? null,
           // Pullthrough percentages (actual values)
           loPullthroughPct: l.loPullthroughPercentage ?? null,
           uwPullthroughPct: l.uwPullthroughPercentage ?? null,
@@ -1388,6 +1486,8 @@ export const ClosingFalloutForecast = ({
           loPullthroughSignal: l.loPullthroughSignal ?? null,
           marketChangeDeltaSignal: l.marketChangeDeltaSignal ?? null,
           loanType: l.loan_type || null,
+          loanPurpose: loanPurpose,
+          channel: channel,
         };
       });
     }
@@ -1449,14 +1549,27 @@ export const ClosingFalloutForecast = ({
           : "Past expected closing window";
       }
 
+      const ttsData = base.officer
+        ? officerTtsMap[(base.officer || "").trim()]
+        : null;
+      const estimatedClosing =
+        l.estimated_closing_date ?? l.estimatedClosingDate ?? null;
       return {
         ...base,
         riskLevel,
         riskScore,
         reason,
+        officerTtsScore: ttsData?.ttsScore ?? null,
+        officerTier: ttsData?.tier ?? null,
+        currentMilestone:
+          l.current_milestone || l.lastCompletedMilestone || null,
+        activeDays: l.activeDays ?? null,
+        loanPurpose: l.loan_purpose ?? l.loanPurpose ?? null,
+        channel: l.channel ?? null,
+        estimatedClosingDate: estimatedClosing,
       };
     });
-  }, [bucketedLoans, loansRaw, loanPredictions]);
+  }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap]);
 
   // Animated values for main metrics
   const animatedActiveLoans = useCountUp(
@@ -1504,7 +1617,9 @@ export const ClosingFalloutForecast = ({
     isAnimating
   );
 
-  const ensureLoansLoaded = async (periodToUse?: PeriodValue) => {
+  const ensureLoansLoaded = async (
+    periodToUse?: PeriodValue
+  ): Promise<void> => {
     // If no period specified, only load when we don't have loans yet (session cache uses one "all" set)
     if (!periodToUse && (loansRaw || loansLoading)) return;
 
@@ -1585,7 +1700,7 @@ export const ClosingFalloutForecast = ({
   }, [loansRaw, deferredPeriod]);
 
   const handleMetricClick = async (label: string) => {
-    ensureLoansLoaded(); // Load full set if needed (no refetch if already loaded)
+    await ensureLoansLoaded(); // Load full set if needed before opening modal
 
     // Outcome list modals - show predicted loans
     if (label === "Predicted Fallout") {
@@ -1781,6 +1896,70 @@ export const ClosingFalloutForecast = ({
                         </p>
                         <p className="text-xs text-slate-300">
                           {getMetricExplanation("Likely Close Late").desc}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+
+                  {/* Pipeline Volume / Projected Pullthrough / Locked Loans row (matches Outcome Metrics Grid width/gap for alignment) */}
+                  <div className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mb-8 md:mb-12">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                          <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                            Pipeline Volume
+                          </p>
+                          <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                            {kpis[0].value}
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                        <p className="font-semibold mb-1 text-white">
+                          Pipeline Volume
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {kpis[0].explanation}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                          <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                            Projected Pullthrough
+                          </p>
+                          <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                            {kpis[2].value}
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                        <p className="font-semibold mb-1 text-white">
+                          Projected Pullthrough
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {kpis[2].explanation}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                          <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                            Locked Loans
+                          </p>
+                          <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                            {kpis[1].value}
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                        <p className="font-semibold mb-1 text-white">
+                          Locked Loans
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {kpis[1].explanation}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -2561,6 +2740,8 @@ export const ClosingFalloutForecast = ({
               ? `${metrics.falloutRate}%`
               : undefined
           }
+          fallbackActiveVolume={metrics.pipelineValue}
+          fallbackActiveCount={metrics.activeLoansToday}
         />
 
         <OutcomeLoansModal
