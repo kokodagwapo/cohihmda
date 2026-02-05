@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, memo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { LoanCardContent } from './LoanCardContent';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { LoanDrilldownModal } from './LoanDrilldownModal';
@@ -14,7 +15,10 @@ interface RiskSummary {
 
 interface LoanCard {
   id: string;
+  loan_number?: string | null;
   officer: string;
+  officerTtsScore?: number | null;
+  officerTier?: string | null;
   amount: string;
   amountValue?: number;
   riskLevel: string;
@@ -24,13 +28,19 @@ interface LoanCard {
   ltvRatio: number | null;
   dtiRatio: number | null;
   loanType?: string | null;
+  loanPurpose?: string | null;
+  channel?: string | null;
   // Milestone and time in motion
   currentMilestone?: string | null;
   activeDays?: number | null;
+  estimatedClosingDate?: string | null;
   // Rates and market
   interestRate?: number | null;
   marketRate?: number | null;
+  lockMarketRate?: number | null;
   marketChangeDelta?: number | null;
+  lockDate?: string | null;
+  lockExpirationDate?: string | null;
   // Pullthrough percentages
   loPullthroughPct?: number | null;
   uwPullthroughPct?: number | null;
@@ -76,6 +86,35 @@ const ITEMS_PER_PAGE = 6;
 // PERFORMANCE: Threshold for switching to virtualized rendering
 const VIRTUALIZATION_THRESHOLD = 20;
 
+function formatLockExpirationDate(value: string | null | undefined): string {
+  if (value == null || value === '') return '';
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return String(value);
+  }
+}
+
+function getExpirationDateColorClass(expirationDate: string | null | undefined, isDarkMode: boolean): string {
+  if (expirationDate == null || expirationDate === '') return isDarkMode ? 'text-slate-100' : 'text-slate-900';
+  try {
+    const exp = new Date(expirationDate);
+    if (Number.isNaN(exp.getTime())) return isDarkMode ? 'text-slate-100' : 'text-slate-900';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    exp.setHours(0, 0, 0, 0);
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysFromToday = Math.round((exp.getTime() - today.getTime()) / msPerDay);
+    if (daysFromToday < 0) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (daysFromToday <= 7) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  } catch {
+    return isDarkMode ? 'text-slate-100' : 'text-slate-900';
+  }
+}
+
 // PERFORMANCE: Memoized loan card component to prevent unnecessary re-renders
 const LoanCardItem = memo(({ 
   loan, 
@@ -92,79 +131,13 @@ const LoanCardItem = memo(({
     onClick={() => onSelectLoan(loan)}
     className={`group p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl overflow-hidden active:scale-[0.99] transition-all cursor-pointer ${isDarkMode ? 'bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]' : 'bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}
   >
-    <div className="flex items-start justify-between gap-3 mb-2 sm:mb-3">
-      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-slate-700/60' : 'bg-slate-100'}`}>
-          <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className={`font-medium text-[13px] sm:text-sm tracking-tight truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-            Loan #{loan.id.length > 12 ? loan.id.substring(0, 12) + '...' : loan.id}
-          </p>
-          <button
-            onClick={(e) => { e.stopPropagation(); onSelectOfficer(loan.officer); }}
-            className={`text-[10px] sm:text-[11px] font-medium flex items-center gap-1 hover:underline ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
-          >
-            <svg className="w-3 h-3 flex-shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            <span className="truncate max-w-[100px] sm:max-w-none">{loan.officer || 'Unknown LO'}</span>
-          </button>
-        </div>
-      </div>
-      <div className="text-right flex-shrink-0">
-        <p className={`font-semibold text-sm sm:text-base tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{loan.amount}</p>
-        <div className="flex flex-col items-end gap-0.5 mt-0.5">
-          {loan.riskSummary?.predictedOutcome && loan.riskSummary.predictedOutcome !== 'originate' && (
-            <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
-              loan.riskSummary.predictedOutcome === 'deny'
-                ? (isDarkMode ? 'bg-red-600/30 text-red-300' : 'bg-red-100 text-red-700')
-                : loan.riskSummary.predictedOutcome === 'withdraw'
-                  ? (isDarkMode ? 'bg-orange-500/30 text-orange-300' : 'bg-orange-100 text-orange-700')
-                  : (isDarkMode ? 'bg-amber-500/30 text-amber-300' : 'bg-amber-100 text-amber-700')
-            }`}>
-              {loan.riskSummary.predictedOutcome === 'deny' ? '⚠ Likely Decline' : 
-               loan.riskSummary.predictedOutcome === 'withdraw' ? '↩ Likely Withdraw' : 
-               '⚡ At Risk'}
-            </span>
-          )}
-          <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
-            loan.riskLevel === 'Very High' 
-              ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
-              : loan.riskLevel === 'Medium' 
-                ? (isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-50 text-amber-600')
-                : (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-50 text-emerald-600')
-          }`}>
-            {loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW'}
-          </span>
-        </div>
-      </div>
-    </div>
-    <div className="flex items-center justify-between text-[11px] sm:text-[12px] mb-2">
-      <div className={`flex items-center gap-1.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${
-          loan.riskLevel === 'Very High' ? 'bg-rose-500' : loan.riskLevel === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'
-        }`}></span>
-        <span className="font-medium">Risk Score: {loan.riskScore}/100</span>
-      </div>
-    </div>
-    <p className={`text-[11px] sm:text-[12px] leading-relaxed line-clamp-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{loan.reason}</p>
-    <LoanRiskDistribution
-      ficoScore={loan.ficoScore}
-      ltvRatio={loan.ltvRatio}
-      dtiRatio={loan.dtiRatio}
+    <LoanCardContent
+      loan={loan}
       isDarkMode={isDarkMode}
+      onSelectOfficer={onSelectOfficer}
+      showTapForDetails={true}
+      compact={true}
     />
-    <div className={`mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t flex items-center justify-between ${isDarkMode ? 'border-slate-700/50' : 'border-slate-100'}`}>
-      <span className={`text-[9px] sm:text-[10px] ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
-        Tap for details
-      </span>
-      <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-      </svg>
-    </div>
   </div>
 ));
 
@@ -227,6 +200,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
       const term = searchTerm.toLowerCase();
       result = result.filter(loan =>
         loan.id.toLowerCase().includes(term) ||
+        (loan.loan_number?.toLowerCase().includes(term) ?? false) ||
         loan.officer.toLowerCase().includes(term)
       );
     }
@@ -582,6 +556,10 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
           isOpen={!!selectedLoan}
           onClose={() => setSelectedLoan(null)}
           isDarkMode={isDarkMode}
+          onSelectOfficer={(officer) => {
+            setSelectedLoan(null);
+            setSelectedOfficer(officer);
+          }}
         />
       )}
     </div>

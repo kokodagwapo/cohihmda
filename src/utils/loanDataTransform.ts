@@ -13,7 +13,9 @@ export interface RiskSummary {
 
 export interface LoanCard {
   id: string;
+  loan_number?: string | null;
   officer: string;
+  borrower?: string;
   amount: string;
   amountValue?: number;
   riskLevel: string;
@@ -26,6 +28,7 @@ export interface LoanCard {
   // Milestone and time in motion
   currentMilestone?: string | null;
   activeDays?: number | null;
+  estimatedClosingDate?: string | null;
   // Rates and market
   interestRate?: number | null;
   marketRate?: number | null;
@@ -234,6 +237,9 @@ export function transformLoanToCard(loan: any): LoanCard {
                  rawData.loan_id ??
                  loan.id ?? 
                  'UNKNOWN';
+
+  // Human-readable loan number (for display) - differs from GUID
+  const loanNumber = loan.loan_number ?? loan.loanNumber ?? metadata.loan_number ?? rawData.loan_number ?? null;
   
   // For display, use full loan_id if it's a real GUID (not auto-generated), otherwise truncate
   const isRealGuid = typeof loanId === 'string' && (
@@ -310,8 +316,10 @@ export function transformLoanToCard(loan: any): LoanCard {
   ]);
 
   return {
-    id: loanIdDisplay,
+    id: String(loanId),
+    loan_number: loanNumber,
     officer: loan.loan_officer_name ?? loan.officer ?? loan.loName ?? 'Unassigned',
+    borrower,
     amount: formatAmount(amountValue),
     amountValue,
     riskLevel: level,
@@ -331,6 +339,11 @@ export function transformLoanToCard(loan: any): LoanCard {
     mloAeFalloutProneSignalStrength: loan.mloAeFalloutProneSignalStrength ?? null,
     interestLockVsMarketSignalStrength: loan.interestLockVsMarketSignalStrength ?? null,
     loanType: loan.loan_type ?? loan.loanType ?? null,
+    loanPurpose: loan.loan_purpose ?? loan.loanPurpose ?? null,
+    channel: loan.channel ?? null,
+    currentMilestone: loan.current_milestone ?? loan.currentMilestone ?? loan.lastCompletedMilestone ?? null,
+    activeDays: loan.activeDays ?? loan.active_days ?? null,
+    estimatedClosingDate: loan.estimated_closing_date ?? loan.estimatedClosingDate ?? null,
   };
 }
 

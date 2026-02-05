@@ -80,10 +80,44 @@ function getColorClasses(color: 'amber' | 'rose' | 'orange', isDarkMode: boolean
   }
 }
 
-function getRiskBadgeClass(riskLevel: string, isDarkMode: boolean) {
-  if (riskLevel === 'Very High') return isDarkMode ? 'bg-rose-500/15 text-rose-400' : 'bg-rose-50 text-rose-600 border border-rose-100';
-  if (riskLevel === 'Medium') return isDarkMode ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-600 border border-amber-100';
-  return isDarkMode ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600 border border-emerald-100';
+function getRiskBadgeClass(riskLabel: 'Critical' | 'Urgent', isDarkMode: boolean) {
+  if (riskLabel === 'Critical') return isDarkMode ? 'bg-rose-500/15 text-rose-400' : 'bg-rose-50 text-rose-600 border border-rose-100';
+  return isDarkMode ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-600 border border-amber-100';
+}
+
+/** Compute prediction-service risk score (40-100) from bucketed loan signals */
+function computePredictionRiskScore(loan: any): number {
+  const signals = [
+    loan.creditMetricsSignalStrength,
+    loan.loanCharacteristicsSignalStrength,
+    loan.timeInMotionSignalStrength,
+    loan.mloAeFalloutProneSignalStrength,
+    loan.interestLockVsMarketSignalStrength,
+  ].filter((s): s is number => typeof s === 'number' && !isNaN(s));
+
+  if (signals.length === 0) {
+    return loan.riskSummary?.confidence ?? 75;
+  }
+  const avgSignal = signals.reduce((sum, s) => sum + s, 0) / signals.length;
+  const severeCount = signals.filter((s) => s >= 5).length;
+  const elevatedCount = signals.filter((s) => s >= 4).length;
+  let bucket: 'low' | 'medium' | 'high';
+  if (severeCount >= 3) bucket = 'high';
+  else if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5) bucket = 'medium';
+  else if (avgSignal <= 3) bucket = 'low';
+  else bucket = 'medium';
+
+  let riskScore: number;
+  if (bucket === 'low') riskScore = Math.round(40 + (avgSignal / 3) * 15);
+  else if (bucket === 'medium') riskScore = Math.round(55 + (avgSignal / 6) * 20);
+  else riskScore = Math.round(75 + (avgSignal / 6) * 25);
+  return Math.min(100, Math.max(40, riskScore));
+}
+
+/** Map prediction risk score to Critical (>95) or Urgent (≤95) */
+function getRiskLabel(loan: any): 'Critical' | 'Urgent' {
+  const riskScore = computePredictionRiskScore(loan);
+  return riskScore > 95 ? 'Critical' : 'Urgent';
 }
 
 export interface OutcomeLoansModalProps {
@@ -159,7 +193,16 @@ export function OutcomeLoansModal({
     return matches.filter((l) => !isFundedInPeriod(l, dateFilter));
   }, [outcomeType, loansRaw, dateFilter, loanPredictions, bucketedLoans]);
 
-  const cards = useMemo(() => filtered.map(transformLoanToCard), [filtered]);
+  const cards = useMemo(() => {
+    return filtered.map((loan) => {
+      const base = transformLoanToCard(loan);
+      // Use prediction-service risk for Critical/Urgent label (no numeric score shown)
+      const riskLabel = loan.creditMetricsSignalStrength != null || loan.riskSummary?.confidence != null
+        ? getRiskLabel(loan)
+        : 'Urgent'; // Fallback for loansRaw/delayed (no signal data)
+      return { ...base, riskLabel } as LoanCard & { riskLabel: 'Critical' | 'Urgent' };
+    });
+  }, [filtered]);
 
   // Calculate summary stats
   const summaryStats = useMemo(() => {
@@ -305,7 +348,8 @@ export function OutcomeLoansModal({
                   <div className="p-4 space-y-3">
                   {cards.map((loan) => {
                     const colors = config ? getColorClasses(config.color, isDarkMode) : null;
-                    const badge = getRiskBadgeClass(loan.riskLevel, isDarkMode);
+                    const riskLabel = (loan as LoanCard & { riskLabel?: 'Critical' | 'Urgent' }).riskLabel ?? 'Urgent';
+                    const badge = getRiskBadgeClass(riskLabel, isDarkMode);
                     return (
                       <div
                         key={loan.id}
@@ -316,34 +360,24 @@ export function OutcomeLoansModal({
                       >
                         <div className="flex items-start justify-between gap-4 mb-3">
                           <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className={`w-9 h-9 rounded-md flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
-                              <svg className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                            </div>
                             <div className="min-w-0 flex-1">
-                              <p className={`text-[8px] uppercase tracking-widest font-semibold mb-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                {loan.borrower === 'Unknown' || loan.borrower === loan.officer ? 'Loan Officer' : 'Borrower'}
-                              </p>
-                              <p className={`font-medium text-[14px] tracking-tight truncate ${isDarkMode ? 'text-slate-50' : 'text-slate-800'}`}>
-                                {loan.borrower}
-                              </p>
-                              <p className={`text-[10px] font-normal truncate mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                Loan #{loan.id}{loan.borrower !== loan.officer && loan.officer !== 'Unassigned' ? ` · Loan Officer: ${loan.officer}` : ''}
+                              <p className={`font-medium text-[13px] sm:text-sm tracking-tight break-words ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                                Loan #{(() => {
+                                  const num = loan.loan_number?.trim();
+                                  if (!num) return '—';
+                                  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(num)) return '—';
+                                  return num;
+                                })()}
                               </p>
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
                             <p className={`font-semibold text-base tracking-tight ${isDarkMode ? 'text-slate-50' : 'text-slate-800'}`}>{loan.amount}</p>
                             <span className={`text-[9px] font-medium px-2 py-0.5 rounded-md inline-block mt-1 ${badge}`}>
-                              {loan.riskLevel === 'Very High' ? 'Critical' : loan.riskLevel === 'Medium' ? 'At Risk' : 'Low'}
+                              {riskLabel}
                             </span>
                           </div>
                         </div>
-
-                        <p className={`text-[12px] font-normal mb-3 line-clamp-2 leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {loan.reason}
-                        </p>
 
                         <div className={`flex items-center gap-4 pt-3 border-t border-dashed ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
                           <div className="ml-auto flex items-center gap-1.5">

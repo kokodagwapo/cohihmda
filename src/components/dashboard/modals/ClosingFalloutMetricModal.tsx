@@ -57,6 +57,10 @@ export interface ClosingFalloutMetricModalProps {
   loansError?: string | null;
   headlineValue?: number; // the tile number being drilled into
   subLabel?: string; // small text under tile number (e.g. "$xxM Pipeline")
+  /** Fallback active volume when loansRaw is empty (from statsData.activeVolume) */
+  fallbackActiveVolume?: number;
+  /** Fallback active count when loansRaw is empty (from statsData.active) */
+  fallbackActiveCount?: number;
 }
 
 export function ClosingFalloutMetricModal({
@@ -70,6 +74,8 @@ export function ClosingFalloutMetricModal({
   loansError = null,
   headlineValue,
   subLabel,
+  fallbackActiveVolume,
+  fallbackActiveCount,
 }: ClosingFalloutMetricModalProps) {
   const [selectedLoan, setSelectedLoan] = useState<LoanCard | null>(null);
 
@@ -133,14 +139,17 @@ export function ClosingFalloutMetricModal({
 
   const alethiaInsights = useMemo(() => {
     if (!metricKey) return null;
+    // Use fallbacks when computed values are 0 (e.g. loansRaw empty or still loading)
+    const activeCount = (computed.active.count || fallbackActiveCount) ?? 0;
+    const activeVolume = (computed.active.volume || fallbackActiveVolume) ?? 0;
     return generateAlethiaInsightsForMetric({
       metricKey,
       loansRaw,
       dateFilter,
       headlineValue,
       computed: {
-        activeCount: computed.active.count,
-        activeVolume: computed.active.volume,
+        activeCount: activeCount || undefined,
+        activeVolume: activeVolume || undefined,
         fundedCount: computed.funded.count,
         fundedVolume: computed.funded.volume,
         falloutCount: computed.fallout.count,
@@ -148,7 +157,7 @@ export function ClosingFalloutMetricModal({
       },
       priorityLoansRaw,
     });
-  }, [metricKey, loansRaw, dateFilter, headlineValue, computed, priorityLoansRaw]);
+  }, [metricKey, loansRaw, dateFilter, headlineValue, computed, priorityLoansRaw, fallbackActiveCount, fallbackActiveVolume]);
 
   return (
     <>
@@ -214,19 +223,31 @@ export function ClosingFalloutMetricModal({
                   <p className={`text-[10px] font-medium uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Computed Volume</p>
                   <p className={`text-2xl sm:text-3xl font-extralight tracking-tight tabular-nums ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
                     {metricKey === 'Active Loans Today'
-                      ? formatMoneyShort(computed.active.volume)
+                      ? formatMoneyShort((computed.active.volume || fallbackActiveVolume) ?? 0)
                       : metricKey === 'Funded Loans'
                         ? formatMoneyShort(computed.funded.volume)
                         : metricKey === 'Predicted Fallout'
                           ? formatMoneyShort(computed.fallout.volume)
-                          : formatMoneyShort(computed.active.volume)}
+                          : metricKey === 'Predicted Closing'
+                            ? (() => {
+                                const activeCount = (computed.active.count || fallbackActiveCount) ?? 0;
+                                const activeVolume = (computed.active.volume || fallbackActiveVolume) ?? 0;
+                                const predictedCount = headlineValue ?? 0;
+                                const vol = activeCount > 0 && predictedCount > 0
+                                  ? (predictedCount / activeCount) * activeVolume
+                                  : 0;
+                                return formatMoneyShort(vol);
+                              })()
+                            : formatMoneyShort((computed.active.volume || fallbackActiveVolume) ?? 0)}
                   </p>
                   <p className={`mt-2 text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                     {metricKey === 'Predicted Fallout'
                       ? `${computed.fallout.withdrawnCount} withdrawn · ${computed.fallout.deniedCount} denied`
                       : metricKey === 'Funded Loans'
                         ? `${computed.funded.count} funded loans in period`
-                        : `${computed.active.count} active/locked loans`}
+                        : metricKey === 'Predicted Closing'
+                          ? `${headlineValue ?? 0} loans predicted to close`
+                          : `${(computed.active.count || fallbackActiveCount) ?? 0} active/locked loans`}
                   </p>
                 </div>
               </div>

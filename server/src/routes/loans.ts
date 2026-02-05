@@ -600,9 +600,9 @@ router.get(
       const query = `
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate,
-        loan_type, loan_purpose, property_type, property_state, property_city,
+        loan_type, loan_purpose, channel, property_type, property_state, property_city,
         property_street, property_zip, occupancy_type,
-        application_date, lock_date, closing_date, funding_date,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
         current_loan_status, branch, loan_officer, underwriter, closer, processor,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
         created_at, updated_at
@@ -845,6 +845,159 @@ router.get(
       res
         .status(500)
         .json({ error: error.message || "Failed to fetch loan statistics" });
+    }
+  }
+);
+
+/**
+ * GET /api/loans/active-loans-count
+ * Get active loans count with optional date filtering on application_date
+ *
+ * Query params:
+ *   - startDate: ISO date string (optional) - filter application_date >= startDate
+ *   - endDate: ISO date string (optional) - filter application_date < endDate
+ *   - period: string (optional) - rolling period shorthand (rolling_3_months, rolling_6_months, etc.)
+ *
+ * Active loan definition (matches METRICS_CATALOG.active_loans):
+ *   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
+ */
+router.get(
+  "/active-loans-count",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const tenantPool = tenantContext.tenantPool;
+
+      // Get user's loan access context
+      const accessCtx = await getLoanAccessContext(req, tenantPool);
+
+      // If user has no access, return 0
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          count: 0,
+          volume: 0,
+          dateFilter: null,
+        });
+      }
+
+      // Parse date filter params
+      let startDate: string | null = null;
+      let endDate: string | null = null;
+
+      // Handle period shorthand (rolling_3_months, rolling_6_months, etc.)
+      const period = req.query.period as string | undefined;
+      if (period) {
+        const now = new Date();
+        endDate = now.toISOString().split("T")[0]; // Today
+
+        if (period === "rolling_3_months") {
+          const start = new Date(
+            now.getFullYear(),
+            now.getMonth() - 3,
+            now.getDate()
+          );
+          startDate = start.toISOString().split("T")[0];
+        } else if (period === "rolling_6_months") {
+          const start = new Date(
+            now.getFullYear(),
+            now.getMonth() - 6,
+            now.getDate()
+          );
+          startDate = start.toISOString().split("T")[0];
+        } else if (period === "rolling_12_months") {
+          const start = new Date(
+            now.getFullYear(),
+            now.getMonth() - 12,
+            now.getDate()
+          );
+          startDate = start.toISOString().split("T")[0];
+        } else if (period === "rolling_18_months") {
+          const start = new Date(
+            now.getFullYear(),
+            now.getMonth() - 18,
+            now.getDate()
+          );
+          startDate = start.toISOString().split("T")[0];
+        }
+        // If period is not recognized, no date filter is applied (all time)
+      } else {
+        // Use explicit startDate/endDate if provided
+        startDate = (req.query.startDate as string) || null;
+        endDate = (req.query.endDate as string) || null;
+      }
+
+      // Build access clause
+      const { accessClause, accessParams, nextParamIndex } =
+        accessCtx.buildWhereClause("l");
+
+      // Build date filter clause
+      let dateClause = "";
+      const params = [...accessParams];
+      let paramIdx = nextParamIndex;
+
+      if (startDate) {
+        dateClause += ` AND l.application_date >= $${paramIdx}::date`;
+        params.push(startDate);
+        paramIdx++;
+      }
+      if (endDate) {
+        dateClause += ` AND l.application_date < $${paramIdx}::date`;
+        params.push(endDate);
+        paramIdx++;
+      }
+
+      // Query active loans count with date filter
+      // This is the EXACT same definition as METRICS_CATALOG.active_loans
+      const result = await tenantPool.query(
+        `
+        SELECT 
+          COUNT(*) as count,
+          COALESCE(SUM(l.loan_amount), 0) as volume
+        FROM public.loans l
+        WHERE l.current_loan_status = 'Active Loan'
+          AND l.application_date IS NOT NULL
+          AND l.application_date::text != ''
+          ${accessClause}
+          ${dateClause}
+        `,
+        params
+      );
+
+      const row = result.rows[0] || {};
+      const count = parseInt(row.count || "0", 10);
+      const volume = parseFloat(row.volume || "0");
+
+      logDebug("Active loans count API", {
+        count,
+        volume,
+        startDate,
+        endDate,
+        period,
+      });
+
+      res.json({
+        count,
+        volume,
+        dateFilter:
+          startDate || endDate ? { startDate, endDate, period } : null,
+      });
+    } catch (error: any) {
+      logError("Error fetching active loans count", error, {
+        userId: req.userId,
+      });
+
+      if (
+        handleDatabaseError(error, res, "Failed to fetch active loans count")
+      ) {
+        return;
+      }
+
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch active loans count" });
     }
   }
 );
@@ -6865,11 +7018,12 @@ router.post(
       //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
       const activeLoansQuery = `
       SELECT 
-        loan_id, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, closing_date, funding_date,
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
-        loan_purpose, property_type, occupancy_type,
+        loan_purpose, property_type, occupancy_type, channel,
         underwriter, closer, processor
       FROM public.loans 
       WHERE current_loan_status = 'Active Loan'

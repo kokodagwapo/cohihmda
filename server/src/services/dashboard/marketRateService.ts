@@ -261,11 +261,20 @@ export async function initializeMarketRateCache(): Promise<void> {
 
     marketRateCache.clear();
     for (const row of result.rows) {
-      marketRateCache.set(row.rate_date, parseFloat(row.rate));
+      // Normalize to YYYY-MM-DD string - node-pg returns DATE as Date object, but lookups use strings
+      const dateStr = row.rate_date instanceof Date
+        ? row.rate_date.toISOString().split('T')[0]
+        : String(row.rate_date).split('T')[0];
+      marketRateCache.set(dateStr, parseFloat(row.rate));
     }
 
     cacheInitialized = true;
     cacheExpiry = Date.now() + CACHE_TTL;
+    const count = marketRateCache.size;
+    const dates = Array.from(marketRateCache.keys()).sort();
+    const minDate = dates[0] ?? 'N/A';
+    const maxDate = dates[dates.length - 1] ?? 'N/A';
+    console.log(`[FRED API] 📊 Market rate cache initialized: ${count} rates (${minDate} to ${maxDate})`);
   } catch (error: any) {
     // If table doesn't exist or connection timeout, silently continue with empty cache
     if (error?.message?.includes('does not exist') || 
@@ -401,8 +410,8 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
     if (cachedRate !== undefined) {
       return cachedRate;
     }
-    // If date not in cache, return null (don't query DB for missing dates during bucketing)
-    return null;
+    // Date not in cache - fall back to DB (handles weekends/holidays or cache populated before sync)
+    // Don't return null immediately; DB may have the rate
   }
 
   // Cache not initialized or expired - query database
