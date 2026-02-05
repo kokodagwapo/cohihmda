@@ -94,12 +94,15 @@ interface ExecutiveDashboardProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
   year?: number;
   selectedTenantId?: string | null;
+  /** Optional channel filter - filters metrics to loans in the selected channel */
+  selectedChannel?: string | null;
 }
 
 export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   dateFilter,
   year = new Date().getFullYear(),
   selectedTenantId,
+  selectedChannel,
 }: ExecutiveDashboardProps) {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [animatedValues, setAnimatedValues] = useState<Record<string, number>>(
@@ -133,12 +136,13 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   } | null>(null);
 
   // Use metrics service for Qlik Logic Dictionary-based calculations
+  // Channel filtering is passed through to filter metrics by selected channel
   const {
     queryMetric,
     queryMetrics,
     queryMetricsWithDateRange,
     loading: metricsLoading,
-  } = useMetrics(selectedTenantId, year);
+  } = useMetrics(selectedTenantId, year, selectedChannel);
   const [metricsData, setMetricsData] = useState<Record<string, any>>({});
   const [loadingKpis, setLoadingKpis] = useState<Set<string>>(new Set());
 

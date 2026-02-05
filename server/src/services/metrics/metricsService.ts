@@ -19,6 +19,7 @@
 
 import pg from "pg";
 import type { LoanAccessFilter } from "../userLoanAccessService.js";
+import { getActorColumnForChannel } from "../../utils/scorecard-utils.js";
 
 // Date range interface
 export interface DateRange {
@@ -1871,6 +1872,7 @@ export async function queryMetricGroupedBy(
     "loan_type",
     "loan_purpose",
     "occupancy_type",
+    "account_executive", // Added for TPO channel support
   ];
   if (!allowedGroupByFields.includes(groupBy)) {
     throw new Error(
@@ -1880,26 +1882,39 @@ export async function queryMetricGroupedBy(
     );
   }
 
+  // Channel-aware actor column: for TPO channels, use account_executive instead of loan_officer
+  const channelGroup = options.additionalFilters?.consolidated_channel as
+    | string
+    | undefined;
+  let effectiveGroupBy = groupBy;
+  if (groupBy === "loan_officer") {
+    effectiveGroupBy = getActorColumnForChannel(channelGroup) as typeof groupBy;
+  }
+
   // Build query with GROUP BY
   const query = `
     SELECT 
-      l.${groupBy} as group_key,
+      l.${effectiveGroupBy} as group_key,
       ${metric.sqlQuery} as metric_value,
       COUNT(*) as count
     FROM public.loans l
-    WHERE l.${groupBy} IS NOT NULL 
-      AND TRIM(l.${groupBy}::text) != ''
+    WHERE l.${effectiveGroupBy} IS NOT NULL 
+      AND TRIM(l.${effectiveGroupBy}::text) != ''
       ${userAccessClause}
       ${dateRangeClause.clause}
       ${additionalFiltersClause.clause}
-    GROUP BY l.${groupBy}
+    GROUP BY l.${effectiveGroupBy}
     ORDER BY ${metric.sqlQuery} DESC NULLS LAST
     LIMIT 50
   `;
 
   if (process.env.NODE_ENV === "development") {
     console.log(
-      `[MetricsService] Querying ${metricId} grouped by ${groupBy}:`,
+      `[MetricsService] Querying ${metricId} grouped by ${effectiveGroupBy}${
+        effectiveGroupBy !== groupBy
+          ? ` (requested: ${groupBy}, channel: ${channelGroup})`
+          : ""
+      }:`,
       {
         query,
         params,
