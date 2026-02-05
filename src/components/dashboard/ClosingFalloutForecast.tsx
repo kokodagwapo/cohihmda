@@ -3041,6 +3041,7 @@ export const ClosingFalloutForecast = ({
                   loans={criticalLoanCards as any}
                   predictions={fullPredictions}
                   isDarkMode={isDarkMode}
+                  selectedTenantId={selectedTenantId}
                 />
               </div>
             )}
