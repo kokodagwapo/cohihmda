@@ -484,6 +484,7 @@ router.get(
 
       // Query most recent prediction per loan, joining with loans table for date filtering
       // Use a subquery to get distinct predictions first, then join with loans
+      // Include loan_data JSONB which contains signal strengths, loan_purpose, channel, etc.
       let query = `
       WITH latest_predictions AS (
         SELECT DISTINCT ON (loan_id)
@@ -492,6 +493,8 @@ router.get(
           confidence,
           reasoning,
           risk_factors,
+          bucket,
+          loan_data,
           model_version,
           created_at,
           updated_at
@@ -553,16 +556,295 @@ router.get(
 
       const result = await tenantPool.query(query, params);
 
-      const predictions = result.rows.map((row) => ({
-        loanId: row.loan_id,
-        predictedOutcome: row.predicted_outcome,
-        confidence: row.confidence,
-        reasoning: row.reasoning,
-        riskFactors: row.risk_factors || [],
-        modelVersion: row.model_version,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      }));
+      // Get loan IDs from predictions to fetch loan data for signal strengths
+      const predictionLoanIds = result.rows.map((r) => r.loan_id);
+
+      // Fetch loan data with signal strengths for the critical loan cards
+      let loanDataMap: Record<string, any> = {};
+      if (predictionLoanIds.length > 0) {
+        const loanDataResult = await tenantPool.query(
+          `SELECT 
+            loan_id, loan_number, loan_officer, loan_amount, loan_type,
+            current_milestone, fico_score, ltv_ratio, be_dti_ratio,
+            interest_rate, application_date, lock_date, lock_expiration_date,
+            estimated_closing_date, channel, property_type, loan_purpose,
+            underwriter, closer, processor, current_loan_status
+          FROM public.loans 
+          WHERE loan_id = ANY($1)`,
+          [predictionLoanIds]
+        );
+        loanDataResult.rows.forEach((row) => {
+          loanDataMap[row.loan_id] = row;
+        });
+      }
+
+      // Calculate signal strengths from loan data (since loan_prediction_buckets table may not exist)
+      // These are simplified calculations based on the prediction service logic
+      function calculateCreditMetricsSignal(loan: any): number | null {
+        const fico = loan.fico_score != null ? Number(loan.fico_score) : null;
+        const ltv = loan.ltv_ratio != null ? Number(loan.ltv_ratio) : null;
+        const dti =
+          loan.be_dti_ratio != null ? Number(loan.be_dti_ratio) : null;
+
+        if (fico === null && ltv === null && dti === null) return null;
+
+        // Calculate individual buckets (1=best, 6=worst)
+        let ficoBucket = 3;
+        if (fico != null) {
+          if (fico >= 760) ficoBucket = 1;
+          else if (fico >= 720) ficoBucket = 2;
+          else if (fico >= 680) ficoBucket = 3;
+          else if (fico >= 640) ficoBucket = 4;
+          else if (fico >= 600) ficoBucket = 5;
+          else ficoBucket = 6;
+        }
+
+        let ltvBucket = 3;
+        if (ltv != null) {
+          if (ltv <= 60) ltvBucket = 1;
+          else if (ltv <= 70) ltvBucket = 2;
+          else if (ltv <= 80) ltvBucket = 3;
+          else if (ltv <= 90) ltvBucket = 4;
+          else if (ltv <= 95) ltvBucket = 5;
+          else ltvBucket = 6;
+        }
+
+        let dtiBucket = 3;
+        if (dti != null) {
+          if (dti <= 28) dtiBucket = 1;
+          else if (dti <= 36) dtiBucket = 2;
+          else if (dti <= 43) dtiBucket = 3;
+          else if (dti <= 50) dtiBucket = 4;
+          else if (dti <= 55) dtiBucket = 5;
+          else dtiBucket = 6;
+        }
+
+        // Average of available metrics
+        const signals = [ficoBucket, ltvBucket, dtiBucket];
+        return Math.round(signals.reduce((a, b) => a + b, 0) / signals.length);
+      }
+
+      function calculateLoanCharacteristicsSignal(loan: any): number | null {
+        const loanType = (loan.loan_type || "").toLowerCase();
+        const loanPurpose = (loan.loan_purpose || "").toLowerCase();
+        const channel = (loan.channel || "").toLowerCase();
+
+        if (!loanType && !loanPurpose && !channel) return null;
+
+        // Loan type bucket
+        let typeBucket = 3;
+        if (loanType.includes("conventional") || loanType.includes("conf"))
+          typeBucket = 2;
+        else if (loanType.includes("fha") || loanType.includes("va"))
+          typeBucket = 3;
+        else if (loanType.includes("jumbo")) typeBucket = 4;
+
+        // Loan purpose bucket
+        let purposeBucket = 3;
+        if (loanPurpose.includes("purchase")) purposeBucket = 2;
+        else if (loanPurpose.includes("rate") || loanPurpose.includes("refi"))
+          purposeBucket = 3;
+        else if (loanPurpose.includes("cash")) purposeBucket = 4;
+
+        // Channel bucket
+        let channelBucket = 3;
+        if (channel.includes("retail")) channelBucket = 2;
+        else if (
+          channel.includes("broker") ||
+          channel.includes("correspondent")
+        )
+          channelBucket = 4;
+
+        return Math.round((typeBucket + purposeBucket + channelBucket) / 3);
+      }
+
+      function calculateTimeInMotionSignal(loan: any): number | null {
+        // First check if activeDays is already stored
+        let activeDays: number | null = null;
+
+        if (loan.activeDays != null) {
+          activeDays = Number(loan.activeDays);
+        } else {
+          // Calculate from application_date
+          const appDate = loan.application_date;
+          if (!appDate) return null;
+
+          const applicationDate = new Date(appDate);
+          const now = new Date();
+          activeDays = Math.floor(
+            (now.getTime() - applicationDate.getTime()) / (1000 * 60 * 60 * 24)
+          );
+        }
+
+        if (activeDays == null || isNaN(activeDays)) return null;
+
+        if (activeDays <= 15) return 1;
+        if (activeDays <= 30) return 2;
+        if (activeDays <= 45) return 3;
+        if (activeDays <= 60) return 4;
+        if (activeDays <= 90) return 5;
+        return 6;
+      }
+
+      function calculateInterestLockVsMarketSignal(loan: any): number | null {
+        const interestRate =
+          loan.interest_rate != null ? Number(loan.interest_rate) : null;
+        if (interestRate === null) return null;
+
+        // Simplified calculation - full version uses market rate comparison
+        if (interestRate <= 5.5) return 2;
+        if (interestRate <= 6.5) return 3;
+        if (interestRate <= 7.5) return 4;
+        return 5;
+      }
+
+      // Calculate pullthrough signal from percentage (1=best >90%, 6=worst <40%)
+      function calculatePullthroughSignal(
+        pct: number | null | undefined
+      ): number | null {
+        if (pct == null) return null;
+        const percentage = Number(pct);
+        if (isNaN(percentage)) return null;
+
+        if (percentage >= 90) return 1;
+        if (percentage >= 80) return 2;
+        if (percentage >= 70) return 3;
+        if (percentage >= 60) return 4;
+        if (percentage >= 50) return 5;
+        return 6;
+      }
+
+      const predictions = result.rows.map((row) => {
+        // Use stored loan_data from predictions (contains all signal strengths, loan_purpose, channel, etc.)
+        // Fall back to loans table data if loan_data is not stored
+        const storedLoanData = row.loan_data || {};
+        const loanTableData = loanDataMap[row.loan_id] || {};
+
+        // Merge data: prefer stored loan_data, fall back to loans table
+        const mergedLoanData = { ...loanTableData, ...storedLoanData };
+
+        // Use stored bucket or derive from prediction outcome
+        const riskBucket =
+          row.bucket ||
+          (row.predicted_outcome === "withdraw" ||
+          row.predicted_outcome === "deny"
+            ? "high"
+            : "low");
+
+        // Use stored signal strengths from loan_data, or calculate if not present
+        const creditMetricsSignal =
+          mergedLoanData.creditMetricsSignalStrength ??
+          calculateCreditMetricsSignal(mergedLoanData);
+        const loanCharacteristicsSignal =
+          mergedLoanData.loanCharacteristicsSignalStrength ??
+          calculateLoanCharacteristicsSignal(mergedLoanData);
+        const timeInMotionSignal =
+          mergedLoanData.timeInMotionSignalStrength ??
+          calculateTimeInMotionSignal(mergedLoanData);
+        const interestLockVsMarketSignal =
+          mergedLoanData.interestLockVsMarketSignalStrength ??
+          calculateInterestLockVsMarketSignal(mergedLoanData);
+
+        // Calculate LO pullthrough signal from percentage if not stored
+        const loPullthroughSignal =
+          mergedLoanData.loPullthroughSignal ??
+          calculatePullthroughSignal(mergedLoanData.loPullthroughPercentage);
+
+        // MLO/AE fallout signal - use stored value, fall back to LO pullthrough signal
+        const mloAeFalloutSignal =
+          mergedLoanData.mloAeFalloutProneSignalStrength ?? loPullthroughSignal;
+
+        return {
+          loanId: row.loan_id,
+          predictedOutcome: row.predicted_outcome,
+          confidence: row.confidence,
+          reasoning: row.reasoning,
+          riskFactors: row.risk_factors || [],
+          modelVersion: row.model_version,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          bucket: riskBucket,
+          loanData: {
+            loan_id: row.loan_id,
+            loan_number:
+              mergedLoanData.loan_number ?? mergedLoanData.loanNumber,
+            loan_officer: mergedLoanData.loan_officer,
+            loan_amount: mergedLoanData.loan_amount,
+            loan_type: mergedLoanData.loan_type,
+            current_milestone:
+              mergedLoanData.current_milestone ??
+              mergedLoanData.lastCompletedMilestone,
+            fico_score: mergedLoanData.fico_score ?? mergedLoanData.ficoScore,
+            ltv_ratio: mergedLoanData.ltv_ratio ?? mergedLoanData.ltv,
+            be_dti_ratio: mergedLoanData.be_dti_ratio ?? mergedLoanData.dti,
+            interest_rate:
+              mergedLoanData.interest_rate ?? mergedLoanData.interestRate,
+            market_rate:
+              mergedLoanData.market_rate ?? mergedLoanData.marketRate,
+            lockMarketRate: mergedLoanData.lockMarketRate ?? null,
+            closeMarketRate: mergedLoanData.closeMarketRate ?? null,
+            marketChangeDelta: mergedLoanData.marketChangeDelta ?? null,
+            application_date: mergedLoanData.application_date,
+            lock_date: mergedLoanData.lock_date ?? mergedLoanData.lockDate,
+            lock_expiration_date:
+              mergedLoanData.lock_expiration_date ??
+              mergedLoanData.lockExpirationDate,
+            estimated_closing_date:
+              mergedLoanData.estimated_closing_date ??
+              mergedLoanData.estimatedClosingDate,
+            channel: mergedLoanData.channel,
+            property_type:
+              mergedLoanData.property_type ?? mergedLoanData.propertyType,
+            loan_purpose:
+              mergedLoanData.loan_purpose ?? mergedLoanData.loanPurpose,
+            underwriter: mergedLoanData.underwriter,
+            closer: mergedLoanData.closer,
+            processor: mergedLoanData.processor,
+            current_loan_status:
+              mergedLoanData.current_loan_status ??
+              mergedLoanData.currentLoanStatus,
+            // Active days in pipeline
+            activeDays: mergedLoanData.activeDays ?? null,
+            // Pullthrough percentages (for display)
+            loPullthroughPercentage:
+              mergedLoanData.loPullthroughPercentage ?? null,
+            uwPullthroughPercentage:
+              mergedLoanData.uwPullthroughPercentage ?? null,
+            closerPullthroughPercentage:
+              mergedLoanData.closerPullthroughPercentage ?? null,
+            processorPullthroughPercentage:
+              mergedLoanData.processorPullthroughPercentage ?? null,
+            // Signal strengths (stored or calculated)
+            creditMetricsSignalStrength: creditMetricsSignal,
+            loanCharacteristicsSignalStrength: loanCharacteristicsSignal,
+            timeInMotionSignalStrength: timeInMotionSignal,
+            mloAeFalloutProneSignalStrength: mloAeFalloutSignal,
+            interestLockVsMarketSignalStrength: interestLockVsMarketSignal,
+            uwPullthroughSignalStrength:
+              mergedLoanData.uwPullthroughSignalStrength ?? null,
+            closerPullthroughSignalStrength:
+              mergedLoanData.closerPullthroughSignalStrength ?? null,
+            processorPullthroughSignalStrength:
+              mergedLoanData.processorPullthroughSignalStrength ?? null,
+            loPullthroughSignal: loPullthroughSignal,
+            marketChangeDeltaSignal:
+              mergedLoanData.marketChangeDeltaSignal ?? null,
+            bucket: riskBucket,
+            riskSummary: mergedLoanData.riskSummary || {
+              predictedOutcome: row.predicted_outcome,
+              confidence: row.confidence,
+              risks: row.risk_factors || [],
+              positives: [],
+              overallRisk:
+                riskBucket === "high"
+                  ? "high"
+                  : riskBucket === "low"
+                  ? "low"
+                  : "medium",
+            },
+          },
+        };
+      });
 
       // Log for debugging
       logInfo("[Predictions GET] Results", {

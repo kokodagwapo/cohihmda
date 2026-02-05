@@ -66,10 +66,18 @@ interface LoanDrilldownModalProps {
   onClose: () => void;
   isDarkMode?: boolean;
   onSelectOfficer?: (officer: string) => void;
+  selectedTenantId?: string | null;
 }
 
 export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
-  ({ loan, isOpen, onClose, isDarkMode = false, onSelectOfficer }) => {
+  ({
+    loan,
+    isOpen,
+    onClose,
+    isDarkMode = false,
+    onSelectOfficer,
+    selectedTenantId,
+  }) => {
     const [emailLoading, setEmailLoading] = useState(false);
 
     const getRiskLabel = (level: string) => {
@@ -192,6 +200,7 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(
                 onSelectOfficer={onSelectOfficer}
                 showTapForDetails={false}
                 showRiskBreakdown={true}
+                selectedTenantId={selectedTenantId}
               />
             </div>
 
