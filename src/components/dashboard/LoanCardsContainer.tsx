@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect, memo, useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import React, { useState, useMemo, useEffect, memo, useCallback } from 'react';
 import { LoanCardContent } from './LoanCardContent';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { LoanDrilldownModal } from './LoanDrilldownModal';
+import { useToast } from '@/hooks/use-toast';
 
 interface RiskSummary {
   risks: string[];
@@ -77,14 +77,14 @@ interface LoanCardsContainerProps {
   loans: LoanCard[];
   predictions?: LoanPrediction[]; // Optional predictions map
   isDarkMode?: boolean;
+  openLoanId?: string;
+  onOpenLoanIdHandled?: () => void;
 }
 
-type TabType = 'all' | 'likely-withdraw' | 'likely-decline';
+type TabType = 'all' | 'likely-withdraw' | 'likely-decline' | 'favorites';
 type SortType = 'risk' | 'amount' | 'loan' | 'officer';
 
-const ITEMS_PER_PAGE = 6;
-// PERFORMANCE: Threshold for switching to virtualized rendering
-const VIRTUALIZATION_THRESHOLD = 20;
+const ITEMS_PER_PAGE_OPTIONS = [6, 10, 20, 50, 100] as const;
 
 function formatLockExpirationDate(value: string | null | undefined): string {
   if (value == null || value === '') return '';
@@ -120,12 +120,18 @@ const LoanCardItem = memo(({
   loan, 
   isDarkMode, 
   onSelectLoan, 
-  onSelectOfficer 
+  onSelectOfficer,
+  isFavorited,
+  onToggleFavorite,
+  showFavoriteButton = false,
 }: { 
   loan: LoanCard; 
   isDarkMode: boolean; 
   onSelectLoan: (loan: LoanCard) => void;
   onSelectOfficer: (officer: string) => void;
+  isFavorited?: boolean;
+  onToggleFavorite?: () => void;
+  showFavoriteButton?: boolean;
 }) => (
   <div
     onClick={() => onSelectLoan(loan)}
@@ -137,6 +143,9 @@ const LoanCardItem = memo(({
       onSelectOfficer={onSelectOfficer}
       showTapForDetails={true}
       compact={true}
+      isFavorited={isFavorited}
+      onToggleFavorite={onToggleFavorite}
+      showFavoriteButton={showFavoriteButton}
     />
   </div>
 ));
@@ -146,7 +155,9 @@ LoanCardItem.displayName = 'LoanCardItem';
 export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
   loans,
   predictions = [],
-  isDarkMode = false
+  isDarkMode = false,
+  openLoanId,
+  onOpenLoanIdHandled,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -155,15 +166,53 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
   const [selectedLoan, setSelectedLoan] = useState<LoanCard | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
+  const [itemsPerPage, setItemsPerPage] = useState(6);
+  const { toast } = useToast();
+
+  // Favorites (temporary, resets on refresh)
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const toggleFavorite = useCallback((loanId: string) => {
+    setFavoriteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(loanId)) next.delete(loanId);
+      else next.add(loanId);
+      return next;
+    });
+  }, []);
+  const isFavorited = useCallback((id: string) => favoriteIds.has(id), [favoriteIds]);
   
-  // PERFORMANCE: Ref for virtualized scrolling container
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
 
   useEffect(() => {
     setCurrentPage(1);
-    setShowAll(false); // Reset to paginated view when filters change
-  }, [activeTab, searchTerm, sortBy, sortOrder]);
+  }, [activeTab, searchTerm, sortBy, sortOrder, itemsPerPage]);
+
+  // Handle deep link: open loan modal when openLoanId is provided
+  useEffect(() => {
+    if (!openLoanId || loans.length === 0) return;
+    
+    // Find loan by loan_number or id
+    const foundLoan = loans.find(loan => {
+      const loanNum = (loan.loan_number || '').toString().trim();
+      // Match by loan_number if it exists and is not a UUID, otherwise match by id
+      if (loanNum && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(loanNum)) {
+        return loanNum === openLoanId;
+      }
+      return loan.id === openLoanId;
+    });
+    
+    if (foundLoan) {
+      setSelectedLoan(foundLoan);
+      onOpenLoanIdHandled?.();
+    } else {
+      toast({
+        title: 'Loan not found',
+        description: `The loan "${openLoanId}" is not in the current critical loans list.`,
+        variant: 'destructive',
+      });
+      onOpenLoanIdHandled?.();
+    }
+  }, [openLoanId, loans, onOpenLoanIdHandled, toast]);
 
   // Create prediction map for filtering
   const predictionMap = useMemo(() => {
@@ -188,9 +237,11 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
             if (loan.riskSummary?.predictedOutcome === 'deny') return true;
             // Fall back to predictions array
             return predictionMap.get(loan.id)?.predictedOutcome === 'deny';
-          case 'critical': return loan.riskLevel === 'Very High';
-          case 'at-risk': return loan.riskLevel === 'Medium';
-          case 'low': return loan.riskLevel === 'Low';
+          // case 'critical': return loan.riskLevel === 'Very High';
+          // case 'at-risk': return loan.riskLevel === 'Medium';
+          // case 'low': return loan.riskLevel === 'Low';
+          case 'favorites':
+            return isFavorited(loan.id);
           default: return true;
         }
       });
@@ -237,28 +288,13 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
     });
 
     return result;
-  }, [loans, activeTab, searchTerm, sortBy, sortOrder]);
+  }, [loans, activeTab, searchTerm, sortBy, sortOrder, favoriteIds]);
 
-  const totalPages = Math.ceil(filteredLoans.length / ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredLoans.length / itemsPerPage);
   const paginatedLoans = useMemo(() => {
-    if (showAll) return filteredLoans; // Return all when showing all
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredLoans.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredLoans, currentPage, showAll]);
-
-  // PERFORMANCE: Use virtualization when showing all items and count exceeds threshold
-  const useVirtualization = showAll && filteredLoans.length > VIRTUALIZATION_THRESHOLD;
-  
-  // Virtualizer for grid layout (2 columns on lg, 1 on smaller)
-  // Each row contains 2 cards on desktop, 1 on mobile
-  const rowCount = useVirtualization ? Math.ceil(filteredLoans.length / 2) : 0;
-  const rowVirtualizer = useVirtualizer({
-    count: rowCount,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 220, // Estimated height of a loan card row
-    overscan: 3, // Render 3 extra rows above/below viewport
-    enabled: useVirtualization,
-  });
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredLoans.slice(start, start + itemsPerPage);
+  }, [filteredLoans, currentPage, itemsPerPage]);
 
   const tabCounts = useMemo(() => {
     // Use riskSummary.predictedOutcome on each loan (primary source)
@@ -283,14 +319,16 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
         // Fall back to predictions array
         const pred = predictionMapForCounts.get(l.id);
         return pred?.predictedOutcome === 'deny';
-      }).length
+      }).length,
+      'favorites': loans.filter(l => favoriteIds.has(l.id)).length
     };
-  }, [loans, predictions]);
+  }, [loans, predictions, favoriteIds]);
 
   const tabs: { id: TabType; label: string; shortLabel: string; color: string }[] = [
     { id: 'all', label: 'All Loans', shortLabel: 'All', color: 'darkred' },
     { id: 'likely-withdraw', label: 'Likely Withdrawal', shortLabel: 'Withdraw', color: 'red' },
-    { id: 'likely-decline', label: 'Likely Decline', shortLabel: 'Decline', color: 'lightred' }
+    { id: 'likely-decline', label: 'Likely Decline', shortLabel: 'Decline', color: 'lightred' },
+    { id: 'favorites', label: 'Favorites', shortLabel: 'Favorites', color: 'blue' }
   ];
 
   const getTabStyle = (tab: typeof tabs[0]) => {
@@ -311,6 +349,10 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
       },
       lightestred: {
         active: isDarkMode ? 'bg-rose-300 text-rose-900' : 'bg-rose-200 text-rose-800',
+        inactive: isDarkMode ? `${baseStyle} text-slate-400` : `${baseStyle} text-slate-600`
+      },
+      blue: {
+        active: isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white',
         inactive: isDarkMode ? `${baseStyle} text-slate-400` : `${baseStyle} text-slate-600`
       }
     };
@@ -402,47 +444,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
             </svg>
             <p className="text-sm font-medium">No loans found</p>
           </div>
-        ) : useVirtualization ? (
-          // PERFORMANCE: Virtualized rendering for large lists
-          <div 
-            ref={scrollContainerRef}
-            className="max-h-[600px] overflow-y-auto"
-            style={{ contain: 'strict' }}
-          >
-            <div
-              style={{
-                height: `${rowVirtualizer.getTotalSize()}px`,
-                width: '100%',
-                position: 'relative',
-              }}
-            >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const rowIndex = virtualRow.index;
-                const loan1 = filteredLoans[rowIndex * 2];
-                const loan2 = filteredLoans[rowIndex * 2 + 1];
-                
-                return (
-                  <div
-                    key={virtualRow.key}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                    className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4 pb-2 sm:pb-3 lg:pb-4"
-                  >
-                    {loan1 && <LoanCardItem loan={loan1} isDarkMode={isDarkMode} onSelectLoan={setSelectedLoan} onSelectOfficer={setSelectedOfficer} />}
-                    {loan2 && <LoanCardItem loan={loan2} isDarkMode={isDarkMode} onSelectLoan={setSelectedLoan} onSelectOfficer={setSelectedOfficer} />}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
         ) : (
-          // Standard paginated rendering with memoized cards
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
             {paginatedLoans.map((loan) => (
               <LoanCardItem 
@@ -451,18 +453,31 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
                 isDarkMode={isDarkMode} 
                 onSelectLoan={setSelectedLoan} 
                 onSelectOfficer={setSelectedOfficer} 
+                isFavorited={isFavorited(loan.id)}
+                onToggleFavorite={() => toggleFavorite(loan.id)}
+                showFavoriteButton={true}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Pagination controls - only show when not showing all */}
-      {!showAll && totalPages > 1 && (
+      {(totalPages > 1 || filteredLoans.length > 0) && (
         <div className={`flex items-center justify-between py-3 md:px-4 md:border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
-          <p className={`text-[10px] sm:text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-            {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredLoans.length)} of {filteredLoans.length}
-          </p>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <p className={`text-[10px] sm:text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+              {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, filteredLoans.length)} of {filteredLoans.length}
+            </p>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className={`text-[10px] sm:text-xs px-2 py-1 rounded-md font-medium ${isDarkMode ? 'bg-slate-800/80 text-slate-300 border-slate-600' : 'bg-slate-100 text-slate-600 border-slate-200'} border`}
+            >
+              {ITEMS_PER_PAGE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n} per page</option>
+              ))}
+            </select>
+          </div>
           
           <div className="flex items-center gap-0.5 sm:gap-1">
             <button
@@ -508,36 +523,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
             >
               ›
             </button>
-            
-            {/* Show All toggle - only show when there are more items than one page */}
-            {filteredLoans.length > ITEMS_PER_PAGE && (
-              <button
-                onClick={() => setShowAll(true)}
-                className={`ml-2 px-2 py-1 text-[10px] sm:text-xs rounded-md transition-colors ${
-                  isDarkMode ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-slate-100'
-                }`}
-              >
-                Show All
-              </button>
-            )}
           </div>
-        </div>
-      )}
-      
-      {/* Show paginated view toggle when showing all */}
-      {showAll && (
-        <div className={`flex items-center justify-between py-3 md:px-4 md:border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
-          <p className={`text-[10px] sm:text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-            Showing all {filteredLoans.length} loans {useVirtualization && '(virtualized)'}
-          </p>
-          <button
-            onClick={() => setShowAll(false)}
-            className={`px-2 py-1 text-[10px] sm:text-xs rounded-md transition-colors ${
-              isDarkMode ? 'text-blue-400 hover:bg-slate-700' : 'text-blue-600 hover:bg-slate-100'
-            }`}
-          >
-            Show Paginated
-          </button>
         </div>
       )}
 

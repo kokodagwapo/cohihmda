@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -72,6 +72,7 @@ import { useTenantStore } from '@/stores/tenantStore';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     toast
   } = useToast();
@@ -100,6 +101,27 @@ const Dashboard = () => {
   
   // Tenant selection from global store (shared with Navigation header)
   const { selectedTenantId, setSelectedTenantId } = useTenantStore();
+  
+  // Read loan ID from URL for deep linking
+  const openLoanId = searchParams.get('loan');
+  const closingFalloutSectionRef = useRef<HTMLDivElement>(null);
+  
+  // Scroll to Critical Loans section when loan param is present
+  useEffect(() => {
+    if (openLoanId && closingFalloutSectionRef.current) {
+      setTimeout(() => {
+        closingFalloutSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300); // Small delay to ensure section is rendered
+    }
+  }, [openLoanId]);
+  
+  // Callback to clear loan param after handling
+  const handleLoanIdHandled = useCallback(() => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.delete('loan');
+    const newSearch = newParams.toString();
+    setSearchParams(newSearch ? `?${newSearch}` : '', { replace: true });
+  }, [searchParams, setSearchParams]);
   
   // Track user ID to detect user changes and reset state
   // Initialize with current user ID to avoid resetting on first mount
@@ -1060,7 +1082,7 @@ const Dashboard = () => {
                 {dashboardVisibility.executiveDashboard && <div id="executiveDashboard" className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
                 
                 {/* Closing & Fallout Forecast */}
-                {dashboardVisibility.closingFalloutForecast && <div id="closingFalloutForecast" className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
+                {dashboardVisibility.closingFalloutForecast && <div ref={closingFalloutSectionRef} id="closingFalloutForecast" className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} selectedTenantId={selectedTenantId} openLoanId={openLoanId || undefined} onOpenLoanIdHandled={handleLoanIdHandled} /></div>}
               </div>
             )}
           </div>}

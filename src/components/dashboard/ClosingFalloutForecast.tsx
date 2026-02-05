@@ -19,6 +19,8 @@ import { transformLoanToCard } from '@/utils/loanDataTransform';
 interface ClosingFalloutForecastProps {
   dateFilter?: 'today' | 'mtd' | 'ytd' | 'custom';
   selectedTenantId?: string | null;
+  openLoanId?: string;
+  onOpenLoanIdHandled?: () => void;
 }
 
 const normalizeRawStatus = (raw: unknown): string =>
@@ -507,7 +509,7 @@ const getMetricExplanation = (label: string) => {
  * Closing & Fallout Forecast Component
  * Displays predictive analytics for loan closings and fallout risk
  */
-export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }: ClosingFalloutForecastProps) => {
+export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, openLoanId, onOpenLoanIdHandled }: ClosingFalloutForecastProps) => {
   // ============================================================================
   // TESTING FLAG: Signal Strength Buckets Table
   // Set to true to display the loan signal strength buckets table
@@ -1845,6 +1847,8 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId }:
                   loans={criticalLoanCards as any}
                   predictions={fullPredictions}
                   isDarkMode={isDarkMode}
+                  openLoanId={openLoanId}
+                  onOpenLoanIdHandled={onOpenLoanIdHandled}
                 />
               </div>
             )}

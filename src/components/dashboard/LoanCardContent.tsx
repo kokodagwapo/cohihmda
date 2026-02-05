@@ -1,5 +1,5 @@
 import React, { useState, useCallback, memo } from 'react';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Sparkles, Loader2, Heart } from 'lucide-react';
 import { api } from '@/lib/api';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
 
@@ -86,6 +86,9 @@ interface LoanCardContentProps {
   showRiskBreakdown?: boolean;
   /** Compact mode: card shows only up to signal buckets; modal shows full content */
   compact?: boolean;
+  isFavorited?: boolean;
+  onToggleFavorite?: (e: React.MouseEvent) => void;
+  showFavoriteButton?: boolean;
 }
 
 export const LoanCardContent = memo(({
@@ -95,6 +98,9 @@ export const LoanCardContent = memo(({
   showTapForDetails = true,
   showRiskBreakdown = false,
   compact = false,
+  isFavorited,
+  onToggleFavorite,
+  showFavoriteButton,
 }: LoanCardContentProps) => {
   const [aiRecommendations, setAiRecommendations] = useState<string[] | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -211,9 +217,9 @@ export const LoanCardContent = memo(({
               Loan Amount: ${loan.amount.replace(/^\$/, '')}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-0.5 mt-0.5">
+          <div className="flex flex-col items-end gap-0.5 mt-0.5 shrink-0">
             {loan.riskSummary?.predictedOutcome && loan.riskSummary.predictedOutcome !== 'originate' && (
-              <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+              <span className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide whitespace-nowrap ${
                 loan.riskSummary.predictedOutcome === 'deny'
                   ? (isDarkMode ? 'bg-red-600/30 text-red-300' : 'bg-red-100 text-red-700')
                   : loan.riskSummary.predictedOutcome === 'withdraw'
@@ -224,7 +230,7 @@ export const LoanCardContent = memo(({
                  loan.riskSummary.predictedOutcome === 'withdraw' ? '↩ Likely Withdraw' : '⚡ At Risk'}
               </span>
             )}
-            <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
+            <span className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block whitespace-nowrap ${
               loan.riskLevel === 'Very High'
                 ? (isDarkMode ? 'bg-rose-500/20 text-rose-400' : 'bg-rose-50 text-rose-600')
                 : loan.riskLevel === 'Medium'
@@ -254,12 +260,12 @@ export const LoanCardContent = memo(({
             {signalItems.map(({ label, value }) => (
               <div
                 key={label}
-                className={`rounded-lg px-1.5 py-2 sm:px-2 sm:py-2.5 text-center min-w-0 break-words ${bucketBg(value)}`}
+                className={`flex flex-col justify-between rounded-lg px-1.5 py-2 sm:px-2 sm:py-2.5 text-center min-w-0 break-words min-h-[60px] sm:min-h-[68px] ${bucketBg(value)}`}
               >
-                <p className={`text-[9px] sm:text-[10px] font-medium uppercase tracking-wide break-words mb-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                <p className={`text-[9px] sm:text-[10px] font-medium uppercase tracking-wide break-words ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                   {label}
                 </p>
-                <p className={`text-sm sm:text-base font-semibold break-words ${bucketText(value)}`}>
+                <p className={`text-sm sm:text-base font-semibold break-words mt-auto ${bucketText(value)}`}>
                   {value != null ? value : '—'}
                 </p>
               </div>
@@ -450,6 +456,20 @@ export const LoanCardContent = memo(({
       })()}
       {showTapForDetails && (
         <div className={`mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t flex items-center justify-between ${isDarkMode ? 'border-slate-700/50' : 'border-slate-100'}`}>
+          {showFavoriteButton && onToggleFavorite && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(e); }}
+              className="flex-shrink-0 p-0.5 rounded hover:opacity-80 transition-opacity"
+              aria-label={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              {isFavorited ? (
+                <Heart className="w-4 h-4 text-blue-500 fill-blue-500" />
+              ) : (
+                <Heart className="w-4 h-4 text-slate-400" fill="none" strokeWidth={2} stroke="currentColor" />
+              )}
+            </button>
+          )}
           <span className={`text-[9px] sm:text-[10px] ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>
             Tap for details
           </span>
