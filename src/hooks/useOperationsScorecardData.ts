@@ -64,7 +64,7 @@ export interface CompanyAverages {
  * Weight configuration for Operations TTS (70/15/15)
  */
 export interface WeightConfig {
-  unit: number; // 0.70 = 70%
+  units: number; // 0.70 = 70%
   turnTime: number; // 0.15 = 15%
   complexity: number; // 0.15 = 15%
 }
@@ -300,22 +300,23 @@ export const formatPercent = (value: number, decimals: number = 1): string => {
  * This helps bridge the API response to the existing component interface
  */
 export const convertToViewFormat = (tierSummary: OperationsTierSummary) => {
+  // Provide default values for any potentially undefined fields
   return {
-    underwriterCount: tierSummary.count, // Named underwriterCount in the view for historical reasons
-    unitsOutput: tierSummary.units,
-    unitsPercent: tierSummary.unitsPercent,
-    volumeOutput: tierSummary.volume,
-    loanComplexityScore: tierSummary.loanComplexityScore,
-    avgUnitsPerMonth: tierSummary.avgUnitsPerMonth,
-    avgDays: tierSummary.avgDays,
-    compensation: tierSummary.compensation,
-    costPerFile: tierSummary.costPerFile,
-    approvedPercent: tierSummary.approvedPercent,
-    deniedPercent: tierSummary.deniedPercent,
-    governmentPercent: tierSummary.governmentPercent,
-    purchasePercent: tierSummary.purchasePercent,
-    waFico: tierSummary.waFico,
-    waLtv: tierSummary.waLtv,
+    underwriterCount: tierSummary?.count ?? 0, // Named underwriterCount in the view for historical reasons
+    unitsOutput: tierSummary?.units ?? 0,
+    unitsPercent: tierSummary?.unitsPercent ?? 0,
+    volumeOutput: tierSummary?.volume ?? 0,
+    loanComplexityScore: tierSummary?.loanComplexityScore ?? 100,
+    avgUnitsPerMonth: tierSummary?.avgUnitsPerMonth ?? 0,
+    avgDays: tierSummary?.avgDays ?? 0,
+    compensation: tierSummary?.compensation ?? '-',
+    costPerFile: tierSummary?.costPerFile ?? '-',
+    approvedPercent: tierSummary?.approvedPercent ?? 0,
+    deniedPercent: tierSummary?.deniedPercent ?? 0,
+    governmentPercent: tierSummary?.governmentPercent ?? 0,
+    purchasePercent: tierSummary?.purchasePercent ?? 0,
+    waFico: tierSummary?.waFico ?? 0,
+    waLtv: tierSummary?.waLtv ?? 0,
   };
 };
 

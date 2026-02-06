@@ -51,6 +51,12 @@ export function TenantConfigSection() {
   const [complexityComponents, setComplexityComponents] = useState<
     Record<string, any[]>
   >({});
+  const [staffingUnitTargets, setStaffingUnitTargets] = useState<{
+    processor: number;
+    underwriter: number;
+    closer: number;
+    other: number;
+  } | null>(null);
   const [losConnections, setLosConnections] = useState<any[]>([]);
 
   // Load all data
@@ -60,6 +66,7 @@ export function TenantConfigSection() {
       setLosConnections([]);
       setScoringWeights({});
       setComplexityComponents({});
+      setStaffingUnitTargets(null);
       return;
     }
 
@@ -70,27 +77,39 @@ export function TenantConfigSection() {
         ? `?tenant_id=${selectedTenantId}`
         : "";
 
-      const [salesWeightsRes, opsWeightsRes, complexityRes, losRes] =
-        await Promise.all([
-          api.request<{ weights: Record<string, any[]> }>(
-            `/api/tenant-config/scoring-weights/sales${tenantParam}`
-          ),
-          api.request<{ weights: Record<string, any[]> }>(
-            `/api/tenant-config/scoring-weights/operations${tenantParam}`
-          ),
-          api.request<{ components: Record<string, any[]> }>(
-            `/api/tenant-config/complexity${tenantParam}`
-          ),
-          api.request<{ connections: any[] }>(
-            `/api/los/connections${tenantParam}`
-          ),
-        ]);
+      const [
+        salesWeightsRes,
+        opsWeightsRes,
+        complexityRes,
+        losRes,
+        staffingTargetsRes,
+      ] = await Promise.all([
+        api.request<{ weights: Record<string, any[]> }>(
+          `/api/tenant-config/scoring-weights/sales${tenantParam}`
+        ),
+        api.request<{ weights: Record<string, any[]> }>(
+          `/api/tenant-config/scoring-weights/operations${tenantParam}`
+        ),
+        api.request<{ components: Record<string, any[]> }>(
+          `/api/tenant-config/complexity${tenantParam}`
+        ),
+        api.request<{ connections: any[] }>(
+          `/api/los/connections${tenantParam}`
+        ),
+        api.request<{
+          processor: number;
+          underwriter: number;
+          closer: number;
+          other: number;
+        }>(`/api/tenant-config/staffing-unit-targets${tenantParam}`),
+      ]);
 
       setScoringWeights({
         sales: salesWeightsRes.weights?.default || [],
         operations: opsWeightsRes.weights?.default || [],
       });
       setComplexityComponents(complexityRes.components || {});
+      setStaffingUnitTargets(staffingTargetsRes ?? null);
       setLosConnections(losRes.connections || []);
     } catch (error: any) {
       console.error("Error loading tenant config:", error);
@@ -231,6 +250,7 @@ export function TenantConfigSection() {
                 <ScoringWeightsTab
                   weights={scoringWeights}
                   complexityComponents={complexityComponents}
+                  staffingUnitTargets={staffingUnitTargets}
                   onRefresh={loadData}
                 />
               </TabsContent>

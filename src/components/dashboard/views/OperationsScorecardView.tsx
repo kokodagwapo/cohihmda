@@ -349,7 +349,8 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
   );
 
   // Convert API data to view format, with fallback to empty structure
-  const currentData = apiData ? {
+  // Add safety checks for potentially undefined nested properties
+  const currentData = apiData && apiData.totals && apiData.tierSummary ? {
     totals: convertToViewFormat(apiData.totals),
     topTier: convertToViewFormat(apiData.tierSummary.top),
     secondTier: convertToViewFormat(apiData.tierSummary.second),
@@ -381,9 +382,11 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     localStorage.setItem('op-scorecard-showComparison', showComparison.toString());
   }, [showComparison]);
 
-  const formatNumber = (num: number) => num.toLocaleString();
-  const formatCurrency = (num: number) => `$${num.toLocaleString()}`;
-  const formatPercent = (num: number) => `${num.toFixed(1)}%`;
+  // Safe formatting helpers that handle undefined/null values
+  const formatNumber = (num: number | undefined | null) => (num ?? 0).toLocaleString();
+  const formatCurrency = (num: number | undefined | null) => `$${(num ?? 0).toLocaleString()}`;
+  const formatPercent = (num: number | undefined | null) => `${(num ?? 0).toFixed(1)}%`;
+  const safeFixed = (num: number | undefined | null, decimals: number = 1) => (num ?? 0).toFixed(decimals);
 
   // Calculate trend indicator
   const calculateChange = (current: number, previous: number, higherIsBetter: boolean = true): MetricChange => {
@@ -531,115 +534,205 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                   </TabsList>
                 </CardHeader>
 
-                {/* Applied Weights Tab Content */}
+                {/* Applied Weights Tab Content - Dynamic from tenant config */}
                 <TabsContent value="weights" className="mt-0">
                   <CardContent className="space-y-6">
-                {/* Units */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className={`text-sm font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                      Units
-                    </span>
-                    <Badge variant="secondary" className="font-mono">70%</Badge>
-                  </div>
-                  <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
-                    <div 
-                      className="h-full bg-tier-second rounded-full shadow-lg shadow-tier-second/30 transition-all duration-1000 ease-out animate-in slide-in-from-left" 
-                      style={{ width: '70%' }} 
-                    />
-                  </div>
-                  <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                    Unit Weight: 70%
-                  </p>
-                </div>
+                    {(() => {
+                      // Get weights from API response, with defaults
+                      const weights = apiData?.weightConfig || {
+                        units: 0.7,
+                        turnTime: 0.15,
+                        complexity: 0.15,
+                      };
+                      // Calculate total for normalization display
+                      const totalWeight = weights.units + weights.turnTime + weights.complexity;
+                      // Helper to format weight as percentage
+                      const formatWeight = (w: number) => `${((w / totalWeight) * 100).toFixed(0)}%`;
+                      const getBarWidth = (w: number) => `${(w / totalWeight) * 100}%`;
 
-                {/* Turn Time */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className={`text-sm font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                      Turn Time
-                    </span>
-                    <Badge variant="secondary" className="font-mono">15%</Badge>
-                  </div>
-                  <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
-                    <div 
-                      className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-lg shadow-blue-500/30 transition-all duration-1000 ease-out animate-in slide-in-from-left delay-150" 
-                      style={{ width: '15%' }} 
-                    />
-                  </div>
-                  <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                    Turn Time Weight: 15%
-                  </p>
-                </div>
+                      return (
+                        <>
+                          {/* Units */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className={`text-sm font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                Units
+                              </span>
+                              <Badge variant="secondary" className="font-mono">{formatWeight(weights.units)}</Badge>
+                            </div>
+                            <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
+                              <div 
+                                className="h-full bg-tier-second rounded-full shadow-lg shadow-tier-second/30 transition-all duration-1000 ease-out" 
+                                style={{ width: getBarWidth(weights.units) }} 
+                              />
+                            </div>
+                            <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                              Primary driver of performance score
+                            </p>
+                          </div>
 
-                {/* Loan Complexity */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className={`text-sm font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
-                      Loan Complexity
-                    </span>
-                    <Badge variant="secondary" className="font-mono">15%</Badge>
-                  </div>
-                  <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
-                    <div 
-                      className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full shadow-lg shadow-amber-500/30 transition-all duration-1000 ease-out animate-in slide-in-from-left delay-300" 
-                      style={{ width: '15%' }} 
-                    />
-                  </div>
-                  <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                    Loan Complexity Weight: 15%
-                  </p>
-                </div>
+                          {/* Turn Time */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className={`text-sm font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                                Turn Time
+                              </span>
+                              <Badge variant="secondary" className="font-mono">{formatWeight(weights.turnTime)}</Badge>
+                            </div>
+                            <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
+                              <div 
+                                className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-lg shadow-blue-500/30 transition-all duration-1000 ease-out" 
+                                style={{ width: getBarWidth(weights.turnTime) }} 
+                              />
+                            </div>
+                            <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                              Inverse: faster = higher score
+                            </p>
+                          </div>
+
+                          {/* Loan Complexity */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className={`text-sm font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                                Loan Complexity
+                              </span>
+                              <Badge variant="secondary" className="font-mono">{formatWeight(weights.complexity)}</Badge>
+                            </div>
+                            <div className={`h-3 rounded-full overflow-hidden backdrop-blur-sm ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-slate-200/80 border border-slate-300/40'}`}>
+                              <div 
+                                className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full shadow-lg shadow-amber-500/30 transition-all duration-1000 ease-out" 
+                                style={{ width: getBarWidth(weights.complexity) }} 
+                              />
+                            </div>
+                            <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                              Rewards handling difficult loans
+                            </p>
+                          </div>
+
+                          <div className={`pt-2 mt-2 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                            <p className={`text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              TTS = Sum of (Rating × Weight) / Total Weight
+                            </p>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </CardContent>
                 </TabsContent>
 
-                {/* Story Tab Content */}
+                {/* Story Tab Content - Pareto Distribution Methodology */}
                 <TabsContent value="story" className="mt-0">
                   <CardContent className="space-y-4">
-                    <div>
-                      <h3 className={`text-sm font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                        TopTiering Methodology
-                      </h3>
-                      <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Our proprietary TopTiering system evaluates performance across three key dimensions to create a holistic view of operational excellence.
-                      </p>
-                    </div>
+                    {(() => {
+                      // Get weights from API response, with defaults
+                      const weights = apiData?.weightConfig || {
+                        units: 0.7,
+                        turnTime: 0.15,
+                        complexity: 0.15,
+                      };
+                      const totalWeight = weights.units + weights.turnTime + weights.complexity;
+                      const formatWeight = (w: number) => `${((w / totalWeight) * 100).toFixed(0)}%`;
 
-                    <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
-                      <h4 className={`text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        Units (70%)
-                      </h4>
-                      <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Volume-based output measuring productivity and throughput capacity. This is the primary driver of tiering.
-                      </p>
-                    </div>
+                      return (
+                        <>
+                          <div>
+                            <h3 className={`text-sm font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                              Pareto Distribution
+                            </h3>
+                            <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                              TopTiering uses the Pareto principle to identify high-impact performers based on value contribution patterns.
+                            </p>
+                          </div>
 
-                    <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
-                      <h4 className={`text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                        Turn Time (15%)
-                      </h4>
-                      <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Speed and efficiency metrics tracking average days to completion and process velocity.
-                      </p>
-                    </div>
+                          {/* Pareto Distribution Visual */}
+                          <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
+                            <h4 className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
+                              Value Distribution
+                            </h4>
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="w-3 h-3 rounded bg-tier-top"></span>
+                                <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>Top 20%</span>
+                                <span className={`ml-auto font-medium ${isDarkMode ? 'text-tier-top' : 'text-tier-top'}`}>~50% of value</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="w-3 h-3 rounded bg-tier-second"></span>
+                                <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>Middle 30%</span>
+                                <span className={`ml-auto font-medium ${isDarkMode ? 'text-tier-second' : 'text-tier-second'}`}>~30% of value</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="w-3 h-3 rounded bg-tier-bottom"></span>
+                                <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>Bottom 50%</span>
+                                <span className={`ml-auto font-medium ${isDarkMode ? 'text-tier-bottom' : 'text-tier-bottom'}`}>~20% of value</span>
+                              </div>
+                            </div>
+                          </div>
 
-                    <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-blue-50/30'}`}>
-                      <h4 className={`text-xs font-semibold mb-1.5 flex items-center gap-1.5 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                        Loan Complexity (15%)
-                      </h4>
-                      <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Weighted scoring of deal difficulty factors including government loans, purchase transactions, and risk indicators.
-                      </p>
-                    </div>
+                          {/* Tier Assignment */}
+                          <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-800/50' : 'bg-emerald-50/30'}`}>
+                            <h4 className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
+                              Tier Assignment (Percentile-Based)
+                            </h4>
+                            <div className="space-y-1.5 text-[11px]">
+                              <div className={`flex justify-between ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-tier-top"></span>
+                                  Top Tier
+                                </span>
+                                <span className="font-mono">80th+ percentile</span>
+                              </div>
+                              <div className={`flex justify-between ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-tier-second"></span>
+                                  Second Tier
+                                </span>
+                                <span className="font-mono">50th-80th percentile</span>
+                              </div>
+                              <div className={`flex justify-between ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-tier-bottom"></span>
+                                  Bottom Tier
+                                </span>
+                                <span className="font-mono">Below 50th percentile</span>
+                              </div>
+                            </div>
+                          </div>
 
-                    <div className={`mt-4 pt-4 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-                      <p className={`text-[11px] leading-relaxed ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
-                        Tiers are calculated by combining these weighted scores to identify top performers, consistent contributors, and areas for development.
-                      </p>
-                    </div>
+                          {/* Scoring Components */}
+                          <div>
+                            <h4 className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>
+                              Scoring Components
+                            </h4>
+                            <div className="space-y-2">
+                              <div className={`p-2 rounded ${isDarkMode ? 'bg-emerald-900/20' : 'bg-emerald-50/50'}`}>
+                                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                  Units ({formatWeight(weights.units)})
+                                </span>
+                                <p className={`text-[10px] mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                  Productivity output
+                                </p>
+                              </div>
+                              <div className={`p-2 rounded ${isDarkMode ? 'bg-blue-900/20' : 'bg-blue-50/50'}`}>
+                                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                                  Turn Time ({formatWeight(weights.turnTime)})
+                                </span>
+                                <p className={`text-[10px] mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                  Processing efficiency
+                                </p>
+                              </div>
+                              <div className={`p-2 rounded ${isDarkMode ? 'bg-amber-900/20' : 'bg-amber-50/50'}`}>
+                                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                                  Complexity ({formatWeight(weights.complexity)})
+                                </span>
+                                <p className={`text-[10px] mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                  Difficulty factor bonus
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </CardContent>
                 </TabsContent>
               </Tabs>
@@ -1715,15 +1808,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           }
                           
                           return sortedActors.map((actor: OperationsActor, index: number) => {
-                            // TTS Score color based on value
-                            const getTtsScoreColor = (score: number) => {
-                              if (score >= 120) return isDarkMode ? 'text-tier-top font-bold' : 'text-tier-top font-bold';
-                              if (score >= 100) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
-                              if (score >= 80) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
-                              return isDarkMode ? 'text-red-400' : 'text-red-600';
-                            };
-                            
-                            // Tier badge styles
+                            // Tier badge styles (used for both Tier column and TTS score color)
                             const getTierBadgeStyles = (tier: 'top' | 'second' | 'bottom') => {
                               switch (tier) {
                                 case 'top':
@@ -1732,6 +1817,17 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                                   return 'bg-tier-second text-white';
                                 case 'bottom':
                                   return 'bg-tier-bottom text-slate-800';
+                              }
+                            };
+                            // TTS score text color by API tier so it always matches the Tier column (tier is by TTS rank, not raw thresholds)
+                            const getTtsScoreTextColor = (tier: 'top' | 'second' | 'bottom') => {
+                              switch (tier) {
+                                case 'top':
+                                  return 'text-tier-top font-bold';
+                                case 'second':
+                                  return isDarkMode ? 'text-tier-second' : 'text-tier-second';
+                                case 'bottom':
+                                  return isDarkMode ? 'text-tier-bottom' : 'text-tier-bottom';
                               }
                             };
                             
@@ -1750,9 +1846,9 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                                     {actor.tier === 'top' ? 'Top' : actor.tier === 'second' ? '2nd' : 'Bottom'}
                                   </span>
                                 </td>
-                                {/* TTS Score */}
-                                <td className={`py-3 px-3 text-sm text-right font-mono ${getTtsScoreColor(actor.ttsScore)}`}>
-                                  {actor.ttsScore.toFixed(1)}
+                                {/* TTS Score - colored by API tier so it matches Tier column */}
+                                <td className={`py-3 px-3 text-sm text-right font-mono ${getTtsScoreTextColor(actor.tier)}`}>
+                                  {safeFixed(actor.ttsScore, 1)}
                                 </td>
                                 {/* Units */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
@@ -1764,15 +1860,15 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                                 </td>
                                 {/* Avg Units/Mo */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {actor.avgUnitsPerMonth.toFixed(1)}
+                                  {safeFixed(actor.avgUnitsPerMonth, 1)}
                                 </td>
                                 {/* Turn Time */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {actor.avgDays.toFixed(1)}
+                                  {safeFixed(actor.avgDays, 1)}
                                 </td>
                                 {/* Complexity */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {actor.loanComplexityScore.toFixed(1)}
+                                  {safeFixed(actor.loanComplexityScore, 1)}
                                 </td>
                                 {/* % Approved */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
@@ -1788,11 +1884,11 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                                 </td>
                                 {/* WA FICO */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {Math.round(actor.waFico)}
+                                  {Math.round(actor.waFico ?? 0)}
                                 </td>
                                 {/* WA LTV */}
                                 <td className={`py-3 px-3 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {actor.waLtv.toFixed(1)}%
+                                  {safeFixed(actor.waLtv, 1)}%
                                 </td>
                               </tr>
                             );
@@ -1997,7 +2093,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                     % of Output
                   </p>
                   <p className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                    {getTierData(drilldownModal.tier).data.unitsPercent.toFixed(1)}%
+                    {safeFixed(getTierData(drilldownModal.tier).data.unitsPercent, 1)}%
                   </p>
                 </div>
               </div>
@@ -2006,16 +2102,16 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
               <div className={`border rounded-lg overflow-hidden ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
                 <div className={`grid grid-cols-2 gap-px ${isDarkMode ? 'bg-slate-700' : 'bg-slate-200'}`}>
                   {[
-                    { label: 'Avg Units/Month', value: getTierData(drilldownModal.tier).data.avgUnitsPerMonth },
-                    { label: 'Avg Days', value: getTierData(drilldownModal.tier).data.avgDays.toFixed(2) },
+                    { label: 'Avg Units/Month', value: getTierData(drilldownModal.tier).data.avgUnitsPerMonth ?? 0 },
+                    { label: 'Avg Days', value: safeFixed(getTierData(drilldownModal.tier).data.avgDays, 2) },
                     { label: 'Volume', value: formatCurrency(getTierData(drilldownModal.tier).data.volumeOutput) },
-                    { label: 'Complexity Score', value: getTierData(drilldownModal.tier).data.loanComplexityScore.toFixed(1) },
-                    { label: 'Approval Rate', value: `${getTierData(drilldownModal.tier).data.approvedPercent.toFixed(1)}%` },
-                    { label: 'Denial Rate', value: `${getTierData(drilldownModal.tier).data.deniedPercent.toFixed(1)}%` },
-                    { label: 'Government %', value: `${getTierData(drilldownModal.tier).data.governmentPercent.toFixed(1)}%` },
-                    { label: 'Purchase %', value: `${getTierData(drilldownModal.tier).data.purchasePercent.toFixed(1)}%` },
-                    { label: 'WA FICO', value: getTierData(drilldownModal.tier).data.waFico },
-                    { label: 'WA LTV', value: `${getTierData(drilldownModal.tier).data.waLtv.toFixed(1)}%` },
+                    { label: 'Complexity Score', value: safeFixed(getTierData(drilldownModal.tier).data.loanComplexityScore, 1) },
+                    { label: 'Approval Rate', value: `${safeFixed(getTierData(drilldownModal.tier).data.approvedPercent, 1)}%` },
+                    { label: 'Denial Rate', value: `${safeFixed(getTierData(drilldownModal.tier).data.deniedPercent, 1)}%` },
+                    { label: 'Government %', value: `${safeFixed(getTierData(drilldownModal.tier).data.governmentPercent, 1)}%` },
+                    { label: 'Purchase %', value: `${safeFixed(getTierData(drilldownModal.tier).data.purchasePercent, 1)}%` },
+                    { label: 'WA FICO', value: getTierData(drilldownModal.tier).data.waFico ?? 0 },
+                    { label: 'WA LTV', value: `${safeFixed(getTierData(drilldownModal.tier).data.waLtv, 1)}%` },
                   ].map((metric, idx) => (
                     <div key={idx} className={`p-3 ${isDarkMode ? 'bg-slate-900' : 'bg-white'}`}>
                       <p className={`text-xs font-medium mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>

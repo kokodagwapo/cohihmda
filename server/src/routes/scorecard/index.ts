@@ -27,10 +27,14 @@ import {
   buildActorNotMissingClause,
   calcLoanRevenue,
   calcLoanComplexity,
+  parseComplexityConfig,
+  DEFAULT_COMPLEXITY_WEIGHTS,
   getVMaxDate,
   formatDateForSQL,
   formatMonthKey,
   assignTTSTier,
+  assignTTSTierByPercentile,
+  assignTiersByCumulativeValue,
   getActorColumnForChannel,
   getActorLabelForChannel,
   isTPOChannel,
@@ -39,14 +43,157 @@ import {
   REVENUE_SQL_EXPRESSION,
   getTenantRevenueExpression,
   TTS_TIER_THRESHOLDS,
+  TTS_TIER_PERCENTILES,
   OPS_TTS_WEIGHTS,
   SALES_TTS_WEIGHTS,
   type ActorConfig,
   type ActorMissingMode,
   type TTSTier,
+  type ComplexityConfig,
 } from "../../utils/scorecard-utils.js";
+import { getOperationsScorecardTrends } from "../../services/scorecard/operationsScorecardTrendsService.js";
 
 const router = Router();
+
+// =============================================================================
+// HELPER: Load Complexity Configuration from Database
+// =============================================================================
+
+/**
+ * Load loan complexity weights from the complexity_components table.
+ * Falls back to default weights if no configuration exists.
+ */
+async function loadComplexityConfig(
+  tenantPool: any
+): Promise<ComplexityConfig> {
+  try {
+    const result = await tenantPool.query(`
+      SELECT component_name, condition_value, weight
+      FROM public.complexity_components
+      WHERE is_active = true
+    `);
+
+    if (result.rows.length === 0) {
+      logDebug("[Scorecard] No complexity config found, using defaults");
+      return DEFAULT_COMPLEXITY_WEIGHTS;
+    }
+
+    const config = parseComplexityConfig(result.rows);
+    logDebug("[Scorecard] Loaded complexity config", {
+      rowCount: result.rows.length,
+    });
+    return config;
+  } catch (error) {
+    logWarn("[Scorecard] Failed to load complexity config, using defaults", {
+      error,
+    });
+    return DEFAULT_COMPLEXITY_WEIGHTS;
+  }
+}
+
+// =============================================================================
+// HELPER: Load Scoring Weights from Database
+// =============================================================================
+
+interface SalesWeightConfig {
+  volume: number;
+  margin: number;
+  unit: number;
+  pullThrough: number;
+  turnTime: number;
+  concession: number;
+}
+
+interface OpsWeightConfig {
+  units: number;
+  turnTime: number;
+  complexity: number;
+}
+
+/**
+ * Load sales scorecard weights from the scoring_weights table.
+ * Falls back to default weights if no configuration exists.
+ */
+async function loadSalesWeights(tenantPool: any): Promise<SalesWeightConfig> {
+  try {
+    const result = await tenantPool.query(`
+      SELECT metric_name, weight
+      FROM public.scoring_weights
+      WHERE scorecard_type = 'sales' AND is_active = true AND persona_id IS NULL
+    `);
+
+    if (result.rows.length === 0) {
+      logDebug("[Scorecard] No sales weights found, using defaults");
+      return { ...SALES_TTS_WEIGHTS };
+    }
+
+    // Build config from database rows
+    const config: SalesWeightConfig = { ...SALES_TTS_WEIGHTS };
+    for (const row of result.rows) {
+      const metricMap: Record<string, keyof SalesWeightConfig> = {
+        volume: "volume",
+        margin: "margin",
+        unit: "unit",
+        pull_through: "pullThrough",
+        turn_time: "turnTime",
+        concession: "concession",
+      };
+      const key = metricMap[row.metric_name];
+      if (key) {
+        config[key] = parseFloat(row.weight);
+      }
+    }
+
+    logDebug("[Scorecard] Loaded sales weights from database", { config });
+    return config;
+  } catch (error) {
+    logWarn("[Scorecard] Failed to load sales weights, using defaults", {
+      error,
+    });
+    return { ...SALES_TTS_WEIGHTS };
+  }
+}
+
+/**
+ * Load operations scorecard weights from the scoring_weights table.
+ * Falls back to default weights if no configuration exists.
+ */
+async function loadOpsWeights(tenantPool: any): Promise<OpsWeightConfig> {
+  try {
+    const result = await tenantPool.query(`
+      SELECT metric_name, weight
+      FROM public.scoring_weights
+      WHERE scorecard_type = 'operations' AND is_active = true AND persona_id IS NULL
+    `);
+
+    if (result.rows.length === 0) {
+      logDebug("[Scorecard] No operations weights found, using defaults");
+      return { ...OPS_TTS_WEIGHTS };
+    }
+
+    // Build config from database rows
+    const config: OpsWeightConfig = { ...OPS_TTS_WEIGHTS };
+    for (const row of result.rows) {
+      const metricMap: Record<string, keyof OpsWeightConfig> = {
+        units: "units",
+        turn_time: "turnTime",
+        complexity: "complexity",
+      };
+      const key = metricMap[row.metric_name];
+      if (key) {
+        config[key] = parseFloat(row.weight);
+      }
+    }
+
+    logDebug("[Scorecard] Loaded operations weights from database", { config });
+    return config;
+  } catch (error) {
+    logWarn("[Scorecard] Failed to load operations weights, using defaults", {
+      error,
+    });
+    return { ...OPS_TTS_WEIGHTS };
+  }
+}
 
 // =============================================================================
 // SALES SCORECARD - GET /api/scorecard/sales
@@ -82,6 +229,9 @@ router.get(
 
       // Get tenant-specific revenue expression (or default if none configured)
       const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
+      // Get tenant-specific complexity weights (or defaults)
+      const complexityConfig = await loadComplexityConfig(tenantPool);
 
       // Get user's loan access context
       const accessCtx = await getLoanAccessContext(req, tenantPool);
@@ -134,8 +284,8 @@ router.get(
         hasAccessFilter: accessCtx.requiresFiltering,
       });
 
-      // TTS Weight Configuration - matches Qlik eCCA_TVI_Score_13_Months formula
-      const weightConfig = SALES_TTS_WEIGHTS;
+      // TTS Weight Configuration - load from database or use defaults
+      const weightConfig = await loadSalesWeights(tenantPool);
 
       // SQL filtering setup
       const channelClause = buildChannelWhereClause(channelGroup);
@@ -319,8 +469,8 @@ router.get(
           }
         }
 
-        // Loan complexity
-        existing.complexityScores.push(calcLoanComplexity(l));
+        // Loan complexity (using tenant-configurable weights)
+        existing.complexityScores.push(calcLoanComplexity(l, complexityConfig));
 
         // Weighted averages (FICO, LTV, DTI)
         const fico = parseFloat(l.fico_score) || 0;
@@ -487,6 +637,15 @@ router.get(
               : 100;
 
           // TTS Score calculation (6 components)
+          // Sum of weights = 0.2 * 6 = 1.2
+          // Divide by 1.2 so average performer (all ratings = 100) scores 100
+          const weightSum =
+            weightConfig.volume +
+            weightConfig.margin +
+            weightConfig.turnTime +
+            weightConfig.pullThrough +
+            weightConfig.unit +
+            weightConfig.concession;
           const ttsScore =
             (volumeRating * weightConfig.volume +
               marginRating * weightConfig.margin +
@@ -494,10 +653,7 @@ router.get(
               pullThroughRating * weightConfig.pullThrough +
               unitRating * weightConfig.unit +
               concessionRating * weightConfig.concession) /
-            10;
-
-          // Assign tier
-          const tier = assignTTSTier(ttsScore);
+            weightSum;
 
           // Weighted averages
           const waFico =
@@ -537,17 +693,29 @@ router.get(
             pullThroughRating: safeNum(pullThroughRating),
             concessionRating: safeNum(concessionRating),
             ttsScore: safeNum(ttsScore),
-            tier,
+            tier: "bottom" as TTSTier, // Placeholder, will be assigned after sorting
           };
         })
         .sort((a, b) => b.ttsScore - a.ttsScore);
 
-      // Calculate tier summaries
-      const topActors = actorsWithScores.filter((a) => a.tier === "top");
-      const secondActors = actorsWithScores.filter((a) => a.tier === "second");
-      const bottomActors = actorsWithScores.filter((a) => a.tier === "bottom");
+      // Assign tiers based on percentile distribution (20/30/50 Pareto rule)
+      // Top 20% of actors by count → "top"
+      // Next 30% (20-50%) → "second"
+      // Remaining 50% → "bottom"
+      const actorsWithScoresAndTiers = actorsWithScores.map((actor, index) => ({
+        ...actor,
+        tier: assignTTSTierByPercentile(actorsWithScores.length, index),
+      }));
 
-      const calcTierSummary = (actors: typeof actorsWithScores) => {
+      // Use the actors with proper tiers for subsequent calculations
+      const actorsWithTiers = actorsWithScoresAndTiers;
+
+      // Calculate tier summaries
+      const topActors = actorsWithTiers.filter((a) => a.tier === "top");
+      const secondActors = actorsWithTiers.filter((a) => a.tier === "second");
+      const bottomActors = actorsWithTiers.filter((a) => a.tier === "bottom");
+
+      const calcTierSummary = (actors: typeof actorsWithTiers) => {
         if (actors.length === 0) {
           return {
             count: 0,
@@ -557,8 +725,18 @@ router.get(
             avgTtsScore: 0,
             avgTurnTime: 0,
             pullThrough: 0,
+            loanComplexityScore: 0,
           };
         }
+        // Calculate weighted average complexity (weighted by units)
+        const complexityWeighted = actors.reduce(
+          (sum, a) => sum + a.avgComplexity * a.units,
+          0
+        );
+        const tierTotalUnits = actors.reduce((sum, a) => sum + a.units, 0);
+        const avgComplexity =
+          tierTotalUnits > 0 ? complexityWeighted / tierTotalUnits : 100;
+
         return {
           count: actors.length,
           units: actors.reduce((sum, a) => sum + a.units, 0),
@@ -570,6 +748,7 @@ router.get(
             actors.reduce((sum, a) => sum + a.avgTurnTime, 0) / actors.length,
           pullThrough:
             actors.reduce((sum, a) => sum + a.pullThrough, 0) / actors.length,
+          loanComplexityScore: avgComplexity,
         };
       };
 
@@ -579,9 +758,17 @@ router.get(
         bottom: calcTierSummary(bottomActors),
       };
 
+      // Calculate company-wide average complexity (weighted by units)
+      const companyComplexityWeighted = actorsWithTiers.reduce(
+        (sum, a) => sum + a.avgComplexity * a.units,
+        0
+      );
+      const companyAvgComplexity =
+        totalUnits > 0 ? companyComplexityWeighted / totalUnits : 100;
+
       // Company totals
       const totals = {
-        actorCount: actorsWithScores.length,
+        actorCount: actorsWithTiers.length,
         units: totalUnits,
         volume: totalVolume,
         revenue: totalRevenue,
@@ -589,19 +776,20 @@ router.get(
         avgTurnTime: companyAvgTurnTime,
         pullThrough: companyPullThrough,
         avgTtsScore:
-          actorsWithScores.length > 0
-            ? actorsWithScores.reduce((sum, a) => sum + a.ttsScore, 0) /
-              actorsWithScores.length
+          actorsWithTiers.length > 0
+            ? actorsWithTiers.reduce((sum, a) => sum + a.ttsScore, 0) /
+              actorsWithTiers.length
             : 0,
+        loanComplexityScore: companyAvgComplexity,
       };
 
       logInfo("[Scorecard/Sales] Complete", {
-        actors: actorsWithScores.length,
+        actors: actorsWithTiers.length,
         totalUnits,
       });
 
       res.json({
-        actors: actorsWithScores,
+        actors: actorsWithTiers,
         companyAverages,
         weightConfig,
         tierSummary,
@@ -650,6 +838,9 @@ router.get(
     try {
       const tenantPool = getTenantContext(req).tenantPool;
 
+      // Get tenant-specific complexity weights (or defaults)
+      const complexityConfig = await loadComplexityConfig(tenantPool);
+
       const actorType = (req.query.actor_type as string) || "underwriter";
       const dateRange = (req.query.date_range as string) || "3-months";
       const channelGroup = req.query.channel_group as string | undefined;
@@ -670,7 +861,8 @@ router.get(
       const monthsBack = monthsMap[dateRange] || 3;
 
       const config = OPERATIONS_ACTOR_CONFIGS[actorType];
-      const weightConfig = OPS_TTS_WEIGHTS;
+      // TTS Weight Configuration - load from database or use defaults
+      const weightConfig = await loadOpsWeights(tenantPool);
 
       // Get vMaxDate
       const vMaxDate = await getVMaxDate(tenantPool);
@@ -736,35 +928,9 @@ router.get(
       };
 
       // Helper: Calculate loan complexity for operations
+      // Uses the same configurable weights as Sales Scorecard for consistency
       const calcOpsComplexity = (l: any): number => {
-        let complexity = 0;
-
-        // Government loan bonus (15%)
-        const loanType = (l.loan_type || "").toUpperCase();
-        if (
-          loanType.includes("FHA") ||
-          loanType.includes("VA") ||
-          loanType.includes("USDA")
-        ) {
-          complexity += 0.15;
-        }
-
-        // Purchase transaction bonus (10%)
-        const loanPurpose = (l.loan_purpose || "").toUpperCase();
-        if (loanPurpose.includes("PURCHASE")) {
-          complexity += 0.1;
-        }
-
-        // Risk factors
-        const fico = parseFloat(l.fico_score) || 0;
-        const ltv = parseFloat(l.ltv_ratio) || 0;
-        const dti = parseFloat(l.be_dti_ratio) || 0;
-
-        if (fico > 0 && fico < 680) complexity += 0.02;
-        if (ltv > 80) complexity += 0.02;
-        if (dti > 43) complexity += 0.01;
-
-        return (1 + complexity) * 100;
+        return calcLoanComplexity(l, complexityConfig);
       };
 
       // Aggregate by actor
@@ -918,13 +1084,11 @@ router.get(
               ? (actorAvgComplexity / companyAvgComplexity) * 100
               : 100;
 
-          // TTS Score (70/15/15)
+          // TTS Score (70/15/15) - weights sum to 1.0, so average performer scores 100
           const ttsScore =
             unitRating * weightConfig.units +
             turnTimeRating * weightConfig.turnTime +
             complexityRating * weightConfig.complexity;
-
-          const tier = assignTTSTier(ttsScore);
 
           // Weighted averages
           const waFico =
@@ -950,7 +1114,7 @@ router.get(
             units: safeNum(actor.units),
             volume: safeNum(actor.volume),
             avgDays: safeNum(actorAvgTurnTime),
-            avgComplexity: safeNum(actorAvgComplexity),
+            loanComplexityScore: safeNum(actorAvgComplexity),
             waFico: safeNum(waFico),
             waLtv: safeNum(waLtv),
             approvedPercent: safeNum(approvedPercent),
@@ -961,17 +1125,35 @@ router.get(
             turnTimeRating: safeNum(turnTimeRating),
             complexityRating: safeNum(complexityRating),
             ttsScore: safeNum(ttsScore),
-            tier,
+            tier: "bottom" as TTSTier, // Placeholder, will be assigned after sorting
           };
         })
         .sort((a, b) => b.ttsScore - a.ttsScore);
 
-      // Tier summaries
-      const topActors = actorsWithScores.filter((a) => a.tier === "top");
-      const secondActors = actorsWithScores.filter((a) => a.tier === "second");
-      const bottomActors = actorsWithScores.filter((a) => a.tier === "bottom");
+      // Pareto: assign tiers by CUMULATIVE VALUE so top tier ≈ 50% of units, second ≈ 30%, bottom ≈ 20%.
+      const byValue = [...actorsWithScores].sort((a, b) => b.units - a.units);
+      const opsActorsWithTiers = assignTiersByCumulativeValue(
+        byValue,
+        totalUnits
+      );
 
-      const calcOpsTierSummary = (actors: typeof actorsWithScores) => {
+      logInfo("[Scorecard/Operations] Tier assignment by cumulative value", {
+        actorCount: opsActorsWithTiers.length,
+        topCount: opsActorsWithTiers.filter((a) => a.tier === "top").length,
+        topUnits: opsActorsWithTiers.filter((a) => a.tier === "top").reduce((s, a) => s + a.units, 0),
+        totalUnits,
+      });
+
+      // Tier summaries
+      const topActors = opsActorsWithTiers.filter((a) => a.tier === "top");
+      const secondActors = opsActorsWithTiers.filter(
+        (a) => a.tier === "second"
+      );
+      const bottomActors = opsActorsWithTiers.filter(
+        (a) => a.tier === "bottom"
+      );
+
+      const calcOpsTierSummary = (actors: typeof opsActorsWithTiers) => {
         if (actors.length === 0) {
           return {
             count: 0,
@@ -979,11 +1161,48 @@ router.get(
             unitsPercent: 0,
             volume: 0,
             avgDays: 0,
-            avgComplexity: 100,
+            loanComplexityScore: 100,
+            avgUnitsPerMonth: 0,
+            compensation: "-",
+            costPerFile: "-",
+            approvedPercent: 0,
+            deniedPercent: 0,
+            governmentPercent: 0,
+            purchasePercent: 0,
+            waFico: 0,
+            waLtv: 0,
             avgTtsScore: 0,
           };
         }
         const tierUnits = actors.reduce((sum, a) => sum + a.units, 0);
+        // Calculate tier percentages (weighted by units)
+        const tierApproved = actors.reduce(
+          (sum, a) => sum + (a.approvedPercent * a.units) / 100,
+          0
+        );
+        const tierDenied = actors.reduce(
+          (sum, a) => sum + (a.deniedPercent * a.units) / 100,
+          0
+        );
+        const tierGovernment = actors.reduce(
+          (sum, a) => sum + (a.governmentPercent * a.units) / 100,
+          0
+        );
+        const tierPurchase = actors.reduce(
+          (sum, a) => sum + (a.purchasePercent * a.units) / 100,
+          0
+        );
+        const tierDecisions = tierApproved + tierDenied;
+        // Weighted averages for FICO and LTV
+        const tierFicoWeighted = actors.reduce(
+          (sum, a) => sum + a.waFico * a.units,
+          0
+        );
+        const tierLtvWeighted = actors.reduce(
+          (sum, a) => sum + a.waLtv * a.units,
+          0
+        );
+
         return {
           count: actors.length,
           units: tierUnits,
@@ -991,8 +1210,22 @@ router.get(
           volume: actors.reduce((sum, a) => sum + a.volume, 0),
           avgDays:
             actors.reduce((sum, a) => sum + a.avgDays, 0) / actors.length,
-          avgComplexity:
-            actors.reduce((sum, a) => sum + a.avgComplexity, 0) / actors.length,
+          loanComplexityScore:
+            actors.reduce((sum, a) => sum + a.loanComplexityScore, 0) /
+            actors.length,
+          avgUnitsPerMonth: tierUnits / actors.length / Math.max(1, monthsBack),
+          compensation: "-",
+          costPerFile: "-",
+          approvedPercent:
+            tierDecisions > 0 ? (tierApproved / tierDecisions) * 100 : 0,
+          deniedPercent:
+            tierDecisions > 0 ? (tierDenied / tierDecisions) * 100 : 0,
+          governmentPercent:
+            tierUnits > 0 ? (tierGovernment / tierUnits) * 100 : 0,
+          purchasePercent:
+            tierUnits > 0 ? (tierPurchase / tierUnits) * 100 : 0,
+          waFico: tierUnits > 0 ? tierFicoWeighted / tierUnits : 0,
+          waLtv: tierUnits > 0 ? tierLtvWeighted / tierUnits : 0,
           avgTtsScore:
             actors.reduce((sum, a) => sum + a.ttsScore, 0) / actors.length,
         };
@@ -1004,13 +1237,64 @@ router.get(
         bottom: calcOpsTierSummary(bottomActors),
       };
 
-      // Company totals
+      // Company totals - include all fields expected by frontend
+      // Calculate company-wide percentages from all actors
+      const totalApproved = opsActorsWithTiers.reduce(
+        (sum, a) => sum + (a.approvedPercent * a.units) / 100,
+        0
+      );
+      const totalDenied = opsActorsWithTiers.reduce(
+        (sum, a) => sum + (a.deniedPercent * a.units) / 100,
+        0
+      );
+      const totalGovernment = opsActorsWithTiers.reduce(
+        (sum, a) => sum + (a.governmentPercent * a.units) / 100,
+        0
+      );
+      const totalPurchase = opsActorsWithTiers.reduce(
+        (sum, a) => sum + (a.purchasePercent * a.units) / 100,
+        0
+      );
+      const totalDecisions = totalApproved + totalDenied;
+
+      // Weighted average FICO and LTV across all actors (weighted by units)
+      const totalFicoWeighted = opsActorsWithTiers.reduce(
+        (sum, a) => sum + a.waFico * a.units,
+        0
+      );
+      const totalLtvWeighted = opsActorsWithTiers.reduce(
+        (sum, a) => sum + a.waLtv * a.units,
+        0
+      );
+
       const totals = {
-        actorCount: actorsWithScores.length,
+        count: opsActorsWithTiers.length,
         units: totalUnits,
+        unitsPercent: 100,
         volume: totalVolume,
         avgDays: companyAvgTurnTime,
-        avgComplexity: companyAvgComplexity,
+        loanComplexityScore: companyAvgComplexity,
+        avgUnitsPerMonth:
+          opsActorsWithTiers.length > 0
+            ? avgUnits / Math.max(1, monthsBack)
+            : 0,
+        compensation: "-",
+        costPerFile: "-",
+        approvedPercent:
+          totalDecisions > 0 ? (totalApproved / totalDecisions) * 100 : 0,
+        deniedPercent:
+          totalDecisions > 0 ? (totalDenied / totalDecisions) * 100 : 0,
+        governmentPercent:
+          totalUnits > 0 ? (totalGovernment / totalUnits) * 100 : 0,
+        purchasePercent:
+          totalUnits > 0 ? (totalPurchase / totalUnits) * 100 : 0,
+        waFico: totalUnits > 0 ? totalFicoWeighted / totalUnits : 0,
+        waLtv: totalUnits > 0 ? totalLtvWeighted / totalUnits : 0,
+        avgTtsScore:
+          opsActorsWithTiers.length > 0
+            ? opsActorsWithTiers.reduce((sum, a) => sum + a.ttsScore, 0) /
+              opsActorsWithTiers.length
+            : 0,
       };
 
       const companyAverages = {
@@ -1020,12 +1304,13 @@ router.get(
       };
 
       logInfo("[Scorecard/Operations] Complete", {
-        actors: actorsWithScores.length,
+        actors: opsActorsWithTiers.length,
         totalUnits,
       });
 
+      res.setHeader("X-Scorecard-Tier-By", "value-rank");
       res.json({
-        actors: actorsWithScores,
+        actors: opsActorsWithTiers,
         companyAverages,
         weightConfig,
         tierSummary,
@@ -1079,123 +1364,23 @@ router.get(
         return res.status(400).json({ error: "Invalid actor_type" });
       }
 
-      const config = OPERATIONS_ACTOR_CONFIGS[actorType];
-      const vMaxDate = await getVMaxDate(tenantPool);
-
-      const effectiveEndDate = new Date(vMaxDate);
-      const effectiveStartDate = new Date(
-        vMaxDate.getFullYear(),
-        vMaxDate.getMonth() - monthsCount,
-        1
-      );
-
-      const channelClause = buildChannelWhereClause(channelGroup);
-      const startDateStr = formatDateForSQL(effectiveStartDate);
-      const endDateStr = formatDateForSQL(effectiveEndDate);
-
       logInfo("[Scorecard/Operations-Trends] Start", {
         actorType,
         months: monthsCount,
       });
 
-      // Fetch loans with monthly breakdown
-      const loansResult = await tenantPool.query(
-        `
-      SELECT 
-        ${config.actorColumn} as actor_name,
-        TO_CHAR(${config.outputDateField}, 'YYYY-MM') as month,
-        COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) as units,
-        SUM(loan_amount) as volume
-      FROM loans
-      WHERE ${config.outputDateField} IS NOT NULL
-        AND ${config.outputDateField} >= $1
-        AND ${config.outputDateField} < $2
-        AND ${config.actorColumn} IS NOT NULL
-        AND TRIM(${config.actorColumn}) != ''
-        AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
-        ${channelClause}
-      GROUP BY ${config.actorColumn}, TO_CHAR(${config.outputDateField}, 'YYYY-MM')
-      ORDER BY ${config.actorColumn}, month
-    `,
-        [startDateStr, endDateStr]
-      );
-
-      // Build actor trends data structure
-      const actorMonthlyData = new Map<
-        string,
-        Map<string, { units: number; volume: number }>
-      >();
-      const allMonths = new Set<string>();
-
-      loansResult.rows.forEach((row: any) => {
-        const actorName = row.actor_name;
-        const month = row.month;
-        allMonths.add(month);
-
-        if (!actorMonthlyData.has(actorName)) {
-          actorMonthlyData.set(actorName, new Map());
-        }
-        actorMonthlyData.get(actorName)!.set(month, {
-          units: parseInt(row.units) || 0,
-          volume: parseFloat(row.volume) || 0,
-        });
-      });
-
-      // Sort months
-      const sortedMonths = Array.from(allMonths).sort();
-
-      // Build response
-      const actors = Array.from(actorMonthlyData.entries())
-        .map(([name, monthData]) => {
-          const totalUnits = Array.from(monthData.values()).reduce(
-            (sum, d) => sum + d.units,
-            0
-          );
-          const totalVolume = Array.from(monthData.values()).reduce(
-            (sum, d) => sum + d.volume,
-            0
-          );
-
-          const monthlyData = sortedMonths.map((month) => ({
-            month,
-            units: monthData.get(month)?.units || 0,
-            volume: monthData.get(month)?.volume || 0,
-          }));
-
-          return {
-            name,
-            totalUnits,
-            totalVolume,
-            avgUnitsPerMonth: totalUnits / sortedMonths.length,
-            monthlyData,
-          };
-        })
-        .sort((a, b) => b.totalUnits - a.totalUnits);
-
-      // Calculate monthly totals
-      const monthlyTotals = sortedMonths.map((month) => {
-        const monthTotal = actors.reduce((sum, a) => {
-          const monthData = a.monthlyData.find((m) => m.month === month);
-          return sum + (monthData?.units || 0);
-        }, 0);
-        return { month, units: monthTotal };
+      const result = await getOperationsScorecardTrends(tenantPool, {
+        actorType,
+        monthsCount,
+        channelGroup,
       });
 
       logInfo("[Scorecard/Operations-Trends] Complete", {
-        actors: actors.length,
-        months: sortedMonths.length,
+        actors: result.actors.length,
+        months: result.months.length,
       });
 
-      res.json({
-        actors,
-        months: sortedMonths,
-        monthlyTotals,
-        dateRange: {
-          startDate: effectiveStartDate.toISOString(),
-          endDate: effectiveEndDate.toISOString(),
-          months: monthsCount,
-        },
-      });
+      res.json(result);
     } catch (error: any) {
       logError("Error fetching operations trends data", error, {
         userId: req.userId,

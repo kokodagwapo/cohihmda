@@ -14,6 +14,10 @@ import {
 } from "../middleware/tenantContext.js";
 import { logInfo, logError, logDebug } from "../services/logger.js";
 import { clearTenantRevenueExpressionCache } from "../utils/scorecard-utils.js";
+import {
+  getStaffingUnitTargets,
+  type StaffingUnitTargets,
+} from "../utils/staffingUnitTargets.js";
 
 const router = express.Router();
 
@@ -1442,12 +1446,14 @@ router.get(
       const { scorecardType } = req.params;
       const personaId = req.query.persona_id as string | undefined;
 
+      // Use DISTINCT ON to get only the most recent entry per metric (in case of duplicates)
       const result = await tenantPool.query(
         `
-      SELECT id, scorecard_type, persona_id, metric_name, weight, is_active, description, created_at, updated_at
+      SELECT DISTINCT ON (scorecard_type, COALESCE(persona_id::text, 'null'), metric_name)
+        id, scorecard_type, persona_id, metric_name, weight, is_active, description, created_at, updated_at
       FROM public.scoring_weights
       WHERE scorecard_type = $1 AND (persona_id = $2 OR persona_id IS NULL)
-      ORDER BY persona_id NULLS LAST, metric_name
+      ORDER BY scorecard_type, COALESCE(persona_id::text, 'null'), metric_name, updated_at DESC NULLS LAST
     `,
         [scorecardType, personaId || null]
       );
@@ -1498,36 +1504,65 @@ router.put(
 
       const data = schema.parse(req.body);
 
-      // Validate weights sum to 1.0 (with tolerance for floating point)
+      // Note: We don't require weights to sum to exactly 1.0 because:
+      // - Sales TTS uses 6 metrics at 0.2 each (sum = 1.2), normalized by dividing by sum
+      // - Operations TTS uses 3 metrics that sum to 1.0
+      // The scorecard calculation normalizes weights anyway, so any sum works.
+      // Just validate that at least one weight is non-zero.
       const totalWeight = data.weights.reduce((sum, w) => sum + w.weight, 0);
-      if (Math.abs(totalWeight - 1.0) > 0.01) {
+      if (totalWeight <= 0) {
         return res.status(400).json({
-          error: `Weights must sum to 1.0 (current sum: ${totalWeight.toFixed(
-            2
-          )})`,
+          error: "At least one weight must be greater than zero",
         });
       }
 
       // Upsert each weight
+      // Note: For persona_id = NULL, we use a partial unique index (idx_scoring_weights_unique_null_persona)
+      // which targets (scorecard_type, metric_name) WHERE persona_id IS NULL.
+      // For non-null persona_id, we use the regular unique constraint.
       const results = [];
       for (const w of data.weights) {
-        const result = await tenantPool.query(
-          `
-        INSERT INTO public.scoring_weights (scorecard_type, persona_id, metric_name, weight, description, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (scorecard_type, persona_id, metric_name)
-        DO UPDATE SET weight = $4, description = COALESCE($5, scoring_weights.description), updated_at = NOW()
-        RETURNING *
-      `,
-          [
-            scorecardType,
-            data.persona_id || null,
-            w.metric_name,
-            w.weight,
-            w.description || null,
-            req.userId,
-          ]
-        );
+        const personaId = data.persona_id || null;
+        let result;
+
+        if (personaId === null) {
+          // Use ON CONFLICT for partial unique index on (scorecard_type, metric_name) WHERE persona_id IS NULL
+          result = await tenantPool.query(
+            `
+            INSERT INTO public.scoring_weights (scorecard_type, persona_id, metric_name, weight, description, created_by)
+            VALUES ($1, NULL, $2, $3, $4, $5)
+            ON CONFLICT (scorecard_type, metric_name) WHERE persona_id IS NULL
+            DO UPDATE SET weight = $3, description = COALESCE($4, scoring_weights.description), updated_at = NOW()
+            RETURNING *
+            `,
+            [
+              scorecardType,
+              w.metric_name,
+              w.weight,
+              w.description || null,
+              req.userId,
+            ]
+          );
+        } else {
+          // Use ON CONFLICT for regular unique constraint
+          result = await tenantPool.query(
+            `
+            INSERT INTO public.scoring_weights (scorecard_type, persona_id, metric_name, weight, description, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (scorecard_type, persona_id, metric_name)
+            DO UPDATE SET weight = $4, description = COALESCE($5, scoring_weights.description), updated_at = NOW()
+            RETURNING *
+            `,
+            [
+              scorecardType,
+              personaId,
+              w.metric_name,
+              w.weight,
+              w.description || null,
+              req.userId,
+            ]
+          );
+        }
         results.push(result.rows[0]);
       }
 
@@ -1543,6 +1578,83 @@ router.put(
         scorecardType: req.params.scorecardType,
       });
       res.status(500).json({ error: "Failed to update scoring weights" });
+    }
+  }
+);
+
+// ============================================
+// STAFFING UNIT TARGETS
+// ============================================
+
+/**
+ * GET /api/tenant-config/staffing-unit-targets
+ * Returns unit targets per role (processor, underwriter, closer, other)
+ */
+router.get(
+  "/staffing-unit-targets",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const targets = await getStaffingUnitTargets(tenantPool);
+      res.json(targets);
+    } catch (error: any) {
+      logError("Error fetching staffing unit targets", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({ error: "Failed to fetch staffing unit targets" });
+    }
+  }
+);
+
+const staffingUnitTargetsSchema = z.object({
+  processor: z.number().int().positive(),
+  underwriter: z.number().int().positive(),
+  closer: z.number().int().positive(),
+  other: z.number().int().positive(),
+});
+
+/**
+ * PUT /api/tenant-config/staffing-unit-targets
+ * Update unit targets per role
+ */
+router.put(
+  "/staffing-unit-targets",
+  authenticateToken,
+  attachTenantContext,
+  requireRole("tenant_admin", "super_admin"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const data = staffingUnitTargetsSchema.parse(req.body);
+      const roles: (keyof StaffingUnitTargets)[] = [
+        "processor",
+        "underwriter",
+        "closer",
+        "other",
+      ];
+      for (const role of roles) {
+        await tenantPool.query(
+          `
+          INSERT INTO public.staffing_unit_targets (role_key, units_per_month, updated_at)
+          VALUES ($1, $2, NOW())
+          ON CONFLICT (role_key) DO UPDATE SET units_per_month = $2, updated_at = NOW()
+          `,
+          [role, data[role]]
+        );
+      }
+      const targets = await getStaffingUnitTargets(tenantPool);
+      logInfo("Staffing unit targets updated", { userId: req.userId });
+      res.json(targets);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid payload", details: error.errors });
+      }
+      logError("Error updating staffing unit targets", error, {
+        userId: req.userId,
+      });
+      res.status(500).json({ error: "Failed to update staffing unit targets" });
     }
   }
 );

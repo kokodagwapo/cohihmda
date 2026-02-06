@@ -13,7 +13,10 @@ import {
   getInsights,
   getClosingFalloutForecast,
   getDashboardOverview,
+  getFinancialModelingBaseline,
+  type FinancialModelingPeriod,
 } from "../../services/dashboard/analyticsService.js";
+import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 
 const router = Router();
 
@@ -308,6 +311,75 @@ router.get(
 
       res.status(500).json({
         error: "Failed to fetch dashboard overview",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/financial-modeling-baseline
+ * Returns baseline metrics for the Financial Modeling Sandbox (revenue, volume, margin BPS, pull-through, units by role).
+ * Query params: period (optional: 'all' | 'mtd' | 'ytd' | 'last_month' | 'last_year', default 'ytd')
+ * Respects user-level loan access filtering
+ */
+router.get(
+  "/financial-modeling-baseline",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+
+      const accessCtx = await getLoanAccessContext(
+        req,
+        tenantContext.tenantPool
+      );
+
+      if (accessCtx.hasNoAccess) {
+        const targetUnits = await getStaffingUnitTargets(tenantContext.tenantPool);
+        return res.json({
+          totalRevenue: 0,
+          totalVolume: 0,
+          fundedUnits: 0,
+          marginBps: 0,
+          pullThroughRate: 0,
+          mloCount: 0,
+          avgUnitsPerMlo: 0,
+          avgUnitsPerProcessor: 0,
+          avgUnitsPerUnderwriter: 0,
+          avgUnitsPerCloser: 0,
+          targetUnits,
+          dateRange: { start: null, end: null },
+          accessFiltered: true,
+        });
+      }
+
+      const period = (req.query.period as FinancialModelingPeriod) || "trailing_12";
+      const validPeriods: FinancialModelingPeriod[] = [
+        "all",
+        "mtd",
+        "ytd",
+        "trailing_12",
+        "last_month",
+        "last_year",
+      ];
+      const effectivePeriod = validPeriods.includes(period) ? period : "trailing_12";
+
+      const result = await getFinancialModelingBaseline(
+        tenantContext.tenantPool,
+        effectivePeriod,
+        { userAccessFilter: accessCtx.getFilter("l") }
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error fetching financial modeling baseline:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch financial modeling baseline")) {
+        return;
+      }
+      res.status(500).json({
+        error: "Failed to fetch financial modeling baseline",
         details:
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });

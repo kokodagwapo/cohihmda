@@ -1,10 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTheme } from "@/components/theme-provider";
-import { Printer, RotateCcw } from "lucide-react";
+import { Printer, RotateCcw, Loader2 } from "lucide-react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
+import {
+  useFinancialModelingBaseline,
+  type FinancialModelingBaseline,
+} from "@/hooks/useFinancialModelingBaseline";
 
 // Horizontal Slider Component
 interface HorizontalSliderProps {
@@ -138,27 +142,82 @@ interface ProfitImprovementData {
   profitImprovement: number;
 }
 
-export function FinancialModelingSandboxView() {
+export interface FinancialModelingSandboxViewProps {
+  selectedTenantId?: string | null;
+}
+
+// Fallback constants when no tenant baseline data (demo/industry assumptions)
+const FALLBACK_MARGIN_BP = 20;
+const FALLBACK_PULL_THROUGH = 64.09;
+const FALLBACK_MLO_ACTUAL = 4.5;
+const FALLBACK_MARGIN_PROFIT = 932725;
+const FALLBACK_PROCESSOR_ACTUAL = 32;
+const FALLBACK_UNDERWRITER_ACTUAL = 14;
+const FALLBACK_CLOSER_ACTUAL = 17;
+const FALLBACK_OTHER_ACTUAL = 17;
+
+// Qlik extension config: role annual salaries (used for Actual Cost = monthlyComp/actual, Target Cost = monthlyComp/target)
+const ROLE_ANNUAL_SALARIES: Record<string, number> = {
+  Processor: 75000,
+  Underwriter: 125000,
+  Closer: 85000,
+  Other: 70000,
+};
+
+// Default target units (sliders) – match Qlik actualTargets / StaffingUnits (25, 45, 85, 85)
+const DEFAULT_TARGET_PROCESSOR = 25;
+const DEFAULT_TARGET_UNDERWRITER = 45;
+const DEFAULT_TARGET_CLOSER = 85;
+const DEFAULT_TARGET_OTHER = 85;
+
+export function FinancialModelingSandboxView({ selectedTenantId }: FinancialModelingSandboxViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === "dark";
 
-  // Slider values - matching the image
-  const [marginIncreaseBP, setMarginIncreaseBP] = useState(20);
-  const [pullThroughPercent, setPullThroughPercent] = useState(64.09);
-  const [mlo, setMlo] = useState(3);
-  const [processor, setProcessor] = useState(100);
-  const [underwriter, setUnderwriter] = useState(100);
-  const [closer, setCloser] = useState(85);
-  const [otherSupport, setOtherSupport] = useState(85);
+  const { data: baseline, loading: baselineLoading, error: baselineError } = useFinancialModelingBaseline(
+    selectedTenantId ?? undefined,
+    "trailing_12" // Rolling 12 months
+  );
+
+  // Slider values; targets default to Qlik benchmark (25, 45, 85, 85)
+  const [marginIncreaseBP, setMarginIncreaseBP] = useState(FALLBACK_MARGIN_BP);
+  const [pullThroughPercent, setPullThroughPercent] = useState(FALLBACK_PULL_THROUGH);
+  const [mlo, setMlo] = useState(FALLBACK_MLO_ACTUAL);
+  const [processor, setProcessor] = useState(DEFAULT_TARGET_PROCESSOR);
+  const [underwriter, setUnderwriter] = useState(DEFAULT_TARGET_UNDERWRITER);
+  const [closer, setCloser] = useState(DEFAULT_TARGET_CLOSER);
+  const [otherSupport, setOtherSupport] = useState(DEFAULT_TARGET_OTHER);
+
+  // When baseline loads, sync margin/pull-through/MLO to actuals and role sliders to tenant targets
+  useEffect(() => {
+    if (!baseline) return;
+    const marginBp = baseline.marginBps > 0 ? baseline.marginBps : FALLBACK_MARGIN_BP;
+    const pullThrough = baseline.pullThroughRate > 0 ? baseline.pullThroughRate : FALLBACK_PULL_THROUGH;
+    const mloActual = baseline.avgUnitsPerMlo > 0 ? baseline.avgUnitsPerMlo : FALLBACK_MLO_ACTUAL;
+    setMarginIncreaseBP(marginBp);
+    setPullThroughPercent(pullThrough);
+    setMlo(mloActual);
+    const t = baseline.targetUnits;
+    if (t) {
+      setProcessor(t.processor ?? DEFAULT_TARGET_PROCESSOR);
+      setUnderwriter(t.underwriter ?? DEFAULT_TARGET_UNDERWRITER);
+      setCloser(t.closer ?? DEFAULT_TARGET_CLOSER);
+      setOtherSupport(t.other ?? DEFAULT_TARGET_OTHER);
+    }
+  }, [baseline]);
 
   const resetSliders = () => {
-    setMarginIncreaseBP(20);
-    setPullThroughPercent(64.09);
-    setMlo(3);
-    setProcessor(100);
-    setUnderwriter(100);
-    setCloser(85);
-    setOtherSupport(85);
+    const marginBp = baseline?.marginBps && baseline.marginBps > 0 ? baseline.marginBps : FALLBACK_MARGIN_BP;
+    const pullThrough = baseline?.pullThroughRate && baseline.pullThroughRate > 0 ? baseline.pullThroughRate : FALLBACK_PULL_THROUGH;
+    const mloActual = baseline?.avgUnitsPerMlo && baseline.avgUnitsPerMlo > 0 ? baseline.avgUnitsPerMlo : FALLBACK_MLO_ACTUAL;
+    setMarginIncreaseBP(marginBp);
+    setPullThroughPercent(pullThrough);
+    setMlo(mloActual);
+    const t = baseline?.targetUnits;
+    setProcessor(t?.processor ?? DEFAULT_TARGET_PROCESSOR);
+    setUnderwriter(t?.underwriter ?? DEFAULT_TARGET_UNDERWRITER);
+    setCloser(t?.closer ?? DEFAULT_TARGET_CLOSER);
+    setOtherSupport(t?.other ?? DEFAULT_TARGET_OTHER);
   };
 
   const printResults = () => {
@@ -185,68 +244,131 @@ export function FinancialModelingSandboxView() {
    * TODO: These should be configurable per tenant or fetched from company data.
    */
 
-  // Base target units per month (industry benchmarks)
-  const BASE_TARGET_PROCESSOR = 25; // Units/month target for processors
-  const BASE_TARGET_UNDERWRITER = 45; // Units/month target for underwriters
-  const BASE_TARGET_CLOSER = 85; // Units/month target for closers
-  const BASE_TARGET_OTHER = 85; // Units/month target for other support
+  // Actual units per month per FTE (Qlik formula: total output / (avg distinct per month * num months))
+  // Use *PerMonthFTE when available, else fallback. Other uses same as Closer (Qlik PostCloser = Closer actual).
+  const processorActual =
+    baseline?.actualUnitsPerProcessorPerMonthFTE &&
+    baseline.actualUnitsPerProcessorPerMonthFTE > 0
+      ? Math.round(baseline.actualUnitsPerProcessorPerMonthFTE)
+      : FALLBACK_PROCESSOR_ACTUAL;
+  const underwriterActual =
+    baseline?.actualUnitsPerUnderwriterPerMonthFTE &&
+    baseline.actualUnitsPerUnderwriterPerMonthFTE > 0
+      ? Math.round(baseline.actualUnitsPerUnderwriterPerMonthFTE)
+      : FALLBACK_UNDERWRITER_ACTUAL;
+  const closerActual =
+    baseline?.actualUnitsPerCloserPerMonthFTE &&
+    baseline.actualUnitsPerCloserPerMonthFTE > 0
+      ? Math.round(baseline.actualUnitsPerCloserPerMonthFTE)
+      : FALLBACK_CLOSER_ACTUAL;
+  const otherActual = closerActual; // Qlik: PostCloser/Other uses same actual as Closer
 
-  // Actual performance values (baseline scenario)
-  const processorActual = 24;
-  const processorActualCost = 260; // Cost per unit ($)
-  const processorBaseTargetCost = 250; // Target cost per unit at base productivity
-  const processorBaseSavings = 10; // Savings per unit at base ($)
-  const processorBaseImprovement = 20400; // Total improvement at base ($)
+  // Revenue/margin baseline from tenant or fallbacks
+  const baseMloActual =
+    baseline?.avgUnitsPerMlo && baseline.avgUnitsPerMlo > 0
+      ? baseline.avgUnitsPerMlo
+      : FALLBACK_MLO_ACTUAL;
+  const basePullThroughActual =
+    baseline?.pullThroughRate && baseline.pullThroughRate > 0
+      ? baseline.pullThroughRate
+      : FALLBACK_PULL_THROUGH;
+  const baseMarginActualBp =
+    baseline?.marginBps && baseline.marginBps > 0
+      ? baseline.marginBps
+      : FALLBACK_MARGIN_BP;
+  const baseMarginProfit =
+    baseline?.totalRevenue && baseline.totalRevenue > 0
+      ? baseline.totalRevenue
+      : FALLBACK_MARGIN_PROFIT;
 
-  const underwriterActual = 22;
-  const underwriterActualCost = 473;
-  const underwriterBaseTargetCost = 231;
-  const underwriterBaseSavings = 242;
-  const underwriterBaseImprovement = 493680;
+  const marginProfitPerBp =
+    baseMarginActualBp > 0 ? baseMarginProfit / baseMarginActualBp : 0;
 
-  const closerActual = 33;
-  const closerActualCost = 215;
-  const closerBaseTargetCost = 83;
-  const closerBaseSavings = 132;
-  const closerBaseImprovement = 269280;
+  // Total closed units and volume in period (rolling 12 months)
+  const totalClosedUnits = baseline?.fundedUnits ?? 0;
+  const totalClosedVolume = baseline?.totalVolume ?? 0;
+  const avgLoanSize =
+    totalClosedUnits > 0 ? totalClosedVolume / totalClosedUnits : 0;
+  // Raw headcount (for display). For improvement $ we use derived "effective MLOs" like Qlik so numbers match.
+  const mloCount =
+    baseline?.mloCount && baseline.mloCount > 0 ? baseline.mloCount : 1;
+  // Qlik: numberOfMLOs = totalClosedUnits / 13 / mloUnitsActual (effective FTE). Use 13 to match Qlik dollar-for-dollar.
+  const monthsForEffectiveMLOs = 13;
+  const effectiveMLOs =
+    baseMloActual > 0 && totalClosedUnits > 0
+      ? Math.round(totalClosedUnits / monthsForEffectiveMLOs / baseMloActual)
+      : mloCount;
 
-  const otherActual = 33;
-  const otherActualCost = 177;
-  const otherBaseTargetCost = 69;
-  const otherBaseSavings = 108;
-  const otherBaseImprovement = 220320;
+  /**
+   * MLO Improvement (Qlik formula): same effective MLO count, higher units/LO/month → extra revenue.
+   * loUnitImprovement = numberOfMLOs * (sliderMLO - mloUnitsActual) * 12 * avgLoanSize * (marginBPS/10000)
+   */
+  const mloImprovementDollars =
+    mlo > baseMloActual && avgLoanSize > 0 && baseMarginActualBp > 0
+      ? Math.round(
+          Math.max(1, effectiveMLOs) *
+            (mlo - baseMloActual) *
+            12 *
+            avgLoanSize *
+            (baseMarginActualBp / 10000)
+        )
+      : 0;
 
-  // Revenue/margin baseline values
-  const baseMloActual = 4.5; // MLO actual performance (loans/month)
-  const basePullThroughActual = 64.09; // Pull-through rate (%)
-  const baseMarginActualBp = 20; // Margin in basis points
-  const baseMarginProfit = 932725; // Total margin profit at baseline ($)
-
-  const marginProfitPerBp = baseMarginProfit / baseMarginActualBp;
-  const mloProfitPerPoint = baseMarginProfit / baseMloActual;
-  const pullThroughProfitPerPoint = baseMarginProfit / basePullThroughActual;
-
-  const calculateTargetCost = (
-    baseTargetCost: number,
-    baseTarget: number,
-    target: number
-  ) => {
-    if (target <= 0) {
-      return 0;
+  // Debug: MLO improvement inputs (open DevTools Console to verify effectiveMLOs vs mloCount)
+  useEffect(() => {
+    if (baseline && (totalClosedUnits > 0 || baseMloActual > 0)) {
+      const usingDerived = baseMloActual > 0 && totalClosedUnits > 0;
+      console.debug("[FinancialModeling] MLO improvement", {
+        source: usingDerived ? "effectiveMLOs (derived)" : "mloCount (fallback)",
+        totalClosedUnits,
+        baseMloActual,
+        mloCount,
+        effectiveMLOs,
+        monthsForEffectiveMLOs,
+        mloSlider: mlo,
+        deltaUnits: mlo - baseMloActual,
+        avgLoanSize,
+        baseMarginActualBp,
+        mloImprovementDollars,
+      });
     }
-    return Math.round((baseTargetCost * baseTarget) / target);
-  };
+  }, [
+    baseline,
+    totalClosedUnits,
+    baseMloActual,
+    mloCount,
+    effectiveMLOs,
+    mlo,
+    avgLoanSize,
+    baseMarginActualBp,
+    mloImprovementDollars,
+  ]);
 
-  const calculateImprovement = (
-    baseImprovement: number,
-    savingsPerUnit: number,
-    baseSavings: number
-  ) => {
-    if (baseSavings <= 0) {
-      return 0;
-    }
-    return Math.round((baseImprovement * savingsPerUnit) / baseSavings);
-  };
+  /**
+   * Pull-through improvement (Qlik formula): more applications convert → more closed units → more revenue.
+   * pullthroughTarget = unitsApplication * (sliderPullthrough/100) * avgLoanSize * (margin/10000), pullthroughBase = totalClosedUnits * avgLoanSize * (margin/10000).
+   */
+  const unitsApplication =
+    basePullThroughActual > 0
+      ? (totalClosedUnits * 100) / basePullThroughActual
+      : 0;
+  const pullThroughImprovementDollars =
+    pullThroughPercent > basePullThroughActual &&
+    avgLoanSize > 0 &&
+    baseMarginActualBp > 0 && basePullThroughActual > 0
+      ? Math.round(
+          Math.max(
+            0,
+            unitsApplication *
+              (pullThroughPercent / 100) *
+              avgLoanSize *
+              (baseMarginActualBp / 10000) -
+              totalClosedUnits *
+                avgLoanSize *
+                (baseMarginActualBp / 10000)
+          )
+        )
+      : 0;
 
   const calculateDeltaProfit = (
     selected: number,
@@ -260,121 +382,48 @@ export function FinancialModelingSandboxView() {
     return Math.round(delta * profitPerPoint);
   };
 
+  // Actual Cost = monthlyComp/actual, Target Cost = monthlyComp/target. Delta = actual - target (negative when under target). Savings/Improvement when actual < target.
   const calculateProductivityData = (): ProductivityData[] => {
-    // Calculate target cost based on ratio of target to base target
-    // Uses BASE_TARGET_* constants defined above (industry benchmarks)
-    const processorTargetCost = calculateTargetCost(
-      processorBaseTargetCost,
-      BASE_TARGET_PROCESSOR,
-      processor
-    );
-    const processorSavingsPerUnit =
-      processor > 0 ? processorActualCost - processorTargetCost : 0;
-    const processorImprovement =
-      processor > 0
-        ? calculateImprovement(
-            processorBaseImprovement,
-            processorSavingsPerUnit,
-            processorBaseSavings
-          )
-        : 0;
-
-    const underwriterTargetCost = calculateTargetCost(
-      underwriterBaseTargetCost,
-      BASE_TARGET_UNDERWRITER,
-      underwriter
-    );
-    const underwriterSavingsPerUnit =
-      underwriter > 0 ? underwriterActualCost - underwriterTargetCost : 0;
-    const underwriterImprovement =
-      underwriter > 0
-        ? calculateImprovement(
-            underwriterBaseImprovement,
-            underwriterSavingsPerUnit,
-            underwriterBaseSavings
-          )
-        : 0;
-
-    const closerTargetCost = calculateTargetCost(
-      closerBaseTargetCost,
-      BASE_TARGET_CLOSER,
-      closer
-    );
-    const closerSavingsPerUnit =
-      closer > 0 ? closerActualCost - closerTargetCost : 0;
-    const closerImprovement =
-      closer > 0
-        ? calculateImprovement(
-            closerBaseImprovement,
-            closerSavingsPerUnit,
-            closerBaseSavings
-          )
-        : 0;
-
-    const otherTargetCost = calculateTargetCost(
-      otherBaseTargetCost,
-      BASE_TARGET_OTHER,
-      otherSupport
-    );
-    const otherSavingsPerUnit =
-      otherSupport > 0 ? otherActualCost - otherTargetCost : 0;
-    const otherImprovement =
-      otherSupport > 0
-        ? calculateImprovement(
-            otherBaseImprovement,
-            otherSavingsPerUnit,
-            otherBaseSavings
-          )
-        : 0;
-
-    return [
-      {
-        role: "Processor",
-        actual: processorActual,
-        target: processor,
-        delta: processor - processorActual,
-        actualCost: processorActualCost,
-        targetCost: processorTargetCost,
-        savingsPerUnit: processorSavingsPerUnit,
-        productivityImprovement: processorImprovement,
-      },
-      {
-        role: "Underwriter",
-        actual: underwriterActual,
-        target: underwriter,
-        delta: underwriter - underwriterActual,
-        actualCost: underwriterActualCost,
-        targetCost: underwriterTargetCost,
-        savingsPerUnit: underwriterSavingsPerUnit,
-        productivityImprovement: underwriterImprovement,
-      },
-      {
-        role: "Closer",
-        actual: closerActual,
-        target: closer,
-        delta: closer - closerActual,
-        actualCost: closerActualCost,
-        targetCost: closerTargetCost,
-        savingsPerUnit: closerSavingsPerUnit,
-        productivityImprovement: closerImprovement,
-      },
-      {
-        role: "Other",
-        actual: otherActual,
-        target: otherSupport,
-        delta: otherSupport - otherActual,
-        actualCost: otherActualCost,
-        targetCost: otherTargetCost,
-        savingsPerUnit: otherSavingsPerUnit,
-        productivityImprovement: otherImprovement,
-      },
+    const rows: { role: string; actual: number; target: number }[] = [
+      { role: "Processor", actual: processorActual, target: processor },
+      { role: "Underwriter", actual: underwriterActual, target: underwriter },
+      { role: "Closer", actual: closerActual, target: closer },
+      { role: "Other", actual: otherActual, target: otherSupport },
     ];
+    return rows.map(({ role, actual, target }) => {
+      const annualSalary = ROLE_ANNUAL_SALARIES[role] ?? 0;
+      const monthlyComp = annualSalary / 12;
+      const delta = actual - target; // negative when actual under target
+      const actualCost =
+        actual > 0 ? Math.round(monthlyComp / actual) : 0;
+      const targetCost =
+        target > 0 ? Math.round(monthlyComp / target) : 0;
+      const savingsPerUnit =
+        actual > 0 && actual < target ? actualCost - targetCost : 0;
+      const productivityImprovement = Math.round(
+        savingsPerUnit * totalClosedUnits
+      );
+      return {
+        role,
+        actual,
+        target,
+        delta,
+        actualCost,
+        targetCost,
+        savingsPerUnit,
+        productivityImprovement,
+      };
+    });
   };
 
   const productivityData = calculateProductivityData();
 
   const estimatedCountData: EstimatedCountData[] = [
-    { role: "MLOs", estimatedCount: 35 },
+    {
+      role: "MLOs",
+      estimatedCount:
+        baseline?.mloCount && baseline.mloCount > 0 ? baseline.mloCount : 35,
+    },
     { role: "Processors", estimatedCount: 7 },
     { role: "Underwriters", estimatedCount: 7 },
     { role: "Closers", estimatedCount: 5 },
@@ -386,29 +435,24 @@ export function FinancialModelingSandboxView() {
       metric: "MLO Improvement",
       actual: baseMloActual.toFixed(1),
       valueSelected: mlo.toFixed(1),
-      profitImprovement: calculateDeltaProfit(
-        mlo,
-        baseMloActual,
-        mloProfitPerPoint
-      ),
+      profitImprovement: mloImprovementDollars,
     },
     {
       metric: "Pull Through Increase",
       actual: `${basePullThroughActual.toFixed(2)}%`,
       valueSelected: `${pullThroughPercent.toFixed(2)}%`,
-      profitImprovement: calculateDeltaProfit(
-        pullThroughPercent,
-        basePullThroughActual,
-        pullThroughProfitPerPoint
-      ),
+      profitImprovement: pullThroughImprovementDollars,
     },
     {
       metric: "Margin Improvement",
       actual: `${baseMarginActualBp} BP`,
       valueSelected: `${marginIncreaseBP} BP`,
-      profitImprovement: Math.round(
-        Math.max(0, marginIncreaseBP) * marginProfitPerBp
-      ),
+      profitImprovement: (() => {
+        const deltaBp = marginIncreaseBP - baseMarginActualBp;
+        return Math.round(
+          deltaBp > 0 ? deltaBp * marginProfitPerBp : 0
+        );
+      })(),
     },
   ];
 
@@ -421,8 +465,38 @@ export function FinancialModelingSandboxView() {
     }).format(value);
   };
 
+  if (baselineLoading) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center py-16">
+        <Loader2
+          className={`h-10 w-10 animate-spin ${
+            isDarkMode ? "text-slate-400" : "text-blue-600"
+          }`}
+        />
+        <p
+          className={`mt-4 text-sm ${
+            isDarkMode ? "text-slate-400" : "text-slate-600"
+          }`}
+        >
+          Loading baseline data…
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full">
+      {baselineError && (
+        <div
+          className={`mb-4 rounded-lg px-4 py-2 text-sm ${
+            isDarkMode
+              ? "bg-red-900/30 text-red-300 border border-red-800/50"
+              : "bg-red-50 text-red-700 border border-red-200"
+          }`}
+        >
+          {baselineError} Using demo assumptions for baseline.
+        </div>
+      )}
       {/* Description */}
       <div className="text-center mb-4 sm:mb-6 py-3 sm:py-4 px-4 sm:px-6">
         <p
@@ -434,6 +508,70 @@ export function FinancialModelingSandboxView() {
           staffing metrics against strategic targets. Explore potential cost
           savings and profit improvements in real time.
         </p>
+      </div>
+
+      {/* KPIs: Total Units Closed, Total Dollars Closed (Rolling 12 months) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
+        <Card
+          className={`rounded-xl ${
+            isDarkMode
+              ? "border-slate-700/50 bg-slate-800/70"
+              : "border-blue-200/40 bg-white"
+          }`}
+        >
+          <CardContent className="pt-4 pb-4 px-4">
+            <p
+              className={`text-xs font-semibold uppercase tracking-wider mb-1 ${
+                isDarkMode ? "text-slate-400" : "text-slate-500"
+              }`}
+            >
+              Total Units Closed
+            </p>
+            <p
+              className={`text-2xl font-bold ${
+                isDarkMode ? "text-slate-100" : "text-slate-900"
+              }`}
+            >
+              {baseline?.fundedUnits ?? 0}
+            </p>
+            <p className={`text-xs mt-1 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+              Rolling 12 months
+              {baseline?.dateRange?.start && baseline?.dateRange?.end && (
+                <span> · {baseline.dateRange.start} – {baseline.dateRange.end}</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+        <Card
+          className={`rounded-xl ${
+            isDarkMode
+              ? "border-slate-700/50 bg-slate-800/70"
+              : "border-blue-200/40 bg-white"
+          }`}
+        >
+          <CardContent className="pt-4 pb-4 px-4">
+            <p
+              className={`text-xs font-semibold uppercase tracking-wider mb-1 ${
+                isDarkMode ? "text-slate-400" : "text-slate-500"
+              }`}
+            >
+              Total Dollars Closed
+            </p>
+            <p
+              className={`text-2xl font-bold ${
+                isDarkMode ? "text-slate-100" : "text-slate-900"
+              }`}
+            >
+              {formatCurrency(baseline?.totalVolume ?? 0)}
+            </p>
+            <p className={`text-xs mt-1 ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>
+              Rolling 12 months
+              {baseline?.dateRange?.start && baseline?.dateRange?.end && (
+                <span> · {baseline.dateRange.start} – {baseline.dateRange.end}</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Two-Column Layout: Sliders Left, Content Right */}
@@ -462,11 +600,11 @@ export function FinancialModelingSandboxView() {
               isDarkMode={isDarkMode}
             />
             <HorizontalSlider
-              label="MLO"
+              label="MLO (units/LO/month)"
               value={mlo}
               onValueChange={setMlo}
               min={0}
-              max={10}
+              max={15}
               step={0.1}
               formatValue={(val) => val.toFixed(1)}
               isDarkMode={isDarkMode}

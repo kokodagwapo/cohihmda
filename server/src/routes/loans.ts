@@ -61,6 +61,7 @@ import {
   type ActorConfig,
   type ActorMissingMode,
 } from "../utils/scorecard-utils.js";
+import { getStaffingUnitTargets } from "../utils/staffingUnitTargets.js";
 
 // Helper function to calculate days between dates
 function daysBetween(
@@ -5172,14 +5173,13 @@ router.get(
       const monthsCount = parseInt(req.query.months as string) || 12;
       const channelGroup = req.query.channel_group as string | undefined;
 
-      // Target units per actor type (from Qlik Variables.csv - StaffingUnits)
-      // These are the monthly targets for each actor type
-      const ACTOR_TARGETS: Record<string, number> = {
-        processor: 25, // ProcessorStaffingUnits
-        underwriter: 45, // UnderwriterStaffingUnits
-        closer: 85, // CloserStaffingUnits
-      };
-      const targetUnits = ACTOR_TARGETS[actorType] || 25;
+      const targets = await getStaffingUnitTargets(tenantPool);
+      const targetUnits =
+        actorType === "processor"
+          ? targets.processor
+          : actorType === "underwriter"
+            ? targets.underwriter
+            : targets.closer;
 
       // Validate actor type
       if (!["processor", "underwriter", "closer"].includes(actorType)) {

@@ -1458,22 +1458,60 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       )
       .catch(() => {});
 
-    // Seed default scoring weights
+    // Add partial unique index for NULL persona_id (handles ON CONFLICT correctly)
+    await pool
+      .query(
+        `
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_scoring_weights_unique_null_persona 
+      ON public.scoring_weights (scorecard_type, metric_name) 
+      WHERE persona_id IS NULL
+    `
+      )
+      .catch(() => {});
+
+    // Seed default scoring weights with correct TTS formula weights
+    // Sales TTS: 6 components at 20% each (normalized so average performer scores 100)
+    // Operations TTS: Units (70%) + Turn Time (15%) + Complexity (15%)
     await pool
       .query(
         `
       INSERT INTO public.scoring_weights (scorecard_type, persona_id, metric_name, weight, description)
       VALUES 
-        -- Sales scorecard defaults (sum = 1.0)
-        ('sales', NULL, 'pull_through', 0.30, 'Pull-through percentage weight'),
-        ('sales', NULL, 'revenue', 0.25, 'Revenue per loan weight'),
-        ('sales', NULL, 'volume', 0.20, 'Loan volume weight'),
-        ('sales', NULL, 'turn_time', 0.25, 'Turn time (inverse) weight'),
-        -- Operations scorecard defaults (sum = 1.0)
-        ('operations', NULL, 'turn_time', 0.40, 'Turn time weight'),
-        ('operations', NULL, 'pull_through', 0.30, 'Pull-through percentage weight'),
-        ('operations', NULL, 'volume', 0.30, 'Volume processed weight')
-      ON CONFLICT (scorecard_type, persona_id, metric_name) DO NOTHING
+        -- Sales scorecard (6 components, each 0.2 = 20%)
+        ('sales', NULL, 'volume', 0.2, 'Total loan volume (dollar amount funded)'),
+        ('sales', NULL, 'margin', 0.2, 'Revenue as basis points of loan amount'),
+        ('sales', NULL, 'unit', 0.2, 'Number of loans funded'),
+        ('sales', NULL, 'pull_through', 0.2, 'Percentage of applications that fund'),
+        ('sales', NULL, 'turn_time', 0.2, 'Days from application to close (lower is better)'),
+        ('sales', NULL, 'concession', 0.2, 'Price concessions given (lower is better)'),
+        -- Operations scorecard (3 components)
+        ('operations', NULL, 'units', 0.70, 'Number of loans processed (70% weight)'),
+        ('operations', NULL, 'turn_time', 0.15, 'Days to complete processing (15% weight)'),
+        ('operations', NULL, 'complexity', 0.15, 'Loan complexity handled (15% weight)')
+      ON CONFLICT (scorecard_type, metric_name) WHERE persona_id IS NULL DO NOTHING
+    `
+      )
+      .catch(() => {});
+
+    // Create staffing_unit_targets (unit targets per role for Financial Modeling and scorecards)
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.staffing_unit_targets (
+        role_key VARCHAR(50) PRIMARY KEY,
+        units_per_month INT NOT NULL CHECK (units_per_month > 0),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
+      INSERT INTO public.staffing_unit_targets (role_key, units_per_month)
+      VALUES ('processor', 25), ('underwriter', 45), ('closer', 85), ('other', 85)
+      ON CONFLICT (role_key) DO NOTHING
     `
       )
       .catch(() => {});
@@ -1578,38 +1616,44 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       )
       .catch(() => {});
 
-    // Seed default complexity components (from Qlik logic)
+    // Seed default complexity components with standardized condition values
+    // These values match the frontend UI and backend calculation logic
+    // Note: weight is stored as decimal (0.10 = 10 points in the UI)
     await pool
       .query(
         `
       INSERT INTO public.complexity_components (component_name, condition_value, weight, description)
       VALUES 
-        -- Loan Purpose
-        ('loan_purpose', 'C to P', 0.30, 'Construction-to-Permanent: two-phase loan, construction monitoring'),
-        ('loan_purpose', 'Purchase', 0.10, 'Standard purchase transaction'),
-        ('loan_purpose', 'Refi CO', 0.10, 'Cash-out refinance: additional equity verification'),
-        ('loan_purpose', 'Refi No CO', 0.00, 'Rate/term refinance: simplest type'),
         -- Loan Type
-        ('loan_type', 'FHA', 0.10, 'Government program: MI, condition requirements'),
-        ('loan_type', 'VA', 0.05, 'Government program: COE requirements'),
-        ('loan_type', 'Conventional', 0.00, 'Standard underwriting'),
-        -- Loan Amount
-        ('loan_amount', 'jumbo', 0.10, 'Jumbo loans (≥$1M): additional documentation and reserves'),
-        -- Occupancy
-        ('occupancy', 'SecondHome', 0.10, 'Additional scrutiny on occupancy intent'),
-        ('occupancy', 'Investor', 0.10, 'Non-owner occupied: rental income analysis'),
-        ('occupancy', 'Primary', 0.00, 'Standard owner-occupied'),
-        -- FICO (note: can be negative for excellent credit)
-        ('fico', 'excellent', -0.10, 'FICO > 760: excellent credit reduces complexity'),
-        ('fico', 'good', 0.00, 'FICO 681-760: standard processing'),
-        ('fico', 'fair', 0.05, 'FICO 620-681: may require compensating factors'),
-        ('fico', 'poor', 0.15, 'FICO ≤620: high-risk credit, extensive documentation'),
-        -- LTV
-        ('ltv', 'high', 0.05, 'LTV ≥95%: high LTV, MI requirements'),
-        -- DTI
-        ('dti', 'high', 0.05, 'DTI ≥43%: may require compensating factors'),
-        -- Employment
-        ('employment', 'self_employed', 0.20, 'Self-employed: tax returns, P&L, business documentation')
+        ('loan_type', 'government', 0.10, 'Government loans (FHA, VA, USDA) require more documentation and have stricter guidelines'),
+        ('loan_type', 'conventional', 0.00, 'Standard conventional loans'),
+        
+        -- Loan Purpose
+        ('loan_purpose', 'purchase', 0.05, 'Purchase transactions involve more parties and tighter timelines'),
+        ('loan_purpose', 'refinance', 0.00, 'Standard refinance transactions'),
+        
+        -- FICO Score Ranges
+        ('fico', 'poor', 0.10, 'Poor FICO (< 680) requires additional documentation and risk assessment'),
+        ('fico', 'fair', 0.00, 'Fair FICO (680-719) - average credit range'),
+        ('fico', 'good', 0.00, 'Good FICO (720-759) - good credit range'),
+        ('fico', 'excellent', -0.05, 'Excellent FICO (760+) can simplify processing'),
+        
+        -- LTV Ratio
+        ('ltv', 'high', 0.05, 'High LTV (> 80%) may require PMI and additional review'),
+        ('ltv', 'standard', 0.00, 'Standard LTV (≤ 80%)'),
+        
+        -- DTI Ratio
+        ('dti', 'high', 0.05, 'High DTI (> 43%) requires additional income verification'),
+        ('dti', 'standard', 0.00, 'Standard DTI (≤ 43%)'),
+        
+        -- Occupancy Type
+        ('occupancy', 'investment', 0.05, 'Investment properties have stricter requirements'),
+        ('occupancy', 'second_home', 0.05, 'Second homes require additional documentation'),
+        ('occupancy', 'primary', 0.00, 'Standard primary residence'),
+        
+        -- Employment Type
+        ('employment', 'self_employed', 0.05, 'Self-employed borrowers require additional income documentation'),
+        ('employment', 'w2', 0.00, 'Standard W-2 employment')
       ON CONFLICT (component_name, condition_value) DO NOTHING
     `
       )

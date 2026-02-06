@@ -170,6 +170,9 @@ class TenantDatabaseManager {
           cached.schemaEnsured = true;
         }
 
+        // Ensure pool is tagged for per-tenant caches (e.g. pools created before this fix)
+        const poolWithKey = cached.pool as pg.Pool & { _connectionKey?: string };
+        if (!poolWithKey._connectionKey) poolWithKey._connectionKey = tenantId;
         return cached.pool;
       }
     }
@@ -201,6 +204,9 @@ class TenantDatabaseManager {
       connectionTimeoutMillis: 8000, // 8 seconds connection timeout (fast fail)
       allowExitOnIdle: false, // Keep pool alive to avoid reconnection overhead
     });
+
+    // Tag pool with tenant ID so per-tenant caches (e.g. revenue expression) stay isolated
+    (pool as pg.Pool & { _connectionKey?: string })._connectionKey = tenantId;
 
     // Handle pool errors - mark for eviction on critical errors
     pool.on("error", (err: any) => {

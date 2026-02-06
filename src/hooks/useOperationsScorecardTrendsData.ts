@@ -145,8 +145,7 @@ export const useOperationsScorecardTrendsData = (
           params.append("channel_group", selectedChannel);
 
         const queryString = params.toString();
-        // NOTE: Using original endpoint until /api/scorecard/operations-trends is updated to match expected format
-        // Using new consolidated endpoint with channel-aware actor support
+        // Canonical endpoint: /api/scorecard/operations-trends (legacy /api/loans/operations-scorecard-trends is deprecated)
         const url = `/api/scorecard/operations-trends${
           queryString ? `?${queryString}` : ""
         }`;
