@@ -1,69 +1,173 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { api } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Phone, FileCheck, AlertTriangle, TrendingUp, Users, DollarSign, Clock, BarChart3, ArrowUp, ArrowDown, Target, MessageSquare, X, FileSpreadsheet, FileText, Presentation, Bell, BellOff, Activity, CheckCircle2, Info, Zap, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Newspaper, Building2, ExternalLink, Pause, Play, Minimize2, Maximize2, KeyRound, CalendarDays, Pin, Archive, Medal, Award, Star, Crown, Rocket, Timer, ShieldCheck, Gauge, CircleCheck, Settings, Check, RefreshCw, MoreVertical, Search, Database, Loader2 } from 'lucide-react';
-import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format } from 'date-fns';
-import { DateRange } from 'react-day-picker';
-import { SeedDataButton } from '@/components/dashboard/SeedDataButton';
-import { useToast } from '@/hooks/use-toast';
-import { DashboardLayout } from '@/components/dashboard/DashboardLayout';
-import { DashboardContainer } from '@/components/dashboard/DashboardContainer';
-import { useDashboardState } from '@/hooks/useDashboardState';
-import { useDashboardFilters } from '@/hooks/useDashboardFilters';
-import { useDashboardVisibility } from '@/hooks/useDashboardVisibility';
-import { UsageDisplay } from '@/components/billing/UsageDisplay';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Area, AreaChart } from 'recharts';
-import { Copy, Code2, Sparkles } from 'lucide-react';
-import { AletheiaVoiceAssistant } from '@/components/aletheia/AletheiaVoiceAssistant';
-import { CohiPodcast } from '@/components/aletheia/CohiPodcast';
-import { motion, AnimatePresence } from 'framer-motion';
-import { generatePDF } from '@/utils/pdfExport';
-import { ReportsSidebar, DashboardVisibility } from '@/components/dashboard/ReportsSidebar';
-import { ReportModal } from '@/components/dashboard/ReportModal';
-import { ReportData, allReports } from '@/data/reportSimulations';
-import { useEdit } from '@/contexts/EditContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { EditableText, EditableNumber } from '@/components/ui/EditableText';
-import { LOSFunnelData, LOSApiResponse, mapLOSDataToUniversalSchema } from '@/lib/losSchema';
-import { FunnelVisualizationLegacy } from '@/components/FunnelVisualizationLegacy';
-import { FunnelDataPoint } from '@/types/funnel';
-import { useTheme } from '@/components/theme-provider';
-import { formatCompactNumber, formatCompactNumberNoCurrency } from '@/utils/formatting';
-import { getUrgencyColor, getUrgencyDot, getAnimatedValue, getSmoothProgress, getFilteredKPI } from '@/utils/dashboardHelpers';
-import { useDashboardMetrics } from '@/hooks/useDashboardMetrics';
-import { useMockDashboardData } from '@/hooks/useMockDashboardData';
-import { IndustryNewsCard } from '@/components/dashboard/IndustryNewsCard';
-import { BusinessDataTable } from '@/components/dashboard/BusinessDataTable';
-import { DashboardCard } from '@/components/dashboard/DashboardCard';
-import { DataTable } from '@/components/dashboard/DataTable';
-import { ExecutiveDashboard } from '@/components/dashboard/ExecutiveDashboard';
-import { AletheiaPromptsCard } from '@/components/dashboard/AletheiaPromptsCard';
-import { LeaderBoardSection } from '@/components/dashboard/LeaderBoardSection';
-import { LoanFunnelViewLegacy } from '@/components/dashboard/views/LoanFunnelViewLegacy';
-import { ClosingFalloutForecast } from '@/components/dashboard/ClosingFalloutForecast';
-import { TopTieringModal } from '@/components/dashboard/modals/TopTieringModal';
-import { TrendsModal } from '@/components/dashboard/modals/TrendsModal';
-import { ForecastingModal } from '@/components/dashboard/modals/ForecastingModal';
-import { ContactModal } from '@/components/dashboard/modals/ContactModal';
-import { MetricModal } from '@/components/dashboard/modals/MetricModal';
-import { RiskModal } from '@/components/dashboard/modals/RiskModal';
-import { PullThroughModal } from '@/components/dashboard/modals/PullThroughModal';
-import { ExportModal } from '@/components/dashboard/modals/ExportModal';
-import { ShareModal } from '@/components/dashboard/modals/ShareModal';
-import { EmbedModal } from '@/components/dashboard/modals/EmbedModal';
-import { FalloutModal } from '@/components/dashboard/modals/FalloutModal';
-import { TenantSelector } from '@/components/dashboard/TenantSelector';
-import { useChannelStore } from '@/stores/channelStore';
-
-
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { api } from "@/lib/api";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Phone,
+  FileCheck,
+  AlertTriangle,
+  TrendingUp,
+  Users,
+  DollarSign,
+  Clock,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
+  Target,
+  MessageSquare,
+  X,
+  FileSpreadsheet,
+  FileText,
+  Presentation,
+  Bell,
+  BellOff,
+  Activity,
+  CheckCircle2,
+  Info,
+  Zap,
+  ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+  ChevronUp,
+  Newspaper,
+  Building2,
+  ExternalLink,
+  Pause,
+  Play,
+  Minimize2,
+  Maximize2,
+  KeyRound,
+  CalendarDays,
+  Pin,
+  Archive,
+  Medal,
+  Award,
+  Star,
+  Crown,
+  Rocket,
+  Timer,
+  ShieldCheck,
+  Gauge,
+  CircleCheck,
+  Settings,
+  Check,
+  RefreshCw,
+  MoreVertical,
+  Search,
+  Database,
+  Loader2,
+} from "lucide-react";
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from "@/components/ui/input-otp";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
+import { SeedDataButton } from "@/components/dashboard/SeedDataButton";
+import { useToast } from "@/hooks/use-toast";
+import { DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { DashboardContainer } from "@/components/dashboard/DashboardContainer";
+import { useDashboardState } from "@/hooks/useDashboardState";
+import { useDashboardFilters } from "@/hooks/useDashboardFilters";
+import { useDashboardVisibility } from "@/hooks/useDashboardVisibility";
+import { UsageDisplay } from "@/components/billing/UsageDisplay";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Area,
+  AreaChart,
+} from "recharts";
+import { Copy, Code2, Sparkles } from "lucide-react";
+import { AletheiaVoiceAssistant } from "@/components/aletheia/AletheiaVoiceAssistant";
+import { CohiPodcast } from "@/components/aletheia/CohiPodcast";
+import { motion, AnimatePresence } from "framer-motion";
+import { generatePDF } from "@/utils/pdfExport";
+import {
+  ReportsSidebar,
+  DashboardVisibility,
+} from "@/components/dashboard/ReportsSidebar";
+import { ReportModal } from "@/components/dashboard/ReportModal";
+import { ReportData, allReports } from "@/data/reportSimulations";
+import { useEdit } from "@/contexts/EditContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { EditableText, EditableNumber } from "@/components/ui/EditableText";
+import {
+  LOSFunnelData,
+  LOSApiResponse,
+  mapLOSDataToUniversalSchema,
+} from "@/lib/losSchema";
+import { FunnelVisualizationLegacy } from "@/components/FunnelVisualizationLegacy";
+import { FunnelDataPoint } from "@/types/funnel";
+import { useTheme } from "@/components/theme-provider";
+import {
+  formatCompactNumber,
+  formatCompactNumberNoCurrency,
+} from "@/utils/formatting";
+import {
+  getUrgencyColor,
+  getUrgencyDot,
+  getAnimatedValue,
+  getSmoothProgress,
+  getFilteredKPI,
+} from "@/utils/dashboardHelpers";
+import { useDashboardMetrics } from "@/hooks/useDashboardMetrics";
+import { useMockDashboardData } from "@/hooks/useMockDashboardData";
+import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
+import { BusinessDataTable } from "@/components/dashboard/BusinessDataTable";
+import { DashboardCard } from "@/components/dashboard/DashboardCard";
+import { DataTable } from "@/components/dashboard/DataTable";
+import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
+import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
+import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
+import { LoanFunnelViewLegacy } from "@/components/dashboard/views/LoanFunnelViewLegacy";
+import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
+import { TopTieringModal } from "@/components/dashboard/modals/TopTieringModal";
+import { TrendsModal } from "@/components/dashboard/modals/TrendsModal";
+import { ForecastingModal } from "@/components/dashboard/modals/ForecastingModal";
+import { ContactModal } from "@/components/dashboard/modals/ContactModal";
+import { MetricModal } from "@/components/dashboard/modals/MetricModal";
+import { RiskModal } from "@/components/dashboard/modals/RiskModal";
+import { PullThroughModal } from "@/components/dashboard/modals/PullThroughModal";
+import { ExportModal } from "@/components/dashboard/modals/ExportModal";
+import { ShareModal } from "@/components/dashboard/modals/ShareModal";
+import { EmbedModal } from "@/components/dashboard/modals/EmbedModal";
+import { FalloutModal } from "@/components/dashboard/modals/FalloutModal";
+import { TenantSelector } from "@/components/dashboard/TenantSelector";
+import { useChannelStore } from "@/stores/channelStore";
 
 // CompanyDetailView, SalesView, and OpsView have been extracted to:
 // - src/components/dashboard/views/CompanyDetailView.tsx
@@ -72,60 +176,64 @@ import { useChannelStore } from '@/stores/channelStore';
 
 const DashboardLegacy = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const {
-    toast
-  } = useToast();
-  const { isAuthenticated: authContextAuthenticated, user, logout: authLogout } = useAuth();
+    isAuthenticated: authContextAuthenticated,
+    user,
+    logout: authLogout,
+  } = useAuth();
   // Keep useEdit for content editing only (auth properties are deprecated)
   const editContext = useEdit();
   // Use custom hooks for state management
   const dashboardState = useDashboardState();
   const dashboardFilters = useDashboardFilters();
-  const { dashboardVisibility, isLoadingVisibility, handleVisibilityChange } = useDashboardVisibility();
-  
+  const { dashboardVisibility, isLoadingVisibility, handleVisibilityChange } =
+    useDashboardVisibility();
+
   // Local state for loading and error handling
   // Note: Authentication is now handled by ProtectedRoute wrapper in App.tsx
   // If we reach this component, user is already authenticated via AuthContext
   const [loading, setLoading] = useState(false);
   const [pageError, setPageError] = useState<Error | null>(null);
-  
+
   // Use auth from AuthContext - this component is protected by ProtectedRoute
   const isAuthenticated = authContextAuthenticated;
-  
+
   // Tenant selection state for admins
   // For tenant_admin users, this is automatically set to their tenant_id
-  const isTenantAdmin = user?.role === 'tenant_admin';
-  const isPlatformAdmin = user?.role === 'super_admin' || user?.role === 'platform_admin';
+  const isTenantAdmin = user?.role === "tenant_admin";
+  const isPlatformAdmin =
+    user?.role === "super_admin" || user?.role === "platform_admin";
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
-  
+
   // Track user ID to detect user changes and reset state
   const [prevUserId, setPrevUserId] = useState<string | null>(null);
-  
+
   // Reset tenant selection when user changes (login/logout/switch)
   useEffect(() => {
     const currentUserId = user?.id || null;
-    
+
     if (currentUserId !== prevUserId) {
-      console.log('[Dashboard] User changed, resetting tenant selection', { 
-        from: prevUserId, 
+      console.log("[Dashboard] User changed, resetting tenant selection", {
+        from: prevUserId,
         to: currentUserId,
-        newRole: user?.role 
+        newRole: user?.role,
       });
-      
+
       // Set tenant based on new user's role
-      if (user?.role === 'tenant_admin' && user?.tenant_id) {
+      if (user?.role === "tenant_admin" && user?.tenant_id) {
         setSelectedTenantId(user.tenant_id);
       } else {
         setSelectedTenantId(null);
       }
-      
+
       setPrevUserId(currentUserId);
     }
   }, [user?.id, user?.role, user?.tenant_id, prevUserId]);
-  
+
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
-  
+
   // Briefing context state
   const [briefingContext, setBriefingContext] = useState<{
     dialogues?: Array<{ message: string; type: string; priority: string }>;
@@ -140,62 +248,96 @@ const DashboardLegacy = () => {
   // Catch any unhandled errors
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
-      console.error('Unhandled error:', event.error);
+      console.error("Unhandled error:", event.error);
       setPageError(event.error);
     };
-    
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
+
+    window.addEventListener("error", handleError);
+    return () => window.removeEventListener("error", handleError);
   }, []);
 
   // Destructure state from hooks for easier access
   const {
-    stats, setStats,
-    recentCalls, setRecentCalls,
-    animationCycle, setAnimationCycle,
-    isAnimating, setIsAnimating,
-    selectedTier, setSelectedTier,
-    visibleCount, setVisibleCount,
+    stats,
+    setStats,
+    recentCalls,
+    setRecentCalls,
+    animationCycle,
+    setAnimationCycle,
+    isAnimating,
+    setIsAnimating,
+    selectedTier,
+    setSelectedTier,
+    visibleCount,
+    setVisibleCount,
     itemsPerPage,
-    mobileMenuOpen, setMobileMenuOpen,
-    currentWarningIndex, setCurrentWarningIndex,
-    visibleWarnings, setVisibleWarnings,
-    showNotifications, setShowNotifications,
-    contactModal, setContactModal,
-    metricModal, setMetricModal,
-    falloutModal, setFalloutModal,
-    pullThroughModal, setPullThroughModal,
-    riskModal, setRiskModal,
-    exportModal, setExportModal,
-    shareModal, setShareModal,
-    embedModal, setEmbedModal,
-    topTieringModal, setTopTieringModal,
-    topTieringTab, setTopTieringTab,
-    funnelView, setFunnelView,
-    funnelYear, setFunnelYear,
-    selectedBranch, setSelectedBranch,
-    selectedStaff, setSelectedStaff,
-    staffFilter, setStaffFilter,
-    trendsModal, setTrendsModal,
-    forecastingModal, setForecastingModal,
-    trendsSelectedMetric, setTrendsSelectedMetric,
-    forecastSelectedScenario, setForecastSelectedScenario,
-    selectedReport, setSelectedReport,
-    reportModalOpen, setReportModalOpen
+    mobileMenuOpen,
+    setMobileMenuOpen,
+    currentWarningIndex,
+    setCurrentWarningIndex,
+    visibleWarnings,
+    setVisibleWarnings,
+    showNotifications,
+    setShowNotifications,
+    contactModal,
+    setContactModal,
+    metricModal,
+    setMetricModal,
+    falloutModal,
+    setFalloutModal,
+    pullThroughModal,
+    setPullThroughModal,
+    riskModal,
+    setRiskModal,
+    exportModal,
+    setExportModal,
+    shareModal,
+    setShareModal,
+    embedModal,
+    setEmbedModal,
+    topTieringModal,
+    setTopTieringModal,
+    topTieringTab,
+    setTopTieringTab,
+    funnelView,
+    setFunnelView,
+    funnelYear,
+    setFunnelYear,
+    selectedBranch,
+    setSelectedBranch,
+    selectedStaff,
+    setSelectedStaff,
+    staffFilter,
+    setStaffFilter,
+    trendsModal,
+    setTrendsModal,
+    forecastingModal,
+    setForecastingModal,
+    trendsSelectedMetric,
+    setTrendsSelectedMetric,
+    forecastSelectedScenario,
+    setForecastSelectedScenario,
+    selectedReport,
+    setSelectedReport,
+    reportModalOpen,
+    setReportModalOpen,
   } = dashboardState;
 
   const {
-    dateFilter, setDateFilter,
-    customDateRange, setCustomDateRange,
+    dateFilter,
+    setDateFilter,
+    customDateRange,
+    setCustomDateRange,
     customDateLabel,
-    customDatePopoverOpen, setCustomDatePopoverOpen,
+    customDatePopoverOpen,
+    setCustomDatePopoverOpen,
     currentYear,
-    handleCustomRangeSelect
+    handleCustomRangeSelect,
   } = dashboardFilters;
 
   // Helper function to get filter-based KPI values for reports
   // Now imported from utils/dashboardHelpers.ts
-  
+
   // Report sidebar and modal - state is now managed by useDashboardState hook
   const totalEmployees = 100;
 
@@ -203,7 +345,7 @@ const DashboardLegacy = () => {
   const tierPercentages = {
     top: 20,
     middle: 30,
-    bottom: 50
+    bottom: 50,
   };
 
   // Authentication is now fully handled by AuthContext and ProtectedRoute
@@ -211,104 +353,127 @@ const DashboardLegacy = () => {
   // No need to check auth here - just set up the dashboard state
   useEffect(() => {
     if (isAuthenticated) {
-      sessionStorage.setItem('dashboard_auth', 'authenticated');
+      sessionStorage.setItem("dashboard_auth", "authenticated");
     }
   }, [isAuthenticated]);
 
   // Fetch briefing context data (insights and funnel data)
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
-  
+
   useEffect(() => {
     if (!isAuthenticated || briefingLoading) return;
-    
+
     const fetchBriefingContext = async () => {
       // Check if user has a valid token before making API calls
-      const token = localStorage.getItem('auth_token');
+      const token = localStorage.getItem("auth_token");
       if (!token) {
         // No token - set empty context, briefing will still work
         setBriefingContext({
           dialogues: [],
           funnelStory: null,
-          userName: undefined
+          userName: undefined,
         });
         return;
       }
-      
+
       setBriefingLoading(true);
       setBriefingError(null);
-      
+
       try {
         // Fetch insights/dialogues
-        const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
-        const insightsData = await api.request<any>(`/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`);
-        const dialogues = insightsData?.insights?.map((insight: any) => ({
-          message: insight.message || '',
-          type: insight.type || 'info',
-          priority: insight.priority || 'standard'
-        })) || [];
+        const tenantParam = selectedTenantId
+          ? `&tenant_id=${selectedTenantId}`
+          : "";
+        const insightsData = await api.request<any>(
+          `/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`
+        );
+        const dialogues =
+          insightsData?.insights?.map((insight: any) => ({
+            message: insight.message || "",
+            type: insight.type || "info",
+            priority: insight.priority || "standard",
+          })) || [];
 
         // Fetch funnel data
         let funnelStory = null;
         try {
-          const funnelData = await api.request<any>(`/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`);
+          const funnelData = await api.request<any>(
+            `/api/loans/funnel?dateFilter=${dateFilter}${tenantParam}`
+          );
           if (funnelData) {
             funnelStory = {
               conversionRates: funnelData.conversionRates || {},
               falloutData: funnelData.falloutData || {},
-              lostRevenue: funnelData.lostRevenue || {}
+              lostRevenue: funnelData.lostRevenue || {},
             };
           }
         } catch (error: any) {
           // Handle errors silently - briefing works without funnel data
-          if (!error.message?.includes('Unauthorized') && !error.message?.includes('401') && 
-              !error.message?.includes('timed out') && !error.message?.includes('timeout') &&
-              !error.message?.includes('403')) {
-            console.warn('Error fetching funnel data for briefing:', error);
+          if (
+            !error.message?.includes("Unauthorized") &&
+            !error.message?.includes("401") &&
+            !error.message?.includes("timed out") &&
+            !error.message?.includes("timeout") &&
+            !error.message?.includes("403")
+          ) {
+            console.warn("Error fetching funnel data for briefing:", error);
           }
         }
 
         setBriefingContext({
           dialogues,
           funnelStory,
-          userName: undefined // Can be set from user profile if available
+          userName: undefined, // Can be set from user profile if available
         });
       } catch (error: any) {
         // Handle 403 (Forbidden) and 401 (Unauthorized) errors gracefully
-        if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+        if (
+          error.message?.includes("403") ||
+          error.message?.includes("Forbidden")
+        ) {
           // Tenant context not available - set empty context
           setBriefingContext({
             dialogues: [],
             funnelStory: null,
-            userName: undefined
+            userName: undefined,
           });
-          setBriefingError('Tenant context not available');
-        } else if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+          setBriefingError("Tenant context not available");
+        } else if (
+          error.message?.includes("Unauthorized") ||
+          error.message?.includes("401")
+        ) {
           // User not authenticated - set empty context
           setBriefingContext({
             dialogues: [],
             funnelStory: null,
-            userName: undefined
+            userName: undefined,
           });
-          setBriefingError('Not authenticated');
-        } else if (error.message?.includes('timed out') || error.message?.includes('timeout')) {
+          setBriefingError("Not authenticated");
+        } else if (
+          error.message?.includes("timed out") ||
+          error.message?.includes("timeout")
+        ) {
           // For timeout errors, log as warning since briefing has empty context fallback
-          console.warn('Briefing context request timed out, using empty context fallback:', error.message);
+          console.warn(
+            "Briefing context request timed out, using empty context fallback:",
+            error.message
+          );
           setBriefingContext({
             dialogues: [],
             funnelStory: null,
-            userName: undefined
+            userName: undefined,
           });
-          setBriefingError('Request timed out');
+          setBriefingError("Request timed out");
         } else {
-          console.error('Error fetching briefing context:', error);
+          console.error("Error fetching briefing context:", error);
           // Set empty context on error - briefing will still work
           setBriefingContext({
             dialogues: [],
             funnelStory: null,
-            userName: undefined
+            userName: undefined,
           });
-          setBriefingError(error.message || 'Unknown error');
+          setBriefingError(error.message || "Unknown error");
         }
       } finally {
         setBriefingLoading(false);
@@ -330,7 +495,7 @@ const DashboardLegacy = () => {
 
       // Animation runs for 5 seconds
       animationInterval = setInterval(() => {
-        setAnimationCycle(prev => {
+        setAnimationCycle((prev) => {
           const newCycle = prev + 0.1;
           if (newCycle >= 5) {
             // Stop animation after 5 seconds
@@ -366,118 +531,142 @@ const DashboardLegacy = () => {
     realTopPerformers,
     realMiddlePerformers,
     realBottomPerformers,
-    branchLOs
+    branchLOs,
   } = useMockDashboardData();
-  const realFalloutData = [{
-    type: 'Withdrawals',
-    predicted: 12,
-    actual: 10,
-    risk: 'medium'
-  }, {
-    type: 'Declinations',
-    predicted: 8,
-    actual: 9,
-    risk: 'high'
-  }, {
-    type: 'Rate-Driven',
-    predicted: 15,
-    actual: 14,
-    risk: 'high'
-  }, {
-    type: 'Ops-Driven',
-    predicted: 6,
-    actual: 5,
-    risk: 'low'
-  }, {
-    type: 'Borrower Behavior',
-    predicted: 9,
-    actual: 11,
-    risk: 'medium'
-  }];
-  const realProfitabilityData = [{
-    month: 'Jan',
-    margin: 3.2,
-    productivity: 85,
-    revenue: 2.1
-  }, {
-    month: 'Feb',
-    margin: 3.5,
-    productivity: 88,
-    revenue: 2.3
-  }, {
-    month: 'Mar',
-    margin: 3.8,
-    productivity: 92,
-    revenue: 2.5
-  }, {
-    month: 'Apr',
-    margin: 4.1,
-    productivity: 89,
-    revenue: 2.4
-  }, {
-    month: 'May',
-    margin: 4.3,
-    productivity: 94,
-    revenue: 2.7
-  }, {
-    month: 'Jun',
-    margin: 4.5,
-    productivity: 96,
-    revenue: 2.9
-  }];
-  const realCycleTimeData = [{
-    role: 'LO',
-    avgDays: 12,
-    targetDays: 10,
-    efficiency: 83
-  }, {
-    role: 'Processor',
-    avgDays: 18,
-    targetDays: 15,
-    efficiency: 78
-  }, {
-    role: 'UW',
-    avgDays: 22,
-    targetDays: 20,
-    efficiency: 91
-  }, {
-    role: 'Closer',
-    avgDays: 8,
-    targetDays: 7,
-    efficiency: 88
-  }];
-  const realPullThroughData = [{
-    stage: 'Application',
-    count: 100,
-    percentage: 100
-  }, {
-    stage: 'Processing',
-    count: 78,
-    percentage: 78
-  }, {
-    stage: 'Underwriting',
-    count: 65,
-    percentage: 65
-  }, {
-    stage: 'Closing',
-    count: 58,
-    percentage: 58
-  }, {
-    stage: 'Funded',
-    count: 52,
-    percentage: 52
-  }];
+  const realFalloutData = [
+    {
+      type: "Withdrawals",
+      predicted: 12,
+      actual: 10,
+      risk: "medium",
+    },
+    {
+      type: "Declinations",
+      predicted: 8,
+      actual: 9,
+      risk: "high",
+    },
+    {
+      type: "Rate-Driven",
+      predicted: 15,
+      actual: 14,
+      risk: "high",
+    },
+    {
+      type: "Ops-Driven",
+      predicted: 6,
+      actual: 5,
+      risk: "low",
+    },
+    {
+      type: "Borrower Behavior",
+      predicted: 9,
+      actual: 11,
+      risk: "medium",
+    },
+  ];
+  const realProfitabilityData = [
+    {
+      month: "Jan",
+      margin: 3.2,
+      productivity: 85,
+      revenue: 2.1,
+    },
+    {
+      month: "Feb",
+      margin: 3.5,
+      productivity: 88,
+      revenue: 2.3,
+    },
+    {
+      month: "Mar",
+      margin: 3.8,
+      productivity: 92,
+      revenue: 2.5,
+    },
+    {
+      month: "Apr",
+      margin: 4.1,
+      productivity: 89,
+      revenue: 2.4,
+    },
+    {
+      month: "May",
+      margin: 4.3,
+      productivity: 94,
+      revenue: 2.7,
+    },
+    {
+      month: "Jun",
+      margin: 4.5,
+      productivity: 96,
+      revenue: 2.9,
+    },
+  ];
+  const realCycleTimeData = [
+    {
+      role: "LO",
+      avgDays: 12,
+      targetDays: 10,
+      efficiency: 83,
+    },
+    {
+      role: "Processor",
+      avgDays: 18,
+      targetDays: 15,
+      efficiency: 78,
+    },
+    {
+      role: "UW",
+      avgDays: 22,
+      targetDays: 20,
+      efficiency: 91,
+    },
+    {
+      role: "Closer",
+      avgDays: 8,
+      targetDays: 7,
+      efficiency: 88,
+    },
+  ];
+  const realPullThroughData = [
+    {
+      stage: "Application",
+      count: 100,
+      percentage: 100,
+    },
+    {
+      stage: "Processing",
+      count: 78,
+      percentage: 78,
+    },
+    {
+      stage: "Underwriting",
+      count: 65,
+      percentage: 65,
+    },
+    {
+      stage: "Closing",
+      count: 58,
+      percentage: 58,
+    },
+    {
+      stage: "Funded",
+      count: 52,
+      percentage: 52,
+    },
+  ];
 
   // Select the correct performer list based on tier (Top 20%, Middle 30%, Bottom 50%)
   const getAllPerformersByTier = () => {
     switch (selectedTier) {
-      case 'top':
+      case "top":
         return realTopPerformers;
       // 20 employees (top 20%)
-      case 'middle':
+      case "middle":
         return realMiddlePerformers;
       // 30 employees (middle 30%)
-      case 'bottom':
+      case "bottom":
         return realBottomPerformers;
       // 50 employees (bottom 50%)
       default:
@@ -499,24 +688,59 @@ const DashboardLegacy = () => {
 
   // Generate employee data for fallout categories
   const getFalloutEmployees = (category: string) => {
-    const baseEmployees = [...realTopPerformers.slice(15, 20), ...realMiddlePerformers.slice(0, 10), ...realBottomPerformers.slice(0, 15)];
+    const baseEmployees = [
+      ...realTopPerformers.slice(15, 20),
+      ...realMiddlePerformers.slice(0, 10),
+      ...realBottomPerformers.slice(0, 15),
+    ];
     return baseEmployees.slice(0, 10).map((emp, idx) => ({
       ...emp,
-      falloutReason: category === 'Withdrawals' ? 'Customer withdrew application' : category === 'Declinations' ? 'Did not meet underwriting criteria' : category === 'Rate-Driven' ? 'Found better rate elsewhere' : category === 'Ops-Driven' ? 'Processing delays caused withdrawal' : 'Changed financing plans',
+      falloutReason:
+        category === "Withdrawals"
+          ? "Customer withdrew application"
+          : category === "Declinations"
+          ? "Did not meet underwriting criteria"
+          : category === "Rate-Driven"
+          ? "Found better rate elsewhere"
+          : category === "Ops-Driven"
+          ? "Processing delays caused withdrawal"
+          : "Changed financing plans",
       daysInPipeline: Math.floor(Math.random() * 30) + 10,
-      lastContact: `${Math.floor(Math.random() * 7) + 1} days ago`
+      lastContact: `${Math.floor(Math.random() * 7) + 1} days ago`,
     }));
   };
 
   // Generate employee data for pull-through stages
   const getPullThroughEmployees = (stage: string, count: number) => {
-    const allEmployees = [...realTopPerformers, ...realMiddlePerformers, ...realBottomPerformers];
+    const allEmployees = [
+      ...realTopPerformers,
+      ...realMiddlePerformers,
+      ...realBottomPerformers,
+    ];
     return allEmployees.slice(0, Math.min(count, 15)).map((emp, idx) => ({
       ...emp,
       stage: stage,
-      status: stage === 'Application' ? 'New Application' : stage === 'Processing' ? 'Documents Under Review' : stage === 'Underwriting' ? 'Credit Analysis' : stage === 'Closing' ? 'Final Review' : 'Funded',
+      status:
+        stage === "Application"
+          ? "New Application"
+          : stage === "Processing"
+          ? "Documents Under Review"
+          : stage === "Underwriting"
+          ? "Credit Analysis"
+          : stage === "Closing"
+          ? "Final Review"
+          : "Funded",
       daysInStage: Math.floor(Math.random() * 14) + 1,
-      nextAction: stage === 'Application' ? 'Await documentation' : stage === 'Processing' ? 'Complete verification' : stage === 'Underwriting' ? 'Final approval' : stage === 'Closing' ? 'Schedule signing' : 'Disbursement'
+      nextAction:
+        stage === "Application"
+          ? "Await documentation"
+          : stage === "Processing"
+          ? "Complete verification"
+          : stage === "Underwriting"
+          ? "Final approval"
+          : stage === "Closing"
+          ? "Schedule signing"
+          : "Disbursement",
     }));
   };
 
@@ -527,11 +751,29 @@ const DashboardLegacy = () => {
     const variation = Math.sin((animationCycle * 100 + timeOffset) / 300) * 0.1;
     return {
       ...p,
-      score: isAnimating ? Math.max(70, Math.min(100, Math.floor(p.score * (0.75 + baseProgress * 0.25 + variation)))) : p.score,
+      score: isAnimating
+        ? Math.max(
+            70,
+            Math.min(
+              100,
+              Math.floor(p.score * (0.75 + baseProgress * 0.25 + variation))
+            )
+          )
+        : p.score,
       loans: getAnimatedValue(p.loans, animationCycle, isAnimating, 0.2),
-      revenue: getAnimatedValue(typeof p.revenue === 'number' ? p.revenue : parseFloat(p.revenue.replace(/[$K,]/g, '')) * 1000, animationCycle, isAnimating, 0.15),
-      trend: isAnimating ? Math.random() > 0.5 ? 'up' : 'down' // Randomly flicker during animation
-      : p.trend
+      revenue: getAnimatedValue(
+        typeof p.revenue === "number"
+          ? p.revenue
+          : parseFloat(p.revenue.replace(/[$K,]/g, "")) * 1000,
+        animationCycle,
+        isAnimating,
+        0.15
+      ),
+      trend: isAnimating
+        ? Math.random() > 0.5
+          ? "up"
+          : "down" // Randomly flicker during animation
+        : p.trend,
     };
   });
   const falloutData = realFalloutData.map((d, idx) => {
@@ -539,8 +781,18 @@ const DashboardLegacy = () => {
     const baseProgress = getSmoothProgress(animationCycle, isAnimating);
     return {
       ...d,
-      predicted: isAnimating ? Math.max(0, Math.floor(d.predicted * (0.6 + baseProgress * 0.4 + variation))) : d.predicted,
-      actual: isAnimating ? Math.max(0, Math.floor(d.actual * (0.6 + baseProgress * 0.4 + variation * 0.8))) : d.actual
+      predicted: isAnimating
+        ? Math.max(
+            0,
+            Math.floor(d.predicted * (0.6 + baseProgress * 0.4 + variation))
+          )
+        : d.predicted,
+      actual: isAnimating
+        ? Math.max(
+            0,
+            Math.floor(d.actual * (0.6 + baseProgress * 0.4 + variation * 0.8))
+          )
+        : d.actual,
     };
   });
   const profitabilityData = realProfitabilityData.map((d, idx) => {
@@ -549,9 +801,15 @@ const DashboardLegacy = () => {
     const baseProgress = getSmoothProgress(animationCycle, isAnimating);
     return {
       ...d,
-      margin: isAnimating ? Math.max(0, d.margin * (0.7 + baseProgress * 0.3 + wave)) : d.margin,
-      productivity: isAnimating ? Math.max(0, d.productivity * (0.7 + baseProgress * 0.3 + wave)) : d.productivity,
-      revenue: isAnimating ? Math.max(0, d.revenue * (0.7 + baseProgress * 0.3 + wave * 0.8)) : d.revenue
+      margin: isAnimating
+        ? Math.max(0, d.margin * (0.7 + baseProgress * 0.3 + wave))
+        : d.margin,
+      productivity: isAnimating
+        ? Math.max(0, d.productivity * (0.7 + baseProgress * 0.3 + wave))
+        : d.productivity,
+      revenue: isAnimating
+        ? Math.max(0, d.revenue * (0.7 + baseProgress * 0.3 + wave * 0.8))
+        : d.revenue,
     };
   });
   const cycleTimeData = realCycleTimeData.map((d, idx) => {
@@ -559,9 +817,21 @@ const DashboardLegacy = () => {
     const baseProgress = getSmoothProgress(animationCycle, isAnimating);
     return {
       ...d,
-      avgDays: isAnimating ? Math.max(0, d.avgDays * (0.8 + baseProgress * 0.2 + variation)) : d.avgDays,
-      targetDays: isAnimating ? Math.max(0, d.targetDays * (0.8 + baseProgress * 0.2 + variation * 0.7)) : d.targetDays,
-      efficiency: isAnimating ? Math.max(0, Math.min(100, d.efficiency * (0.7 + baseProgress * 0.3 + variation))) : d.efficiency
+      avgDays: isAnimating
+        ? Math.max(0, d.avgDays * (0.8 + baseProgress * 0.2 + variation))
+        : d.avgDays,
+      targetDays: isAnimating
+        ? Math.max(
+            0,
+            d.targetDays * (0.8 + baseProgress * 0.2 + variation * 0.7)
+          )
+        : d.targetDays,
+      efficiency: isAnimating
+        ? Math.max(
+            0,
+            Math.min(100, d.efficiency * (0.7 + baseProgress * 0.3 + variation))
+          )
+        : d.efficiency,
     };
   });
   const pullThroughData = realPullThroughData.map((d, idx) => {
@@ -569,135 +839,197 @@ const DashboardLegacy = () => {
     const baseProgress = getSmoothProgress(animationCycle, isAnimating);
     return {
       ...d,
-      count: isAnimating ? Math.max(0, Math.floor(d.count * (0.6 + baseProgress * 0.4 + variation))) : d.count,
-      percentage: isAnimating ? Math.max(0, Math.min(100, Math.floor(d.percentage * (0.6 + baseProgress * 0.4 + variation)))) : d.percentage
+      count: isAnimating
+        ? Math.max(
+            0,
+            Math.floor(d.count * (0.6 + baseProgress * 0.4 + variation))
+          )
+        : d.count,
+      percentage: isAnimating
+        ? Math.max(
+            0,
+            Math.min(
+              100,
+              Math.floor(d.percentage * (0.6 + baseProgress * 0.4 + variation))
+            )
+          )
+        : d.percentage,
     };
   });
-  const riskCases = [{
-    id: 1,
-    borrower: 'John Smith',
-    loanAmount: 450000,
-    risk: 'high',
-    reason: 'Rate lock expiring',
-    daysOverdue: 3,
-    breakdown: {
-      rateLockExpiry: '2 days remaining',
-      currentRate: '6.75%',
-      marketRate: '7.25%',
-      estimatedLoss: '$45,000',
-      actions: ['Contact borrower immediately', 'Expedite underwriting', 'Prepare rate extension'],
-      timeline: [{
-        date: '3 days ago',
-        event: 'Application received',
-        status: 'completed'
-      }, {
-        date: '2 days ago',
-        event: 'Initial docs submitted',
-        status: 'completed'
-      }, {
-        date: '1 day ago',
-        event: 'Underwriting started',
-        status: 'in-progress'
-      }, {
-        date: 'Today',
-        event: 'Rate lock warning issued',
-        status: 'flagged'
-      }]
-    }
-  }, {
-    id: 2,
-    borrower: 'Maria Garcia',
-    loanAmount: 320000,
-    risk: 'medium',
-    reason: 'Documentation delay',
-    daysOverdue: 2,
-    breakdown: {
-      missingDocs: ['W2 (2023)', 'Bank statements (last 2 months)', 'Property insurance'],
-      lastContact: '2 days ago',
-      processorAssigned: 'Valentina Rossi',
-      estimatedDelay: '5-7 business days',
-      actions: ['Follow up with borrower', 'Request doc upload reminder', 'Consider conditional approval'],
-      timeline: [{
-        date: '5 days ago',
-        event: 'Application received',
-        status: 'completed'
-      }, {
-        date: '4 days ago',
-        event: 'Initial review',
-        status: 'completed'
-      }, {
-        date: '2 days ago',
-        event: 'Documentation requested',
-        status: 'pending'
-      }, {
-        date: 'Today',
-        event: 'Follow-up sent',
-        status: 'in-progress'
-      }]
-    }
-  }, {
-    id: 3,
-    borrower: 'Robert Johnson',
-    loanAmount: 580000,
-    risk: 'high',
-    reason: 'Underwriting review',
-    daysOverdue: 5,
-    breakdown: {
-      issues: ['DTI ratio at 48% (target: 43%)', 'Employment gap 3 months', 'Credit inquiry spike'],
-      underwriterAssigned: 'Benjamin Kowalczyk',
-      probabilityApproval: '62%',
-      estimatedLoss: '$87,000',
-      actions: ['Request compensating factors', 'Review credit report with borrower', 'Consider manual underwrite'],
-      timeline: [{
-        date: '7 days ago',
-        event: 'Application received',
-        status: 'completed'
-      }, {
-        date: '5 days ago',
-        event: 'Sent to underwriting',
-        status: 'completed'
-      }, {
-        date: '3 days ago',
-        event: 'Conditions issued',
-        status: 'pending'
-      }, {
-        date: 'Today',
-        event: 'Escalated to senior UW',
-        status: 'flagged'
-      }]
-    }
-  }, {
-    id: 4,
-    borrower: 'Emily Davis',
-    loanAmount: 275000,
-    risk: 'medium',
-    reason: 'Appraisal pending',
-    daysOverdue: 1,
-    breakdown: {
-      appraiserAssigned: 'ABC Appraisal Co.',
-      scheduledDate: 'Tomorrow',
-      propertyType: 'Single Family Home',
-      estimatedValue: '$290,000',
-      actions: ['Confirm appraisal appointment', 'Prepare for potential low appraisal', 'Review comparable sales'],
-      timeline: [{
-        date: '4 days ago',
-        event: 'Application received',
-        status: 'completed'
-      }, {
-        date: '3 days ago',
-        event: 'Appraisal ordered',
-        status: 'completed'
-      }, {
-        date: '1 day ago',
-        event: 'Appraisal scheduled',
-        status: 'in-progress'
-      }, {
-        date: 'Today',
-        event: 'Reminder sent to borrower',
-        status: 'pending'
-      }]
-    }
-  }];
+  const riskCases = [
+    {
+      id: 1,
+      borrower: "John Smith",
+      loanAmount: 450000,
+      risk: "high",
+      reason: "Rate lock expiring",
+      daysOverdue: 3,
+      breakdown: {
+        rateLockExpiry: "2 days remaining",
+        currentRate: "6.75%",
+        marketRate: "7.25%",
+        estimatedLoss: "$45,000",
+        actions: [
+          "Contact borrower immediately",
+          "Expedite underwriting",
+          "Prepare rate extension",
+        ],
+        timeline: [
+          {
+            date: "3 days ago",
+            event: "Application received",
+            status: "completed",
+          },
+          {
+            date: "2 days ago",
+            event: "Initial docs submitted",
+            status: "completed",
+          },
+          {
+            date: "1 day ago",
+            event: "Underwriting started",
+            status: "in-progress",
+          },
+          {
+            date: "Today",
+            event: "Rate lock warning issued",
+            status: "flagged",
+          },
+        ],
+      },
+    },
+    {
+      id: 2,
+      borrower: "Maria Garcia",
+      loanAmount: 320000,
+      risk: "medium",
+      reason: "Documentation delay",
+      daysOverdue: 2,
+      breakdown: {
+        missingDocs: [
+          "W2 (2023)",
+          "Bank statements (last 2 months)",
+          "Property insurance",
+        ],
+        lastContact: "2 days ago",
+        processorAssigned: "Valentina Rossi",
+        estimatedDelay: "5-7 business days",
+        actions: [
+          "Follow up with borrower",
+          "Request doc upload reminder",
+          "Consider conditional approval",
+        ],
+        timeline: [
+          {
+            date: "5 days ago",
+            event: "Application received",
+            status: "completed",
+          },
+          {
+            date: "4 days ago",
+            event: "Initial review",
+            status: "completed",
+          },
+          {
+            date: "2 days ago",
+            event: "Documentation requested",
+            status: "pending",
+          },
+          {
+            date: "Today",
+            event: "Follow-up sent",
+            status: "in-progress",
+          },
+        ],
+      },
+    },
+    {
+      id: 3,
+      borrower: "Robert Johnson",
+      loanAmount: 580000,
+      risk: "high",
+      reason: "Underwriting review",
+      daysOverdue: 5,
+      breakdown: {
+        issues: [
+          "DTI ratio at 48% (target: 43%)",
+          "Employment gap 3 months",
+          "Credit inquiry spike",
+        ],
+        underwriterAssigned: "Benjamin Kowalczyk",
+        probabilityApproval: "62%",
+        estimatedLoss: "$87,000",
+        actions: [
+          "Request compensating factors",
+          "Review credit report with borrower",
+          "Consider manual underwrite",
+        ],
+        timeline: [
+          {
+            date: "7 days ago",
+            event: "Application received",
+            status: "completed",
+          },
+          {
+            date: "5 days ago",
+            event: "Sent to underwriting",
+            status: "completed",
+          },
+          {
+            date: "3 days ago",
+            event: "Conditions issued",
+            status: "pending",
+          },
+          {
+            date: "Today",
+            event: "Escalated to senior UW",
+            status: "flagged",
+          },
+        ],
+      },
+    },
+    {
+      id: 4,
+      borrower: "Emily Davis",
+      loanAmount: 275000,
+      risk: "medium",
+      reason: "Appraisal pending",
+      daysOverdue: 1,
+      breakdown: {
+        appraiserAssigned: "ABC Appraisal Co.",
+        scheduledDate: "Tomorrow",
+        propertyType: "Single Family Home",
+        estimatedValue: "$290,000",
+        actions: [
+          "Confirm appraisal appointment",
+          "Prepare for potential low appraisal",
+          "Review comparable sales",
+        ],
+        timeline: [
+          {
+            date: "4 days ago",
+            event: "Application received",
+            status: "completed",
+          },
+          {
+            date: "3 days ago",
+            event: "Appraisal ordered",
+            status: "completed",
+          },
+          {
+            date: "1 day ago",
+            event: "Appraisal scheduled",
+            status: "in-progress",
+          },
+          {
+            date: "Today",
+            event: "Reminder sent to borrower",
+            status: "pending",
+          },
+        ],
+      },
+    },
+  ];
 
   // Generate warnings based on actual dashboard data
   const generateDashboardWarnings = () => {
@@ -706,61 +1038,66 @@ const DashboardLegacy = () => {
     // Risk Cases warnings
     if (riskCases.length > 3) {
       warnings.push({
-        id: 'risk-high',
+        id: "risk-high",
         message: `${riskCases.length} flagged cases require immediate attention`,
-        urgency: 'critical',
-        code: 'RISK-001'
+        urgency: "critical",
+        code: "RISK-001",
       });
     }
-    if (riskCases.filter(c => c.risk === 'high').length > 2) {
+    if (riskCases.filter((c) => c.risk === "high").length > 2) {
       warnings.push({
-        id: 'risk-critical',
-        message: 'Multiple high-risk loans pending review',
-        urgency: 'critical',
-        code: 'RISK-002'
+        id: "risk-critical",
+        message: "Multiple high-risk loans pending review",
+        urgency: "critical",
+        code: "RISK-002",
       });
     }
 
     // Performance warnings
-    const lowPerformers = realBottomPerformers.filter(p => p.score < 70);
+    const lowPerformers = realBottomPerformers.filter((p) => p.score < 70);
     if (lowPerformers.length > 5) {
       warnings.push({
-        id: 'perf-low',
-        message: 'Below-target performance detected across team',
-        urgency: 'high',
-        code: 'PERF-001'
+        id: "perf-low",
+        message: "Below-target performance detected across team",
+        urgency: "high",
+        code: "PERF-001",
       });
     }
 
     // Cycle time warnings
-    const highCycleTime = realCycleTimeData.find(d => d.avgDays > d.targetDays * 1.3);
+    const highCycleTime = realCycleTimeData.find(
+      (d) => d.avgDays > d.targetDays * 1.3
+    );
     if (highCycleTime) {
       warnings.push({
-        id: 'cycle-time',
-        message: `${highCycleTime.role} exceeding target by ${Math.round((highCycleTime.avgDays / highCycleTime.targetDays - 1) * 100)}%`,
-        urgency: 'high',
-        code: 'TIME-001'
+        id: "cycle-time",
+        message: `${highCycleTime.role} exceeding target by ${Math.round(
+          (highCycleTime.avgDays / highCycleTime.targetDays - 1) * 100
+        )}%`,
+        urgency: "high",
+        code: "TIME-001",
       });
     }
 
     // Fallout warnings
-    const highFallout = realFalloutData.filter(d => d.actual > 15);
+    const highFallout = realFalloutData.filter((d) => d.actual > 15);
     if (highFallout.length > 0) {
       warnings.push({
-        id: 'fallout-high',
+        id: "fallout-high",
         message: `High fallout in ${highFallout[0].type}: ${highFallout[0].actual}%`,
-        urgency: 'medium',
-        code: 'FALL-001'
+        urgency: "medium",
+        code: "FALL-001",
       });
     }
 
     // Volume warnings
     if (stats.callsToday > 1500) {
       warnings.push({
-        id: 'volume-high',
-        message: 'Call volume exceeding capacity - consider staffing adjustment',
-        urgency: 'medium',
-        code: 'VOL-001'
+        id: "volume-high",
+        message:
+          "Call volume exceeding capacity - consider staffing adjustment",
+        urgency: "medium",
+        code: "VOL-001",
       });
     }
 
@@ -768,10 +1105,10 @@ const DashboardLegacy = () => {
     const currentHour = new Date().getHours();
     if (currentHour >= 9 && currentHour <= 17) {
       warnings.push({
-        id: 'compliance',
-        message: 'Compliance deadline approaching - quarterly review due',
-        urgency: 'high',
-        code: 'COMP-001'
+        id: "compliance",
+        message: "Compliance deadline approaching - quarterly review due",
+        urgency: "high",
+        code: "COMP-001",
       });
     }
     return warnings.slice(0, 10); // Max 10 warnings
@@ -786,73 +1123,95 @@ const DashboardLegacy = () => {
     const review: any[] = [];
 
     // Add critical risk cases
-    riskCases.filter(rc => rc.risk === 'high').slice(0, 3).forEach(rc => {
-      critical.push({
-        id: `risk-${rc.id}`,
-        title: `${rc.borrower} - ${rc.reason}`,
-        description: `$${(rc.loanAmount / 1000).toFixed(0)}K loan, ${rc.daysOverdue} days overdue`,
-        action: 'Review case details',
-        urgency: 'critical',
-        data: rc
+    riskCases
+      .filter((rc) => rc.risk === "high")
+      .slice(0, 3)
+      .forEach((rc) => {
+        critical.push({
+          id: `risk-${rc.id}`,
+          title: `${rc.borrower} - ${rc.reason}`,
+          description: `$${(rc.loanAmount / 1000).toFixed(0)}K loan, ${
+            rc.daysOverdue
+          } days overdue`,
+          action: "Review case details",
+          urgency: "critical",
+          data: rc,
+        });
       });
-    });
 
     // Add critical warnings
-    managementWarnings.filter(w => w.urgency === 'critical').slice(0, 3 - critical.length).forEach(w => {
-      critical.push({
-        id: w.id,
-        title: w.message,
-        description: `Code: ${w.code}`,
-        action: 'Take action',
-        urgency: 'critical',
-        data: w
+    managementWarnings
+      .filter((w) => w.urgency === "critical")
+      .slice(0, 3 - critical.length)
+      .forEach((w) => {
+        critical.push({
+          id: w.id,
+          title: w.message,
+          description: `Code: ${w.code}`,
+          action: "Take action",
+          urgency: "critical",
+          data: w,
+        });
       });
-    });
 
     // Add high priority items to review
-    managementWarnings.filter(w => w.urgency === 'high').slice(0, 5).forEach(w => {
-      review.push({
-        id: w.id,
-        title: w.message,
-        description: `Code: ${w.code}`,
-        action: 'Review',
-        urgency: 'high',
-        data: w
+    managementWarnings
+      .filter((w) => w.urgency === "high")
+      .slice(0, 5)
+      .forEach((w) => {
+        review.push({
+          id: w.id,
+          title: w.message,
+          description: `Code: ${w.code}`,
+          action: "Review",
+          urgency: "high",
+          data: w,
+        });
       });
-    });
 
     // Add medium risk cases
-    riskCases.filter(rc => rc.risk === 'medium').slice(0, 5 - review.length).forEach(rc => {
-      review.push({
-        id: `risk-${rc.id}`,
-        title: `${rc.borrower} - ${rc.reason}`,
-        description: `$${(rc.loanAmount / 1000).toFixed(0)}K loan needs attention`,
-        action: 'Review case',
-        urgency: 'medium',
-        data: rc
+    riskCases
+      .filter((rc) => rc.risk === "medium")
+      .slice(0, 5 - review.length)
+      .forEach((rc) => {
+        review.push({
+          id: `risk-${rc.id}`,
+          title: `${rc.borrower} - ${rc.reason}`,
+          description: `$${(rc.loanAmount / 1000).toFixed(
+            0
+          )}K loan needs attention`,
+          action: "Review case",
+          urgency: "medium",
+          data: rc,
+        });
       });
-    });
     return {
       critical,
-      review
+      review,
     };
   };
   const actionItems = prepareActionItems();
 
   // Calculate key metrics using hook (extracted from Dashboard.tsx)
-  const { commandMetrics, financialHealth, operationalHealth } = useDashboardMetrics({
-    realTopPerformers,
-    realMiddlePerformers,
-    realBottomPerformers,
-    topPerformers,
-    cycleTimeData,
-    pullThroughData,
-    managementWarnings
-  });
+  const { commandMetrics, financialHealth, operationalHealth } =
+    useDashboardMetrics({
+      realTopPerformers,
+      realMiddlePerformers,
+      realBottomPerformers,
+      topPerformers,
+      cycleTimeData,
+      pullThroughData,
+      managementWarnings,
+    });
 
   // Auto-hide warnings after 10 seconds, cycle every 3 seconds
   useEffect(() => {
-    if (!isAuthenticated || managementWarnings.length === 0 || !showNotifications) return;
+    if (
+      !isAuthenticated ||
+      managementWarnings.length === 0 ||
+      !showNotifications
+    )
+      return;
 
     // Auto-hide after 10 seconds
     const hideTimer = setTimeout(() => {
@@ -861,7 +1220,7 @@ const DashboardLegacy = () => {
 
     // Cycle warnings every 3 seconds - remove top, add new at bottom
     const cycleInterval = setInterval(() => {
-      setVisibleWarnings(prev => {
+      setVisibleWarnings((prev) => {
         if (prev.length === 0) return [0, 1, 2];
 
         // Get the last warning index and calculate next
@@ -894,12 +1253,12 @@ const DashboardLegacy = () => {
   }, [isAuthenticated]);
   const loadDashboardData = async () => {
     // Check if user has a valid token before making API call
-    const token = localStorage.getItem('auth_token');
+    const token = localStorage.getItem("auth_token");
     if (!token) {
       // No token - skip API call
       return;
     }
-    
+
     try {
       // Fetch call sessions
       const calls = await api.getCallSessions(5);
@@ -909,32 +1268,37 @@ const DashboardLegacy = () => {
         // Calculate stats
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const callsToday = calls.filter(c => new Date(c.started_at) >= today).length;
-        const flaggedCases = calls.filter(c => c.status === 'flagged').length;
+        const callsToday = calls.filter(
+          (c) => new Date(c.started_at) >= today
+        ).length;
+        const flaggedCases = calls.filter((c) => c.status === "flagged").length;
         setStats({
           callsToday,
           documentsVerified: calls.length * 2,
           // Mock calculation
-          flaggedCases
+          flaggedCases,
         });
       }
     } catch (error: any) {
       // Handle unauthorized errors silently (user not logged in)
-      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+      if (
+        error.message?.includes("Unauthorized") ||
+        error.message?.includes("401")
+      ) {
         // User not authenticated - skip silently
         return;
       }
-      console.error('Error loading dashboard:', error);
+      console.error("Error loading dashboard:", error);
     }
   };
   const handleLogout = async () => {
     await authLogout();
-    sessionStorage.removeItem('dashboard_auth');
+    sessionStorage.removeItem("dashboard_auth");
     toast({
-      title: 'Logged out',
-      description: 'Successfully signed out.'
+      title: "Logged out",
+      description: "Successfully signed out.",
     });
-    navigate('/');
+    navigate("/");
   };
 
   // PIN auto-submit removed - no longer needed
@@ -972,172 +1336,216 @@ const DashboardLegacy = () => {
         }
       >
         {/* Report Modal */}
-        <ReportModal open={reportModalOpen} onClose={() => {
-          setReportModalOpen(false);
-          setSelectedReport(null);
-        }} report={selectedReport} />
+        <ReportModal
+          open={reportModalOpen}
+          onClose={() => {
+            setReportModalOpen(false);
+            setSelectedReport(null);
+          }}
+          report={selectedReport}
+        />
 
-      {/* TopTiering Story Detail Modal - Enhanced with Drill-Down */}
-      <TopTieringModal
-        open={topTieringModal}
-        onOpenChange={setTopTieringModal}
-        selectedBranch={selectedBranch}
-        setSelectedBranch={setSelectedBranch}
-        selectedStaff={selectedStaff}
-        setSelectedStaff={setSelectedStaff}
-        topTieringTab={topTieringTab}
-        setTopTieringTab={setTopTieringTab}
-        staffFilter={staffFilter}
-        setStaffFilter={setStaffFilter}
-        setTrendsModal={setTrendsModal}
-        setForecastingModal={setForecastingModal}
-        funnelView={funnelView}
-        setFunnelView={setFunnelView}
-        funnelYear={funnelYear}
-        setFunnelYear={setFunnelYear}
-        selectedTier={selectedTier}
-        setSelectedTier={setSelectedTier}
-        branchLOs={branchLOs}
-      />
+        {/* TopTiering Story Detail Modal - Enhanced with Drill-Down */}
+        <TopTieringModal
+          open={topTieringModal}
+          onOpenChange={setTopTieringModal}
+          selectedBranch={selectedBranch}
+          setSelectedBranch={setSelectedBranch}
+          selectedStaff={selectedStaff}
+          setSelectedStaff={setSelectedStaff}
+          topTieringTab={topTieringTab}
+          setTopTieringTab={setTopTieringTab}
+          staffFilter={staffFilter}
+          setStaffFilter={setStaffFilter}
+          setTrendsModal={setTrendsModal}
+          setForecastingModal={setForecastingModal}
+          funnelView={funnelView}
+          setFunnelView={setFunnelView}
+          funnelYear={funnelYear}
+          setFunnelYear={setFunnelYear}
+          selectedTier={selectedTier}
+          setSelectedTier={setSelectedTier}
+          branchLOs={branchLOs}
+        />
 
-      {/* Trends Modal with Drill-Down - Enhanced */}
-      <TrendsModal
-        open={trendsModal}
-        onOpenChange={(open) => {
-          setTrendsModal(open);
-          if (!open) setTrendsSelectedMetric(null);
-        }}
-        trendsSelectedMetric={trendsSelectedMetric}
-        setTrendsSelectedMetric={setTrendsSelectedMetric}
-        dateFilter={dateFilter}
-        setDateFilter={setDateFilter}
-        setTopTieringModal={setTopTieringModal}
-        setForecastingModal={setForecastingModal}
-      />
+        {/* Trends Modal with Drill-Down - Enhanced */}
+        <TrendsModal
+          open={trendsModal}
+          onOpenChange={(open) => {
+            setTrendsModal(open);
+            if (!open) setTrendsSelectedMetric(null);
+          }}
+          trendsSelectedMetric={trendsSelectedMetric}
+          setTrendsSelectedMetric={setTrendsSelectedMetric}
+          dateFilter={dateFilter}
+          setDateFilter={setDateFilter}
+          setTopTieringModal={setTopTieringModal}
+          setForecastingModal={setForecastingModal}
+        />
 
-      {/* Forecasting Modal with Drill-Down - Modern Minimalist */}
-      <ForecastingModal
-        open={forecastingModal}
-        onOpenChange={(open) => {
-          setForecastingModal(open);
-          if (!open) setForecastSelectedScenario(null);
-        }}
-        forecastSelectedScenario={forecastSelectedScenario}
-        setForecastSelectedScenario={setForecastSelectedScenario}
-        setTopTieringModal={setTopTieringModal}
-        setTrendsModal={setTrendsModal}
-      />
+        {/* Forecasting Modal with Drill-Down - Modern Minimalist */}
+        <ForecastingModal
+          open={forecastingModal}
+          onOpenChange={(open) => {
+            setForecastingModal(open);
+            if (!open) setForecastSelectedScenario(null);
+          }}
+          forecastSelectedScenario={forecastSelectedScenario}
+          setForecastSelectedScenario={setForecastSelectedScenario}
+          setTopTieringModal={setTopTieringModal}
+          setTrendsModal={setTrendsModal}
+        />
 
-      <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-28 sm:pt-32 md:pt-36 pb-4 sm:pb-8 md:pb-12 relative z-10">
-        {/* Insights Section - Minimalist */}
-        {isAuthenticated && <div className="section-insights mb-16 md:mb-20">
-            {/* Cohi Insights - First */}
-            {dashboardVisibility.aletheiaInsights && (
-              <div className="section-aletheia-insights mb-8 md:mb-12">
-                <AletheiaPromptsCard 
-                  dateFilter={dateFilter} 
-                  briefingContext={briefingContext || undefined}
-                  selectedTenantId={selectedTenantId}
-                  onDataAvailabilityChange={(hasData) => {
-                    if (!hasData && dashboardVisibility.aletheiaInsights) {
-                      handleVisibilityChange({
-                        ...dashboardVisibility,
-                        aletheiaInsights: false
-                      });
-                    }
-                  }}
-                />
-              </div>
-            )}
-            
-            {/* Industry News - Second */}
-            {dashboardVisibility.industryNews && <div className="section-industry-news"><IndustryNewsCard /></div>}
-            
-            {/* Dashboards Section */}
-            {(dashboardVisibility.executiveDashboard || dashboardVisibility.closingFalloutForecast || dashboardVisibility.topTiering || dashboardVisibility.leaderboard) && (
-              <div className="section-dashboards mt-12 sm:mt-16">
-                <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">Dashboards</h2>
-                
-                {/* Business Overview */}
-                {dashboardVisibility.executiveDashboard && <div className="section-business-overview"><ExecutiveDashboard dateFilter={dateFilter} year={funnelYear} selectedTenantId={selectedTenantId} /></div>}
-                
-                {/* Closing & Fallout Forecast */}
-                {dashboardVisibility.closingFalloutForecast && <div className="section-closing-fallout-forecast"><ClosingFalloutForecast dateFilter={dateFilter} /></div>}
-                
-                {/* TopTiering Loan Funnel - Full Width Section */}
-                {dashboardVisibility.topTiering && <div className="section-top-tiering mt-12 sm:mt-16 mb-4 sm:mb-8">
-                    <LoanFunnelViewLegacy view={funnelView} onViewChange={setFunnelView} year={funnelYear} onYearChange={setFunnelYear} selectedTenantId={selectedTenantId} selectedChannel={selectedChannel} />
-                  </div>}
-                
-                {/* Leader Board Section */}
-                {dashboardVisibility.leaderboard && <div className="section-leaderboard"><LeaderBoardSection dateFilter={dateFilter} selectedTenantId={selectedTenantId} /></div>}
-              </div>
-            )}
-          </div>}
-      </div>
+        <div className="container mx-auto px-3 sm:px-6 md:px-8 lg:px-12 pt-28 sm:pt-32 md:pt-36 pb-4 sm:pb-8 md:pb-12 relative z-10">
+          {/* Insights Section - Minimalist */}
+          {isAuthenticated && (
+            <div className="section-insights mb-16 md:mb-20">
+              {/* Cohi Insights - First */}
+              {dashboardVisibility.aletheiaInsights && (
+                <div className="section-aletheia-insights mb-8 md:mb-12">
+                  <AletheiaPromptsCard
+                    dateFilter={dateFilter}
+                    briefingContext={briefingContext || undefined}
+                    selectedTenantId={selectedTenantId}
+                    selectedChannel={selectedChannel}
+                    onDataAvailabilityChange={(hasData) => {
+                      if (!hasData && dashboardVisibility.aletheiaInsights) {
+                        handleVisibilityChange({
+                          ...dashboardVisibility,
+                          aletheiaInsights: false,
+                        });
+                      }
+                    }}
+                  />
+                </div>
+              )}
 
-      {/* Contact Modal */}
-      <ContactModal
-        open={contactModal.open}
-        type={contactModal.type}
-        performer={contactModal.performer}
-        onClose={() => setContactModal({ open: false, type: null, performer: null })}
-      />
+              {/* Industry News - Second */}
+              {dashboardVisibility.industryNews && (
+                <div className="section-industry-news">
+                  <IndustryNewsCard />
+                </div>
+              )}
 
-      {/* Metric Breakdown Modal */}
-      <MetricModal
-        open={metricModal.open}
-        type={metricModal.type}
-        performer={metricModal.performer}
-        onClose={() => setMetricModal({ open: false, type: null, performer: null })}
-      />
+              {/* Dashboards Section */}
+              {(dashboardVisibility.executiveDashboard ||
+                dashboardVisibility.closingFalloutForecast ||
+                dashboardVisibility.topTiering ||
+                dashboardVisibility.leaderboard) && (
+                <div className="section-dashboards mt-12 sm:mt-16">
+                  <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">
+                    Dashboards
+                  </h2>
 
-      {/* Risk Case Breakdown Modal */}
-      <RiskModal
-        open={riskModal.open}
-        case={riskModal.case}
-        onClose={() => setRiskModal({ open: false, case: null })}
-      />
+                  {/* Business Overview */}
+                  {dashboardVisibility.executiveDashboard && (
+                    <div className="section-business-overview">
+                      <ExecutiveDashboard
+                        dateFilter={dateFilter}
+                        year={funnelYear}
+                        selectedTenantId={selectedTenantId}
+                      />
+                    </div>
+                  )}
 
-      {/* Pull-Through Stage Modal */}
-      <PullThroughModal
-        open={pullThroughModal.open}
-        onOpenChange={(open) => !open && setPullThroughModal({
-          open: false,
-          stage: null,
-          data: []
-        })}
-        stage={pullThroughModal.stage}
-        data={pullThroughModal.data}
-      />
+                  {/* Closing & Fallout Forecast */}
+                  {dashboardVisibility.closingFalloutForecast && (
+                    <div className="section-closing-fallout-forecast">
+                      <ClosingFalloutForecast dateFilter={dateFilter} />
+                    </div>
+                  )}
 
-      {/* Export to Excel Modal */}
-      <ExportModal
-        open={exportModal}
-        onOpenChange={setExportModal}
-      />
+                  {/* TopTiering Loan Funnel - Full Width Section */}
+                  {dashboardVisibility.topTiering && (
+                    <div className="section-top-tiering mt-12 sm:mt-16 mb-4 sm:mb-8">
+                      <LoanFunnelViewLegacy
+                        view={funnelView}
+                        onViewChange={setFunnelView}
+                        year={funnelYear}
+                        onYearChange={setFunnelYear}
+                        selectedTenantId={selectedTenantId}
+                        selectedChannel={selectedChannel}
+                      />
+                    </div>
+                  )}
 
-      {/* Share via Messenger Modal */}
-      <ShareModal
-        open={shareModal}
-        onOpenChange={setShareModal}
-      />
+                  {/* Leader Board Section */}
+                  {dashboardVisibility.leaderboard && (
+                    <div className="section-leaderboard">
+                      <LeaderBoardSection
+                        dateFilter={dateFilter}
+                        selectedTenantId={selectedTenantId}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-      {/* Embed Code Modal */}
-      <EmbedModal
-        open={embedModal}
-        onOpenChange={setEmbedModal}
-      />
+        {/* Contact Modal */}
+        <ContactModal
+          open={contactModal.open}
+          type={contactModal.type}
+          performer={contactModal.performer}
+          onClose={() =>
+            setContactModal({ open: false, type: null, performer: null })
+          }
+        />
 
-      {/* Fallout Analysis Modal */}
-      <FalloutModal
-        open={falloutModal.open}
-        category={falloutModal.category}
-        data={falloutModal.data}
-        onClose={() => setFalloutModal({ open: false, category: null, data: [] })}
-      />
+        {/* Metric Breakdown Modal */}
+        <MetricModal
+          open={metricModal.open}
+          type={metricModal.type}
+          performer={metricModal.performer}
+          onClose={() =>
+            setMetricModal({ open: false, type: null, performer: null })
+          }
+        />
 
-      {/* Hidden for now - Cohi Avatar
+        {/* Risk Case Breakdown Modal */}
+        <RiskModal
+          open={riskModal.open}
+          case={riskModal.case}
+          onClose={() => setRiskModal({ open: false, case: null })}
+        />
+
+        {/* Pull-Through Stage Modal */}
+        <PullThroughModal
+          open={pullThroughModal.open}
+          onOpenChange={(open) =>
+            !open &&
+            setPullThroughModal({
+              open: false,
+              stage: null,
+              data: [],
+            })
+          }
+          stage={pullThroughModal.stage}
+          data={pullThroughModal.data}
+        />
+
+        {/* Export to Excel Modal */}
+        <ExportModal open={exportModal} onOpenChange={setExportModal} />
+
+        {/* Share via Messenger Modal */}
+        <ShareModal open={shareModal} onOpenChange={setShareModal} />
+
+        {/* Embed Code Modal */}
+        <EmbedModal open={embedModal} onOpenChange={setEmbedModal} />
+
+        {/* Fallout Analysis Modal */}
+        <FalloutModal
+          open={falloutModal.open}
+          category={falloutModal.category}
+          data={falloutModal.data}
+          onClose={() =>
+            setFalloutModal({ open: false, category: null, data: [] })
+          }
+        />
+
+        {/* Hidden for now - Cohi Avatar
        <AletheiaVoiceAssistant dashboardContext={{
         stats,
         riskCases,
@@ -1148,14 +1556,14 @@ const DashboardLegacy = () => {
        }} />
        */}
 
-      {/* Floating Data Chat Button - Links to full page */}
-      <Link
-        to="/data-chat"
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all hover:scale-105 group"
-      >
-        <Sparkles className="w-5 h-5" />
-        <span className="font-medium">Ask about your data</span>
-      </Link>
+        {/* Floating Data Chat Button - Links to full page */}
+        <Link
+          to="/data-chat"
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all hover:scale-105 group"
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="font-medium">Ask about your data</span>
+        </Link>
       </DashboardLayout>
     </DashboardContainer>
   );

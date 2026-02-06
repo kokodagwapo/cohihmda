@@ -13,6 +13,7 @@ import {
 import type { GeneratedInsight } from "../insights/index.js";
 import {
   REVENUE_SQL_EXPRESSION,
+  getTenantRevenueExpression,
   getActorColumnForChannel,
   getActorSqlExpression,
   getActorLabelForChannel,
@@ -449,6 +450,9 @@ export async function getLeaderboardData(
     const actorColumn = getActorColumnForChannel(filters?.channelGroup);
     const actorExpression = getActorSqlExpression(filters?.channelGroup, "l");
 
+    // Get tenant-specific revenue expression (or default if none configured)
+    const revenueExpression = await getTenantRevenueExpression(tenantPool, "l");
+
     // Build WHERE clause for filters
     const conditions: string[] = [];
     const params: any[] = [startDate, endDate];
@@ -494,8 +498,8 @@ export async function getLeaderboardData(
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
         ), 0) as total_volume,
-        -- Total revenue: Using shared REVENUE_SQL_EXPRESSION from scorecard-utils.ts
-        COALESCE(SUM(${REVENUE_SQL_EXPRESSION}) FILTER (
+        -- Total revenue: Using tenant-specific revenue expression (or default)
+        COALESCE(SUM(${revenueExpression}) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')

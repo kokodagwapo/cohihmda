@@ -364,6 +364,7 @@ function DashboardSectionEmbed({
           <AletheiaPromptsCard
             dateFilter="mtd"
             selectedTenantId={selectedTenantId}
+            selectedChannel={selectedChannel}
           />
         </div>
       );

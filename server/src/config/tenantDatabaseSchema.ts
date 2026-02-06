@@ -162,6 +162,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         gfe_application_date DATE,
         started_date DATE,
         pre_approval_date DATE,
+        preapproval_req_dt DATE,
         disclosure_prep_date DATE,
         signed_date DATE,
         scrubbed_date DATE,
@@ -401,6 +402,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         -- HMDA fields
         interest_only_indicator BOOLEAN,
         business_or_commercial_purpose BOOLEAN,
+        preapproval_flag BOOLEAN,
         
         -- Refinance fields
         refinance_cash_out_type TEXT,
@@ -1472,6 +1474,78 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         ('operations', NULL, 'pull_through', 0.30, 'Pull-through percentage weight'),
         ('operations', NULL, 'volume', 0.30, 'Volume processed weight')
       ON CONFLICT (scorecard_type, persona_id, metric_name) DO NOTHING
+    `
+      )
+      .catch(() => {});
+
+    // Create tenant_calculations table (custom calculation formulas per tenant)
+    // Allows each tenant to define their own revenue formula from available fields
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.tenant_calculations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        calculation_type VARCHAR(50) NOT NULL DEFAULT 'revenue', -- 'revenue', 'margin', 'custom'
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        -- Formula components stored as JSONB array
+        -- Each element: { field: 'field_name', operator: '+' | '-' | '*' | '/', coefficient: 1.0 }
+        formula_components JSONB NOT NULL DEFAULT '[]',
+        -- Raw SQL expression (generated from components or custom)
+        sql_expression TEXT,
+        -- Whether this is the active formula for this calculation type
+        is_active BOOLEAN DEFAULT TRUE,
+        -- Validation status
+        is_validated BOOLEAN DEFAULT FALSE,
+        last_validated_at TIMESTAMPTZ,
+        validation_result TEXT,
+        -- Audit fields
+        created_by UUID REFERENCES public.users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_by UUID REFERENCES public.users(id),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(calculation_type, name)
+      )
+    `
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE INDEX IF NOT EXISTS idx_tenant_calculations_type ON public.tenant_calculations(calculation_type)
+    `
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE INDEX IF NOT EXISTS idx_tenant_calculations_active ON public.tenant_calculations(calculation_type, is_active) WHERE is_active = TRUE
+    `
+      )
+      .catch(() => {});
+
+    // Seed default revenue calculation (matches current hardcoded formula)
+    await pool
+      .query(
+        `
+      INSERT INTO public.tenant_calculations (calculation_type, name, description, formula_components, sql_expression, is_active, is_validated)
+      VALUES (
+        'revenue',
+        'Default Revenue Formula',
+        'Standard revenue calculation: Base Buy ($) + Orig Fee Borr Pd + Orig Fees Seller - CD Lender Credits. Base Buy = ((rate_lock_buy_side_base_price_rate - 100) / 100) * loan_amount',
+        '[
+          {"field": "rate_lock_buy_side_base_price_rate", "operator": "+", "is_base_buy": true, "label": "Base Buy ($)"},
+          {"field": "orig_fee_borr_pd", "operator": "+", "label": "Orig Fee Borr Pd"},
+          {"field": "orig_fees_seller", "operator": "+", "label": "Orig Fees Seller"},
+          {"field": "cd_lender_credits", "operator": "-", "label": "CD Lender Credits"}
+        ]'::jsonb,
+        'COALESCE(CASE WHEN rate_lock_buy_side_base_price_rate IS NOT NULL AND rate_lock_buy_side_base_price_rate != 0 THEN ROUND(((rate_lock_buy_side_base_price_rate - 100.0) / 100.0) * loan_amount, 2) ELSE 0 END, 0) + COALESCE(orig_fee_borr_pd, 0) + COALESCE(orig_fees_seller, 0) - COALESCE(cd_lender_credits, 0)',
+        TRUE,
+        TRUE
+      )
+      ON CONFLICT (calculation_type, name) DO NOTHING
     `
       )
       .catch(() => {});

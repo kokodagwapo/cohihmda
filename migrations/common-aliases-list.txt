@@ -1,0 +1,261 @@
+1st Change Months
+Account Executive
+Adjustment Period Months
+Application Date
+Appraisal Completed Date
+Appraisal Ordered Date
+Appraisal Received Date
+Appraised Value
+ARM Program
+Assets Subtotal Liquid Assets
+ATR Loan Type
+AU Decision Date
+Balloon Payments
+Base Loan Amount
+BE DTI Ratio
+BORR EMPLOYER
+Borr Position
+Borr Position - 2nd
+Borr Self Employed
+Borr Self Employed - 2nd
+Borr Yrs on Job
+Borr Yrs on Job - 2nd
+Borrower Mailing Address is same as the Property Address
+Borrower Type
+Branch
+Branch Price Concession
+Broker Lender Name
+Business or Commercial Purpose
+Buy Side Lock # Days
+Buy Side Lock Date
+Buy Side Lock Expiration
+CD Applied Cure
+CD Lender Credits
+Channel
+Closer
+Closer ID
+Closing Date
+Closing Disclosure Received Date
+Closing Disclosure Sent Date
+CLTV
+Co-Borr Employer
+Co-Borr Position
+Co-Borr Self Employed
+Co-Borr Yrs on Job
+CoBorrower Mailing Address is same as the Property Address
+CoBorrower Type
+Combined Assets All Borrowers
+Company NMLS ID
+Conditional Approval Date
+Corporate Price Concession
+County FIPS Code
+Credit Pull Date
+CTC Date
+CU Risk Score
+Current Loan Status
+Current Milestone
+Current Status Date
+Description of the ARM index type
+Discount / Yield Spread Premium
+Document Type
+DU/LP Case ID
+Estimated Closing Date
+Exempt from Reg. Z
+Fannie AU Decision
+Fannie Property Valuation Form Type
+Fee Details - Line 804 - Borrower Amount - Appraisal Fee
+Fee Details - Line 804 - Borrower POC Amount - Appraisal
+Fee Details - Line 804 - Broker POC Amount - Appraisal
+Fee Details - Line 804 - Lender POC Amount - Appraisal
+Fee Details - Line 804 - Other POC Amount - Appraisal
+Fee Details - Line 804 - Seller Amount - Appraisal Fee
+Fee Details - Line 804 - Seller POC Amount - Appraisal
+Fee Details - Line 804 Appraisal Fee PAC
+Fee Details - Line 805 - Borrower Amount - Credit Report
+Fee Details - Line 805 - Borrower POC Amount - Cred Report
+Fee Details - Line 805 - Broker POC Amount - Cred Report
+Fee Details - Line 805 - Lender POC Amount - Cred Report
+Fee Details - Line 805 - Other POC Amount - Cred Report
+Fee Details - Line 805 - Seller Amount - Credit Report
+Fee Details - Line 805 - Seller POC Amount - Cred Report
+Fee Details - Line 805 Credit Report Fee PAC
+Fee Details - Line 807 - Borrower Amount - Flood Cert
+Fee Details - Line 807 - Borrower POC Amount - Flood Cert
+Fee Details - Line 807 - Broker POC Amount - Flood Cert
+Fee Details - Line 807 - Lender POC Amount - Flood Cert
+Fee Details - Line 807 - Other POC Amount - Flood Cert
+Fee Details - Line 807 - Seller Amount - Flood Cert
+Fee Details - Line 807 - Seller POC Amount - Flood Cert
+Fee Details - Line 807 Flood Certification Fee PAC
+FICO Score
+First Rate Adjustment Cap
+First Rate Adjustment Date
+Flood Certification Date
+Floor Rate
+Freddie AU Decision
+Freddie AVM Model Name Type Other Description
+Freddie Loan Level Credit Score Method
+Freddie Loan Level Credit Score Value
+Freddie Property Valuation Form Type
+Freddie Underwriting Type Other
+Frefinance Cash Out Type
+Funding Date
+Funds Sent Date
+Guaranty Fee
+GUID
+HCLTV
+Hedged Loan
+HELOC Draw Period
+HELOC Intial Draw
+HELOC Repayment Period
+Income Total Mo Income
+Interest Only Indicator
+Interest Only Payments
+Interest Rate
+Investor
+Investor Lock Date
+Investor Purchase Date
+Investor Status
+Last Modified Date
+Legacy Loan Officer ID
+Lien Position
+Life Cap
+Loan Amount
+Loan Estimate Received Date
+Loan Estimate Sent Date
+Loan First Payment Date
+Loan Folder
+Loan Interviewer
+Loan Number
+Loan Officer
+Loan Officer ID
+Loan Processor ID
+Loan Program
+Loan Purpose
+Loan Source
+Loan Term
+Loan Type
+Lock Date
+Lock Days
+Lock Expiration Date
+Lookback
+LTV Ratio
+Margin
+Margin Index
+Maturity Date
+Mavent - ATR-QM Result
+Mavent - Enterprise Result
+Mavent - GSE Result
+Mavent - High-Cost result
+Mavent - HMDA Result
+Mavent - HPML Result
+Mavent - License Reviewer Result
+Mavent - NMLS Licensing Result
+Mavent - Other Result
+Mavent - Overall Result
+Mavent - State Rules Result
+Mavent - TILA Tolerance Result
+Maximum Rate Adjustment Cap
+Meets Agency/GSE QM
+Mers Min
+MI % Coverage 1
+Mi % Coverage 2
+MI Cancel %
+MI Coverage 1 Months
+MI Coverage 2 Months
+Mortgage Insurance Company Name
+MSR Value
+Net Buy
+Net Sell
+NMLS ID
+Note Date
+Number Of Conditions
+Number of Months Interest Only Payments
+Number of Months Reserves
+Number of Units
+Occupancy Type
+ORGID
+Orig Fee Borr Pd
+Orig Fees Seller
+Origination Points
+P&amp;I Payment
+PA Payout 1
+PA Payout 10
+PA Payout 11
+PA Payout 12
+PA Payout 2
+PA Payout 3
+PA Payout 4
+PA Payout 5
+PA Payout 6
+PA Payout 7
+PA Payout 8
+PA Payout 9
+PA Sell Amt
+PA SRP Amt
+PITI Payment
+PMI Flag
+Preapproval Flag
+PreApproval Req. Dt
+Private Mortgage Insurance Indicator
+Processor
+Product Type
+Property City
+Property County
+Property Rights
+Property State
+Property Street
+Property Type
+Property Valuation Effective Date
+Property Valuation Method Type
+Property Zip
+QM Loan Type
+Rate Lock Buy Side Adjusted Buy Price
+Rate Lock Buy Side Base Price Rate
+Rate Lock Buy Side Net Buy Rate
+Rate Lock Buy Side Profit Margin Adjustment 1 Desc
+Rate Lock Buy Side Profit Margin Adjustment 1 Rate
+Rate Lock Buy Side Profit Margin Adjustment 2 Desc
+Rate Lock Buy Side Profit Margin Adjustment 2 Rate
+Rate Lock Buy Side Profit Margin Adjustment 3 Desc
+Rate Lock Buy Side Profit Margin Adjustment 3 Rate
+Rate Lock Buy Side Profit Margin Adjustment 4 Desc
+Rate Lock Buy Side Profit Margin Adjustment 4 Rate
+Rate Lock Buy Side Profit Margin Adjustment 5 Desc
+Rate Lock Buy Side Profit Margin Adjustment 5 Rate
+Rate Lock Buy Side Profit Margin Adjustment 6 Desc
+Rate Lock Buy Side Profit Margin Adjustment 6 Rate
+Rate Lock Buy Side Profit Margin Adjustment 7 Desc
+Rate Lock Buy Side Profit Margin Adjustment 7 Rate
+Rate Lock Buy Side Profit Margin Adjustment 8 Desc
+Rate Lock Buy Side Profit Margin Adjustment 8 Rate
+Referral Name
+Revised CD Received Date
+Revised CD Sent Date
+Revised LE Received Date
+Revised LE Sent Date
+Rounding
+Safe Harbor
+Sales Price
+Sell Side Lock # Days
+Sell Side Lock Expiration
+Service Fee
+Shipped Date
+SRP from investor
+Started Date
+State FIPS Code
+Submitted To Processing Date
+Submitted To Underwriting Date
+Total Mortgaged Properties Count
+Underwriter
+Underwriter ID
+Underwriter Risk Assess AUS Recomm
+Underwriter Risk Assess Type
+Underwriting AUS Number
+Underwriting AUS Source
+Underwriting Description
+UW Denied Date
+UW Final Approval Date
+UW Suspended Date
+UW Touches
+Warehouse Co Name

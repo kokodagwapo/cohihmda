@@ -37,6 +37,7 @@ import {
   OPERATIONS_ACTOR_CONFIGS,
   SALES_ACTOR_CONFIGS,
   REVENUE_SQL_EXPRESSION,
+  getTenantRevenueExpression,
   TTS_TIER_THRESHOLDS,
   OPS_TTS_WEIGHTS,
   SALES_TTS_WEIGHTS,
@@ -78,6 +79,9 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const tenantPool = getTenantContext(req).tenantPool;
+
+      // Get tenant-specific revenue expression (or default if none configured)
+      const revenueExpression = await getTenantRevenueExpression(tenantPool);
 
       // Get user's loan access context
       const accessCtx = await getLoanAccessContext(req, tenantPool);
@@ -153,7 +157,7 @@ router.get(
         ? `AND guid IN (SELECT loan_guid FROM user_loan_access WHERE user_id = $3)`
         : "";
 
-      // Fetch FUNDED loans (main data for scorecard - DateType={'Funding'})
+      // Fetch FUNDED loans with tenant-specific revenue calculation (main data for scorecard - DateType={'Funding'})
       const fundedLoansResult = await retryQuery(
         () =>
           tenantPool.query(
@@ -164,7 +168,8 @@ router.get(
           origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
           branch_price_concession, occupancy_type, borr_self_employed,
           rate_lock_buy_side_base_price_rate,
-          number_of_conditions, date_warehoused, investor_status, investor_purchase_date
+          number_of_conditions, date_warehoused, investor_status, investor_purchase_date,
+          (${revenueExpression}) AS revenue
          FROM loans
          WHERE funding_date IS NOT NULL
            AND funding_date >= $1
@@ -182,7 +187,7 @@ router.get(
       );
       const fundedLoans = fundedLoansResult.rows;
 
-      // Fetch supporting loans (for pull-through calculation - DateType={'Application'})
+      // Fetch supporting loans with tenant-specific revenue (for pull-through and lost opportunity calculation - DateType={'Application'})
       const supportingLoansResult = await retryQuery(
         () =>
           tenantPool.query(
@@ -191,7 +196,8 @@ router.get(
           funding_date, closing_date, application_date, started_date,
           branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
           origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
-          rate_lock_buy_side_base_price_rate
+          rate_lock_buy_side_base_price_rate,
+          (${revenueExpression}) AS revenue
          FROM loans
          WHERE COALESCE(started_date, application_date) >= $1
            AND COALESCE(started_date, application_date) <= $2
@@ -288,7 +294,7 @@ router.get(
         existing.units += 1;
         existing.volume += loanAmount;
 
-        const revenue = calcLoanRevenue(l);
+        const revenue = parseFloat(l.revenue) || 0; // Uses tenant-specific formula from SQL
         existing.revenue += revenue;
 
         if (loanAmount > 0) {
@@ -359,7 +365,7 @@ router.get(
           status.includes("INCOMPLETE")
         ) {
           existing.lostOpportunityUnits += 1;
-          existing.lostOpportunityRevenue += calcLoanRevenue(l);
+          existing.lostOpportunityRevenue += parseFloat(l.revenue) || 0; // Uses tenant-specific formula from SQL
         }
 
         // Denied
@@ -1224,6 +1230,9 @@ router.get(
     try {
       const tenantPool = getTenantContext(req).tenantPool;
 
+      // Get tenant-specific revenue expression (or default if none configured)
+      const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
       const dateRange = (req.query.date_range as string) || "3-months";
       const channelGroup = (req.query.channel_group as string) || "Retail";
       const monthsBack = dateRange === "6-months" ? 6 : 3;
@@ -1248,7 +1257,7 @@ router.get(
         channel: channelGroup,
       });
 
-      // Fetch loans
+      // Fetch loans with tenant-specific revenue calculation
       const loansResult = await tenantPool.query(
         `
       SELECT 
@@ -1256,7 +1265,8 @@ router.get(
         funding_date, application_date, closing_date,
         loan_officer, branch, channel, current_loan_status,
         rate_lock_buy_side_base_price_rate,
-        orig_fee_borr_pd, orig_fees_seller, cd_lender_credits
+        orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
+        (${revenueExpression}) AS revenue
       FROM public.loans
       WHERE funding_date IS NOT NULL
         AND funding_date >= $1
@@ -1335,7 +1345,7 @@ router.get(
 
         existing.units += 1;
         existing.volume += parseFloat(loan.loan_amount || 0);
-        existing.revenue += calcLoanRevenue(loan);
+        existing.revenue += parseFloat(loan.revenue) || 0; // Uses tenant-specific formula from SQL
 
         const turnTime = calcTurnTime(loan);
         if (turnTime !== null) {
@@ -1527,6 +1537,10 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const tenantPool = getTenantContext(req).tenantPool;
+
+      // Get tenant-specific revenue expression (or default if none configured)
+      const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
       const loName = req.params.loName as string;
       const decodedLoName = decodeURIComponent(loName);
 
@@ -1541,7 +1555,7 @@ router.get(
       startDate.setMonth(startDate.getMonth() - monthsBack);
       startDate.setDate(1);
 
-      // Fetch LO's loans
+      // Fetch LO's loans with tenant-specific revenue calculation
       const loansResult = await tenantPool.query(
         `
       SELECT 
@@ -1549,7 +1563,8 @@ router.get(
         funding_date, application_date, closing_date,
         loan_officer, branch, channel, current_loan_status,
         rate_lock_buy_side_base_price_rate,
-        orig_fee_borr_pd, orig_fees_seller, cd_lender_credits
+        orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
+        (${revenueExpression}) AS revenue
       FROM public.loans
       WHERE loan_officer = $1
         AND funding_date IS NOT NULL
@@ -1582,14 +1597,14 @@ router.get(
         return days > 0 ? days : null;
       };
 
-      // Calculate metrics
+      // Calculate metrics using tenant-specific revenue from SQL
       const totalClosed = filteredLoans.length;
       const totalVolume = filteredLoans.reduce(
         (sum: number, l: any) => sum + parseFloat(l.loan_amount || 0),
         0
       );
       const totalRevenue = filteredLoans.reduce(
-        (sum: number, l: any) => sum + calcLoanRevenue(l),
+        (sum: number, l: any) => sum + (parseFloat(l.revenue) || 0),
         0
       );
       const avgMargin =
@@ -1644,7 +1659,7 @@ router.get(
             0
           );
           const monthRevenue = monthLoans.reduce(
-            (sum: number, l: any) => sum + calcLoanRevenue(l),
+            (sum: number, l: any) => sum + (parseFloat(l.revenue) || 0), // Uses tenant-specific formula from SQL
             0
           );
           const monthTurnTimes = monthLoans

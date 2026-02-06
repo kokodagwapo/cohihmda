@@ -419,8 +419,13 @@ const Dashboard = () => {
         const tenantParam = selectedTenantId
           ? `&tenant_id=${selectedTenantId}`
           : "";
+        // Don't send channel filter when "All" is selected
+        const channelParam =
+          selectedChannel && selectedChannel !== "All"
+            ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+            : "";
         const insightsData = await api.request<any>(
-          `/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}`
+          `/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}${channelParam}`
         );
         const dialogues =
           insightsData?.insights?.map((insight: any) => ({
@@ -1408,6 +1413,7 @@ const Dashboard = () => {
                     dateFilter={dateFilter}
                     briefingContext={briefingContext || undefined}
                     selectedTenantId={selectedTenantId}
+                    selectedChannel={selectedChannel}
                     onOpenCohiPanel={() =>
                       window.dispatchEvent(new Event("cohi-chat-open"))
                     }

@@ -70,7 +70,15 @@ import {
 } from "@/hooks/useTopTieringComparisonData";
 
 type TopTieringActor = "branch" | "loan-officer";
-type TimeFilter = "last-year" | "last-quarter" | "last-month" | "custom";
+type TimeFilter =
+  | "last-year"
+  | "last-quarter"
+  | "last-month"
+  | "ytd"
+  | "qtd"
+  | "mtd"
+  | "trailing-12"
+  | "custom";
 type ChartSorting = "desc" | "asc";
 
 interface ActorData {
@@ -1017,7 +1025,15 @@ export function TopTieringComparisonView({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="last-year">Last Year</SelectItem>
+                      <SelectItem value="ytd">Year to Date</SelectItem>
+                      <SelectItem value="qtd">Quarter to Date</SelectItem>
+                      <SelectItem value="mtd">Month to Date</SelectItem>
+                      <SelectItem value="trailing-12">
+                        Trailing 12 Months
+                      </SelectItem>
+                      <SelectItem value="last-year">
+                        Last Calendar Year
+                      </SelectItem>
                       <SelectItem value="last-quarter">Last Quarter</SelectItem>
                       <SelectItem value="last-month">Last Month</SelectItem>
                       <SelectItem value="custom">Custom Range</SelectItem>

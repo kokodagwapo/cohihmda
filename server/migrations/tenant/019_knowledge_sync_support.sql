@@ -8,9 +8,14 @@
 -- - Creates rag_embeddings table if not exists (for vector search)
 
 -- =============================================================================
--- Enable pgvector extension if not already enabled
+-- Enable pgvector extension if available (skip gracefully if not installed)
 -- =============================================================================
-CREATE EXTENSION IF NOT EXISTS vector;
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS vector;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pgvector extension not available - vector features will be disabled';
+END $$;
 
 -- =============================================================================
 -- RAG_DOCUMENTS - Add columns to track global vs tenant-owned documents

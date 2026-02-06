@@ -66,7 +66,8 @@ export const useMetrics = (
         if (dateField) params.append("dateField", dateField);
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         // Channel filter uses consolidated_channel for Retail/TPO mapping
-        if (selectedChannel)
+        // Don't send filter when "All" channels selected
+        if (selectedChannel && selectedChannel !== "All")
           params.append("consolidated_channel", selectedChannel);
 
         const result = await api.request<MetricResult>(
@@ -101,8 +102,9 @@ export const useMetrics = (
         }`;
 
         // Build additionalFilters for channel filtering
+        // Don't send filter when "All" channels selected
         const additionalFilters: Record<string, string> = {};
-        if (selectedChannel) {
+        if (selectedChannel && selectedChannel !== "All") {
           additionalFilters.consolidated_channel = selectedChannel;
         }
 
@@ -152,8 +154,9 @@ export const useMetrics = (
         }`;
 
         // Build additionalFilters for channel filtering
+        // Don't send filter when "All" channels selected
         const additionalFilters: Record<string, string> = {};
-        if (selectedChannel) {
+        if (selectedChannel && selectedChannel !== "All") {
           additionalFilters.consolidated_channel = selectedChannel;
         }
 

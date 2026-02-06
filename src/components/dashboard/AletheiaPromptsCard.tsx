@@ -1,15 +1,28 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Zap, Pin, RefreshCw, Sparkles, ChevronRight, MessageSquare } from 'lucide-react';
-import { useAletheiaData, AletheiaInsight } from '@/hooks/useAletheiaData';
-import { CohiBriefingControl } from '@/components/aletheia/CohiBriefingControl';
-import { Link } from 'react-router-dom';
-import { InsightDetailModal } from './InsightDetailModal';
-import { ExportShareMenu } from '@/components/common/ExportShareMenu';
-import type { ExportData } from '@/utils/exportUtils';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import { motion } from "framer-motion";
+import {
+  Zap,
+  Pin,
+  RefreshCw,
+  Sparkles,
+  ChevronRight,
+  MessageSquare,
+} from "lucide-react";
+import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
+import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
+import { Link } from "react-router-dom";
+import { InsightDetailModal } from "./InsightDetailModal";
+import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+import type { ExportData } from "@/utils/exportUtils";
 
 interface AletheiaPromptsCardProps {
-  dateFilter: 'today' | 'mtd' | 'ytd' | 'custom';
+  dateFilter: "today" | "mtd" | "ytd" | "custom";
   onDataAvailabilityChange?: (hasData: boolean) => void;
   /** Called when user clicks "Ask Cohi" – opens the page-level Cohi panel */
   onOpenCohiPanel?: () => void;
@@ -23,6 +36,7 @@ interface AletheiaPromptsCardProps {
     userName?: string;
   };
   selectedTenantId?: string | null;
+  selectedChannel?: string | null;
 }
 
 export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
@@ -30,7 +44,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   onDataAvailabilityChange,
   onOpenCohiPanel,
   briefingContext,
-  selectedTenantId
+  selectedTenantId,
+  selectedChannel,
 }: AletheiaPromptsCardProps) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const [currentSet, setCurrentSet] = useState(0);
@@ -39,15 +54,24 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [pinnedInsights, setPinnedInsights] = useState<Set<string>>(new Set());
   // Modal state for insight details
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedInsight, setSelectedInsight] = useState<AletheiaInsight | null>(null);
-  
+  const [selectedInsight, setSelectedInsight] =
+    useState<AletheiaInsight | null>(null);
+
   // Use custom hook for data fetching
-  const { allInsights, insightsLoading, insightsError, funnelData, metadata, refreshInsights } = useAletheiaData(
+  const {
+    allInsights,
+    insightsLoading,
+    insightsError,
+    funnelData,
+    metadata,
+    refreshInsights,
+  } = useAletheiaData(
     dateFilter,
     onDataAvailabilityChange,
-    selectedTenantId
+    selectedTenantId,
+    selectedChannel
   );
-  
+
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Handle refresh with loading state
@@ -60,35 +84,54 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ tenantId?: string | null }>).detail;
+      const detail = (event as CustomEvent<{ tenantId?: string | null }>)
+        .detail;
       if (!detail?.tenantId || detail.tenantId === selectedTenantId) {
         refreshInsights();
       }
     };
-    window.addEventListener('cohi-demo-seeded', handler as EventListener);
-    return () => window.removeEventListener('cohi-demo-seeded', handler as EventListener);
+    window.addEventListener("cohi-demo-seeded", handler as EventListener);
+    return () =>
+      window.removeEventListener("cohi-demo-seeded", handler as EventListener);
   }, [refreshInsights, selectedTenantId]);
-  
+
   // Handle insight click to show detail modal
   const handleInsightClick = useCallback((insight: AletheiaInsight) => {
     // Only show modal for insights with drillable sources
-    const drillableSources = ['predictions', 'credit_risk', 'lost_opportunity', 'pipeline', 'performance', 'comparisons'];
+    const drillableSources = [
+      "predictions",
+      "credit_risk",
+      "lost_opportunity",
+      "pipeline",
+      "performance",
+      "comparisons",
+    ];
     if (insight.source && drillableSources.includes(insight.source)) {
       setSelectedInsight(insight);
       setIsModalOpen(true);
     }
   }, []);
-  
+
   // Check if an insight is drillable
   const isDrillable = useCallback((insight: AletheiaInsight) => {
-    const drillableSources = ['predictions', 'credit_risk', 'lost_opportunity', 'pipeline', 'performance', 'comparisons'];
+    const drillableSources = [
+      "predictions",
+      "credit_risk",
+      "lost_opportunity",
+      "pipeline",
+      "performance",
+      "comparisons",
+    ];
     return insight.source && drillableSources.includes(insight.source);
   }, []);
 
   // Create unique ID for each insight based on message content (must be defined before useMemo)
-  const getInsightId = useCallback((insight: AletheiaInsight, index: number) => {
-    return `${dateFilter}-${index}-${insight.message.substring(0, 50)}`;
-  }, [dateFilter]);
+  const getInsightId = useCallback(
+    (insight: AletheiaInsight, index: number) => {
+      return `${dateFilter}-${index}-${insight.message.substring(0, 50)}`;
+    },
+    [dateFilter]
+  );
 
   // Group insights into sets of 3 with priority color coding (using useMemo to ensure consistent calculation)
   const unpinnedInsights = useMemo(() => {
@@ -128,9 +171,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     return () => clearInterval(interval);
   }, [isPaused, insightSets.length]);
 
-
   // Toggle pin/unpin insight
-  const togglePin = (insight: typeof allInsights[0], index: number) => {
+  const togglePin = (insight: (typeof allInsights)[0], index: number) => {
     const insightId = getInsightId(insight, index);
     setPinnedInsights((prev) => {
       const next = new Set(prev);
@@ -157,7 +199,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         <div className="flex items-center justify-between mb-5 sm:mb-6 md:mb-8">
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 dark:shadow-blue-600/15 ring-1 ring-white/20">
-              <Zap className="w-5 h-5 sm:w-6 sm:h-6 text-white" strokeWidth={1.5} />
+              <Zap
+                className="w-5 h-5 sm:w-6 sm:h-6 text-white"
+                strokeWidth={1.5}
+              />
             </div>
             <div>
               <h3 className="text-xl sm:text-2xl md:text-3xl font-semibold text-slate-900 dark:text-white mb-0.5 tracking-tight leading-tight">
@@ -171,7 +216,9 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     AI
                   </span>
                 )}
-                <span className="text-slate-400 dark:text-slate-500">{allInsights.length} insights</span>
+                <span className="text-slate-400 dark:text-slate-500">
+                  {allInsights.length} insights
+                </span>
               </p>
             </div>
           </div>
@@ -201,16 +248,18 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 label: "Cohi Insights",
               }}
             />
-{/* Documentation links hidden for now */}
+            {/* Documentation links hidden for now */}
             <button
               onClick={handleRefresh}
               disabled={insightsLoading || isRefreshing}
               className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
               title="Refresh insights"
             >
-              <RefreshCw 
-                className={`w-4 h-4 text-slate-500 dark:text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`} 
-                strokeWidth={1.5} 
+              <RefreshCw
+                className={`w-4 h-4 text-slate-500 dark:text-slate-400 ${
+                  isRefreshing ? "animate-spin" : ""
+                }`}
+                strokeWidth={1.5}
               />
             </button>
             <button
@@ -220,7 +269,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
             >
               <MessageSquare className="w-4 h-4" strokeWidth={1.5} />
             </button>
-            <CohiBriefingControl 
+            <CohiBriefingControl
               briefingContext={briefingContext}
               tenantId={selectedTenantId}
             />
@@ -237,7 +286,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         {pinnedInsightsList.length > 0 && (
           <div className="mb-4 sm:mb-5 md:mb-6 space-y-2 sm:space-y-3">
             {pinnedInsightsList.map((insight, idx) => {
-              const insightId = getInsightId(insight, allInsights.indexOf(insight));
+              const insightId = getInsightId(
+                insight,
+                allInsights.indexOf(insight)
+              );
               const InsightIcon = insight.icon;
               return (
                 <motion.div
@@ -248,18 +300,29 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 shadow-sm"
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      insight.type === 'success' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
-                      insight.type === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                      insight.type === 'error' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                      'bg-blue-100 dark:bg-blue-900/30'
-                    }`}>
-                      <InsightIcon className={`w-4 h-4 ${
-                        insight.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' :
-                        insight.type === 'warning' ? 'text-amber-600 dark:text-amber-400' :
-                        insight.type === 'error' ? 'text-rose-600 dark:text-rose-400' :
-                        'text-blue-600 dark:text-blue-400'
-                      }`} strokeWidth={1.5} />
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        insight.type === "success"
+                          ? "bg-emerald-100 dark:bg-emerald-900/30"
+                          : insight.type === "warning"
+                          ? "bg-amber-100 dark:bg-amber-900/30"
+                          : insight.type === "error"
+                          ? "bg-rose-100 dark:bg-rose-900/30"
+                          : "bg-blue-100 dark:bg-blue-900/30"
+                      }`}
+                    >
+                      <InsightIcon
+                        className={`w-4 h-4 ${
+                          insight.type === "success"
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : insight.type === "warning"
+                            ? "text-amber-600 dark:text-amber-400"
+                            : insight.type === "error"
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-blue-600 dark:text-blue-400"
+                        }`}
+                        strokeWidth={1.5}
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm sm:text-base text-slate-900 dark:text-white font-light leading-relaxed">
@@ -272,11 +335,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                       )}
                     </div>
                     <button
-                      onClick={() => togglePin(insight, allInsights.indexOf(insight))}
+                      onClick={() =>
+                        togglePin(insight, allInsights.indexOf(insight))
+                      }
                       className="ml-2 p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
                       aria-label="Unpin insight"
                     >
-                      <Pin className="w-4 h-4 text-blue-600 dark:text-blue-400" strokeWidth={2} />
+                      <Pin
+                        className="w-4 h-4 text-blue-600 dark:text-blue-400"
+                        strokeWidth={2}
+                      />
                     </button>
                   </div>
                 </motion.div>
@@ -308,30 +376,49 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: idx * 0.1 }}
-                  className={`p-4 rounded-2xl bg-white/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 shadow-sm hover:shadow-md transition-all duration-200 ${canDrill ? 'cursor-pointer hover:border-blue-300/80 dark:hover:border-blue-500/50' : 'cursor-default'}`}
+                  className={`p-4 rounded-2xl bg-white/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 shadow-sm hover:shadow-md transition-all duration-200 ${
+                    canDrill
+                      ? "cursor-pointer hover:border-blue-300/80 dark:hover:border-blue-500/50"
+                      : "cursor-default"
+                  }`}
                   onClick={() => {
                     if (canDrill) {
                       handleInsightClick(insight);
                     } else {
-                      setExpandedInsight(expandedInsight === globalIdx ? null : globalIdx);
+                      setExpandedInsight(
+                        expandedInsight === globalIdx ? null : globalIdx
+                      );
                     }
                   }}
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      insight.type === 'success' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
-                      insight.type === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                      insight.type === 'error' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                      insight.type === 'critical' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                      'bg-blue-100 dark:bg-blue-900/30'
-                    }`}>
-                      <InsightIcon className={`w-4 h-4 ${
-                        insight.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' :
-                        insight.type === 'warning' ? 'text-amber-600 dark:text-amber-400' :
-                        insight.type === 'error' ? 'text-rose-600 dark:text-rose-400' :
-                        insight.type === 'critical' ? 'text-rose-600 dark:text-rose-400' :
-                        'text-blue-600 dark:text-blue-400'
-                      }`} strokeWidth={1.5} />
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        insight.type === "success"
+                          ? "bg-emerald-100 dark:bg-emerald-900/30"
+                          : insight.type === "warning"
+                          ? "bg-amber-100 dark:bg-amber-900/30"
+                          : insight.type === "error"
+                          ? "bg-rose-100 dark:bg-rose-900/30"
+                          : insight.type === "critical"
+                          ? "bg-rose-100 dark:bg-rose-900/30"
+                          : "bg-blue-100 dark:bg-blue-900/30"
+                      }`}
+                    >
+                      <InsightIcon
+                        className={`w-4 h-4 ${
+                          insight.type === "success"
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : insight.type === "warning"
+                            ? "text-amber-600 dark:text-amber-400"
+                            : insight.type === "error"
+                            ? "text-rose-600 dark:text-rose-400"
+                            : insight.type === "critical"
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-blue-600 dark:text-blue-400"
+                        }`}
+                        strokeWidth={1.5}
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm sm:text-base text-slate-900 dark:text-white font-light leading-relaxed">
@@ -340,7 +427,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                       {expandedInsight === globalIdx && insight.reasoning && (
                         <motion.p
                           initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
+                          animate={{ opacity: 1, height: "auto" }}
                           exit={{ opacity: 0, height: 0 }}
                           className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-2 font-light"
                         >
@@ -350,7 +437,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     </div>
                     <div className="flex items-center gap-1">
                       {canDrill && (
-                        <div className="p-1.5 rounded-lg text-blue-500 dark:text-blue-400" title="Click to view details">
+                        <div
+                          className="p-1.5 rounded-lg text-blue-500 dark:text-blue-400"
+                          title="Click to view details"
+                        >
                           <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
                         </div>
                       )}
@@ -362,7 +452,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                         className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
                         aria-label="Pin insight"
                       >
-                        <Pin className="w-4 h-4 text-slate-400 dark:text-slate-500" strokeWidth={1.5} />
+                        <Pin
+                          className="w-4 h-4 text-slate-400 dark:text-slate-500"
+                          strokeWidth={1.5}
+                        />
                       </button>
                     </div>
                   </div>
@@ -381,8 +474,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 onClick={() => setCurrentSet(idx)}
                 className={`w-2 h-2 rounded-full transition-all ${
                   currentSet === idx
-                    ? 'bg-blue-600 dark:bg-blue-400 w-6'
-                    : 'bg-slate-300 dark:bg-slate-600'
+                    ? "bg-blue-600 dark:bg-blue-400 w-6"
+                    : "bg-slate-300 dark:bg-slate-600"
                 }`}
                 aria-label={`Go to insight set ${idx + 1}`}
               />
@@ -390,7 +483,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           </div>
         )}
       </motion.div>
-      
+
       {/* Insight Detail Modal */}
       <InsightDetailModal
         isOpen={isModalOpen}
@@ -398,8 +491,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           setIsModalOpen(false);
           setSelectedInsight(null);
         }}
-        insightSource={selectedInsight?.source || ''}
-        insightMessage={selectedInsight?.message || ''}
+        insightSource={selectedInsight?.source || ""}
+        insightMessage={selectedInsight?.message || ""}
         dateFilter={dateFilter}
       />
     </div>

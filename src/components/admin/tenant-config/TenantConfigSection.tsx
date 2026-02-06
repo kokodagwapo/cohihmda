@@ -5,40 +5,52 @@
  * Note: Personas/user profiles are managed in Access & Permissions section
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { 
-  Filter, 
-  BarChart3, 
+import { useState, useEffect, useCallback } from "react";
+import { motion } from "framer-motion";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Calculator,
+  BarChart3,
   Loader2,
   RefreshCw,
   Settings2,
   Link2,
-  Building2
-} from 'lucide-react';
-import { api } from '@/lib/api';
-import { useToast } from '@/hooks/use-toast';
-import { useAdminTenant } from '@/contexts/AdminTenantContext';
-import { FieldMappingTab } from './FieldMappingTab';
-import { FilterBuilderTab } from './FilterBuilderTab';
-import { ScoringWeightsTab } from './ScoringWeightsTab';
+  Building2,
+  Upload,
+} from "lucide-react";
+import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { useAdminTenant } from "@/contexts/AdminTenantContext";
+import { FieldMappingTab } from "./FieldMappingTab";
+import { RevenueFormulaTab } from "./RevenueFormulaTab";
+import { ScoringWeightsTab } from "./ScoringWeightsTab";
+import { LegacyConfigImportTab } from "./LegacyConfigImportTab";
 
 export function TenantConfigSection() {
   const { toast } = useToast();
-  
+
   // Use admin tenant context
-  const { selectedTenantId, isTenantAdmin, currentTenantName } = useAdminTenant();
-  const [activeTab, setActiveTab] = useState('mapping');
+  const { selectedTenantId, isTenantAdmin, currentTenantName } =
+    useAdminTenant();
+  const [activeTab, setActiveTab] = useState("mapping");
   const [loading, setLoading] = useState(false);
-  
+
   // Data states
-  const [filters, setFilters] = useState<any[]>([]);
-  const [scoringWeights, setScoringWeights] = useState<Record<string, any[]>>({});
-  const [complexityComponents, setComplexityComponents] = useState<Record<string, any[]>>({});
+  const [scoringWeights, setScoringWeights] = useState<Record<string, any[]>>(
+    {}
+  );
+  const [complexityComponents, setComplexityComponents] = useState<
+    Record<string, any[]>
+  >({});
   const [losConnections, setLosConnections] = useState<any[]>([]);
 
   // Load all data
@@ -46,26 +58,34 @@ export function TenantConfigSection() {
     // For platform admins, require a tenant to be selected
     if (!isTenantAdmin && !selectedTenantId) {
       setLosConnections([]);
-      setFilters([]);
       setScoringWeights({});
       setComplexityComponents({});
       return;
     }
-    
+
     setLoading(true);
     try {
       // Build tenant query param for platform admins
-      const tenantParam = selectedTenantId ? `?tenant_id=${selectedTenantId}` : '';
-      
-      const [filtersRes, salesWeightsRes, opsWeightsRes, complexityRes, losRes] = await Promise.all([
-        api.request<{ filters: any[] }>(`/api/tenant-config/filters${tenantParam}`),
-        api.request<{ weights: Record<string, any[]> }>(`/api/tenant-config/scoring-weights/sales${tenantParam}`),
-        api.request<{ weights: Record<string, any[]> }>(`/api/tenant-config/scoring-weights/operations${tenantParam}`),
-        api.request<{ components: Record<string, any[]> }>(`/api/tenant-config/complexity${tenantParam}`),
-        api.request<{ connections: any[] }>(`/api/los/connections${tenantParam}`),
-      ]);
-      
-      setFilters(filtersRes.filters || []);
+      const tenantParam = selectedTenantId
+        ? `?tenant_id=${selectedTenantId}`
+        : "";
+
+      const [salesWeightsRes, opsWeightsRes, complexityRes, losRes] =
+        await Promise.all([
+          api.request<{ weights: Record<string, any[]> }>(
+            `/api/tenant-config/scoring-weights/sales${tenantParam}`
+          ),
+          api.request<{ weights: Record<string, any[]> }>(
+            `/api/tenant-config/scoring-weights/operations${tenantParam}`
+          ),
+          api.request<{ components: Record<string, any[]> }>(
+            `/api/tenant-config/complexity${tenantParam}`
+          ),
+          api.request<{ connections: any[] }>(
+            `/api/los/connections${tenantParam}`
+          ),
+        ]);
+
       setScoringWeights({
         sales: salesWeightsRes.weights?.default || [],
         operations: opsWeightsRes.weights?.default || [],
@@ -73,11 +93,11 @@ export function TenantConfigSection() {
       setComplexityComponents(complexityRes.components || {});
       setLosConnections(losRes.connections || []);
     } catch (error: any) {
-      console.error('Error loading tenant config:', error);
+      console.error("Error loading tenant config:", error);
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to load configuration data',
-        variant: 'destructive',
+        title: "Error",
+        description: error.message || "Failed to load configuration data",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -89,9 +109,15 @@ export function TenantConfigSection() {
   }, [loadData, selectedTenantId]);
 
   const tabs = [
-    { id: 'mapping', label: 'Field Mapping', icon: Link2, count: null },
-    { id: 'filters', label: 'Saved Filters', icon: Filter, count: filters.length },
-    { id: 'scoring', label: 'Scoring Weights', icon: BarChart3, count: null },
+    { id: "mapping", label: "Field Mapping", icon: Link2, count: null },
+    {
+      id: "calculations",
+      label: "Revenue Calculations",
+      icon: Calculator,
+      count: null,
+    },
+    { id: "scoring", label: "Scoring Weights", icon: BarChart3, count: null },
+    { id: "import", label: "Legacy Import", icon: Upload, count: null },
   ];
 
   return (
@@ -112,9 +138,9 @@ export function TenantConfigSection() {
                   Data Configuration
                 </CardTitle>
                 <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-                  {isTenantAdmin 
-                    ? 'Manage field mappings, guideline rules, filters, and scoring for your organization'
-                    : 'Configure tenant data mappings, rules, and scoring weights'}
+                  {isTenantAdmin
+                    ? "Manage field mappings, guideline rules, filters, and scoring for your organization"
+                    : "Configure tenant data mappings, rules, and scoring weights"}
                 </CardDescription>
               </div>
             </div>
@@ -140,13 +166,17 @@ export function TenantConfigSection() {
       {!isTenantAdmin && !selectedTenantId && (
         <Card className="border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
           <CardContent className="flex items-center gap-4 py-8">
-            <Building2 className="h-12 w-12 text-amber-500 dark:text-amber-400" strokeWidth={1.5} />
+            <Building2
+              className="h-12 w-12 text-amber-500 dark:text-amber-400"
+              strokeWidth={1.5}
+            />
             <div>
               <h3 className="text-lg font-medium text-amber-900 dark:text-amber-100">
                 Select a Tenant
               </h3>
               <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                Use the tenant selector above to choose which organization's configuration to manage.
+                Use the tenant selector above to choose which organization's
+                configuration to manage.
               </p>
             </div>
           </CardContent>
@@ -155,57 +185,62 @@ export function TenantConfigSection() {
 
       {/* Tabs - only show when tenant is selected (or for tenant admins) */}
       {(isTenantAdmin || selectedTenantId) && (
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-          {tabs.map((tab) => (
-            <TabsTrigger
-              key={tab.id}
-              value={tab.id}
-              className="flex items-center gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 font-light"
-            >
-              <tab.icon className="h-4 w-4" />
-              <span className="hidden sm:inline">{tab.label}</span>
-              {tab.count !== null && tab.count > 0 && (
-                <Badge variant="secondary" className="ml-1 text-xs">
-                  {tab.count}
-                </Badge>
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="space-y-4"
+        >
+          <TabsList className="grid w-full grid-cols-4 gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+            {tabs.map((tab) => (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className="flex items-center gap-2 data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 font-light"
+              >
+                <tab.icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{tab.label}</span>
+                {tab.count !== null && tab.count > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-xs">
+                    {tab.count}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        {loading ? (
-          <Card className="border-slate-200 dark:border-slate-700">
-            <CardContent className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <TabsContent value="mapping">
-              <FieldMappingTab
-                losConnections={losConnections}
-                onRefresh={loadData}
-              />
-            </TabsContent>
+          {loading ? (
+            <Card className="border-slate-200 dark:border-slate-700">
+              <CardContent className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <TabsContent value="mapping">
+                <FieldMappingTab
+                  losConnections={losConnections}
+                  onRefresh={loadData}
+                />
+              </TabsContent>
 
-            <TabsContent value="filters">
-              <FilterBuilderTab
-                filters={filters}
-                onRefresh={loadData}
-              />
-            </TabsContent>
+              <TabsContent value="calculations">
+                <RevenueFormulaTab onRefresh={loadData} />
+              </TabsContent>
 
-            <TabsContent value="scoring">
-              <ScoringWeightsTab
-                weights={scoringWeights}
-                complexityComponents={complexityComponents}
-                onRefresh={loadData}
-              />
-            </TabsContent>
-          </>
-        )}
-      </Tabs>
+              <TabsContent value="scoring">
+                <ScoringWeightsTab
+                  weights={scoringWeights}
+                  complexityComponents={complexityComponents}
+                  onRefresh={loadData}
+                />
+              </TabsContent>
+
+              <TabsContent value="import">
+                <LegacyConfigImportTab tenantId={selectedTenantId || ""} />
+              </TabsContent>
+            </>
+          )}
+        </Tabs>
       )}
     </motion.div>
   );

@@ -1762,9 +1762,12 @@ export const ClosingFalloutForecast = ({
         const params = new URLSearchParams();
         params.set("actor", "loan_officer");
         if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+        if (selectedChannel && selectedChannel !== "All")
+          params.set("channel_group", selectedChannel);
+        // Using new consolidated endpoint with channel-aware actor support
         const res = await api.request<{
           actors?: Array<{ name: string; ttsScore: number; tier?: string }>;
-        }>(`/api/loans/sales-scorecard?${params.toString()}`);
+        }>(`/api/scorecard/sales?${params.toString()}`);
         if (cancelled || !res?.actors) return;
         const map: Record<string, { ttsScore: number; tier: string }> = {};
         res.actors.forEach((a) => {

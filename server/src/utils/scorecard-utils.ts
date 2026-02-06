@@ -185,23 +185,40 @@ export const filterByChannel = (
  * @returns SQL fragment to add to WHERE clause (includes leading AND)
  */
 export const buildChannelWhereClause = (
-  channelGroup: string | undefined
+  channelGroup: string | undefined,
+  tableAlias: string = ""
 ): string => {
   if (!channelGroup || channelGroup === "All") return "";
 
+  // Prefix with table alias if provided (e.g., "l." for "l.channel")
+  const col = tableAlias ? `${tableAlias}.channel` : "channel";
+
+  // Handle consolidated channel groups
   switch (channelGroup) {
     case "Retail":
-      return `AND (channel ILIKE '%retail%' OR channel ILIKE '%brokered%' OR channel ILIKE '%brok%')`;
+      // Retail = Direct origination (company's own loan officers)
+      // NOTE: "Brokered" is NOT Retail - it's TPO
+      return `AND (${col} ILIKE '%retail%')`;
     case "TPO":
-      return `AND (channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%')`;
+      // TPO = Third Party Origination (brokers, wholesale, correspondent)
+      return `AND (${col} ILIKE '%broker%' OR ${col} ILIKE '%brokered%' 
+              OR ${col} ILIKE '%wholesale%' OR ${col} ILIKE '%correspondent%' 
+              OR ${col} ILIKE '%corresp%' OR ${col} ILIKE '%tpo%')`;
     case "99-Missing":
-      return `AND (channel IS NULL OR TRIM(channel) = '')`;
+      return `AND (${col} IS NULL OR TRIM(${col}) = '')`;
     case "Other":
-      return `AND channel IS NOT NULL AND TRIM(channel) != '' 
-              AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%'
-              AND channel NOT ILIKE '%wholesale%' AND channel NOT ILIKE '%corresp%'`;
+      return `AND ${col} IS NOT NULL AND TRIM(${col}) != '' 
+              AND ${col} NOT ILIKE '%retail%'
+              AND ${col} NOT ILIKE '%broker%' AND ${col} NOT ILIKE '%brokered%'
+              AND ${col} NOT ILIKE '%wholesale%' AND ${col} NOT ILIKE '%corresp%'
+              AND ${col} NOT ILIKE '%tpo%'`;
     default:
-      return "";
+      // Not a known group - treat as an individual channel value (exact match)
+      // This handles when users select individual channels from the dropdown
+      return `AND LOWER(TRIM(${col})) = LOWER('${channelGroup.replace(
+        /'/g,
+        "''"
+      )}')`;
   }
 };
 
@@ -343,8 +360,12 @@ export const calcLoanRevenue = (loan: LoanRevenueData): number => {
 };
 
 /**
- * SQL expression for revenue calculation.
+ * Default SQL expression for revenue calculation.
  * Use in SELECT clauses for database-level computation.
+ *
+ * Note: Tenants can define custom revenue formulas via the admin panel.
+ * Use getTenantRevenueExpression() to get the tenant-specific formula,
+ * falling back to this default if none is configured.
  */
 export const REVENUE_SQL_EXPRESSION = `
   COALESCE(
@@ -357,6 +378,146 @@ export const REVENUE_SQL_EXPRESSION = `
   COALESCE(orig_fees_seller, 0) - 
   COALESCE(cd_lender_credits, 0)
 `;
+
+/**
+ * Cache for tenant revenue expressions to avoid repeated DB queries.
+ * Map of tenantId -> { expression: string, cachedAt: number }
+ */
+const tenantRevenueExpressionCache = new Map<
+  string,
+  { expression: string; cachedAt: number }
+>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get the tenant-specific revenue SQL expression.
+ *
+ * Tenants can configure custom revenue formulas through the admin panel.
+ * This function returns the tenant's custom formula if one is configured,
+ * otherwise falls back to the default REVENUE_SQL_EXPRESSION.
+ *
+ * @param pool - Tenant database connection pool
+ * @param tableAlias - Optional table alias to prefix field names (e.g., 'l' for 'l.loan_amount')
+ * @returns SQL expression for revenue calculation
+ */
+export const getTenantRevenueExpression = async (
+  pool: pg.Pool,
+  tableAlias?: string
+): Promise<string> => {
+  try {
+    // Try to get from cache first
+    // We use the pool's connectionParameters or a hash as the tenant identifier
+    const poolId = (pool as any)._connectionKey || "default";
+    const cached = tenantRevenueExpressionCache.get(poolId);
+
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+      return applyTableAlias(cached.expression, tableAlias);
+    }
+
+    // Check if tenant_calculations table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'tenant_calculations'
+      ) as exists
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      // Table doesn't exist - use default
+      return applyTableAlias(REVENUE_SQL_EXPRESSION, tableAlias);
+    }
+
+    // Query for the active revenue formula
+    const result = await pool.query(`
+      SELECT sql_expression
+      FROM public.tenant_calculations
+      WHERE calculation_type = 'revenue' AND is_active = TRUE
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `);
+
+    let expression = REVENUE_SQL_EXPRESSION;
+
+    if (result.rows[0]?.sql_expression) {
+      expression = result.rows[0].sql_expression;
+    }
+
+    // Cache the result
+    tenantRevenueExpressionCache.set(poolId, {
+      expression,
+      cachedAt: Date.now(),
+    });
+
+    return applyTableAlias(expression, tableAlias);
+  } catch (error) {
+    // On any error, fall back to default
+    console.warn(
+      "[scorecard-utils] Error fetching tenant revenue expression, using default:",
+      error
+    );
+    return applyTableAlias(REVENUE_SQL_EXPRESSION, tableAlias);
+  }
+};
+
+/**
+ * Apply table alias to field names in a SQL expression.
+ * This allows the expression to work in JOIN queries where field names need to be qualified.
+ *
+ * @param expression - SQL expression with unqualified field names
+ * @param tableAlias - Table alias to prepend (e.g., 'l' becomes 'l.field_name')
+ * @returns SQL expression with qualified field names
+ */
+const applyTableAlias = (expression: string, tableAlias?: string): string => {
+  if (!tableAlias) return expression;
+
+  // List of field names that could appear in revenue expressions
+  const fieldNames = [
+    "rate_lock_buy_side_base_price_rate",
+    "loan_amount",
+    "orig_fee_borr_pd",
+    "orig_fees_seller",
+    "cd_lender_credits",
+    "cd_applied_cure",
+    "origination_points",
+    "pa_sell_amt",
+    "pa_srp_amt",
+    "pa_payout_1",
+    "pa_payout_2",
+    "pa_payout_3",
+    "pa_payout_4",
+    "pa_payout_5",
+    "line_800_borr",
+    "line_800_seller",
+    "warehouse_line_fee",
+    "warehouse_line_interest",
+    "fees_interest_borr",
+    "pa_expected_int_pymt",
+    "fees_appraisal_borr",
+  ];
+
+  let result = expression;
+  for (const field of fieldNames) {
+    // Use word boundary to avoid replacing partial matches
+    // Replace field_name with alias.field_name, but not if it's already aliased
+    const regex = new RegExp(`(?<!\\.)\\b${field}\\b`, "g");
+    result = result.replace(regex, `${tableAlias}.${field}`);
+  }
+
+  return result;
+};
+
+/**
+ * Clear the tenant revenue expression cache.
+ * Call this when a tenant updates their revenue formula.
+ */
+export const clearTenantRevenueExpressionCache = (poolId?: string): void => {
+  if (poolId) {
+    tenantRevenueExpressionCache.delete(poolId);
+  } else {
+    tenantRevenueExpressionCache.clear();
+  }
+};
 
 // ============================================================================
 // Date Range Utilities
