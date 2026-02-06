@@ -180,8 +180,9 @@ export const LoanCardContent = memo(({
                   return num;
                 })();
                 const format = (val: number) => val >= 1000 ? `$${(val / 1000).toFixed(2)}K` : `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                const low = amt * 0.005;
-                const high = amt * 0.01;
+                const COMMISSION_MAX = 6000;
+                const low = Math.min(amt * 0.005, COMMISSION_MAX);
+                const high = Math.min(amt * 0.01, COMMISSION_MAX);
                 return `${format(low)} – ${format(high)}`;
               })()}
             </p>
@@ -214,7 +215,22 @@ export const LoanCardContent = memo(({
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <div className="flex flex-col items-end gap-0.5">
             <p className={`font-semibold text-sm sm:text-base tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-              Loan Amount: ${loan.amount.replace(/^\$/, '')}
+              Loan Amount: {((): string => {
+                const amt = loan.amountValue ?? (() => {
+                  const s = String(loan.amount);
+                  const num = parseFloat(s.replace(/[$,KkMm]/g, '')) || 0;
+                  if (s.toLowerCase().includes('m')) return num * 1e6;
+                  if (s.toLowerCase().includes('k')) return num * 1000;
+                  return num;
+                })();
+                if (amt >= 1000000) {
+                  return `$${(amt / 1000000).toFixed(2)}M`;
+                } else if (amt >= 1000) {
+                  return `$${(amt / 1000).toFixed(0)}K`;
+                } else {
+                  return `$${amt.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+                }
+              })()}
             </p>
           </div>
           <div className="flex flex-col items-end gap-0.5 mt-0.5 shrink-0">
@@ -248,7 +264,7 @@ export const LoanCardContent = memo(({
             loan.riskLevel === 'Very High' ? 'bg-rose-500' : loan.riskLevel === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'
           }`}></span>
           <span className="font-medium">Risk Score: {loan.riskScore}/100</span>
-          <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} title="Score scale: 40 = worst, 100 = best">(40 = worst, 100 = best)</span>
+          <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} title="Score scale: 40 = best, 100 = worst">(40 = best, 100 = worst)</span>
         </div>
       </div>
       {hasAnySignal && (

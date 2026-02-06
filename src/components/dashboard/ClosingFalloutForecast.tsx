@@ -1,13 +1,20 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo, useDeferredValue } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { BarChart3, TrendingUp, Play } from 'lucide-react';
+import { BarChart3, TrendingUp, Play, Table, ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown } from 'lucide-react';
 import { DashboardCard } from './DashboardCard';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useDashboardStats } from '@/hooks/useDashboardStats';
 import { useMetrics } from '@/hooks/useMetrics';
 import { LoanCardsContainer } from './LoanCardsContainer';
 import { LoanOfficerModal } from './LoanOfficerModal';
+import { LoanDrilldownModal } from './LoanDrilldownModal';
 import { useTheme } from '@/components/theme-provider';
 import { api } from '@/lib/api';
 import { ClosingFalloutMetricModal } from '@/components/dashboard/modals/ClosingFalloutMetricModal';
@@ -574,9 +581,14 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
   const [metricModalLabel, setMetricModalLabel] = useState<string | null>(null);
   const [outcomeModalType, setOutcomeModalType] = useState<OutcomeModalType | null>(null);
   const [selectedLoanForDetail, setSelectedLoanForDetail] = useState<any | null>(null);
+  const [selectedLoanForDrilldown, setSelectedLoanForDrilldown] = useState<any | null>(null);
 
   // Loan officer name -> TTS (Top Tier Score) + tier for display on critical loan cards
   const [officerTtsMap, setOfficerTtsMap] = useState<Record<string, { ttsScore: number; tier: string }>>({});
+
+  // Table sorting state
+  const [sortColumn, setSortColumn] = useState<string>('riskScore');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
 
   const availableYears = useMemo(() => {
     // Prefer years from loaded loans (if available); otherwise provide a small recent range.
@@ -1030,8 +1042,11 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
     // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
     // Fall back to loansRaw if no bucketed data
     if (bucketedLoans && bucketedLoans.length > 0) {
-      // Filter to high-risk loans from bucketed data
-      const highRiskLoans = bucketedLoans.filter((l: any) => l.bucket === 'high');
+      // Filter to loans predicted to withdraw or deny (all predicted fallout, not just high bucket)
+      const highRiskLoans = bucketedLoans.filter((l: any) => {
+        const predictedOutcome = l.riskSummary?.predictedOutcome || '';
+        return predictedOutcome === 'withdraw' || predictedOutcome === 'deny';
+      });
 
       return highRiskLoans.map((l: any) => {
         // Use snake_case field names matching database columns
@@ -1061,39 +1076,9 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
           reason = l.riskSummary;
         }
         
-        // Calculate risk score aligned with backend count-based bucket logic
-        // Same logic as predictionService bucketLoanData: severeCount (>=5), elevatedCount (>=4)
-        const signals = [
-          l.creditMetricsSignalStrength,
-          l.loanCharacteristicsSignalStrength,
-          l.timeInMotionSignalStrength,
-          l.mloAeFalloutProneSignalStrength,
-          l.interestLockVsMarketSignalStrength,
-        ].filter((s): s is number => typeof s === 'number' && !isNaN(s));
-        
-        let riskScore = 75; // Default for high-risk loans
-        if (signals.length > 0) {
-          const avgSignal = signals.reduce((sum, s) => sum + s, 0) / signals.length;
-          const severeCount = signals.filter(s => s >= 5).length;
-          const elevatedCount = signals.filter(s => s >= 4).length;
-          // Same bucket logic as backend (no hasMaxSignal)
-          let bucket: 'low' | 'medium' | 'high';
-          if (severeCount >= 3) bucket = 'high';
-          else if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5) bucket = 'medium';
-          else if (avgSignal <= 3) bucket = 'low';
-          else bucket = 'medium';
-          // Map bucket to 40-100, use avgSignal for within-bucket spread
-          if (bucket === 'low') {
-            riskScore = Math.round(40 + (avgSignal / 3) * 15);
-          } else if (bucket === 'medium') {
-            riskScore = Math.round(55 + (avgSignal / 6) * 20);
-          } else {
-            riskScore = Math.round(75 + (avgSignal / 6) * 25);
-          }
-          riskScore = Math.min(100, Math.max(40, riskScore));
-        } else if (l.riskSummary?.confidence) {
-          riskScore = l.riskSummary.confidence;
-        }
+        // Use risk score from backend (calculated as simple average of signal buckets, scaled to 1-100)
+        // Backend calculates: average of 7 signal buckets (FICO, LTV, DTI, Loan Characteristics, Time in Motion, MLO Fallout Prone, Lock vs Market)
+        let riskScore = l.riskSummary?.riskScore ?? l.riskSummary?.confidence ?? 75;
         
         // Return in LoanCardsContainer expected format
         // Use snake_case field names matching database columns
@@ -1216,6 +1201,393 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
       };
     });
   }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap]);
+
+  // Sorted critical loans for table display
+  const sortedCriticalLoans = useMemo(() => {
+    const loans = [...criticalLoanCards];
+    
+    const getSortValue = (loan: typeof criticalLoanCards[0], column: string): any => {
+      switch (column) {
+        case 'loan_number':
+          return loan.loan_number || '';
+        case 'amount':
+          return loan.amountValue || 0;
+        case 'officer':
+          return loan.officer || '';
+        case 'commission':
+          const amt = loan.amountValue || 0;
+          const COMMISSION_MAX = 6000;
+          return Math.min(amt * 0.01, COMMISSION_MAX);
+        case 'predictedOutcome':
+          return loan.riskSummary?.predictedOutcome || '';
+        case 'riskScore':
+          return loan.riskScore || 0;
+        case 'fico':
+          return loan.ficoScore ?? -1;
+        case 'ltv':
+          return loan.ltvRatio ?? -1;
+        case 'dti':
+          return loan.dtiRatio ?? -1;
+        case 'loPullthrough':
+          return loan.loPullthroughPct ?? -1;
+        case 'timeInMotion':
+          return loan.activeDays ?? -1;
+        case 'loanType':
+          return loan.loanType || '';
+        case 'loanPurpose':
+          return loan.loanPurpose || '';
+        case 'channel':
+          return loan.channel || '';
+        case 'milestone':
+          return loan.currentMilestone || '';
+        case 'estimatedClosingDate':
+          return loan.estimatedClosingDate || '';
+        case 'marketRateAtLock':
+          return (loan as any).lockMarketRate ?? -1;
+        case 'marketRateToday':
+          return loan.marketRate ?? -1;
+        case 'marketDelta':
+          return loan.marketChangeDelta ?? -1;
+        case 'lockStatus':
+          if ((loan as any).lockDate) return 'Locked';
+          return 'Not Locked';
+        case 'creditMetrics':
+          return loan.creditMetricsSignalStrength ?? -1;
+        case 'loanCharacteristics':
+          return loan.loanCharacteristicsSignalStrength ?? -1;
+        case 'timeInMotionSignal':
+          return loan.timeInMotionSignalStrength ?? -1;
+        case 'mloFalloutProne':
+          return loan.mloAeFalloutProneSignalStrength ?? -1;
+        case 'lockVsMarket':
+          return loan.interestLockVsMarketSignalStrength ?? -1;
+        default:
+          return '';
+      }
+    };
+
+    loans.sort((a, b) => {
+      const aVal = getSortValue(a, sortColumn);
+      const bVal = getSortValue(b, sortColumn);
+      
+      // Handle null/undefined values
+      if (aVal === null || aVal === undefined || aVal === '') return 1;
+      if (bVal === null || bVal === undefined || bVal === '') return -1;
+      
+      // String comparison
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const comparison = aVal.localeCompare(bVal);
+        return sortDirection === 'asc' ? comparison : -comparison;
+      }
+      
+      // Number comparison
+      const comparison = (aVal as number) - (bVal as number);
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+    
+    return loans;
+  }, [criticalLoanCards, sortColumn, sortDirection]);
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const formatAmount = (amount: number | null | undefined): string => {
+    if (!amount) return '$0';
+    if (amount >= 1000000) {
+      return `$${(amount / 1000000).toFixed(2)}M`;
+    } else if (amount >= 1000) {
+      return `$${(amount / 1000).toFixed(0)}K`;
+    }
+    return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  const formatCommission = (loan: typeof criticalLoanCards[0]): string => {
+    const amt = loan.amountValue || 0;
+    const COMMISSION_MAX = 6000;
+    const low = Math.round(Math.min(amt * 0.005, COMMISSION_MAX));
+    const high = Math.round(Math.min(amt * 0.01, COMMISSION_MAX));
+    if (low === high && low === COMMISSION_MAX) {
+      return `$${COMMISSION_MAX.toLocaleString()}`;
+    }
+    return `$${low.toLocaleString()} – $${high.toLocaleString()}`;
+  };
+
+  const formatDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (Number.isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const formatPercent = (val: number | null | undefined): string => {
+    if (val === null || val === undefined) return '—';
+    return `${val.toFixed(1)}%`;
+  };
+
+  const formatNumber = (val: number | null | undefined, decimals: number = 0): string => {
+    if (val === null || val === undefined) return '—';
+    return val.toFixed(decimals);
+  };
+
+  const getPredictedOutcomeLabel = (outcome: string | undefined): string => {
+    if (!outcome) return '—';
+    switch (outcome.toLowerCase()) {
+      case 'withdraw': return 'Withdraw';
+      case 'deny': return 'Deny';
+      case 'originate': return 'Originate';
+      case 'at_risk': return 'At Risk';
+      default: return outcome;
+    }
+  };
+
+  const getLockStatus = (loan: typeof criticalLoanCards[0]): string => {
+    const lockDate = (loan as any).lockDate;
+    const lockExpirationDate = (loan as any).lockExpirationDate;
+    if (lockDate) {
+      if (lockExpirationDate) {
+        const exp = new Date(lockExpirationDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        exp.setHours(0, 0, 0, 0);
+        if (exp < today) return 'Expired';
+        return 'Locked';
+      }
+      return 'Locked';
+    }
+    return 'Not Locked';
+  };
+
+  // Color helper functions matching LoanRiskDistribution
+  const getFicoColor = (score: number | null | undefined): string => {
+    if (score == null || score === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (score < 640) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (score < 700) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getLtvColor = (ratio: number | null | undefined): string => {
+    if (ratio == null || ratio === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (ratio > 95) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (ratio > 80) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getDtiColor = (ratio: number | null | undefined): string => {
+    if (ratio == null || ratio === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (ratio > 50) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (ratio > 43) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getPullthroughColor = (pct: number | null | undefined): string => {
+    if (pct == null || pct === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (pct >= 80) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+    if (pct >= 60) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+  };
+
+  const getTimeInMotionColor = (days: number | null | undefined): string => {
+    if (days == null || days === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (days > 45) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (days >= 30) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getPredictedOutcomeColor = (outcome: string | undefined): string => {
+    if (!outcome) return isDarkMode ? 'text-slate-300' : 'text-slate-900';
+    const outcomeLower = outcome.toLowerCase();
+    if (outcomeLower === 'deny') {
+      return isDarkMode ? 'text-red-300 bg-red-600/20' : 'text-red-700 bg-red-100';
+    }
+    if (outcomeLower === 'withdraw') {
+      return isDarkMode ? 'text-orange-300 bg-orange-500/20' : 'text-orange-700 bg-orange-100';
+    }
+    return isDarkMode ? 'text-slate-300' : 'text-slate-900';
+  };
+
+  const getSignalBucketColor = (bucket: number | null | undefined): string => {
+    if (bucket === null || bucket === undefined) {
+      return isDarkMode ? 'text-slate-400 bg-slate-700/50' : 'text-slate-500 bg-slate-100';
+    }
+    if (bucket <= 2) {
+      return isDarkMode ? 'text-emerald-400 bg-emerald-900/30' : 'text-emerald-600 bg-emerald-50';
+    }
+    if (bucket <= 4) {
+      return isDarkMode ? 'text-amber-400 bg-amber-900/30' : 'text-amber-600 bg-amber-50';
+    }
+    return isDarkMode ? 'text-rose-400 bg-rose-900/30' : 'text-rose-600 bg-rose-50';
+  };
+
+  // Helper function to get export data
+  const getExportData = useCallback(() => {
+    const headers = [
+      'Loan Number',
+      'Loan Amount',
+      'MLO/AE',
+      'Est. Commission at Risk',
+      'Predicted Outcome',
+      'Risk Score',
+      'FICO',
+      'LTV',
+      'DTI',
+      'LO Pullthrough',
+      'Time in Motion',
+      'Loan Type',
+      'Loan Purpose',
+      'Channel',
+      'Milestone',
+      'Est. Closing Date',
+      'Market Rate at Lock',
+      'Market Rate Today',
+      'Market Delta',
+      'Lock Status',
+      'Credit Metrics',
+      'Loan Characteristics',
+      'Time in Motion Signal',
+      'MLO Fallout Prone',
+      'Lock vs Market',
+    ];
+
+    const rows = sortedCriticalLoans.map((loan) => {
+      const commission = formatCommission(loan);
+      return [
+        loan.loan_number || '',
+        formatAmount(loan.amountValue),
+        loan.officer || '',
+        commission,
+        getPredictedOutcomeLabel(loan.riskSummary?.predictedOutcome),
+        formatNumber(loan.riskScore),
+        formatNumber(loan.ficoScore),
+        formatPercent(loan.ltvRatio),
+        formatPercent(loan.dtiRatio),
+        formatPercent(loan.loPullthroughPct),
+        loan.activeDays !== null && loan.activeDays !== undefined ? `${loan.activeDays} days` : '',
+        loan.loanType || '',
+        loan.loanPurpose || '',
+        loan.channel || '',
+        loan.currentMilestone || '',
+        formatDate(loan.estimatedClosingDate),
+        ((loan as any).lockMarketRate !== null && (loan as any).lockMarketRate !== undefined) ? `${((loan as any).lockMarketRate).toFixed(2)}%` : '',
+        loan.marketRate !== null && loan.marketRate !== undefined ? `${loan.marketRate.toFixed(2)}%` : '',
+        loan.marketChangeDelta !== null && loan.marketChangeDelta !== undefined ? `${loan.marketChangeDelta > 0 ? '+' : ''}${loan.marketChangeDelta.toFixed(2)}%` : '',
+        getLockStatus(loan),
+        formatNumber(loan.creditMetricsSignalStrength),
+        formatNumber(loan.loanCharacteristicsSignalStrength),
+        formatNumber(loan.timeInMotionSignalStrength),
+        formatNumber(loan.mloAeFalloutProneSignalStrength),
+        formatNumber(loan.interestLockVsMarketSignalStrength),
+      ];
+    });
+
+    return { headers, rows };
+  }, [sortedCriticalLoans]);
+
+  const exportToCSV = useCallback(() => {
+    if (sortedCriticalLoans.length === 0) return;
+
+    const { headers, rows } = getExportData();
+
+    // Convert to CSV format
+    const escapeCSV = (value: string): string => {
+      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    };
+
+    const csvContent = [
+      headers.map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(','))
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `critical-loans-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [sortedCriticalLoans, getExportData]);
+
+  const exportToExcel = useCallback(() => {
+    if (sortedCriticalLoans.length === 0) return;
+
+    const { headers, rows } = getExportData();
+
+    // Escape XML characters
+    const escapeXML = (value: string): string => {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    };
+
+    // Create XML Spreadsheet format (Excel-compatible)
+    let xml = '<?xml version="1.0"?>\n';
+    xml += '<?mso-application progid="Excel.Sheet"?>\n';
+    xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';
+    xml += ' xmlns:o="urn:schemas-microsoft-com:office:office"\n';
+    xml += ' xmlns:x="urn:schemas-microsoft-com:office:excel"\n';
+    xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n';
+    xml += ' xmlns:html="http://www.w3.org/TR/REC-html40">\n';
+    xml += '<Worksheet ss:Name="Critical Loans">\n';
+    xml += '<Table>\n';
+
+    // Add header row
+    xml += '<Row>\n';
+    headers.forEach(header => {
+      xml += `<Cell><Data ss:Type="String">${escapeXML(header)}</Data></Cell>\n`;
+    });
+    xml += '</Row>\n';
+
+    // Add data rows
+    rows.forEach(row => {
+      xml += '<Row>\n';
+      row.forEach(cell => {
+        const cellValue = String(cell || '');
+        // Try to detect if it's a number
+        const numValue = parseFloat(cellValue.replace(/[$,%]/g, ''));
+        if (!isNaN(numValue) && cellValue.trim() !== '') {
+          xml += `<Cell><Data ss:Type="Number">${numValue}</Data></Cell>\n`;
+        } else {
+          xml += `<Cell><Data ss:Type="String">${escapeXML(cellValue)}</Data></Cell>\n`;
+        }
+      });
+      xml += '</Row>\n';
+    });
+
+    xml += '</Table>\n';
+    xml += '</Worksheet>\n';
+    xml += '</Workbook>';
+
+    // Create blob and download
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `critical-loans-${new Date().toISOString().split('T')[0]}.xls`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [sortedCriticalLoans, getExportData]);
 
   // Animated values for main metrics
   const animatedActiveLoans = useCountUp(metrics.activeLoansToday, 1500, 0, isAnimating);
@@ -1827,15 +2199,13 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
               }`}
             >
               <span className="flex items-center justify-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                Top Loan Officers
+                <Table className="w-4 h-4" />
+                Critical Loans Table
               </span>
             </button>
           </div>
 
-          <div className="py-4 md:p-8 lg:p-10">
+          <div className="py-2 md:p-3 lg:p-4">
             {insightsTab === 'critical' && (
               <div>
                 {loansError ? (
@@ -1854,50 +2224,196 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
             )}
 
             {insightsTab === 'officers' && (
-              (() => {
-                // TODO: Replace with actual loan officer data from API using aggregateLoanOfficers utility
-                const mockOfficers: Array<{ name: string; activeLoans: number; pullThrough: string; volume: string; risk: 'Low' | 'Medium' | 'High' }> = [];
-                
-                return mockOfficers.length === 0 ? (
+              <div className="w-full">
+                {loansLoading && !loansRaw ? (
+                  <div className={`text-sm py-6 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading loans…</div>
+                ) : sortedCriticalLoans.length === 0 ? (
                   <div className={`text-center py-12 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    <svg className="w-12 h-12 mx-auto mb-4 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                    </svg>
-                    <p className="text-sm font-medium">No loan officer activity for this period</p>
-                    <p className="text-xs mt-1 opacity-70">Try selecting a different date range to see loan officers</p>
+                    <Table className="w-12 h-12 mx-auto mb-4 opacity-40" />
+                    <p className="text-sm font-medium">No critical loans found</p>
+                    <p className="text-xs mt-1 opacity-70">Run predictions to see critical loans in the table</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-                    {mockOfficers.slice(0, 16).map((mlo, index) => (
-                      <div 
-                        key={mlo.name} 
-                        className={`flex items-center justify-between p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl transition-all duration-200 group cursor-pointer active:scale-[0.98] ${isDarkMode ? 'bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]' : 'bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}
-                        onClick={() => setSelectedOfficer(mlo.name)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-lg flex items-center justify-center text-xs sm:text-sm font-semibold ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-                            {index + 1}
-                          </div>
-                          <div className="min-w-0">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setSelectedOfficer(mlo.name); }}
-                              className={`text-[13px] sm:text-sm font-medium hover:underline text-left truncate block max-w-[140px] sm:max-w-none ${isDarkMode ? 'text-slate-100 hover:text-indigo-400' : 'text-slate-700 hover:text-indigo-600'}`}
-                            >
-                              {mlo.name}
-                            </button>
-                            <p className={`text-[10px] sm:text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                              {mlo.activeLoans || 0} loans · {mlo.pullThrough}
-                            </p>
-                          </div>
-                        </div>
-                        <div className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-[11px] font-medium ${mlo.risk === 'Low' ? 'text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-500/15' : 'text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-500/15'}`}>
-                          {mlo.volume}
-                        </div>
+                  <div className="w-full">
+                    <div className={`overflow-x-auto overflow-y-auto border rounded-lg ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ maxHeight: '45rem' }}>
+                      <table className="table-auto divide-y divide-slate-200 dark:divide-white/10">
+                          <thead className={`sticky top-0 z-10 ${isDarkMode ? 'bg-slate-800/90' : 'bg-slate-50'}`}>
+                            <tr>
+                              {[
+                                { key: 'loan_number', label: 'Loan Number' },
+                                { key: 'amount', label: 'Loan Amount' },
+                                { key: 'officer', label: 'MLO/AE' },
+                                { key: 'commission', label: 'Est. Commission at Risk' },
+                                { key: 'predictedOutcome', label: 'Predicted Outcome' },
+                                { key: 'riskScore', label: 'Risk Score' },
+                                { key: 'fico', label: 'FICO' },
+                                { key: 'ltv', label: 'LTV' },
+                                { key: 'dti', label: 'DTI' },
+                                { key: 'loPullthrough', label: 'LO Pullthrough' },
+                                { key: 'timeInMotion', label: 'Time in Motion' },
+                                { key: 'loanType', label: 'Loan Type' },
+                                { key: 'loanPurpose', label: 'Loan Purpose' },
+                                { key: 'channel', label: 'Channel' },
+                                { key: 'milestone', label: 'Milestone' },
+                                { key: 'estimatedClosingDate', label: 'Est. Closing Date' },
+                                { key: 'marketRateAtLock', label: 'Market Rate at Lock' },
+                                { key: 'marketRateToday', label: 'Market Rate Today' },
+                                { key: 'marketDelta', label: 'Market Delta' },
+                                { key: 'lockStatus', label: 'Lock Status' },
+                                { key: 'creditMetrics', label: 'Credit Metrics' },
+                                { key: 'loanCharacteristics', label: 'Loan Characteristics' },
+                                { key: 'timeInMotionSignal', label: 'Time in Motion Signal' },
+                                { key: 'mloFalloutProne', label: 'MLO Fallout Prone' },
+                                { key: 'lockVsMarket', label: 'Lock vs Market' },
+                              ].map((col) => (
+                                <th
+                                  key={col.key}
+                                  className={`px-2 py-2 text-left text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} whitespace-nowrap`}
+                                >
+                                  <button
+                                    onClick={() => handleSort(col.key)}
+                                    className="flex items-center justify-between gap-2 hover:opacity-70 transition-opacity w-full"
+                                  >
+                                    <span>{col.label}</span>
+                                    <span className="flex-shrink-0">
+                                      {sortColumn === col.key ? (
+                                        sortDirection === 'asc' ? (
+                                          <ArrowUp className="w-3 h-3" />
+                                        ) : (
+                                          <ArrowDown className="w-3 h-3" />
+                                        )
+                                      ) : (
+                                        <ArrowUpDown className="w-3 h-3 opacity-40" />
+                                      )}
+                                    </span>
+                                  </button>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className={`divide-y ${isDarkMode ? 'divide-white/5 bg-slate-900/30' : 'divide-slate-200 bg-white'}`}>
+                            {sortedCriticalLoans.map((loan, idx) => (
+                              <tr
+                                key={loan.id || idx}
+                                className={`hover:${isDarkMode ? 'bg-slate-800/50' : 'bg-slate-50'} transition-colors cursor-pointer`}
+                                onClick={() => setSelectedLoanForDrilldown(loan)}
+                              >
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.loan_number || '—'}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {formatAmount(loan.amountValue)}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.officer || '—'}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {formatCommission(loan)}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs whitespace-nowrap rounded ${getPredictedOutcomeColor(loan.riskSummary?.predictedOutcome)}`}>
+                                  {getPredictedOutcomeLabel(loan.riskSummary?.predictedOutcome)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {formatNumber(loan.riskScore)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getFicoColor(loan.ficoScore)}`}>
+                                  {formatNumber(loan.ficoScore)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getLtvColor(loan.ltvRatio)}`}>
+                                  {formatPercent(loan.ltvRatio)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getDtiColor(loan.dtiRatio)}`}>
+                                  {formatPercent(loan.dtiRatio)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getPullthroughColor(loan.loPullthroughPct)}`}>
+                                  {formatPercent(loan.loPullthroughPct)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getTimeInMotionColor(loan.activeDays)}`}>
+                                  {loan.activeDays !== null && loan.activeDays !== undefined ? `${loan.activeDays} days` : '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.loanType || '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.loanPurpose || '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.channel || '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.currentMilestone || '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {formatDate(loan.estimatedClosingDate)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {((loan as any).lockMarketRate !== null && (loan as any).lockMarketRate !== undefined) ? `${((loan as any).lockMarketRate).toFixed(2)}%` : '—'}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.marketRate !== null && loan.marketRate !== undefined ? `${loan.marketRate.toFixed(2)}%` : '—'}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {loan.marketChangeDelta !== null && loan.marketChangeDelta !== undefined ? `${loan.marketChangeDelta > 0 ? '+' : ''}${loan.marketChangeDelta.toFixed(2)}%` : '—'}
+                                </td>
+                                <td className={`px-2 py-1.5 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-900'} whitespace-nowrap`}>
+                                  {getLockStatus(loan)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.creditMetricsSignalStrength)}`}>
+                                  {formatNumber(loan.creditMetricsSignalStrength)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.loanCharacteristicsSignalStrength)}`}>
+                                  {formatNumber(loan.loanCharacteristicsSignalStrength)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.timeInMotionSignalStrength)}`}>
+                                  {formatNumber(loan.timeInMotionSignalStrength)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.mloAeFalloutProneSignalStrength)}`}>
+                                  {formatNumber(loan.mloAeFalloutProneSignalStrength)}
+                                </td>
+                                <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.interestLockVsMarketSignalStrength)}`}>
+                                  {formatNumber(loan.interestLockVsMarketSignalStrength)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    ))}
+                      {sortedCriticalLoans.length > 0 && (
+                        <div className={`mt-2 flex items-center justify-center gap-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          <span className="text-xs">
+                            Showing {sortedCriticalLoans.length} critical loan{sortedCriticalLoans.length !== 1 ? 's' : ''}
+                          </span>
+                          <DropdownMenu modal={false}>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className={`text-xs h-7 px-3 ${isDarkMode ? 'border-white/20 hover:bg-slate-800' : 'border-slate-300 hover:bg-slate-50'}`}
+                              >
+                                <Download className="w-3 h-3 mr-1.5" />
+                                Export
+                                <ChevronDown className="w-3 h-3 ml-1.5" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent 
+                              align="end"
+                              className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]"
+                            >
+                              <DropdownMenuItem onClick={exportToCSV} className="justify-start text-[13px] py-1.5 whitespace-nowrap">
+                                <Download className="w-3 h-3 mr-1.5 flex-shrink-0" />
+                                CSV
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={exportToExcel} className="justify-start text-[13px] py-1.5 whitespace-nowrap">
+                                <Download className="w-3 h-3 mr-1.5 flex-shrink-0" />
+                                Excel
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      )}
                   </div>
-                );
-              })()
+                )}
+              </div>
             )}
           </div>
         </section>
@@ -1958,6 +2474,26 @@ export const ClosingFalloutForecast = ({ dateFilter = 'mtd', selectedTenantId, o
           loansError={loansError}
           loanPredictions={loanPredictions}
           bucketedLoans={bucketedLoans}
+        />
+
+        {/* Loan Drilldown Modal - shown when clicking a loan in the critical loans table */}
+        <LoanDrilldownModal
+          loan={selectedLoanForDrilldown}
+          isOpen={!!selectedLoanForDrilldown}
+          onClose={() => setSelectedLoanForDrilldown(null)}
+          isDarkMode={isDarkMode}
+          onSelectOfficer={(officer) => {
+            setSelectedLoanForDrilldown(null);
+            setSelectedOfficer(officer);
+          }}
+        />
+
+        {/* Loan Officer Modal */}
+        <LoanOfficerModal
+          officerName={selectedOfficer}
+          isOpen={!!selectedOfficer}
+          onClose={() => setSelectedOfficer(null)}
+          isDarkMode={isDarkMode}
         />
 
         {/* Loan Risk Detail Modal - shown when clicking a loan in the signal buckets table */}

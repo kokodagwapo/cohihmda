@@ -61,7 +61,7 @@ interface LoanData {
 }
 
 interface LoanDrilldownModalProps {
-  loan: LoanData;
+  loan: LoanData | null;
   isOpen: boolean;
   onClose: () => void;
   isDarkMode?: boolean;
@@ -90,8 +90,9 @@ function buildEmailBody(loan: LoanData): string {
     return num;
   })();
   const formatAmt = (val: number) => val >= 1000 ? `$${(val / 1000).toFixed(2)}K` : `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const commissionLow = formatAmt(amt * 0.005);
-  const commissionHigh = formatAmt(amt * 0.01);
+  const COMMISSION_MAX = 6000;
+  const commissionLow = formatAmt(Math.min(amt * 0.005, COMMISSION_MAX));
+  const commissionHigh = formatAmt(Math.min(amt * 0.01, COMMISSION_MAX));
   const officerTier = loan.officerTier === 'top' ? 'Top Tier' : loan.officerTier === 'second' ? 'Second Tier' : 'Bottom Tier';
   const officerSuffix = loan.officerTtsScore != null && !Number.isNaN(loan.officerTtsScore) ? `  ${officerTier} – ${Math.round(loan.officerTtsScore)}` : '';
   const predictedLabel = loan.riskSummary?.predictedOutcome === 'deny' ? '▲ LIKELY DECLINE' :
@@ -219,12 +220,14 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
   }, [isDarkMode]);
 
   const handleEmail = () => {
+    if (!loan) return;
     const subject = encodeURIComponent(`Loan Update: ${loan.id} - ${loan.officer || 'Unassigned'}`);
     const body = encodeURIComponent(buildEmailBody(loan));
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
   };
 
   const handleSave = async () => {
+    if (!loan) return;
     setSaveLoading(true);
     try {
       const blob = await captureCardAsBlob();
@@ -262,29 +265,35 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
           </DialogPrimitive.Close>
 
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 pt-2">
-            <div ref={cardRef} className="w-full min-w-0">
-              <LoanCardContent
-                loan={loan}
-                isDarkMode={isDarkMode}
-                onSelectOfficer={onSelectOfficer}
-                showTapForDetails={false}
-                showRiskBreakdown={true}
-              />
-            </div>
+            {loan ? (
+              <div ref={cardRef} className="w-full min-w-0">
+                <LoanCardContent
+                  loan={loan}
+                  isDarkMode={isDarkMode}
+                  onSelectOfficer={onSelectOfficer}
+                  showTapForDetails={false}
+                  showRiskBreakdown={true}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center p-8 text-slate-500">
+                No loan data available
+              </div>
+            )}
           </div>
-
+        
           <div className="flex-shrink-0 flex items-center gap-2 px-4 sm:px-6 py-2.5 border-t border-slate-200/60 dark:border-slate-700 bg-white dark:bg-slate-900">
-            <button
+                <button
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-light transition-all active:scale-[0.98] text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
               onClick={handleEmail}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
               Email
             </button>
             <div className="w-px h-10 bg-slate-200 dark:bg-slate-600 flex-shrink-0" aria-hidden />
-            <button
+            <button 
               className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-[13px] font-light transition-all active:scale-[0.98] ${saveLoading ? 'opacity-60' : ''} text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800`}
               disabled={saveLoading}
               onClick={handleSave}
@@ -292,13 +301,13 @@ export const LoanDrilldownModal: React.FC<LoanDrilldownModalProps> = memo(({
               {saveLoading ? (
                 <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
               ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
               )}
               Save
             </button>
-          </div>
+        </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </Dialog>
