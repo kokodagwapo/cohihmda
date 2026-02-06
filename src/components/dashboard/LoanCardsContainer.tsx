@@ -4,6 +4,7 @@ import { LoanRiskDistribution } from './LoanRiskDistribution';
 import { LoanOfficerModal } from './LoanOfficerModal';
 import { LoanDrilldownModal } from './LoanDrilldownModal';
 import { useToast } from '@/hooks/use-toast';
+import { useLoanFavorites } from '@/hooks/useLoanFavorites';
 
 interface RiskSummary {
   risks: string[];
@@ -169,18 +170,8 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
   const [itemsPerPage, setItemsPerPage] = useState(6);
   const { toast } = useToast();
 
-  // Favorites (temporary, resets on refresh)
-  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
-  const toggleFavorite = useCallback((loanId: string) => {
-    setFavoriteIds(prev => {
-      const next = new Set(prev);
-      if (next.has(loanId)) next.delete(loanId);
-      else next.add(loanId);
-      return next;
-    });
-  }, []);
-  const isFavorited = useCallback((id: string) => favoriteIds.has(id), [favoriteIds]);
-  
+  // Favorites (persistent across sessions and devices)
+  const { favoriteIds, toggleFavorite, isFavorited } = useLoanFavorites();
   
 
   useEffect(() => {
@@ -442,7 +433,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(({
             <svg className="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <p className="text-sm font-medium">No loans found</p>
+            <p className="text-sm font-medium">{activeTab === 'favorites' ? 'No favorites added' : 'No loans found'}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
