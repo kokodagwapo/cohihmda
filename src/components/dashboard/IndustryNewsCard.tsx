@@ -160,6 +160,15 @@ function MarketIntelligenceTicker() {
                   </DialogDescription>
                 </div>
               </div>
+              <a
+                href={OBMMI_WIDGET_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors"
+              >
+                Open in new tab
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
             </div>
             <div className="flex-1 min-h-0 p-4 sm:p-5 bg-slate-50/30 dark:bg-slate-800/30 flex flex-col">
               <div className="rounded-xl overflow-hidden border border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900 shadow-sm flex-1 min-h-0 flex flex-col">

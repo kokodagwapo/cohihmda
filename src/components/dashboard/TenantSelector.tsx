@@ -35,6 +35,7 @@ export const TenantSelector = ({
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [autoSelectedHomestead, setAutoSelectedHomestead] = useState(false);
 
   // Check if user is admin first, then load tenants
   useEffect(() => {
@@ -49,6 +50,8 @@ export const TenantSelector = ({
         // Load tenants if user is admin
         const isAdmin =
           userData.user?.role === "super_admin" ||
+          userData.user?.role === "platform_admin" ||
+          userData.user?.role === "support" ||
           userData.user?.role === "tenant_admin" ||
           userData.user?.role === "admin";
         if (isAdmin) {
@@ -66,10 +69,43 @@ export const TenantSelector = ({
 
   const isAdmin =
     currentUserRole === "super_admin" ||
+    currentUserRole === "platform_admin" ||
+    currentUserRole === "support" ||
     currentUserRole === "tenant_admin" ||
     currentUserRole === "admin" || // 'admin' maps to 'super_admin' in RBAC
     userRole === "super_admin" ||
+    userRole === "platform_admin" ||
+    userRole === "support" ||
     userRole === "tenant_admin";
+
+  useEffect(() => {
+    if (!selectedTenantId || loading || tenants.length === 0) return;
+    const directMatch = tenants.find((t) => t.id === selectedTenantId);
+    if (directMatch) return;
+    const nameMatch = tenants.find(
+      (t) => t.name.toLowerCase() === selectedTenantId.toLowerCase()
+    );
+    if (nameMatch) {
+      onTenantChange(nameMatch.id);
+    } else {
+      onTenantChange(null);
+    }
+  }, [selectedTenantId, tenants, loading, onTenantChange]);
+
+  // Default to Homestead on initial load (if no selection yet).
+  useEffect(() => {
+    if (autoSelectedHomestead) return;
+    if (loading || tenants.length === 0) return;
+    if (selectedTenantId) return;
+
+    const homesteadTenant = tenants.find(
+      (t) => t.name.toLowerCase() === "homestead"
+    );
+    if (homesteadTenant) {
+      onTenantChange(homesteadTenant.id);
+    }
+    setAutoSelectedHomestead(true);
+  }, [autoSelectedHomestead, loading, tenants, selectedTenantId, onTenantChange]);
 
   // Non-admin users don't see the selector
   if (!isAdmin) {
@@ -114,10 +150,9 @@ export const TenantSelector = ({
 
   // Compact mode for header placement (nav-style)
   if (compact) {
-    const selectedTenantName =
-      selectedTenantId === "homestead"
-        ? "Homestead (local)"
-        : tenants.find((t) => t.id === selectedTenantId)?.name;
+    const selectedTenantName = tenants.find(
+      (t) => t.id === selectedTenantId
+    )?.name;
 
     return (
       <div className="flex items-center gap-2">
@@ -140,9 +175,6 @@ export const TenantSelector = ({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__default__">My Tenant (Default)</SelectItem>
-            {import.meta.env.DEV && (
-              <SelectItem value="homestead">Homestead (local DB)</SelectItem>
-            )}
             {tenants && Array.isArray(tenants) && tenants.length > 0
               ? tenants.map((tenant) => (
                   <SelectItem key={tenant.id} value={tenant.id}>
@@ -194,9 +226,6 @@ export const TenantSelector = ({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">My Tenant (Default)</SelectItem>
-              {import.meta.env.DEV && (
-                <SelectItem value="homestead">Homestead (local DB from env)</SelectItem>
-              )}
               {tenants && Array.isArray(tenants) && tenants.length > 0
                 ? tenants.map((tenant) => (
                     <SelectItem key={tenant.id} value={tenant.id}>
@@ -224,10 +253,8 @@ export const TenantSelector = ({
         {selectedTenantId && (
           <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-light">
             ⚠️ You are viewing data for:{" "}
-            {selectedTenantId === "homestead"
-              ? "Homestead (local DB)"
-              : tenants.find((t) => t.id === selectedTenantId)?.name ||
-                "Selected Tenant"}
+            {tenants.find((t) => t.id === selectedTenantId)?.name ||
+              "Selected Tenant"}
           </p>
         )}
       </CardContent>

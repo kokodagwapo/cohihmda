@@ -68,6 +68,11 @@ export function ExportShareMenu({
     return await getExportData();
   };
 
+  const resolveTarget = (): HTMLElement | null => {
+    if (targetRef instanceof HTMLElement) return targetRef;
+    return targetRef?.current ?? null;
+  };
+
   const handleExport = async (type: "pdf" | "png" | "jpeg" | "ppt" | "excel") => {
     try {
       if (type === "excel") {
@@ -77,15 +82,26 @@ export function ExportShareMenu({
           return;
         }
         await exportDataAsExcel(data, safeTitle);
-      } else if (type === "ppt") {
-        const data = await handleExportData();
-        await exportElementAsPpt(targetRef, safeTitle, data);
-      } else if (type === "pdf") {
-        await exportElementAsPdf(targetRef, safeTitle);
-      } else if (type === "png") {
-        await exportElementAsImage(targetRef, "png", safeTitle);
-      } else if (type === "jpeg") {
-        await exportElementAsImage(targetRef, "jpeg", safeTitle);
+      } else {
+        const el = resolveTarget();
+        if (!el) {
+          toast({
+            title: "Export unavailable",
+            description: "Content not ready. Try again in a moment.",
+            variant: "destructive",
+          });
+          return;
+        }
+        if (type === "ppt") {
+          const data = await handleExportData();
+          await exportElementAsPpt(targetRef, safeTitle, data);
+        } else if (type === "pdf") {
+          await exportElementAsPdf(targetRef, safeTitle);
+        } else if (type === "png") {
+          await exportElementAsImage(targetRef, "png", safeTitle);
+        } else if (type === "jpeg") {
+          await exportElementAsImage(targetRef, "jpeg", safeTitle);
+        }
       }
       toast({ title: "Downloaded", description: `Exported ${type.toUpperCase()}.` });
     } catch (error) {
@@ -98,7 +114,7 @@ export function ExportShareMenu({
   };
 
   const handleCreateShareLink = async () => {
-    if (!/^\d{6,}$/.test(pin)) {
+    if (!pin || !/^\d{6,}$/.test(pin)) {
       toast({
         title: "Invalid PIN",
         description: "PIN must be at least 6 digits.",

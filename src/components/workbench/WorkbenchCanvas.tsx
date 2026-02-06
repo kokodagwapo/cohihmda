@@ -51,6 +51,7 @@ import {
   MessageSquare,
   Send,
   Pin,
+  Loader2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -81,6 +82,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useToast } from '@/hooks/use-toast';
 import { useCanvasHistory } from '@/hooks/useCanvasHistory';
 import { useCohiQuery } from '@/hooks/useCohiQuery';
+import { api } from '@/lib/api';
 import { CohiInsightPanel } from '@/components/cohi/CohiInsightPanel';
 import { useCanvasPinStore } from '@/stores/canvasPinStore';
 import { WidgetRenderer } from '@/components/workbench/canvas/WidgetRenderer';
@@ -104,6 +106,8 @@ const UPLOAD_ALLOWED_TYPES = [
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
 ];
 const UPLOAD_MAX_SIZE = 10 * 1024 * 1024;
 
@@ -386,7 +390,14 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
+  const [showCohiChat, setShowCohiChat] = useState(false);
   const [cohiQuestion, setCohiQuestion] = useState('');
+  const [fileAnalysis, setFileAnalysis] = useState<{
+    summary: string;
+    analysis: string;
+    insights: string[];
+    visualization?: { type: string; title: string; data: unknown[]; tableConfig?: unknown };
+  } | null>(null);
   const { query: cohiQuery, loading: cohiLoading, responsePlan: cohiResponsePlan, dataPayloads: cohiDataPayloads, reset: cohiReset } = useCohiQuery({ tenantId });
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -694,13 +705,12 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
       const file = e.target.files?.[0];
       e.target.value = '';
       if (!file) return;
-      if (
-        !UPLOAD_ALLOWED_TYPES.includes(file.type) &&
-        !file.name.toLowerCase().endsWith('.csv')
-      ) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const allowedExts = ['csv', 'xlsx', 'xls', 'pdf', 'pptx', 'ppt', 'docx', 'doc', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
+      if (!UPLOAD_ALLOWED_TYPES.includes(file.type) && !allowedExts.includes(ext || '')) {
         toast({
           title: 'Invalid file type',
-          description: 'Please upload CSV, PDF, Excel, PowerPoint, or image files.',
+          description: 'Use CSV, Excel, PDF, PowerPoint, Word, or images.',
           variant: 'destructive',
         });
         return;
@@ -714,21 +724,25 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         return;
       }
       setIsUploading(true);
+        setFileAnalysis(null);
       try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('question', 'Analyze this file');
-        const response = await fetch('/api/data-chat/analyze-file', {
-          method: 'POST',
-          body: formData,
-        });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.message || 'Failed to analyze file');
-        }
-        const result = await response.json();
+        const result = await api.request<{
+          analysis?: string;
+          summary?: string;
+          insights?: string[];
+          visualization?: { type: string; title: string; data: unknown[]; tableConfig?: unknown };
+        }>('/api/data-chat/analyze-file', { method: 'POST', body: formData });
         const analysis = result.analysis || result.summary || '';
         const visualization = result.visualization;
+        setFileAnalysis({
+          summary: result.summary || analysis.slice(0, 200),
+          analysis: analysis || '',
+          insights: result.insights || [],
+          visualization,
+        });
         const uploadRecord: CanvasUpload = {
           id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           filename: file.name,
@@ -743,9 +757,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         }
         toast({
           title: 'File analyzed',
-          description: visualization
-            ? `Added chart from ${file.name} to canvas.`
-            : `${file.name} analyzed. Add a chart from CSV/Excel for automatic visualization.`,
+          description: result.insights?.length
+            ? `${file.name}: ${result.insights.length} insight(s). View below.`
+            : visualization
+              ? `Added table/chart from ${file.name}.`
+              : `${file.name} analyzed.`,
         });
       } catch (err: unknown) {
         toast({
@@ -1255,11 +1271,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
       if (!res.ok) throw new Error('Failed to update favorite');
       setShareFavorited(next);
       toast({
-        title: next ? 'Added to favorites' : 'Removed from favorites',
-        description: next ? 'Canvas saved to your favorites.' : 'Canvas removed from favorites.',
+        title: next ? 'Added to bookmarks' : 'Removed from bookmarks',
+        description: next ? 'Canvas saved to your bookmarks.' : 'Canvas removed from bookmarks.',
       });
     } catch {
-      toast({ title: 'Update failed', description: 'Could not update favorites.', variant: 'destructive' });
+      toast({ title: 'Update failed', description: 'Could not update bookmarks.', variant: 'destructive' });
     } finally {
       setFavoriteLoading(false);
     }
@@ -1436,7 +1452,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <input ref={fileInputRef} type="file" accept={UPLOAD_ALLOWED_TYPES.join(',') + ',.csv,.xlsx,.xls,.pptx,.ppt'} onChange={handleFileChange} className="hidden" aria-hidden />
+            <input ref={fileInputRef} type="file" accept={UPLOAD_ALLOWED_TYPES.join(',') + ',.csv,.xlsx,.xls,.pdf,.pptx,.ppt,.docx,.doc'} onChange={handleFileChange} className="hidden" aria-hidden />
             <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoChange} className="hidden" aria-hidden />
             <DropdownMenu>
               <Tooltip>
@@ -1485,25 +1501,26 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Add widget or template</TooltipContent>
               </Tooltip>
-              <DropdownMenuContent align="start" className="w-[620px]">
-                <div className="grid grid-cols-[160px_1fr] gap-3 px-2 py-2">
-                  <div className="space-y-1.5">
+              <DropdownMenuContent align="start" className="w-[640px] rounded-xl border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-0 shadow-lg overflow-hidden">
+                <div className="grid grid-cols-[168px_1fr] gap-0">
+                  <div className="border-r border-slate-200/70 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/50 py-3 px-2 space-y-0.5">
                     {DASHBOARD_SECTION_GROUPS.map((group) => (
                       <button
                         key={group.label}
                         type="button"
                         onClick={() => setActiveAddGroup(group.label)}
-                        className={`w-full text-left rounded-lg px-2 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                        className={`w-full text-left rounded-lg px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
                           activeAddGroup === group.label
-                            ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                            ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm'
+                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 hover:text-slate-700 dark:hover:text-slate-300'
                         }`}
                       >
                         {group.label}
                       </button>
                     ))}
                   </div>
-                  <div className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-slate-50/70 dark:bg-slate-900/40 p-2.5">
+                  <div className="p-4 min-h-[200px]">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">Add to canvas</p>
                     <div className="grid grid-cols-2 gap-2">
                       {(DASHBOARD_SECTION_GROUPS.find((g) => g.label === activeAddGroup)?.items ?? []).map((section) => {
                         const Icon = section.icon;
@@ -1511,9 +1528,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                           <DropdownMenuItem
                             key={section.id}
                             onClick={() => addDashboardSection(section.id, section.title)}
-                            className="gap-2 rounded-lg px-2 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-white/70 dark:hover:bg-slate-800/70"
+                            className="gap-3 rounded-xl px-3 py-3 text-sm font-medium text-slate-700 dark:text-slate-200 focus:bg-slate-100 dark:focus:bg-slate-800 focus:text-slate-900 dark:focus:text-slate-100 border border-transparent focus:border-slate-200 dark:focus:border-slate-700"
                           >
-                            <Icon className={`h-4 w-4 ${section.iconClass ?? 'text-slate-500'}`} />
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-200/80 dark:border-slate-700/80">
+                              <Icon className={`h-4 w-4 ${section.iconClass ?? 'text-slate-500'}`} />
+                            </span>
                             <span className="truncate">{section.title}</span>
                           </DropdownMenuItem>
                         );
@@ -1521,35 +1540,35 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                     </div>
                   </div>
                 </div>
-                <div className="h-px bg-slate-200/70 dark:bg-slate-700/60 my-2" />
-                <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-3">
-                  Templates
-                </DropdownMenuLabel>
-                <div className="grid grid-cols-2 gap-2 px-2 py-2">
-                  {CANVAS_TEMPLATES.map((t) => {
-                    const Icon = t.icon;
-                    return (
-                      <DropdownMenuItem
-                        key={t.id}
-                        onClick={() => applyTemplate(t)}
-                        className="gap-3 rounded-lg border border-transparent bg-slate-50/60 p-2.5 transition-colors data-[highlighted]:border-slate-200 data-[highlighted]:bg-slate-100 dark:bg-slate-800/40 dark:data-[highlighted]:border-slate-700 dark:data-[highlighted]:bg-slate-800"
-                      >
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <span className="flex flex-col">
-                          <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{t.label}</span>
-                          <span className="text-xs text-slate-500 dark:text-slate-400">{t.description}</span>
-                        </span>
-                      </DropdownMenuItem>
-                    );
-                  })}
+                <div className="border-t border-slate-200/70 dark:border-slate-700/60 bg-slate-50/30 dark:bg-slate-900/30 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">Templates</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {CANVAS_TEMPLATES.map((t) => {
+                      const Icon = t.icon;
+                      return (
+                        <DropdownMenuItem
+                          key={t.id}
+                          onClick={() => applyTemplate(t)}
+                          className="gap-4 rounded-xl border border-slate-200/80 dark:border-slate-700/70 bg-white dark:bg-slate-800/50 p-4 transition-all focus:border-slate-300 dark:focus:border-slate-600 focus:bg-slate-50 dark:focus:bg-slate-800 focus:shadow-sm"
+                        >
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-700 dark:to-slate-800 border border-slate-200/80 dark:border-slate-600/80 shadow-sm">
+                            <Icon className="h-5 w-5 text-slate-600 dark:text-slate-300" />
+                          </span>
+                          <span className="flex flex-col text-left min-w-0">
+                            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t.label}</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.description}</span>
+                          </span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </div>
                 </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={addTextBlock} className="gap-2">
-                  <StickyNote className="h-4 w-4" />
-                  Text block
-                </DropdownMenuItem>
+                <div className="border-t border-slate-200/70 dark:border-slate-700/60 px-4 py-2">
+                  <DropdownMenuItem onClick={addTextBlock} className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 focus:bg-slate-100 dark:focus:bg-slate-800">
+                    <StickyNote className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                    Text block
+                  </DropdownMenuItem>
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
             <Tooltip>
@@ -1599,25 +1618,39 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Arrange layout</TooltipContent>
               </Tooltip>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Auto layout</DropdownMenuLabel>
-                <DropdownMenuItem onClick={applyBestFitLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Best fit — balanced grid
+              <DropdownMenuContent align="end" className="w-72 rounded-xl border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 p-2 shadow-lg">
+                <DropdownMenuLabel className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Auto layout</DropdownMenuLabel>
+                <DropdownMenuItem onClick={applyBestFitLayout} disabled={!hasItems} className="gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 focus:bg-slate-100 dark:focus:bg-slate-800 focus:text-slate-900 dark:focus:text-slate-100">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                    <LayoutGrid className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                  </span>
+                  <span>
+                    <span className="font-medium">Best fit</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">Balanced grid</span>
+                  </span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={applyMasonryLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Masonry — staggered columns
+                <DropdownMenuItem onClick={applyMasonryLayout} disabled={!hasItems} className="gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 focus:bg-slate-100 dark:focus:bg-slate-800 focus:text-slate-900 dark:focus:text-slate-100">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                    <LayoutGrid className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                  </span>
+                  <span>
+                    <span className="font-medium">Masonry</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">Staggered columns</span>
+                  </span>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Manual layouts</DropdownMenuLabel>
-                <DropdownMenuItem onClick={applyRowLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Single row
+                <DropdownMenuSeparator className="my-2 bg-slate-200/70 dark:bg-slate-700/60" />
+                <DropdownMenuLabel className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Manual layouts</DropdownMenuLabel>
+                <DropdownMenuItem onClick={applyRowLayout} disabled={!hasItems} className="gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 focus:bg-slate-100 dark:focus:bg-slate-800 focus:text-slate-900 dark:focus:text-slate-100">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                    <LayoutGrid className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                  </span>
+                  <span className="font-medium">Single row</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={applyColumnLayout} disabled={!hasItems} className="gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Single column
+                <DropdownMenuItem onClick={applyColumnLayout} disabled={!hasItems} className="gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 focus:bg-slate-100 dark:focus:bg-slate-800 focus:text-slate-900 dark:focus:text-slate-100">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                    <LayoutGrid className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                  </span>
+                  <span className="font-medium">Single column</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1642,6 +1675,25 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">Clear canvas</TooltipContent>
+            </Tooltip>
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={
+                    items.length === 0 && showCohiChat
+                      ? "h-8 shrink-0 gap-1.5 px-2 text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30"
+                      : "h-8 shrink-0 gap-1.5 px-2 text-slate-600 dark:text-slate-400"
+                  }
+                  onClick={() => items.length === 0 && setShowCohiChat((v) => !v)}
+                  aria-label="Cohi Chat"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="text-xs font-medium">Cohi Chat</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Cohi Chat</TooltipContent>
             </Tooltip>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -1793,86 +1845,183 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 );
               })
             ) : (
-              <div className="flex flex-col items-center justify-center p-8 min-h-[400px] gap-8">
-                {/* COHI Chat in the center of the canvas */}
-                <div className="w-full max-w-xl mx-auto">
-                  <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/70 bg-white/95 dark:bg-slate-900/95 shadow-lg overflow-hidden">
-                    <div className="px-4 py-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/80 flex items-center gap-2">
+              <div className="flex flex-col items-center justify-start p-8 min-h-[70vh] gap-8 pt-48 sm:pt-56">
+                {showCohiChat ? (
+                <>
+                {/* COHI Chat – shown when toolbar Cohi icon is clicked (~2in wider each side than max-w-xl) */}
+                <div className="w-full max-w-[960px] mx-auto -mt-[3mm]">
+                  <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/70 bg-white/95 dark:bg-slate-900/95 shadow-lg overflow-hidden min-h-[320px] max-h-[75vh] flex flex-col">
+                    <div className="flex-shrink-0 px-4 py-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/80 flex items-center gap-2">
                       <MessageSquare className="h-5 w-5 text-sky-500 dark:text-sky-400" />
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Chat with Cohi</h3>
                     </div>
-                    {!cohiResponsePlan ? (
-                      <>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 px-4 pt-3 pb-2">
-                          Ask about pipeline, fundings, TopTiering, or upload a CSV to analyze. Pin insights to this canvas.
-                        </p>
-                        <form onSubmit={handleCohiSubmit} className="p-4 flex gap-2">
-                          <Input
-                            placeholder="e.g. Show me loan volume by channel"
-                            value={cohiQuestion}
-                            onChange={(e) => setCohiQuestion(e.target.value)}
-                            disabled={cohiLoading}
-                            className="flex-1"
+                    {/* Results above – scrollable */}
+                    <div className="flex-1 min-h-0 overflow-auto p-4">
+                      {!cohiResponsePlan && !fileAnalysis ? (
+                        <div className="rounded-lg border-0 bg-muted/10 dark:bg-muted/20 p-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 dark:text-slate-400">
+                                  <MessageSquare className="h-4 w-4 text-sky-500 dark:text-sky-400" />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                Ask about pipeline, fundings, TopTiering, or upload a file to analyze
+                              </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 dark:text-slate-400">
+                                  <Pin className="h-4 w-4 text-violet-500 dark:text-violet-400" />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">Pin insights to this canvas</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-9 w-9 shrink-0 text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400"
+                                  onClick={handleUploadClick}
+                                  disabled={isUploading}
+                                >
+                                  {isUploading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Upload className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                {isUploading ? 'Analyzing…' : 'Upload CSV, Excel, PDF, PPT, or Word'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      ) : !cohiResponsePlan && fileAnalysis ? (
+                        <div className="rounded-md border border-slate-200/60 dark:border-slate-700/60 bg-white dark:bg-slate-900/50 p-2.5 mb-2 space-y-2">
+                          <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{fileAnalysis.summary}</p>
+                          {fileAnalysis.insights.length > 0 && (
+                            <ul className="list-disc list-inside text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
+                              {fileAnalysis.insights.map((insight, i) => (
+                                <li key={i}>{insight}</li>
+                              ))}
+                            </ul>
+                          )}
+                          {fileAnalysis.visualization?.type === 'table' && fileAnalysis.visualization.data?.length > 0 && (
+                            <div className="overflow-x-auto rounded border border-slate-200/60 dark:border-slate-700/60 mt-2">
+                              <table className="w-full text-xs border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 dark:bg-slate-800/50">
+                                    {(fileAnalysis.visualization.tableConfig as { columns?: { key: string; label: string }[] })?.columns?.map((col) => (
+                                      <th key={col.key} className="text-left p-1.5 font-medium text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+                                        {col.label}
+                                      </th>
+                                    )) ?? Object.keys((fileAnalysis.visualization.data[0] as Record<string, unknown>) || {}).map((key) => (
+                                      <th key={key} className="text-left p-1.5 font-medium text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+                                        {key}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(fileAnalysis.visualization.data as Record<string, unknown>[]).slice(0, 10).map((row, i) => (
+                                    <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+                                      {Object.entries(row).map(([k, v]) => (
+                                        <td key={k} className="p-1.5 text-slate-600 dark:text-slate-400">
+                                          {v != null ? String(v) : '—'}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {(fileAnalysis.visualization.data as unknown[]).length > 10 && (
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 p-1.5">
+                                  Showing first 10 of {(fileAnalysis.visualization.data as unknown[]).length} rows.
+                                </p>
+                              )}
+                            </div>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs mt-1"
+                            onClick={() => setFileAnalysis(null)}
+                          >
+                            Dismiss
+                          </Button>
+                        </div>
+                      ) : cohiResponsePlan ? (
+                        <div className="rounded-md border border-slate-200/60 dark:border-slate-700/60 bg-white dark:bg-slate-900/50 p-2.5 mb-2">
+                          <CohiInsightPanel
+                            responsePlan={cohiResponsePlan}
+                            dataPayloads={cohiDataPayloads}
+                            excludeSectionTypes={['chart', 'ranked_table', 'grouped_table']}
                           />
-                          <Button type="submit" size="sm" disabled={!cohiQuestion.trim() || cohiLoading} className="gap-1.5">
-                            {cohiLoading ? (
-                              <>Sending…</>
-                            ) : (
-                              <>
-                                <Send className="h-4 w-4" />
-                                Ask
-                              </>
-                            )}
-                          </Button>
-                        </form>
-                      </>
-                    ) : (
-                      <div className="p-4 space-y-4">
-                        <div className="max-h-[50vh] overflow-auto rounded-lg border border-slate-200/70 dark:border-slate-700/70 bg-white dark:bg-slate-900/50 p-3">
-                          <CohiInsightPanel responsePlan={cohiResponsePlan} dataPayloads={cohiDataPayloads} />
                         </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <Button variant="outline" size="sm" onClick={() => { cohiReset(); setCohiQuestion(''); }}>
-                            Ask another
-                          </Button>
-                          <Button size="sm" className="gap-1.5" onClick={handlePinCohiToCanvas}>
-                            <Pin className="h-4 w-4" />
-                            Pin to canvas
-                          </Button>
+                      ) : null}
+                    </div>
+                    {/* Chat box – always visible at bottom */}
+                    <div className="flex-shrink-0 rounded-lg border-0 bg-muted/10 dark:bg-muted/20 p-3 mt-2 space-y-2">
+                      {(cohiResponsePlan || fileAnalysis) && (
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-500 dark:text-slate-400" onClick={() => { cohiReset(); setCohiQuestion(''); setFileAnalysis(null); }}>
+                                <MessageSquare className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">Ask another</TooltipContent>
+                          </Tooltip>
+                          {cohiResponsePlan && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-500 dark:text-slate-400" onClick={handlePinCohiToCanvas}>
+                                  <Pin className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">Pin to canvas</TooltipContent>
+                            </Tooltip>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      )}
+                      <form onSubmit={handleCohiSubmit} className="flex items-center gap-2">
+                        <Input
+                          placeholder="Ask about pipeline, fundings, TopTiering…"
+                          value={cohiQuestion}
+                          onChange={(e) => setCohiQuestion(e.target.value)}
+                          disabled={cohiLoading}
+                          className="flex-1 min-w-0 h-9 text-sm"
+                        />
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400" onClick={handleUploadClick} disabled={cohiLoading || isUploading}>
+                              {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">{isUploading ? 'Analyzing…' : 'Upload CSV, Excel, PDF, PPT, or Word'}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button type="submit" size="icon" disabled={!cohiQuestion.trim() || cohiLoading} className="h-9 w-9 shrink-0 bg-sky-500 hover:bg-sky-600 text-white dark:bg-sky-600 dark:hover:bg-sky-500">
+                              {cohiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">{cohiLoading ? 'Sending…' : 'Ask'}</TooltipContent>
+                        </Tooltip>
+                      </form>
+                    </div>
                   </div>
                 </div>
-                <div className="text-center max-w-md">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                    <LayoutDashboard className="w-8 h-8 text-slate-400 dark:text-slate-500" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Canvas</h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                    Add widgets, upload files, or choose a background. Use &quot;Add from dashboard&quot; to place sections here.
-                  </p>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="gap-2">
-                        <LayoutDashboard className="h-4 w-4" />
-                        Add from dashboard
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="center" className="w-72">
-                      {DASHBOARD_SECTION_ITEMS.map((section) => {
-                        const Icon = section.icon;
-                        return (
-                          <DropdownMenuItem key={section.id} onClick={() => addDashboardSection(section.id, section.title)} className="gap-2">
-                            <Icon className={`h-4 w-4 ${section.iconClass ?? 'text-slate-500'}`} />
-                            <span>{section.title}</span>
-                          </DropdownMenuItem>
-                        );
-                      })}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                </>
+                ) : (
+                  <div className="flex-1 min-h-[50vh] w-full" aria-hidden />
+                )}
               </div>
             )}
             {annotations.length > 0 && (
@@ -2059,7 +2208,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 className="w-full"
                 disabled={favoriteLoading}
               >
-                {shareFavorited ? 'Remove from favorites' : 'Add to favorites'}
+                {shareFavorited ? 'Remove from bookmarks' : 'Add to bookmarks'}
               </Button>
             </div>
             <div className="h-px bg-slate-200 dark:bg-slate-700" />

@@ -7,13 +7,11 @@ import { IconBadge } from '@/components/workbench/IconBadge';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { CohortManagement } from '@/components/workbench/CohortManagement';
-
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
   { path: '/workbench/shared', label: 'Shared With Me', icon: Share2, variant: 'rose' as const },
   { path: '/workbench/team-folders', label: 'Team Folders', icon: Folder, variant: 'slate' as const },
-  { path: '/workbench/favorites', label: 'Favorites', icon: Star, variant: 'amber' as const },
+  { path: '/workbench/favorites', label: 'Bookmarks', icon: Star, variant: 'amber' as const },
   { label: 'Cohi Dashboard Library', icon: Library, variant: 'sky' as const, scrollTarget: 'cohi-dashboard-library' },
 ];
 
@@ -93,9 +91,6 @@ function SidebarContent({
           })}
         </nav>
       </div>
-
-      {/* Cohorts */}
-      <CohortManagement />
 
       {/* Cohi Dashboard Library */}
       <div id="cohi-dashboard-library" className="flex-1 min-h-0 p-3 border-t border-slate-200/70 dark:border-slate-700/50">

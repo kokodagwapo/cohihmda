@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { TopTieringSelectionAnalysis } from '@/components/performance/TopTieringSelectionAnalysis';
-import { WorkbenchTopBar } from '@/components/workbench/WorkbenchTopBar';
 import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
 import { MultiCohortComparison } from '@/components/workbench/MultiCohortComparison';
 import { IconBadge } from '@/components/workbench/IconBadge';
@@ -55,7 +54,6 @@ export default function MyDashboard() {
           onSidebarCollapsedChange={setSidebarCollapsed}
         />
         <div className="flex-1 flex flex-col min-w-0">
-          <WorkbenchTopBar onOpenSidebar={() => setSidebarOpen(true)} />
           <div className="flex flex-1 min-w-0">
             <div className="relative flex-1 px-4 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-auto">
               <div className={activeTab === 'canvas' ? 'w-full mx-auto' : 'mx-auto max-w-[1600px]'}>
@@ -70,7 +68,7 @@ export default function MyDashboard() {
                           </h1>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 shrink-0">
+                      <div className="hidden flex items-center gap-3 shrink-0">
                         <TabsList>
                           <TabsTrigger value="canvas" className="gap-2">
                             <Palette className="h-4 w-4" />

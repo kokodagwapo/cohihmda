@@ -59,6 +59,9 @@ export interface ChatMessage {
     dataQuery?: boolean;
     knowledgeBase?: string[];
   };
+  /** Structured COHI response (from /api/cohi/query) */
+  responsePlan?: import("@/types/cohiResponsePlan").ResponsePlan;
+  dataPayloads?: Record<string, unknown[]>;
 }
 
 export interface CohiChatResponse {
@@ -79,46 +82,37 @@ export interface UseCohiChatOptions {
 }
 
 // ============================================================================
-// Demo Data Generator (fallback for development)
+// Error message helpers (no fake demo – show real status per COHI requirements)
 // ============================================================================
 
-const generateDemoResponse = (question: string): CohiChatResponse => {
-  const q = question.toLowerCase();
-
-  if (q.includes("important") || q.includes("today") || q.includes("know")) {
-    return {
-      message:
-        "Here's your executive briefing. Top performers MTD: Sarah Chen leads with 42 units and $18.2M volume. Focus areas: pipeline velocity and reducing fallout in the retail channel.",
-      visualization: {
-        type: "horizontal_bar",
-        title: "Top Performers (MTD)",
-        data: [
-          { name: "Sarah Chen", units: 42, volume: 18200000 },
-          { name: "Mike Torres", units: 38, volume: 15600000 },
-          { name: "Jess Rivera", units: 35, volume: 14200000 },
-        ],
-        xKey: "name",
-        yKey: "units",
-        colors: ["#3B82F6", "#10B981", "#8B5CF6"],
-      },
-      suggestedQuestions: [
-        "Show me loans by branch",
-        "What are the FHA requirements?",
-        "Top loan officers by volume",
-      ],
-    };
+function getFriendlyErrorMessage(error: any): string {
+  const msg = error?.message ?? String(error);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("tenant") ||
+    lower.includes("no tenant selected") ||
+    lower.includes("select a tenant") ||
+    lower.includes("requiresTenantSelection")
+  ) {
+    return "Please select a tenant from the header to view data in COHI Chat.";
   }
-
-  return {
-    message: "I can help you with loan data and mortgage knowledge. Try asking about your pipeline, loan officers, or regulatory requirements.",
-    suggestedQuestions: [
-      "Show me loan volume by month",
-      "Top 10 loan officers",
-      "What are FHA guidelines?",
-      "Pipeline breakdown",
-    ],
-  };
-};
+  if (
+    lower.includes("fetch") ||
+    lower.includes("network") ||
+    lower.includes("econnrefused") ||
+    lower.includes("socket") ||
+    lower.includes("failed to fetch")
+  ) {
+    return "Unable to connect to the server. Check that the backend is running and try again.";
+  }
+  if (lower.includes("403") || lower.includes("access denied")) {
+    return "You don't have access to COHI Chat for this tenant.";
+  }
+  if (lower.includes("401") || lower.includes("unauthorized")) {
+    return "Session expired or not authorized. Please sign in again.";
+  }
+  return msg && msg.length < 200 ? msg : "Unable to load data. Please try again.";
+}
 
 // ============================================================================
 // Hook
@@ -131,55 +125,31 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([
-    "What's important to know today?",
-    "Show me loan volume by month",
-    "What are the FHA requirements?",
-    "Top loan officers by revenue",
+    "What's total loan volume this month?",
+    "Show me TopTiering leaderboard",
+    "How did fundings trend last quarter?",
+    "Loans by product type",
   ]);
 
   const messageIdCounter = useRef(0);
-  const defaultTenantIdRef = useRef<string | null | undefined>(undefined);
 
-  /** Resolve tenant for request */
+  /** Resolve tenant for request. Per COHI requirements data must be synced with SELECTED tenant – no silent fallback to first tenant. */
   const getEffectiveTenantId = useCallback(async (): Promise<string | null> => {
     if (tenantId) return tenantId;
-    if (defaultTenantIdRef.current !== undefined)
-      return defaultTenantIdRef.current;
-    try {
-      const response = await api.request<
-        { tenants: { id: string }[] } | { id: string }[]
-      >("/api/tenants");
-      const list = Array.isArray(response)
-        ? response
-        : (response as any).tenants || [];
-      const first = list[0];
-      if (first?.id) {
-        defaultTenantIdRef.current = first.id;
-        return defaultTenantIdRef.current;
-      }
-    } catch {
-      /* ignore */
-    }
-    try {
-      const defaultRes = await api.request<{ tenantId: string | null }>(
-        "/api/cohi-chat/default-tenant"
-      );
-      defaultTenantIdRef.current = defaultRes?.tenantId ?? null;
-      return defaultTenantIdRef.current;
-    } catch {
-      defaultTenantIdRef.current = null;
-      return null;
-    }
+    return null;
   }, [tenantId]);
 
-  // Initialize session on mount
+  // Initialize session on mount (pass tenant_id so backend can scope session to selected tenant)
   useEffect(() => {
     const initSession = async () => {
       try {
-        const response = await api.request<{ sessionId: string }>(
-          "/api/cohi-chat/new-session",
-          { method: "POST" }
-        );
+        const effectiveTenantId = await getEffectiveTenantId();
+        const endpoint = effectiveTenantId
+          ? `/api/cohi-chat/new-session?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+          : "/api/cohi-chat/new-session";
+        const response = await api.request<{ sessionId: string }>(endpoint, {
+          method: "POST",
+        });
         if (response.sessionId) {
           setSessionId(response.sessionId);
         }
@@ -188,7 +158,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       }
     };
     initSession();
-  }, []);
+  }, [getEffectiveTenantId]);
 
   /**
    * Generate unique message ID
@@ -228,12 +198,29 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       setMessages((prev) => [...prev, userMessage, loadingMessage]);
       setIsLoading(true);
 
+      let effectiveTenantId: string | null = null;
+
       try {
-        const effectiveTenantId = await getEffectiveTenantId();
-        const endpoint = effectiveTenantId
-          ? `/api/cohi-chat/ask?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "/api/cohi-chat/ask";
-        
+        effectiveTenantId = await getEffectiveTenantId();
+
+        // Per COHI requirements: data must be synced with selected tenant – require tenant
+        if (!effectiveTenantId) {
+          const noTenantMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: "assistant",
+            content:
+              "Please select a tenant from the header to view data in COHI Chat. Your answers and insights will then come from that tenant's database.",
+            timestamp: new Date(),
+            error: "NO_TENANT",
+          };
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMessageId ? noTenantMessage : m))
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        const endpoint = `/api/cohi-chat/ask?tenant_id=${encodeURIComponent(effectiveTenantId)}`;
         const response = await api.request<CohiChatResponse>(endpoint, {
           method: "POST",
           body: JSON.stringify({
@@ -248,11 +235,14 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           }),
         });
 
-        // Update assistant message with response
-        const assistantMessage: ChatMessage = {
+        // Update assistant message with response (guard empty/malformed response)
+        let assistantMessage: ChatMessage = {
           id: assistantMessageId,
           role: "assistant",
-          content: response.message,
+          content:
+            typeof response.message === "string" && response.message.trim()
+              ? response.message
+              : "I couldn't generate a response for that. Please try rephrasing or try again.",
           visualization: response.visualization,
           data: response.data,
           timestamp: new Date(),
@@ -267,28 +257,71 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
         if (response.suggestedQuestions) {
           setSuggestedQuestions(response.suggestedQuestions);
         }
+
+        // Enrich with COHI structured insight (responsePlan) from /api/cohi/query so CohiInsightPanel shows below
+        try {
+          const cohiEndpoint = `/api/cohi/query?tenant_id=${encodeURIComponent(effectiveTenantId)}`;
+          const cohiRes = await api.request<{
+            responsePlan: import("@/types/cohiResponsePlan").ResponsePlan;
+            dataPayloads?: Record<string, unknown[]>;
+          }>(cohiEndpoint, {
+            method: "POST",
+            body: JSON.stringify({ question: question.trim(), context: {} }),
+          });
+          if (cohiRes?.responsePlan) {
+            assistantMessage = {
+              ...assistantMessage,
+              responsePlan: cohiRes.responsePlan,
+              dataPayloads: cohiRes.dataPayloads ?? {},
+            };
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m))
+            );
+          }
+        } catch (_) {
+          // COHI query optional; chat answer already shown
+        }
       } catch (error: any) {
-        console.error("[CohiChat] Error sending message, using demo mode:", error);
+        console.error("[CohiChat] Error sending message:", error);
 
-        // Use demo response when API fails
-        const demoResponse = generateDemoResponse(question.trim());
-
-        const demoMessage: ChatMessage = {
+        // Try to get at least structured data from /api/cohi/query when ask fails (per COHI requirements: show insights from pipeline)
+        let fallbackMessage: ChatMessage = {
           id: assistantMessageId,
           role: "assistant",
-          content: demoResponse.message,
-          visualization: demoResponse.visualization,
-          data: demoResponse.data,
+          content: getFriendlyErrorMessage(error),
           timestamp: new Date(),
+          error: error?.message,
         };
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? demoMessage : m))
-        );
-
-        if (demoResponse.suggestedQuestions) {
-          setSuggestedQuestions(demoResponse.suggestedQuestions);
+        if (effectiveTenantId) {
+          try {
+            const cohiEndpoint = `/api/cohi/query?tenant_id=${encodeURIComponent(effectiveTenantId)}`;
+            const cohiRes = await api.request<{
+              responsePlan: import("@/types/cohiResponsePlan").ResponsePlan;
+              dataPayloads?: Record<string, unknown[]>;
+            }>(cohiEndpoint, {
+              method: "POST",
+              body: JSON.stringify({ question: question.trim(), context: {} }),
+            });
+            if (cohiRes?.responsePlan) {
+              const summary =
+                cohiRes.responsePlan?.summary?.trim() ||
+                "Here’s the data view for your question.";
+              fallbackMessage = {
+                ...fallbackMessage,
+                content: `${getFriendlyErrorMessage(error)}\n\n**Data view:** ${summary}`,
+                responsePlan: cohiRes.responsePlan,
+                dataPayloads: cohiRes.dataPayloads ?? {},
+              };
+            }
+          } catch (_) {
+            // Keep friendly error message only
+          }
         }
+
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantMessageId ? fallbackMessage : m))
+        );
       } finally {
         setIsLoading(false);
       }
@@ -467,30 +500,33 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setSuggestedQuestions([
-      "What's important to know today?",
-      "Show me loan volume by month",
-      "What are the FHA requirements?",
-      "Top loan officers by revenue",
+      "What's total loan volume this month?",
+      "Show me TopTiering leaderboard",
+      "How did fundings trend last quarter?",
+      "Loans by product type",
     ]);
   }, []);
 
   /**
-   * Start a new session
+   * Start a new session (uses current effective tenant so data stays synced with selected tenant)
    */
   const newSession = useCallback(async () => {
     clearMessages();
     try {
-      const response = await api.request<{ sessionId: string }>(
-        "/api/cohi-chat/new-session",
-        { method: "POST" }
-      );
+      const effectiveTenantId = await getEffectiveTenantId();
+      const endpoint = effectiveTenantId
+        ? `/api/cohi-chat/new-session?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+        : "/api/cohi-chat/new-session";
+      const response = await api.request<{ sessionId: string }>(endpoint, {
+        method: "POST",
+      });
       if (response.sessionId) {
         setSessionId(response.sessionId);
       }
     } catch (error) {
       console.error("[CohiChat] Failed to create new session:", error);
     }
-  }, [clearMessages]);
+  }, [clearMessages, getEffectiveTenantId]);
 
   return {
     messages,

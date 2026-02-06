@@ -539,15 +539,17 @@ export function useDataChat(options: UseChatOptions = {}) {
       setIsLoading(true);
 
       try {
-        const effectiveTenantId = await getEffectiveTenantId();
-        const cohiEndpoint = effectiveTenantId
-          ? `/api/cohi/query?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "/api/cohi/query";
-        const cohiResponse = await api.request<{
+        type CohiQueryResult = {
           responsePlan: ResponsePlan;
           dataPayloads?: Record<string, unknown[]>;
           audit?: { generatedAt: string; latencyMs?: number };
-        }>(cohiEndpoint, {
+        };
+        const effectiveTenantId = await getEffectiveTenantId();
+        const cohiTenantId = effectiveTenantId ?? (import.meta.env.DEV ? "homestead" : null);
+        const cohiEndpoint = cohiTenantId
+          ? `/api/cohi/query?tenant_id=${encodeURIComponent(cohiTenantId)}`
+          : "/api/cohi/query";
+        const cohiResponse = await api.request<CohiQueryResult>(cohiEndpoint, {
           method: "POST",
           body: JSON.stringify({
             question: question.trim(),
@@ -579,6 +581,7 @@ export function useDataChat(options: UseChatOptions = {}) {
             "Who are the top performers this month?",
             "Show bottom performers by pull-through last 90 days",
             "What do I need to know today?",
+            "How is our pipeline looking?",
           ]);
         }
       } catch (error: any) {
@@ -596,6 +599,7 @@ export function useDataChat(options: UseChatOptions = {}) {
         setSuggestedQuestions([
           "Who are the top performers this month?",
           "What do I need to know today?",
+          "How is our pipeline looking?",
         ]);
       } finally {
         setIsLoading(false);

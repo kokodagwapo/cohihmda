@@ -49,16 +49,40 @@ export const ChannelSelector = ({
         setLoading(true);
         setError(null);
 
+        const normalizeTenantId = (tenantId?: string | null) => {
+          if (!tenantId) return null;
+          const trimmed = tenantId.trim();
+          if (!trimmed || trimmed === "__default__" || trimmed === "null" || trimmed === "undefined") {
+            return null;
+          }
+          return trimmed;
+        };
+
+        const tenantId = normalizeTenantId(selectedTenantId);
+
         // Build URL with tenant_id if provided
         let url = "/api/loans/channels";
-        if (selectedTenantId) {
-          url += `?tenant_id=${selectedTenantId}`;
+        if (tenantId) {
+          url += `?tenant_id=${tenantId}`;
         }
 
-        const data = await api.request<{
-          channels: ChannelData[];
-          channelGroups: ChannelGroupData[];
-        }>(url);
+        let data: { channels: ChannelData[]; channelGroups: ChannelGroupData[] } | null = null;
+        try {
+          data = await api.request<{
+            channels: ChannelData[];
+            channelGroups: ChannelGroupData[];
+          }>(url);
+        } catch (innerErr: any) {
+          // If tenant context fails, retry without tenant_id
+          if (tenantId) {
+            data = await api.request<{
+              channels: ChannelData[];
+              channelGroups: ChannelGroupData[];
+            }>("/api/loans/channels");
+          } else {
+            throw innerErr;
+          }
+        }
 
         // Filter out any channels/groups with empty string values (breaks Radix Select)
         const validChannels = (data.channels || []).filter(

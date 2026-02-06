@@ -129,6 +129,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   const allPagesRef = useRef<HTMLDivElement>(null);
   const insightsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const topTieringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const topTieringAutoCloseRef = useRef<NodeJS.Timeout | null>(null);
   const allPagesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Keyboard navigation state
@@ -158,6 +159,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
         setFocusedIndex(-1);
       }
       if (topTieringRef.current && !topTieringRef.current.contains(event.target as Node)) {
+        if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+        topTieringAutoCloseRef.current = null;
         setTopTieringOpen(false);
         setFocusedIndex(-1);
       }
@@ -206,6 +209,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
         if (menuType === 'insights') {
           setInsightsOpen(false);
         } else {
+          if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+          topTieringAutoCloseRef.current = null;
           setTopTieringOpen(false);
         }
         setFocusedIndex(-1);
@@ -280,6 +285,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   };
 
   const handleTopTieringClick = (itemId: string, customRoute?: string) => {
+    if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+    topTieringAutoCloseRef.current = null;
     setTopTieringOpen(false);
     setFocusedIndex(-1);
     
@@ -326,7 +333,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       return 'Top Tiering';
     }
     if (location.pathname === '/my-dashboard') return 'My Workbench';
-    if (location.pathname === '/data-chat') return 'Cohi Chat';
+    if (location.pathname === '/data-chat') return 'Data Chat';
     return 'Navigation';
   };
 
@@ -545,7 +552,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           </button>
         </div>
 
-        {/* Cohi Chat */}
+        {/* Data Chat */}
         <div>
           <button
             onClick={() => {
@@ -560,7 +567,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
             )}
           >
             <Sparkles className="w-4 h-4 flex-shrink-0" />
-            <span>Cohi Chat</span>
+            <span>Data Chat</span>
           </button>
         </div>
 
@@ -697,9 +704,17 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 className="relative"
                 onMouseEnter={() => {
                   if (topTieringTimeoutRef.current) clearTimeout(topTieringTimeoutRef.current);
+                  if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+                  setTopTieringSubOpen(true);
                   setTopTieringOpen(true);
+                  topTieringAutoCloseRef.current = setTimeout(() => {
+                    topTieringAutoCloseRef.current = null;
+                    setTopTieringOpen(false);
+                  }, 6000);
                 }}
                 onMouseLeave={() => {
+                  if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+                  topTieringAutoCloseRef.current = null;
                   topTieringTimeoutRef.current = setTimeout(() => setTopTieringOpen(false), 150);
                 }}
               >
@@ -708,7 +723,20 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                     if (!isTopTieringPage) {
                       navigate('/loan-funnel');
                     } else {
-                      setTopTieringOpen(!topTieringOpen);
+                      const next = !topTieringOpen;
+                      if (next) {
+                        if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+                        setTopTieringSubOpen(true);
+                        setTopTieringOpen(true);
+                        topTieringAutoCloseRef.current = setTimeout(() => {
+                          topTieringAutoCloseRef.current = null;
+                          setTopTieringOpen(false);
+                        }, 6000);
+                      } else {
+                        if (topTieringAutoCloseRef.current) clearTimeout(topTieringAutoCloseRef.current);
+                        topTieringAutoCloseRef.current = null;
+                        setTopTieringOpen(false);
+                      }
                     }
                   }}
                   onKeyDown={(e) => handleKeyDown(e, 'toptiering')}

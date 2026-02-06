@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Share2, ArrowRight } from 'lucide-react';
 import { Navigation } from '@/components/layout/Navigation';
-import { WorkbenchTopBar } from '@/components/workbench/WorkbenchTopBar';
 import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
 import { AskCohiChat } from '@/components/workbench/AskCohiChat';
 import { IconBadge } from '@/components/workbench/IconBadge';
@@ -43,7 +42,6 @@ export default function SharedWithMe() {
           onSidebarCollapsedChange={setSidebarCollapsed}
         />
         <div className="flex-1 flex flex-col min-w-0">
-          <WorkbenchTopBar onOpenSidebar={() => setSidebarOpen(true)} onAsk={sendPrompt} />
           <main className="flex-1 relative w-full min-h-0 overflow-hidden">
             <div className="h-full overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
               <div className="max-w-[1600px] mx-auto">

@@ -1138,81 +1138,100 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
             )}
           </div>
 
-          {/* Toptiering - main menu like Dashboards */}
-          <div>
+          {/* TopTiering */}
+          <div className="rounded-xl">
             {isExpanded ? (
               <>
-            <button
-              onClick={() => setToptieringExpanded(!toptieringExpanded)}
-              style={{ width: '100%', padding: '12px 10px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 10, transition: 'all 0.2s ease' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-            >
-              <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                <ArrowLeftRight size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-              </div>
-              <h4 style={{ fontSize: 14, fontWeight: 600, color: isDarkMode ? '#e2e8f0' : '#1a1d29', margin: 0, flex: 1 }}>TopTiering</h4>
-              <ChevronDown size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', transform: toptieringExpanded ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
-            </button>
-            <AnimatePresence initial={false}>
-              {toptieringExpanded && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeInOut' }}
-                  style={{ overflow: 'hidden' }}
+                <button
+                  type="button"
+                  onClick={() => setToptieringExpanded(!toptieringExpanded)}
+                  className={cn(
+                    "w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
+                    "hover:bg-slate-100/80 dark:hover:bg-slate-800/60",
+                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  )}
                 >
-            {TOPTIERING_GROUPS.map((group) => {
-              const isExp = subExpanded[group.key];
-              return (
-                <div key={group.key}>
-                  <button
-                    onClick={() => setSubExpanded(group.key, !isExp)}
-                    style={{ width: '100%', padding: '10px 20px 10px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    <p style={{ fontSize: 10, fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, flex: 1 }}>{group.label}</p>
-                    <ChevronDown size={14} style={{ color: isDarkMode ? '#94a3b8' : '#64748b', flexShrink: 0, transform: isExp ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s ease' }} />
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {isExp && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        style={{ overflow: 'hidden' }}
-                      >
-                        {group.items.map((it) => {
-                          const Icon = it.icon;
-                          const handleNavToPath = () => navigate(it.path);
-                          return (
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    <ArrowLeftRight className="h-4 w-4" />
+                  </span>
+                  <span className="flex-1 text-sm font-semibold text-slate-800 dark:text-slate-100">TopTiering</span>
+                  <ChevronDown
+                    className={cn("h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400 transition-transform duration-200", !toptieringExpanded && "-rotate-90")}
+                  />
+                </button>
+                <AnimatePresence initial={false}>
+                  {toptieringExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      className="overflow-hidden pl-1"
+                    >
+                      {TOPTIERING_GROUPS.map((group) => {
+                        const isExp = subExpanded[group.key];
+                        return (
+                          <div key={group.key} className="mt-0.5">
                             <button
-                              key={it.id}
-                              onClick={handleNavToPath}
-                              style={{ width: '100%', padding: '12px 20px 12px 36px', background: 'transparent', border: 'none', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.2s ease' }}
-                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              type="button"
+                              onClick={() => setSubExpanded(group.key, !isExp)}
+                              className={cn(
+                                "w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors",
+                                "hover:bg-slate-100/80 dark:hover:bg-slate-800/60",
+                                "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                              )}
                             >
-                              <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                                <Icon size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                              </div>
-                              <span style={{ fontSize: 13, fontWeight: 500, color: isDarkMode ? '#e2e8f0' : '#1a1d29', flex: 1 }}>{it.label}</span>
+                              <span className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                {group.label}
+                              </span>
+                              <ChevronDown
+                                className={cn("h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500 transition-transform duration-200", !isExp && "-rotate-90")}
+                              />
                             </button>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-                </motion.div>
-              )}
-            </AnimatePresence>
-            </>
+                            <AnimatePresence initial={false}>
+                              {isExp && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                                  className="overflow-hidden"
+                                >
+                                  {group.items.map((it) => {
+                                    const Icon = it.icon;
+                                    const isCurrent = location.pathname === it.path;
+                                    return (
+                                      <button
+                                        key={it.id}
+                                        type="button"
+                                        onClick={() => navigate(it.path)}
+                                        className={cn(
+                                          "w-full flex items-center gap-3 rounded-lg px-3 py-2.5 pl-5 text-left text-sm font-medium transition-colors",
+                                          "hover:bg-slate-100/80 dark:hover:bg-slate-800/60",
+                                          "focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                                          isCurrent && "bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100"
+                                        )}
+                                      >
+                                        <span className={cn(
+                                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-600 dark:text-slate-400",
+                                          isCurrent ? "bg-slate-200 dark:bg-slate-700" : "bg-slate-100 dark:bg-slate-800"
+                                        )}>
+                                          <Icon className="h-4 w-4" />
+                                        </span>
+                                        <span className="flex-1 truncate text-slate-700 dark:text-slate-200">{it.label}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
             ) : (
             <Popover open={toptieringFlyoutOpen} onOpenChange={setToptieringFlyoutOpen}>
               <PopoverTrigger asChild>
@@ -1223,13 +1242,11 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                 >
                   <button
                     type="button"
-                    style={{ width: '100%', padding: '10px', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.02)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                    className="w-full flex items-center justify-center rounded-xl p-2.5 transition-colors hover:bg-slate-100/80 dark:hover:bg-slate-800/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
                   >
-                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(100, 116, 139, 0.1)' }}>
-                      <ArrowLeftRight size={18} style={{ color: isDarkMode ? '#94a3b8' : '#64748b' }} />
-                    </div>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                      <ArrowLeftRight className="h-4 w-4" />
+                    </span>
                   </button>
                 </div>
               </PopoverTrigger>

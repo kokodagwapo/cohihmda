@@ -81,8 +81,10 @@ const App = () => (
               <Handle404Redirect />
               <ScrollToTop />
               <Routes>
-              {/* Public routes */}
-              <Route path="/" element={<Index />} />
+              {/* Root: bypass landing and go straight to /insights */}
+              <Route path="/" element={<Navigate to="/insights" replace />} />
+              {/* Landing page still available at /landing for direct links */}
+              <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
               <Route path="/share/:token" element={<ShareLink />} />

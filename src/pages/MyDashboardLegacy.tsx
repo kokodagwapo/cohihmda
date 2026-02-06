@@ -52,6 +52,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTenantStore } from '@/stores/tenantStore';
 import { useSavedVisualizations, SavedVisualization } from '@/hooks/useSavedVisualizations';
 import { DynamicVisualization, VisualizationConfig } from '@/components/visualizations/DynamicVisualization';
 import { DataChatPanel } from '@/components/dashboard/DataChatPanel';
@@ -73,7 +74,8 @@ export default function MyDashboardLegacy() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
-  
+  const { selectedTenantId } = useTenantStore();
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [gridSize, setGridSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [editDialog, setEditDialog] = useState<EditDialogState>({ isOpen: false, visualization: null });
@@ -320,7 +322,7 @@ export default function MyDashboardLegacy() {
       <DataChatPanel
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
-        tenantId={user?.tenant_id}
+        tenantId={selectedTenantId ?? user?.tenant_id ?? undefined}
       />
 
       {/* Edit Dialog */}

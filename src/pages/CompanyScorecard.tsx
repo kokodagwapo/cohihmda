@@ -48,12 +48,8 @@ const CompanyScorecard = () => {
   const { selectedTenantId } = useTenantStore();
   const { user } = useAuth();
   
-  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant.
-  // In development, default to "homestead" when no tenant selected so local DB data is shown.
-  const tenantId =
-    selectedTenantId ||
-    user?.tenant_id ||
-    (import.meta.env.DEV ? 'homestead' : null);
+  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant
+  const tenantId = selectedTenantId || user?.tenant_id || null;
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);

@@ -1,16 +1,18 @@
 /**
- * Cohi Chat Panel Component
- * AI-powered chat interface with hybrid data + knowledge capabilities
+ * Data Chat Panel Component
+ * AI-powered chat interface for querying loan data
  * Enhanced with executive-level visualizations, color-coded messages, and voice agentic
  */
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Rnd } from "react-rnd";
-import {
-  MessageSquare,
-  Send,
-  X,
-  Minimize2,
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Rnd } from 'react-rnd';
+import { api } from '@/lib/api';
+import { 
+  MessageSquare, 
+  Send, 
+  X, 
+  Minimize2, 
   Maximize2,
   Save,
   RefreshCw,
@@ -32,8 +34,6 @@ import {
   AlertTriangle,
   Mic,
   MicOff,
-  Volume2,
-  VolumeX,
   BarChart3,
   PieChart,
   Activity,
@@ -64,34 +64,23 @@ import {
   LineChart,
   Calculator,
   Pin,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-import { useIsMobile } from "@/hooks/use-mobile";
-import {
-  useCohiChat,
-  ChatMessage,
-  VisualizationConfig,
-} from "@/hooks/useCohiChat";
-import { DynamicVisualization } from "@/components/visualizations/DynamicVisualization";
-import {
-  EnhancedVisualization,
-  EnhancedVisualizationConfig,
-  CohiInsight,
-} from "@/components/visualizations/EnhancedVisualization";
-import { CohiInsightPanel } from "@/components/cohi/CohiInsightPanel";
-import { useToast } from "@/components/ui/use-toast";
-import { useCanvasPinStore } from "@/stores/canvasPinStore";
-import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
-import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
-import {
-  createLayoutItem,
-  type CanvasLayoutItem,
-} from "@/components/workbench/canvas/types";
-import { motion, AnimatePresence } from "framer-motion";
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { useDataChat, ChatMessage, VisualizationConfig } from '@/hooks/useDataChat';
+import { DynamicVisualization } from '@/components/visualizations/DynamicVisualization';
+import { EnhancedVisualization, EnhancedVisualizationConfig, CohiInsight } from '@/components/visualizations/EnhancedVisualization';
+import { useToast } from '@/components/ui/use-toast';
+import { useCanvasPinStore } from '@/stores/canvasPinStore';
+import { CanvasWidgetCard } from '@/components/workbench/canvas/CanvasWidgetCard';
+import { WidgetRenderer } from '@/components/workbench/canvas/WidgetRenderer';
+import { CohiInsightPanel } from '@/components/cohi/CohiInsightPanel';
+import { createLayoutItem, type CanvasLayoutItem } from '@/components/workbench/canvas/types';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Dialog,
   DialogContent,
@@ -99,17 +88,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet";
+} from '@/components/ui/sheet';
 import {
   Table,
   TableBody,
@@ -117,7 +106,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -128,49 +117,41 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuLabel,
-} from "@/components/ui/dropdown-menu";
+} from '@/components/ui/dropdown-menu';
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-function generateCohiInsights(
-  visualization: VisualizationConfig
-): CohiInsight[] {
+function generateCohiInsights(visualization: VisualizationConfig): CohiInsight[] {
   const insights: CohiInsight[] = [];
   const data = visualization.data || [];
-
+  
   if (data.length === 0) return insights;
-
-  const valueKey = visualization.yKey || visualization.valueKey || "value";
-  const nameKey = visualization.xKey || visualization.nameKey || "name";
-
-  const values = data
-    .map((d) =>
-      typeof d[valueKey] === "number"
-        ? d[valueKey]
-        : parseFloat(d[valueKey]) || 0
-    )
-    .filter((v) => !isNaN(v) && isFinite(v));
-
+  
+  const valueKey = visualization.yKey || visualization.valueKey || 'value';
+  const nameKey = visualization.xKey || visualization.nameKey || 'name';
+  
+  const values = data.map(d => typeof d[valueKey] === 'number' ? d[valueKey] : parseFloat(d[valueKey]) || 0).filter(v => !isNaN(v) && isFinite(v));
+  
   if (values.length === 0) return insights;
-
+  
   const total = values.reduce((sum, v) => sum + v, 0);
   const avg = values.length > 0 ? total / values.length : 0;
   const max = Math.max(...values);
   const min = Math.min(...values);
-  const maxItem = data.find((d) => (d[valueKey] || 0) === max);
-  const minItem = data.find((d) => (d[valueKey] || 0) === min);
-
+  const maxItem = data.find(d => (d[valueKey] || 0) === max);
+  const minItem = data.find(d => (d[valueKey] || 0) === min);
+  
   if (avg === 0 || !isFinite(avg)) return insights;
-
+  
   if (maxItem) {
     insights.push({
-      type: "success",
-      title: "Top Performer",
+      type: 'success',
+      title: 'Top Performer',
       description: `${maxItem[nameKey]} leads with ${formatInsightValue(max)}`,
       metric: `${((max / total) * 100).toFixed(1)}% of total`,
-      trend: "up",
+      trend: 'up',
       payload: maxItem,
     });
   }
@@ -179,41 +160,38 @@ function generateCohiInsights(
     const avgDiff = ((avg - min) / avg) * 100;
     if (avgDiff > 20) {
       insights.push({
-        type: "warning",
-        title: "Needs Attention",
-        description: `${minItem[nameKey]} is ${avgDiff.toFixed(
-          0
-        )}% below average`,
+        type: 'warning',
+        title: 'Needs Attention',
+        description: `${minItem[nameKey]} is ${avgDiff.toFixed(0)}% below average`,
         metric: formatInsightValue(min),
-        trend: "down",
+        trend: 'down',
         payload: minItem,
       });
     }
   }
 
-  const variance =
-    values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length;
+  const variance = values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length;
   const stdDev = Math.sqrt(variance);
   const cv = (stdDev / avg) * 100;
 
   if (cv > 50) {
     insights.push({
-      type: "info",
-      title: "High Variance",
-      description: "Performance varies significantly across the dataset",
+      type: 'info',
+      title: 'High Variance',
+      description: 'Performance varies significantly across the dataset',
       metric: `CV: ${cv.toFixed(1)}%`,
       payload: data[0],
     });
   } else if (cv < 15) {
     insights.push({
-      type: "success",
-      title: "Consistent Performance",
-      description: "Values are tightly clustered around the average",
+      type: 'success',
+      title: 'Consistent Performance',
+      description: 'Values are tightly clustered around the average',
       metric: `Avg: ${formatInsightValue(avg)}`,
       payload: data[0],
     });
   }
-
+  
   return insights.slice(0, 4);
 }
 
@@ -243,19 +221,9 @@ interface SaveDialogState {
 }
 
 /** Optional override for quick export from message bubble (no dialog) */
-type ExportOverride = {
-  visualization: VisualizationConfig;
-  title?: string;
-  description?: string;
-};
+type ExportOverride = { visualization: VisualizationConfig; title?: string; description?: string };
 
-type MessageType =
-  | "success"
-  | "warning"
-  | "info"
-  | "error"
-  | "metric"
-  | "insight";
+type MessageType = 'success' | 'warning' | 'info' | 'error' | 'metric' | 'insight';
 
 interface EnhancedMessage {
   type: MessageType;
@@ -272,242 +240,59 @@ interface EnhancedMessage {
 
 const getMessageStyling = (content: string): EnhancedMessage => {
   const lowerContent = content.toLowerCase();
-
-  if (
-    lowerContent.includes("up") ||
-    lowerContent.includes("increase") ||
-    lowerContent.includes("growth") ||
-    lowerContent.includes("exceeded") ||
-    lowerContent.includes("record")
-  ) {
+  
+  if (lowerContent.includes('up') || lowerContent.includes('increase') || lowerContent.includes('growth') || lowerContent.includes('exceeded') || lowerContent.includes('record')) {
     return {
-      type: "success",
+      type: 'success',
       icon: <TrendingUp className="w-4 h-4" />,
-      bgColor: "bg-emerald-50 dark:bg-emerald-950/30",
-      borderColor: "border-emerald-200 dark:border-emerald-800",
-      textColor: "text-emerald-800 dark:text-emerald-200",
-      accentColor: "text-emerald-500",
+      bgColor: 'bg-emerald-50 dark:bg-emerald-950/30',
+      borderColor: 'border-emerald-200 dark:border-emerald-800',
+      textColor: 'text-emerald-800 dark:text-emerald-200',
+      accentColor: 'text-emerald-500',
     };
   }
-
-  if (
-    lowerContent.includes("down") ||
-    lowerContent.includes("decrease") ||
-    lowerContent.includes("decline") ||
-    lowerContent.includes("risk") ||
-    lowerContent.includes("fallout")
-  ) {
+  
+  if (lowerContent.includes('down') || lowerContent.includes('decrease') || lowerContent.includes('decline') || lowerContent.includes('risk') || lowerContent.includes('fallout')) {
     return {
-      type: "warning",
+      type: 'warning',
       icon: <TrendingDown className="w-4 h-4" />,
-      bgColor: "bg-amber-50 dark:bg-amber-950/30",
-      borderColor: "border-amber-200 dark:border-amber-800",
-      textColor: "text-amber-800 dark:text-amber-200",
-      accentColor: "text-amber-500",
+      bgColor: 'bg-amber-50 dark:bg-amber-950/30',
+      borderColor: 'border-amber-200 dark:border-amber-800',
+      textColor: 'text-amber-800 dark:text-amber-200',
+      accentColor: 'text-amber-500',
     };
   }
-
-  if (
-    lowerContent.includes("$") ||
-    lowerContent.includes("volume") ||
-    lowerContent.includes("revenue") ||
-    lowerContent.includes("amount")
-  ) {
+  
+  if (lowerContent.includes('$') || lowerContent.includes('volume') || lowerContent.includes('revenue') || lowerContent.includes('amount')) {
     return {
-      type: "metric",
+      type: 'metric',
       icon: <DollarSign className="w-4 h-4" />,
-      bgColor: "bg-blue-50 dark:bg-blue-950/30",
-      borderColor: "border-blue-200 dark:border-blue-800",
-      textColor: "text-blue-800 dark:text-blue-200",
-      accentColor: "text-blue-500",
+      bgColor: 'bg-blue-50 dark:bg-blue-950/30',
+      borderColor: 'border-blue-200 dark:border-blue-800',
+      textColor: 'text-blue-800 dark:text-blue-200',
+      accentColor: 'text-blue-500',
     };
   }
-
-  if (
-    lowerContent.includes("alert") ||
-    lowerContent.includes("attention") ||
-    lowerContent.includes("critical")
-  ) {
+  
+  if (lowerContent.includes('alert') || lowerContent.includes('attention') || lowerContent.includes('critical')) {
     return {
-      type: "error",
+      type: 'error',
       icon: <AlertTriangle className="w-4 h-4" />,
-      bgColor: "bg-red-50 dark:bg-red-950/30",
-      borderColor: "border-red-200 dark:border-red-800",
-      textColor: "text-red-800 dark:text-red-200",
-      accentColor: "text-red-500",
+      bgColor: 'bg-red-50 dark:bg-red-950/30',
+      borderColor: 'border-red-200 dark:border-red-800',
+      textColor: 'text-red-800 dark:text-red-200',
+      accentColor: 'text-red-500',
     };
   }
-
+  
   return {
-    type: "info",
+    type: 'info',
     icon: <Info className="w-4 h-4" />,
-    bgColor: "bg-slate-50 dark:bg-slate-800/50",
-    borderColor: "border-slate-200 dark:border-slate-700",
-    textColor: "text-slate-800 dark:text-slate-200",
-    accentColor: "text-slate-500",
+    bgColor: 'bg-slate-50 dark:bg-slate-800/50',
+    borderColor: 'border-slate-200 dark:border-slate-700',
+    textColor: 'text-slate-800 dark:text-slate-200',
+    accentColor: 'text-slate-500',
   };
-};
-
-/**
- * Parse markdown and render as React elements
- * Supports: links [text](url), **bold**, bullet lists, numbered lists
- */
-const renderMarkdownText = (text: string): React.ReactNode => {
-  // First, split by double newlines to get paragraphs/sections
-  const sections = text.split(/\n\n+/);
-
-  const renderInlineMarkdown = (
-    line: string,
-    keyPrefix: string
-  ): React.ReactNode => {
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-
-    // Combined regex for links and bold
-    const combinedRegex = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*/g;
-    let match;
-    let matchIndex = 0;
-
-    while ((match = combinedRegex.exec(line)) !== null) {
-      // Add text before match
-      if (match.index > lastIndex) {
-        parts.push(line.slice(lastIndex, match.index));
-      }
-
-      if (match[1] && match[2]) {
-        // It's a link: [text](url)
-        parts.push(
-          <a
-            key={`${keyPrefix}-link-${matchIndex}`}
-            href={match[2]}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-          >
-            {match[1]}
-          </a>
-        );
-      } else if (match[3]) {
-        // It's bold: **text**
-        parts.push(
-          <strong
-            key={`${keyPrefix}-bold-${matchIndex}`}
-            className="font-semibold"
-          >
-            {match[3]}
-          </strong>
-        );
-      }
-
-      lastIndex = match.index + match[0].length;
-      matchIndex++;
-    }
-
-    // Add remaining text
-    if (lastIndex < line.length) {
-      parts.push(line.slice(lastIndex));
-    }
-
-    return parts.length > 0 ? parts : line;
-  };
-
-  return (
-    <div className="space-y-3">
-      {sections.map((section, sectionIdx) => {
-        const lines = section.split("\n");
-
-        // Check if this section is a list
-        const isNumberedList = lines.some((l) => /^\d+\.\s/.test(l.trim()));
-        const isBulletList = lines.some(
-          (l) => /^[-•*]\s/.test(l.trim()) && !l.trim().startsWith("**")
-        );
-
-        if (isNumberedList || isBulletList) {
-          // Render as list with proper indentation
-          return (
-            <div key={sectionIdx} className="space-y-1">
-              {lines.map((line, lineIdx) => {
-                const trimmed = line.trim();
-                if (!trimmed) return null;
-
-                // Calculate indentation level
-                const leadingSpaces = line.match(/^(\s*)/)?.[1].length || 0;
-                const indentLevel = Math.floor(leadingSpaces / 2);
-
-                // Check line type
-                const numberedMatch = trimmed.match(/^(\d+)\.\s*(.*)/);
-                const bulletMatch = trimmed.match(/^[-•*]\s*(.*)/);
-
-                // Use explicit Tailwind classes for indentation (dynamic classes don't work)
-                const marginClasses = ["", "ml-4", "ml-8", "ml-12"];
-                const marginClass =
-                  marginClasses[Math.min(indentLevel, 3)] || "";
-
-                if (numberedMatch) {
-                  return (
-                    <div
-                      key={`${sectionIdx}-${lineIdx}`}
-                      className={`flex gap-2 ${marginClass}`}
-                    >
-                      <span className="text-slate-500 dark:text-slate-400 font-medium shrink-0">
-                        {numberedMatch[1]}.
-                      </span>
-                      <span>
-                        {renderInlineMarkdown(
-                          numberedMatch[2],
-                          `${sectionIdx}-${lineIdx}`
-                        )}
-                      </span>
-                    </div>
-                  );
-                } else if (bulletMatch) {
-                  return (
-                    <div
-                      key={`${sectionIdx}-${lineIdx}`}
-                      className={`flex gap-2 ${marginClass}`}
-                    >
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">
-                        •
-                      </span>
-                      <span>
-                        {renderInlineMarkdown(
-                          bulletMatch[1],
-                          `${sectionIdx}-${lineIdx}`
-                        )}
-                      </span>
-                    </div>
-                  );
-                } else {
-                  // Regular text line in a list context (like a header)
-                  return (
-                    <div
-                      key={`${sectionIdx}-${lineIdx}`}
-                      className={marginClass}
-                    >
-                      {renderInlineMarkdown(
-                        trimmed,
-                        `${sectionIdx}-${lineIdx}`
-                      )}
-                    </div>
-                  );
-                }
-              })}
-            </div>
-          );
-        }
-
-        // Regular paragraph
-        return (
-          <p key={sectionIdx}>
-            {renderInlineMarkdown(
-              section.replace(/\n/g, " "),
-              `p-${sectionIdx}`
-            )}
-          </p>
-        );
-      })}
-    </div>
-  );
 };
 
 const CHAT_CANVAS_DEFAULT_SIZE = { w: 360, h: 240 };
@@ -522,132 +307,61 @@ type ChatDashboardItem = {
 
 const CHAT_DASHBOARD_GROUPS: { label: string; items: ChatDashboardItem[] }[] = [
   {
-    label: "Insights",
+    label: 'Insights',
     items: [
-      {
-        id: "aletheiaInsights",
-        title: "Cohi Daily Briefings",
-        icon: Zap,
-        iconClass: "text-emerald-500",
-      },
-      {
-        id: "industryNews",
-        title: "Mortgage News",
-        icon: Newspaper,
-        iconClass: "text-blue-500",
-      },
+      { id: 'aletheiaInsights', title: 'Cohi Daily Briefings', icon: Zap, iconClass: 'text-emerald-500' },
+      { id: 'industryNews', title: 'Mortgage News', icon: Newspaper, iconClass: 'text-blue-500' },
     ],
   },
   {
-    label: "Dashboards",
+    label: 'Dashboards',
     items: [
-      {
-        id: "leaderboard",
-        title: "Leaderboard",
-        icon: Trophy,
-        iconClass: "text-amber-500",
-      },
-      {
-        id: "executiveDashboard",
-        title: "Business Overview",
-        icon: Target,
-        iconClass: "text-blue-500",
-      },
-      {
-        id: "closingFalloutForecast",
-        title: "Closing & Fallout Forecast",
-        icon: BarChart3,
-        iconClass: "text-emerald-500",
-      },
+      { id: 'leaderboard', title: 'Leaderboard', icon: Trophy, iconClass: 'text-amber-500' },
+      { id: 'executiveDashboard', title: 'Business Overview', icon: Target, iconClass: 'text-blue-500' },
+      { id: 'closingFalloutForecast', title: 'Closing & Fallout Forecast', icon: BarChart3, iconClass: 'text-emerald-500' },
     ],
   },
   {
-    label: "Top Tiering",
+    label: 'Top Tiering',
     items: [
-      {
-        id: "loanFunnel",
-        title: "Loan Funnel",
-        icon: Filter,
-        iconClass: "text-blue-500",
-      },
-      {
-        id: "topTieringComparison",
-        title: "TopTiering Comparison",
-        icon: ArrowLeftRight,
-        iconClass: "text-sky-500",
-      },
-      {
-        id: "creditRiskManagement",
-        title: "Credit Risk Management",
-        icon: Shield,
-        iconClass: "text-emerald-500",
-      },
-      {
-        id: "companyScorecard",
-        title: "Company Scorecard",
-        icon: ClipboardList,
-        iconClass: "text-indigo-500",
-      },
+      { id: 'loanFunnel', title: 'Loan Funnel', icon: Filter, iconClass: 'text-blue-500' },
+      { id: 'topTieringComparison', title: 'TopTiering Comparison', icon: ArrowLeftRight, iconClass: 'text-sky-500' },
+      { id: 'creditRiskManagement', title: 'Credit Risk Management', icon: Shield, iconClass: 'text-emerald-500' },
+      { id: 'companyScorecard', title: 'Company Scorecard', icon: ClipboardList, iconClass: 'text-indigo-500' },
     ],
   },
   {
-    label: "Sales",
+    label: 'Sales',
     items: [
-      {
-        id: "salesScorecard",
-        title: "Scorecard",
-        icon: Target,
-        iconClass: "text-violet-500",
-      },
-      {
-        id: "salesTrends",
-        title: "Trends",
-        icon: TrendingUp,
-        iconClass: "text-emerald-500",
-      },
+      { id: 'salesScorecard', title: 'Scorecard', icon: Target, iconClass: 'text-violet-500' },
+      { id: 'salesTrends', title: 'Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
     ],
   },
   {
-    label: "Operations",
+    label: 'Operations',
     items: [
-      {
-        id: "operationsScorecard",
-        title: "Scorecard",
-        icon: Target,
-        iconClass: "text-indigo-500",
-      },
-      {
-        id: "operationsTrends",
-        title: "Trends",
-        icon: LineChart,
-        iconClass: "text-blue-500",
-      },
+      { id: 'operationsScorecard', title: 'Scorecard', icon: Target, iconClass: 'text-indigo-500' },
+      { id: 'operationsTrends', title: 'Trends', icon: LineChart, iconClass: 'text-blue-500' },
     ],
   },
   {
-    label: "Financial Modeling",
+    label: 'Financial Modeling',
     items: [
-      {
-        id: "financialModeling",
-        title: "Financial Modeling Sandbox",
-        icon: Calculator,
-        iconClass: "text-amber-500",
-      },
+      { id: 'financialModeling', title: 'Financial Modeling Sandbox', icon: Calculator, iconClass: 'text-amber-500' },
     ],
   },
 ];
 
-const CHAT_HIDEABLE_SECTIONS: Record<string, { id: string; label: string }[]> =
-  {
-    topTiering: [
-      { id: "dailyStory", label: "Executive summary / Daily Story" },
-      { id: "chart", label: "Funnel / Detail chart" },
-    ],
-    loanFunnel: [
-      { id: "dailyStory", label: "Executive summary / Daily Story" },
-      { id: "chart", label: "Funnel / Detail chart" },
-    ],
-  };
+const CHAT_HIDEABLE_SECTIONS: Record<string, { id: string; label: string }[]> = {
+  topTiering: [
+    { id: 'dailyStory', label: 'Executive summary / Daily Story' },
+    { id: 'chart', label: 'Funnel / Detail chart' },
+  ],
+  loanFunnel: [
+    { id: 'dailyStory', label: 'Executive summary / Daily Story' },
+    { id: 'chart', label: 'Funnel / Detail chart' },
+  ],
+};
 
 // ============================================================================
 // Animated KPI Card
@@ -667,30 +381,20 @@ const AnimatedKPI: React.FC<{
     transition={{ duration: 0.4, delay }}
     className={cn(
       "p-3 rounded-lg border shadow-sm",
-      color === "blue" &&
-        "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
-      color === "green" &&
-        "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
-      color === "amber" &&
-        "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
-      color === "purple" &&
-        "bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800"
+      color === 'blue' && "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
+      color === 'green' && "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
+      color === 'amber' && "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
+      color === 'purple' && "bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800"
     )}
   >
     <div className="flex items-center gap-2 mb-1">
-      <span
-        className={cn(
-          "p-1.5 rounded",
-          color === "blue" &&
-            "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400",
-          color === "green" &&
-            "bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-400",
-          color === "amber" &&
-            "bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-400",
-          color === "purple" &&
-            "bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400"
-        )}
-      >
+      <span className={cn(
+        "p-1.5 rounded",
+        color === 'blue' && "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400",
+        color === 'green' && "bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-400",
+        color === 'amber' && "bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-400",
+        color === 'purple' && "bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-400"
+      )}>
         {icon}
       </span>
       <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
@@ -703,21 +407,13 @@ const AnimatedKPI: React.FC<{
       transition={{ duration: 0.6, delay: delay + 0.2 }}
       className="flex items-baseline gap-2"
     >
-      <span className="text-xl font-bold text-slate-900 dark:text-white">
-        {value}
-      </span>
+      <span className="text-xl font-bold text-slate-900 dark:text-white">{value}</span>
       {change !== undefined && (
-        <span
-          className={cn(
-            "text-xs font-medium flex items-center gap-0.5",
-            change >= 0 ? "text-emerald-600" : "text-red-600"
-          )}
-        >
-          {change >= 0 ? (
-            <TrendingUp className="w-3 h-3" />
-          ) : (
-            <TrendingDown className="w-3 h-3" />
-          )}
+        <span className={cn(
+          "text-xs font-medium flex items-center gap-0.5",
+          change >= 0 ? "text-emerald-600" : "text-red-600"
+        )}>
+          {change >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
           {Math.abs(change)}%
         </span>
       )}
@@ -729,10 +425,7 @@ const AnimatedKPI: React.FC<{
 // Bullet Point List
 // ============================================================================
 
-const AnimatedBulletList: React.FC<{ items: string[]; delay?: number }> = ({
-  items,
-  delay = 0,
-}) => (
+const AnimatedBulletList: React.FC<{ items: string[]; delay?: number }> = ({ items, delay = 0 }) => (
   <motion.ul className="space-y-2 my-3">
     {items.map((item, index) => (
       <motion.li
@@ -753,25 +446,20 @@ const AnimatedBulletList: React.FC<{ items: string[]; delay?: number }> = ({
 // Mini Chart Component
 // ============================================================================
 
-const MiniSparkline: React.FC<{ data: number[]; color: string }> = ({
-  data,
-  color,
-}) => {
+const MiniSparkline: React.FC<{ data: number[]; color: string }> = ({ data, color }) => {
   const max = Math.max(...data);
   const min = Math.min(...data);
   const range = max - min || 1;
-
-  const points = data
-    .map((value, index) => {
-      const x = (index / (data.length - 1)) * 100;
-      const y = 100 - ((value - min) / range) * 100;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
+  
+  const points = data.map((value, index) => {
+    const x = (index / (data.length - 1)) * 100;
+    const y = 100 - ((value - min) / range) * 100;
+    return `${x},${y}`;
+  }).join(' ');
+  
   return (
-    <motion.svg
-      viewBox="0 0 100 100"
+    <motion.svg 
+      viewBox="0 0 100 100" 
       className="w-full h-8"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -804,36 +492,30 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   className,
 }) => {
   const { toast } = useToast();
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState('');
   const [isExpanded, setIsExpanded] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [voiceProvider, setVoiceProvider] = useState<"openai" | "gemini">(
-    "gemini"
-  );
+  const [voiceProvider, setVoiceProvider] = useState<'openai' | 'gemini'>('gemini');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [vizTypeOverrides, setVizTypeOverrides] = useState<
-    Record<string, VisualizationConfig["type"]>
-  >({});
+  const [vizTypeOverrides, setVizTypeOverrides] = useState<Record<string, VisualizationConfig['type']>>({});
   const [saveDialog, setSaveDialog] = useState<SaveDialogState>({
     isOpen: false,
     visualization: null,
-    question: "",
+    question: '',
   });
-  const [saveTitle, setSaveTitle] = useState("");
-  const [saveDescription, setSaveDescription] = useState("");
-  const [chatCanvasItems, setChatCanvasItems] = useState<CanvasLayoutItem[]>(
-    []
-  );
+  const [saveTitle, setSaveTitle] = useState('');
+  const [saveDescription, setSaveDescription] = useState('');
+  const [chatCanvasItems, setChatCanvasItems] = useState<CanvasLayoutItem[]>([]);
   const [selectedCanvasId, setSelectedCanvasId] = useState<string | null>(null);
   const [chatCanvasWidth, setChatCanvasWidth] = useState(360);
-  const [lastDashboardLabel, setLastDashboardLabel] = useState("Add dashboard");
+  const [lastDashboardLabel, setLastDashboardLabel] = useState('Add dashboard');
   const isMobile = useIsMobile();
   const chatCanvasRef = useRef<HTMLDivElement>(null);
-
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -874,41 +556,26 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   }, [chatCanvasItems]);
 
   const updateCanvasItemRect = useCallback(
-    (
-      id: string,
-      next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>
-    ) => {
-      setChatCanvasItems((prev) =>
-        prev.map((i) => (i.i === id ? { ...i, ...next } : i))
-      );
+    (id: string, next: Partial<Pick<CanvasLayoutItem, 'x' | 'y' | 'w' | 'h'>>) => {
+      setChatCanvasItems((prev) => prev.map((i) => (i.i === id ? { ...i, ...next } : i)));
     },
     []
   );
 
-  const updateCanvasWidgetPayload = useCallback(
-    (id: string, payload: CanvasLayoutItem["payload"]) => {
-      setChatCanvasItems((prev) =>
-        prev.map((i) => (i.i === id ? { ...i, payload } : i))
-      );
-    },
-    []
-  );
+  const updateCanvasWidgetPayload = useCallback((id: string, payload: CanvasLayoutItem['payload']) => {
+    setChatCanvasItems((prev) => prev.map((i) => (i.i === id ? { ...i, payload } : i)));
+  }, []);
 
   const addDashboardToCanvas = useCallback(
     (sectionId: string, title: string) => {
-      const id = `cohi-canvas-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
+      const id = `cohi-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const { x, y } = getNextCanvasPosition();
-      const baseWidth = Math.max(
-        220,
-        Math.min(chatCanvasWidth - 16, isMobile ? 320 : 420)
-      );
+      const baseWidth = Math.max(220, Math.min(chatCanvasWidth - 16, isMobile ? 320 : 420));
       const baseHeight = Math.max(200, Math.round(baseWidth * 0.6));
       const newItem = createLayoutItem(
         id,
-        "dashboard_section",
-        { type: "dashboard_section", sectionId, title },
+        'dashboard_section',
+        { type: 'dashboard_section', sectionId, title },
         { x, y, w: baseWidth, h: baseHeight }
       );
       setChatCanvasItems((prev) => [...prev, newItem]);
@@ -921,19 +588,14 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   const addVisualizationToCanvas = useCallback(
     (payload: { visualization?: VisualizationConfig }) => {
       if (!payload.visualization) return;
-      const id = `cohi-viz-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
+      const id = `cohi-viz-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const { x, y } = getNextCanvasPosition();
-      const baseWidth = Math.max(
-        220,
-        Math.min(chatCanvasWidth - 16, isMobile ? 320 : 420)
-      );
+      const baseWidth = Math.max(220, Math.min(chatCanvasWidth - 16, isMobile ? 320 : 420));
       const baseHeight = Math.max(220, Math.round(baseWidth * 0.6));
       const newItem = createLayoutItem(
         id,
-        "chart",
-        { type: "chart", config: payload.visualization },
+        'chart',
+        { type: 'chart', config: payload.visualization },
         { x, y, w: baseWidth, h: baseHeight }
       );
       setChatCanvasItems((prev) => [...prev, newItem]);
@@ -946,9 +608,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     (id: string) => {
       const item = chatCanvasItems.find((i) => i.i === id);
       if (!item) return;
-      const newId = `cohi-canvas-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
+      const newId = `cohi-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const { x, y } = getNextCanvasPosition();
       const copy = { ...item, i: newId, x, y };
       setChatCanvasItems((prev) => [...prev, copy]);
@@ -957,14 +617,11 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     [chatCanvasItems, getNextCanvasPosition]
   );
 
-  const removeCanvasItem = useCallback(
-    (id: string) => {
-      setChatCanvasItems((prev) => prev.filter((i) => i.i !== id));
-      if (selectedCanvasId === id) setSelectedCanvasId(null);
-    },
-    [selectedCanvasId]
-  );
-
+  const removeCanvasItem = useCallback((id: string) => {
+    setChatCanvasItems((prev) => prev.filter((i) => i.i !== id));
+    if (selectedCanvasId === id) setSelectedCanvasId(null);
+  }, [selectedCanvasId]);
+  
   const {
     messages,
     isLoading,
@@ -974,11 +631,11 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     saveVisualization,
     clearMessages,
     newSession,
-  } = useCohiChat({ tenantId });
+  } = useDataChat({ tenantId });
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   // Focus input when panel opens
@@ -994,9 +651,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   const startVoiceRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm",
-      });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -1007,34 +662,32 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/webm",
-        });
-        stream.getTracks().forEach((track) => track.stop());
-
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        
         // Send audio for transcription (and optional voice provider for reply)
         const formData = new FormData();
-        formData.append("audio", audioBlob, "voice.webm");
-        formData.append("voiceProvider", voiceProvider);
-
+        formData.append('audio', audioBlob, 'voice.webm');
+        formData.append('voiceProvider', voiceProvider);
+        
         try {
-          const response = await fetch("/api/podcast/cohi/ask", {
-            method: "POST",
+          const response = await fetch('/api/podcast/cohi/ask', {
+            method: 'POST',
             body: formData,
           });
-
+          
           if (response.ok) {
             const reader = response.body?.getReader();
             if (reader) {
               // Process streamed response
               toast({
-                title: "Voice processed",
-                description: "Your question has been received.",
+                title: 'Voice processed',
+                description: 'Your question has been received.',
               });
             }
           }
         } catch (error) {
-          console.error("Voice processing error:", error);
+          console.error('Voice processing error:', error);
         }
       };
 
@@ -1042,9 +695,9 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
       setIsListening(true);
     } catch (error) {
       toast({
-        title: "Microphone access denied",
-        description: "Please enable microphone access to use voice features.",
-        variant: "destructive",
+        title: 'Microphone access denied',
+        description: 'Please enable microphone access to use voice features.',
+        variant: 'destructive',
       });
     }
   }, [toast, voiceProvider]);
@@ -1060,186 +713,158 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
    * Text-to-speech: OpenAI streaming voice or Gemini transcript + browser TTS
    * voiceProvider 'openai' = /cohi/ask returns PCM16 audio; 'gemini' = transcript only, we use speechSynthesis
    */
-  const speakResponse = useCallback(
-    async (text: string) => {
-      if (!voiceEnabled || !text) return;
-
-      setIsSpeaking(true);
-
-      try {
-        if (voiceProvider === "gemini") {
-          const response = await fetch("/api/podcast/cohi/ask", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: text, voiceProvider: "gemini" }),
-          });
-          if (!response.ok) throw new Error("Gemini reply failed");
-          const reader = response.body?.getReader();
-          if (!reader) return;
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let transcript = "";
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.type === "transcript" && data.data)
-                    transcript += data.data;
-                  if (data.type === "done" && data.transcript)
-                    transcript = data.transcript;
-                } catch (e) {}
-              }
-            }
-          }
-          const toSpeak = transcript.trim() || text;
-          if (toSpeak && "speechSynthesis" in window) {
-            const u = new SpeechSynthesisUtterance(toSpeak);
-            u.onend = () => setIsSpeaking(false);
-            u.onerror = () => setIsSpeaking(false);
-            window.speechSynthesis.speak(u);
-          } else {
-            setIsSpeaking(false);
-          }
-          return;
-        }
-
-        audioContextRef.current = audioContextRef.current || new AudioContext();
-        const audioContext = audioContextRef.current;
-        const response = await fetch("/api/podcast/cohi/ask", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: text, voiceProvider: "openai" }),
+  const speakResponse = useCallback(async (text: string) => {
+    if (!voiceEnabled || !text) return;
+    
+    setIsSpeaking(true);
+    
+    try {
+      if (voiceProvider === 'gemini') {
+        const response = await fetch('/api/podcast/cohi/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: text, voiceProvider: 'gemini' }),
         });
-        if (!response.ok) throw new Error("Voice synthesis failed");
+        if (!response.ok) throw new Error('Gemini reply failed');
         const reader = response.body?.getReader();
         if (!reader) return;
         const decoder = new TextDecoder();
-        let buffer = "";
-        const audioChunks: ArrayBuffer[] = [];
+        let buffer = '';
+        let transcript = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
           for (const line of lines) {
-            if (line.startsWith("data: ")) {
+            if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                if (data.type === "audio" && data.data) {
-                  const binaryStr = atob(data.data);
-                  const bytes = new Uint8Array(binaryStr.length);
-                  for (let i = 0; i < binaryStr.length; i++)
-                    bytes[i] = binaryStr.charCodeAt(i);
-                  audioChunks.push(bytes.buffer);
-                }
+                if (data.type === 'transcript' && data.data) transcript += data.data;
+                if (data.type === 'done' && data.transcript) transcript = data.transcript;
               } catch (e) {}
             }
           }
         }
-        if (audioChunks.length > 0) {
-          const totalLength = audioChunks.reduce(
-            (acc, chunk) => acc + chunk.byteLength,
-            0
-          );
-          const combinedAudio = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of audioChunks) {
-            combinedAudio.set(new Uint8Array(chunk), offset);
-            offset += chunk.byteLength;
-          }
-          const pcm16 = new Int16Array(combinedAudio.buffer);
-          const floatSamples = new Float32Array(pcm16.length);
-          for (let i = 0; i < pcm16.length; i++)
-            floatSamples[i] = pcm16[i] / 32768;
-          const audioBuffer = audioContext.createBuffer(
-            1,
-            floatSamples.length,
-            24000
-          );
-          audioBuffer.getChannelData(0).set(floatSamples);
-          const source = audioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(audioContext.destination);
-          source.onended = () => setIsSpeaking(false);
-          source.start();
+        const toSpeak = transcript.trim() || text;
+        if (toSpeak && 'speechSynthesis' in window) {
+          const u = new SpeechSynthesisUtterance(toSpeak);
+          u.onend = () => setIsSpeaking(false);
+          u.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(u);
         } else {
           setIsSpeaking(false);
         }
-      } catch (error) {
-        console.error("Voice synthesis error:", error);
+        return;
+      }
+      
+      audioContextRef.current = audioContextRef.current || new AudioContext();
+      const audioContext = audioContextRef.current;
+      const response = await fetch('/api/podcast/cohi/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: text, voiceProvider: 'openai' }),
+      });
+      if (!response.ok) throw new Error('Voice synthesis failed');
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const audioChunks: ArrayBuffer[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'audio' && data.data) {
+                const binaryStr = atob(data.data);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                audioChunks.push(bytes.buffer);
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      if (audioChunks.length > 0) {
+        const totalLength = audioChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+        const combinedAudio = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of audioChunks) {
+          combinedAudio.set(new Uint8Array(chunk), offset);
+          offset += chunk.byteLength;
+        }
+        const pcm16 = new Int16Array(combinedAudio.buffer);
+        const floatSamples = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) floatSamples[i] = pcm16[i] / 32768;
+        const audioBuffer = audioContext.createBuffer(1, floatSamples.length, 24000);
+        audioBuffer.getChannelData(0).set(floatSamples);
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.onended = () => setIsSpeaking(false);
+        source.start();
+      } else {
         setIsSpeaking(false);
       }
-    },
-    [voiceEnabled, voiceProvider]
-  );
+    } catch (error) {
+      console.error('Voice synthesis error:', error);
+      setIsSpeaking(false);
+    }
+  }, [voiceEnabled, voiceProvider]);
 
   /**
    * Handle send message
    */
   const handleSend = async () => {
     if ((!input.trim() && !uploadedFile) || isLoading) return;
-
+    
     if (uploadedFile) {
       setIsUploading(true);
       try {
         const formData = new FormData();
-        formData.append("file", uploadedFile);
-        formData.append(
-          "question",
-          input.trim() || `Analyze this ${uploadedFile.name}`
-        );
-
-        const response = await fetch("/api/data-chat/analyze-file", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to analyze file");
-        }
-
-        const result = await response.json();
-        const analysisText =
-          result.analysis || result.summary || "File processed successfully.";
+        formData.append('file', uploadedFile);
+        formData.append('question', input.trim() || `Analyze this ${uploadedFile.name}`);
+        const result = await api.request<{
+          analysis?: string;
+          summary?: string;
+          insights?: string[];
+          visualization?: unknown;
+        }>('/api/data-chat/analyze-file', { method: 'POST', body: formData });
+        const analysisText = result.insights?.length
+          ? `${result.summary || ''}\n\n• ${result.insights.join('\n• ')}`
+          : (result.analysis || result.summary || 'File processed successfully.');
         const userPrompt = input.trim() || `Analyze this ${uploadedFile.name}`;
         if (result.visualization) {
           addConversationTurn(
             `[File: ${uploadedFile.name}] ${userPrompt}`,
             analysisText,
-            result.visualization,
-            [
-              "Show as pie chart",
-              "Compare with another file",
-              "Export this data",
-            ]
+            result.visualization as any,
+            ['Show as pie chart', 'Compare with another file', 'Export this data']
           );
         } else {
-          addConversationTurn(
-            `[File: ${uploadedFile.name}] ${userPrompt}`,
-            analysisText
-          );
+          addConversationTurn(`[File: ${uploadedFile.name}] ${userPrompt}`, analysisText);
         }
         setUploadedFile(null);
-        setInput("");
+        setInput('');
       } catch (error: any) {
         toast({
-          title: "Upload Error",
-          description: error.message || "Failed to analyze file",
-          variant: "destructive",
+          title: 'Upload Error',
+          description: error.message || 'Failed to analyze file',
+          variant: 'destructive',
         });
       } finally {
         setIsUploading(false);
       }
     } else {
       sendMessage(input.trim());
-      setInput("");
+      setInput('');
     }
   };
 
@@ -1247,54 +872,53 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       const allowedTypes = [
-        "text/csv",
-        "application/pdf",
-        "image/png",
-        "image/jpeg",
-        "image/gif",
-        "image/webp",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/vnd.ms-powerpoint",
+        'text/csv',
+        'application/pdf',
+        'image/png',
+        'image/jpeg',
+        'image/gif',
+        'image/webp',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
       ];
-
+      const allowedExts = ['csv', 'xlsx', 'xls', 'pdf', 'pptx', 'ppt', 'docx', 'doc'];
+      const ext = file.name.split('.').pop()?.toLowerCase();
       const maxSize = 10 * 1024 * 1024;
-
-      if (!allowedTypes.includes(file.type) && !file.name.endsWith(".csv")) {
+      if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext || '')) {
         toast({
-          title: "Invalid file type",
-          description:
-            "Please upload CSV, PDF, Excel, PowerPoint, or image files.",
-          variant: "destructive",
+          title: 'Invalid file type',
+          description: 'Use CSV, Excel, PDF, PowerPoint, Word, or images.',
+          variant: 'destructive',
         });
         return;
       }
-
+      
       if (file.size > maxSize) {
         toast({
-          title: "File too large",
-          description: "Maximum file size is 10MB.",
-          variant: "destructive",
+          title: 'File too large',
+          description: 'Maximum file size is 10MB.',
+          variant: 'destructive',
         });
         return;
       }
-
+      
       setUploadedFile(file);
       toast({
-        title: "File attached",
+        title: 'File attached',
         description: `${file.name} ready to analyze. Add a question and send.`,
       });
     }
   };
 
   const getFileIcon = (filename: string) => {
-    const ext = filename.split(".").pop()?.toLowerCase();
-    if (ext === "csv" || ext === "xlsx" || ext === "xls")
-      return <FileSpreadsheet className="w-4 h-4" />;
-    if (ext === "pdf") return <FileText className="w-4 h-4" />;
-    if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext || ""))
-      return <Image className="w-4 h-4" />;
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') return <FileSpreadsheet className="w-4 h-4" />;
+    if (ext === 'pdf') return <FileText className="w-4 h-4" />;
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext || '')) return <Image className="w-4 h-4" />;
     return <File className="w-4 h-4" />;
   };
 
@@ -1302,7 +926,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
    * Handle key press (Enter to send)
    */
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -1319,12 +943,9 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   /**
    * Open save dialog
    */
-  const handleOpenSaveDialog = (
-    visualization: VisualizationConfig,
-    question: string
-  ) => {
-    setSaveTitle(visualization.title || "My Visualization");
-    setSaveDescription("");
+  const handleOpenSaveDialog = (visualization: VisualizationConfig, question: string) => {
+    setSaveTitle(visualization.title || 'My Visualization');
+    setSaveDescription('');
     setSaveDialog({ isOpen: true, visualization, question });
   };
 
@@ -1333,7 +954,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
    */
   const handleSave = async () => {
     if (!saveDialog.visualization) return;
-
+    
     try {
       await saveVisualization(
         saveDialog.visualization,
@@ -1341,18 +962,18 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         saveTitle,
         saveDescription
       );
-
+      
       toast({
-        title: "Saved!",
-        description: "Visualization saved to your dashboard.",
+        title: 'Saved!',
+        description: 'Visualization saved to your dashboard.',
       });
-
-      setSaveDialog({ isOpen: false, visualization: null, question: "" });
+      
+      setSaveDialog({ isOpen: false, visualization: null, question: '' });
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to save visualization",
-        variant: "destructive",
+        title: 'Error',
+        description: error.message || 'Failed to save visualization',
+        variant: 'destructive',
       });
     }
   };
@@ -1365,25 +986,21 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     const title = override?.title ?? saveTitle;
     const desc = override?.description ?? saveDescription;
     if (!viz) return;
-
+    
     try {
-      const { jsPDF } = await import("jspdf");
+      const { jsPDF } = await import('jspdf');
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.width;
-
+      
       doc.setFontSize(20);
       doc.setTextColor(30, 41, 59);
-      doc.text(title || viz.title || "Visualization", 20, 25);
-
-      const chartType = viz.type || "chart";
+      doc.text(title || viz.title || 'Visualization', 20, 25);
+      
+      const chartType = viz.type || 'chart';
       doc.setFontSize(10);
       doc.setTextColor(100, 116, 139);
-      doc.text(
-        `Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`,
-        20,
-        35
-      );
-
+      doc.text(`Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`, 20, 35);
+      
       let currentY = 45;
       if (desc) {
         doc.setFontSize(11);
@@ -1392,34 +1009,34 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         doc.text(splitDescription, 20, currentY);
         currentY += splitDescription.length * 6 + 10;
       }
-
+      
       const data = viz.data || [];
       if (data.length > 0 && Object.keys(data[0]).length > 0) {
         const columns = Object.keys(data[0]);
         const colCount = Math.min(columns.length, 5);
-
+        
         // Guard against divide by zero
         if (colCount === 0) {
           doc.setFontSize(10);
-          doc.text("No data columns available", 20, currentY);
+          doc.text('No data columns available', 20, currentY);
         } else {
           const colWidth = (pageWidth - 40) / colCount;
-
+          
           // Table header background
           doc.setFillColor(241, 245, 249); // slate-100
-          doc.rect(20, currentY - 5, pageWidth - 40, 10, "F");
-
+          doc.rect(20, currentY - 5, pageWidth - 40, 10, 'F');
+          
           // Headers
           doc.setFontSize(9);
           doc.setTextColor(30, 41, 59);
-          doc.setFont(undefined as any, "bold");
+          doc.setFont(undefined as any, 'bold');
           columns.slice(0, colCount).forEach((col, i) => {
             doc.text(col.substring(0, 18), 22 + i * colWidth, currentY);
           });
           currentY += 10;
-
+          
           // Data rows
-          doc.setFont(undefined as any, "normal");
+          doc.setFont(undefined as any, 'normal');
           doc.setTextColor(51, 65, 85); // slate-700
           data.slice(0, 25).forEach((row) => {
             if (currentY > 270) {
@@ -1427,12 +1044,12 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
               currentY = 25;
             }
             columns.slice(0, colCount).forEach((col, i) => {
-              const value = String(row[col] ?? "").substring(0, 18);
+              const value = String(row[col] ?? '').substring(0, 18);
               doc.text(value, 22 + i * colWidth, currentY);
             });
             currentY += 7;
           });
-
+          
           if (data.length > 25) {
             currentY += 5;
             doc.setFontSize(8);
@@ -1443,35 +1060,26 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
       } else {
         doc.setFontSize(10);
         doc.setTextColor(148, 163, 184);
-        doc.text("No data available for this visualization", 20, currentY);
+        doc.text('No data available for this visualization', 20, currentY);
       }
-
+      
       // Footer
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(
-        `Generated by Coheus on ${new Date().toLocaleDateString()}`,
-        20,
-        285
-      );
-      doc.text("coheus.ai", pageWidth - 35, 285);
-
-      doc.save(
-        `${(title || viz.title || "visualization").replace(
-          /[^a-z0-9]/gi,
-          "_"
-        )}.pdf`
-      );
-
+      doc.text(`Generated by Coheus on ${new Date().toLocaleDateString()}`, 20, 285);
+      doc.text('coheus.ai', pageWidth - 35, 285);
+      
+      doc.save(`${(title || viz.title || 'visualization').replace(/[^a-z0-9]/gi, '_')}.pdf`);
+      
       toast({
-        title: "Downloaded!",
-        description: "PDF report saved successfully.",
+        title: 'Downloaded!',
+        description: 'PDF report saved successfully.',
       });
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to generate PDF",
-        variant: "destructive",
+        title: 'Error',
+        description: error.message || 'Failed to generate PDF',
+        variant: 'destructive',
       });
     }
   };
@@ -1483,35 +1091,32 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     const viz = override?.visualization ?? saveDialog.visualization;
     const title = override?.title ?? saveTitle;
     if (!viz) return;
-
+    
     try {
-      const pptxgen = (await import("pptxgenjs")).default;
+      const pptxgen = (await import('pptxgenjs')).default;
       const pres = new pptxgen();
-      pres.author = "Coheus";
-      pres.title = title || "Visualization";
-
+      pres.author = 'Coheus';
+      pres.title = title || 'Visualization';
+      
       const slide = pres.addSlide();
-      slide.addText(title || viz.title || "Visualization", {
+      slide.addText(title || viz.title || 'Visualization', {
         x: 0.5,
         y: 0.3,
         w: 9,
         fontSize: 28,
         bold: true,
-        color: "1e293b",
+        color: '1e293b',
       });
-
-      const chartType = viz.type || "chart";
-      slide.addText(
-        `Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`,
-        {
-          x: 0.5,
-          y: 0.7,
-          w: 9,
-          fontSize: 12,
-          color: "64748b",
-        }
-      );
-
+      
+      const chartType = viz.type || 'chart';
+      slide.addText(`Chart Type: ${chartType.charAt(0).toUpperCase() + chartType.slice(1)}`, {
+        x: 0.5,
+        y: 0.7,
+        w: 9,
+        fontSize: 12,
+        color: '64748b',
+      });
+      
       const desc = override?.description ?? saveDescription;
       let tableY = 1.3;
       if (desc) {
@@ -1520,91 +1125,79 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
           y: 1.0,
           w: 9,
           fontSize: 14,
-          color: "475569",
+          color: '475569',
         });
         tableY = 1.7;
       }
-
+      
       const data = viz.data || [];
       if (data.length > 0 && Object.keys(data[0]).length > 0) {
         const columns = Object.keys(data[0]).slice(0, 5);
-
+        
         // Guard against empty columns
         if (columns.length > 0) {
           const colWidth = 9 / columns.length;
           const rows = [
-            columns.map((col) => ({
-              text: col.substring(0, 20),
-              options: {
-                bold: true,
-                fill: { color: "f1f5f9" },
-                color: "1e293b",
-              },
+            columns.map(col => ({ 
+              text: col.substring(0, 20), 
+              options: { bold: true, fill: { color: 'f1f5f9' }, color: '1e293b' } 
             })),
-            ...data.slice(0, 12).map((row) =>
-              columns.map((col) => ({
-                text: String(row[col] ?? "").substring(0, 25),
-                options: { color: "334155" },
+            ...data.slice(0, 12).map(row => 
+              columns.map(col => ({ 
+                text: String(row[col] ?? '').substring(0, 25),
+                options: { color: '334155' }
               }))
-            ),
+            )
           ];
-
+          
           slide.addTable(rows as any, {
             x: 0.5,
             y: tableY,
             w: 9,
             colW: columns.map(() => colWidth),
-            border: { pt: 0.5, color: "e2e8f0" },
-            fontFace: "Arial",
+            border: { pt: 0.5, color: 'e2e8f0' },
+            fontFace: 'Arial',
             fontSize: 10,
           });
-
+          
           if (data.length > 12) {
             slide.addText(`... and ${data.length - 12} more rows`, {
               x: 0.5,
               y: tableY + 2.8,
               fontSize: 9,
-              color: "94a3b8",
+              color: '94a3b8',
               italic: true,
             });
           }
         }
       } else {
-        slide.addText("No data available for this visualization", {
+        slide.addText('No data available for this visualization', {
           x: 0.5,
           y: tableY,
           fontSize: 12,
-          color: "94a3b8",
+          color: '94a3b8',
         });
       }
-
+      
       // Footer
-      slide.addText(
-        `Generated by Coheus | ${new Date().toLocaleDateString()}`,
-        {
-          x: 0.5,
-          y: 5.2,
-          fontSize: 8,
-          color: "94a3b8",
-        }
-      );
-
-      await pres.writeFile({
-        fileName: `${(title || viz.title || "visualization").replace(
-          /[^a-z0-9]/gi,
-          "_"
-        )}.pptx`,
+      slide.addText(`Generated by Coheus | ${new Date().toLocaleDateString()}`, {
+        x: 0.5,
+        y: 5.2,
+        fontSize: 8,
+        color: '94a3b8',
       });
-
+      
+      await pres.writeFile({ fileName: `${(title || viz.title || 'visualization').replace(/[^a-z0-9]/gi, '_')}.pptx` });
+      
       toast({
-        title: "Downloaded!",
-        description: "PowerPoint presentation saved.",
+        title: 'Downloaded!',
+        description: 'PowerPoint presentation saved.',
       });
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to generate PowerPoint",
-        variant: "destructive",
+        title: 'Error',
+        description: error.message || 'Failed to generate PowerPoint',
+        variant: 'destructive',
       });
     }
   };
@@ -1613,211 +1206,106 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
    * Share visualization via copy link
    */
   const [linkCopied, setLinkCopied] = useState(false);
-
+  
   /**
    * Drilldown state for viewing loan and loan officer details
    */
   const [drilldownOpen, setDrilldownOpen] = useState(false);
   const [drilldownData, setDrilldownData] = useState<{
-    type: "loan" | "loan_officer";
+    type: 'loan' | 'loan_officer';
     item: any;
     title: string;
   } | null>(null);
 
   // Keys from Recharts / layout that must not be shown as "properties"
   const DRILLDOWN_EXCLUDED_KEYS = new Set([
-    "x",
-    "y",
-    "width",
-    "height",
-    "payload",
-    "cx",
-    "cy",
-    "fill",
-    "color",
-    "stroke",
-    "strokeWidth",
-    "radius",
-    "innerRadius",
-    "outerRadius",
-    "offset",
+    'x', 'y', 'width', 'height', 'payload', 'cx', 'cy', 'fill', 'color',
+    'stroke', 'strokeWidth', 'radius', 'innerRadius', 'outerRadius', 'offset',
   ]);
 
-  const getDrilldownDisplayItem = useCallback(
-    (raw: any, type: "loan" | "loan_officer") => {
-      const item =
-        raw?.payload &&
-        typeof raw.payload === "object" &&
-        !Array.isArray(raw.payload)
-          ? { ...raw.payload }
-          : { ...(raw || {}) };
-      const entries = Object.entries(item).filter(
-        ([key]) => !key.startsWith("_") && !DRILLDOWN_EXCLUDED_KEYS.has(key)
-      );
-      if (type === "loan_officer") {
-        const branch = item.branch ?? item.region ?? "";
-        const loansCount =
-          item.loans ?? item.active_loans ?? item.activeLoans ?? 0;
-        const firstNames = [
-          "Sarah",
-          "Michael",
-          "Jennifer",
-          "David",
-          "Emily",
-          "James",
-          "Maria",
-          "Robert",
-          "Lisa",
-          "Christopher",
-        ];
-        const lastNames = [
-          "Johnson",
-          "Chen",
-          "Williams",
-          "Rodriguez",
-          "Martinez",
-          "Garcia",
-          "Brown",
-          "Davis",
-          "Miller",
-          "Wilson",
-        ];
-        const seed = (branch || "officer")
-          .split("")
-          .reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
-        const displayName =
-          item.name ||
-          item.loan_officer ||
-          item.loan_officer_name ||
-          `${firstNames[seed % firstNames.length]} ${
-            lastNames[(seed >> 4) % lastNames.length]
-          }`;
-        const activeLoans = loansCount;
-        const closedYtd =
-          item.closed_ytd ??
-          item.closedYtd ??
-          Math.max(0, Math.floor((activeLoans || 42) * 0.58));
-        const volume = item.volume ?? item.volume_ytd ?? closedYtd * 385000;
-        const pullThrough =
-          item.pull_through ??
-          item.pullThrough ??
-          (activeLoans + closedYtd
-            ? Math.round((closedYtd / (activeLoans + closedYtd)) * 100)
-            : 78);
-        const nmlsId =
-          item.nmls_id ?? item.nmlsId ?? `NMLS ${100000 + (seed % 900000)}`;
-        return {
-          Name: displayName,
-          "Active Loans": activeLoans,
-          "Closed YTD": closedYtd,
-          "Volume YTD":
-            typeof volume === "number"
-              ? `$${(volume / 1_000_000).toFixed(2)}M`
-              : volume,
-          "Pull-Through %":
-            typeof pullThrough === "number" ? `${pullThrough}%` : pullThrough,
-          "NMLS ID": nmlsId,
-          Branch: branch || "—",
-        };
-      }
-      return Object.fromEntries(entries);
-    },
-    []
-  );
+  const getDrilldownDisplayItem = useCallback((raw: any, type: 'loan' | 'loan_officer') => {
+    const item = raw?.payload && typeof raw.payload === 'object' && !Array.isArray(raw.payload)
+      ? { ...raw.payload }
+      : { ...(raw || {}) };
+    const entries = Object.entries(item).filter(
+      ([key]) => !key.startsWith('_') && !DRILLDOWN_EXCLUDED_KEYS.has(key)
+    );
+    if (type === 'loan_officer') {
+      const branch = item.branch ?? item.region ?? '';
+      const loansCount = item.loans ?? item.active_loans ?? item.activeLoans ?? 0;
+      const firstNames = ['Sarah', 'Michael', 'Jennifer', 'David', 'Emily', 'James', 'Maria', 'Robert', 'Lisa', 'Christopher'];
+      const lastNames = ['Johnson', 'Chen', 'Williams', 'Rodriguez', 'Martinez', 'Garcia', 'Brown', 'Davis', 'Miller', 'Wilson'];
+      const seed = (branch || 'officer').split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
+      const displayName = item.name || item.loan_officer || item.loan_officer_name
+        || `${firstNames[seed % firstNames.length]} ${lastNames[(seed >> 4) % lastNames.length]}`;
+      const activeLoans = loansCount;
+      const closedYtd = item.closed_ytd ?? item.closedYtd ?? Math.max(0, Math.floor((activeLoans || 42) * 0.58));
+      const volume = item.volume ?? item.volume_ytd ?? (closedYtd * 385000);
+      const pullThrough = item.pull_through ?? item.pullThrough ?? (activeLoans + closedYtd ? Math.round((closedYtd / (activeLoans + closedYtd)) * 100) : 78);
+      const nmlsId = item.nmls_id ?? item.nmlsId ?? `NMLS ${100000 + (seed % 900000)}`;
+      return {
+        Name: displayName,
+        'Active Loans': activeLoans,
+        'Closed YTD': closedYtd,
+        'Volume YTD': typeof volume === 'number' ? `$${(volume / 1_000_000).toFixed(2)}M` : volume,
+        'Pull-Through %': typeof pullThrough === 'number' ? `${pullThrough}%` : pullThrough,
+        'NMLS ID': nmlsId,
+        Branch: branch || '—',
+      };
+    }
+    return Object.fromEntries(entries);
+  }, []);
 
-  const handleDrilldown = useCallback(
-    (item: any, level: string) => {
-      if (!item) return;
+  const handleDrilldown = useCallback((item: any, level: string) => {
+    if (!item) return;
 
-      const displayItem = getDrilldownDisplayItem(
-        item,
-        level === "loan_officer" ||
-          item?.loan_officer ||
-          item?.loan_officer_name
-          ? "loan_officer"
-          : "loan"
-      );
-      const itemName =
-        displayItem.Name ??
-        displayItem.name ??
-        item?.name ??
-        item?.loan_officer ??
-        item?.loan_officer_name ??
-        item?.branch ??
-        item?.loan_id ??
-        item?.id ??
-        "Details";
+    const displayItem = getDrilldownDisplayItem(item, level === 'loan_officer' || item?.loan_officer || item?.loan_officer_name ? 'loan_officer' : 'loan');
+    const itemName = displayItem.Name ?? displayItem.name ?? item?.name ?? item?.loan_officer ?? item?.loan_officer_name ?? item?.branch ?? item?.loan_id ?? item?.id ?? 'Details';
 
-      if (
-        level === "loan_officer" ||
-        item?.loan_officer ||
-        item?.loan_officer_name ||
-        item?.branch
-      ) {
-        setDrilldownData({
-          type: "loan_officer",
-          item: displayItem,
-          title: `Loan Officer: ${itemName}`,
-        });
-        setDrilldownOpen(true);
-      } else if (level === "loan" || item?.loan_id || item?.id) {
-        setDrilldownData({
-          type: "loan",
-          item: displayItem,
-          title: `Loan: ${item?.loan_id ?? item?.id ?? "Details"}`,
-        });
-        setDrilldownOpen(true);
-      }
-    },
-    [getDrilldownDisplayItem]
-  );
-
+    if (level === 'loan_officer' || item?.loan_officer || item?.loan_officer_name || item?.branch) {
+      setDrilldownData({
+        type: 'loan_officer',
+        item: displayItem,
+        title: `Loan Officer: ${itemName}`,
+      });
+      setDrilldownOpen(true);
+    } else if (level === 'loan' || item?.loan_id || item?.id) {
+      setDrilldownData({
+        type: 'loan',
+        item: displayItem,
+        title: `Loan: ${item?.loan_id ?? item?.id ?? 'Details'}`,
+      });
+      setDrilldownOpen(true);
+    }
+  }, [getDrilldownDisplayItem]);
+  
   const handleCopyLink = async (override?: ExportOverride) => {
     const title = override?.title ?? saveTitle;
     try {
-      const shareUrl = `${
-        window.location.origin
-      }/shared/visualization?title=${encodeURIComponent(
-        title || override?.visualization?.title || "Visualization"
-      )}`;
+      const shareUrl = `${window.location.origin}/shared/visualization?title=${encodeURIComponent(title || override?.visualization?.title || 'Visualization')}`;
       await navigator.clipboard.writeText(shareUrl);
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
-      toast({
-        title: "Link Copied!",
-        description: "Shareable link copied to clipboard.",
-      });
+      toast({ title: 'Link Copied!', description: 'Shareable link copied to clipboard.' });
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: "Failed to copy link",
-        variant: "destructive",
-      });
+      toast({ title: 'Error', description: 'Failed to copy link', variant: 'destructive' });
     }
   };
 
   const handleShareViaEmail = (override?: ExportOverride) => {
     const title = override?.title ?? saveTitle;
     const desc = override?.description ?? saveDescription;
-    const subject = encodeURIComponent(
-      title || override?.visualization?.title || "Visualization from Coheus"
-    );
-    const body = encodeURIComponent(
-      `Check out this visualization: ${title || "Data Visualization"}\n\n${
-        desc || "Generated from Coheus analytics platform."
-      }`
-    );
-    window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
+    const subject = encodeURIComponent(title || override?.visualization?.title || 'Visualization from Coheus');
+    const body = encodeURIComponent(`Check out this visualization: ${title || 'Data Visualization'}\n\n${desc || 'Generated from Coheus analytics platform.'}`);
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
   };
 
   /** Capture chart as PNG blob via html2canvas (element id = cohi-viz-{messageId}) */
-  const captureChartAsBlob = async (
-    messageId: string
-  ): Promise<Blob | null> => {
+  const captureChartAsBlob = async (messageId: string): Promise<Blob | null> => {
     const el = document.getElementById(`cohi-viz-${messageId}`);
     if (!el) return null;
     try {
-      const html2canvas = (await import("html2canvas")).default;
+      const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(el, {
         useCORS: true,
         allowTaint: true,
@@ -1826,170 +1314,111 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         logging: false,
       });
       return new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b ?? null), "image/png", 1);
+        canvas.toBlob((b) => resolve(b ?? null), 'image/png', 1);
       });
     } catch (e) {
-      console.error("Capture chart error:", e);
+      console.error('Capture chart error:', e);
       return null;
     }
   };
 
   /** Email with screenshot: capture chart, copy to clipboard, open mailto so user can paste image in body */
-  const handleEmailWithScreenshot = async (
-    override?: ExportOverride,
-    messageId?: string
-  ) => {
-    const title =
-      override?.title ?? saveTitle ?? override?.visualization?.title ?? "Chart";
+  const handleEmailWithScreenshot = async (override?: ExportOverride, messageId?: string) => {
+    const title = override?.title ?? saveTitle ?? override?.visualization?.title ?? 'Chart';
     if (!messageId) {
-      toast({
-        title: "Use from chart",
-        description:
-          "Open this menu from a message that has a chart, then choose Email → Image in body.",
-        variant: "destructive",
-      });
+      toast({ title: 'Use from chart', description: 'Open this menu from a message that has a chart, then choose Email → Image in body.', variant: 'destructive' });
       return;
     }
     const blob = await captureChartAsBlob(messageId);
     if (!blob) {
-      toast({
-        title: "Capture failed",
-        description: "Could not capture chart image.",
-        variant: "destructive",
-      });
+      toast({ title: 'Capture failed', description: 'Could not capture chart image.', variant: 'destructive' });
       return;
     }
     try {
-      await navigator.clipboard.write([
-        new ClipboardItem({ "image/png": blob }),
-      ]);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       const subject = encodeURIComponent(`${title} – Coheus`);
       const body = encodeURIComponent(
         `Hi,\n\nPlease find the chart below (pasted from clipboard).\n\n` +
-          `---\n` +
-          `The chart image has been copied to your clipboard. Paste it here with Ctrl+V (Windows/Linux) or Cmd+V (Mac).\n\n` +
-          `— Coheus`
+        `---\n` +
+        `The chart image has been copied to your clipboard. Paste it here with Ctrl+V (Windows/Linux) or Cmd+V (Mac).\n\n` +
+        `— Coheus`
       );
-      window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-      toast({
-        title: "Ready to email",
-        description:
-          "Chart image copied. Paste (Ctrl+V / Cmd+V) into the email body.",
-      });
+      window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+      toast({ title: 'Ready to email', description: 'Chart image copied. Paste (Ctrl+V / Cmd+V) into the email body.' });
     } catch (e) {
-      toast({
-        title: "Clipboard failed",
-        description:
-          "Could not copy image. Try Download as Image and attach manually.",
-        variant: "destructive",
-      });
+      toast({ title: 'Clipboard failed', description: 'Could not copy image. Try Download as Image and attach manually.', variant: 'destructive' });
     }
   };
 
   /** Email with link to live chart so recipient opens the chart in the app */
   const handleEmailWithLink = (override?: ExportOverride) => {
-    const title =
-      override?.title ??
-      saveTitle ??
-      override?.visualization?.title ??
-      "Visualization";
-    const shareUrl = `${
-      window.location.origin
-    }/shared/visualization?title=${encodeURIComponent(title)}`;
+    const title = override?.title ?? saveTitle ?? override?.visualization?.title ?? 'Visualization';
+    const shareUrl = `${window.location.origin}/shared/visualization?title=${encodeURIComponent(title)}`;
     const subject = encodeURIComponent(`${title} – Coheus`);
     const body = encodeURIComponent(
       `Hi,\n\nView this live chart, graph, or table:\n${shareUrl}\n\n— Coheus`
     );
-    window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-    toast({
-      title: "Link ready",
-      description: "Email draft opened with link to the live chart.",
-    });
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+    toast({ title: 'Link ready', description: 'Email draft opened with link to the live chart.' });
   };
 
   /** Export visualization data as Excel (CSV) */
   const handleExportExcel = (override?: ExportOverride) => {
     const viz = override?.visualization ?? saveDialog.visualization;
     if (!viz?.data?.length) {
-      toast({
-        title: "No data",
-        description: "Nothing to export.",
-        variant: "destructive",
-      });
+      toast({ title: 'No data', description: 'Nothing to export.', variant: 'destructive' });
       return;
     }
     try {
       const columns = Object.keys(viz.data[0]);
-      const header = columns.join(",");
-      const rows = viz.data.map((row: any) =>
-        columns
-          .map((col) => {
-            const v = row[col];
-            const s =
-              typeof v === "string" && (v.includes(",") || v.includes('"'))
-                ? `"${v.replace(/"/g, '""')}"`
-                : String(v ?? "");
-            return s;
-          })
-          .join(",")
-      );
-      const csv = [header, ...rows].join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const header = columns.join(',');
+      const rows = viz.data.map((row: any) => columns.map(col => {
+        const v = row[col];
+        const s = typeof v === 'string' && (v.includes(',') || v.includes('"')) ? `"${v.replace(/"/g, '""')}"` : String(v ?? '');
+        return s;
+      }).join(','));
+      const csv = [header, ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      const a = document.createElement('a');
       a.href = url;
-      a.download = `${(override?.title ?? viz.title ?? "export").replace(
-        /[^a-z0-9]/gi,
-        "_"
-      )}.csv`;
+      a.download = `${(override?.title ?? viz.title ?? 'export').replace(/[^a-z0-9]/gi, '_')}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      toast({ title: "Downloaded!", description: "CSV exported." });
+      toast({ title: 'Downloaded!', description: 'CSV exported.' });
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Export failed",
-        variant: "destructive",
-      });
+      toast({ title: 'Error', description: error.message || 'Export failed', variant: 'destructive' });
     }
   };
 
   /** Export chart as PNG (html2canvas on element cohi-viz-{messageId}) */
-  const handleExportImage = async (
-    override?: ExportOverride,
-    messageId?: string
-  ) => {
+  const handleExportImage = async (override?: ExportOverride, messageId?: string) => {
     const viz = override?.visualization ?? saveDialog.visualization;
     if (!viz) return;
     if (!messageId) {
-      toast({
-        title: "Export from chart",
-        description:
-          'Use "Download as Image" from the chart\'s Save & export menu.',
-        variant: "destructive",
-      });
+      toast({ title: 'Export from chart', description: 'Use "Download as Image" from the chart\'s Save & export menu.', variant: 'destructive' });
       return;
     }
     const blob = await captureChartAsBlob(messageId);
     if (!blob) {
-      toast({
-        title: "Capture failed",
-        description: "Could not capture chart.",
-        variant: "destructive",
-      });
+      toast({ title: 'Capture failed', description: 'Could not capture chart.', variant: 'destructive' });
       return;
     }
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = url;
-    a.download = `${(viz.title || "chart").replace(/[^a-z0-9]/gi, "_")}.png`;
+    a.download = `${(viz.title || 'chart').replace(/[^a-z0-9]/gi, '_')}.png`;
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "Downloaded", description: "Chart saved as PNG." });
+    toast({ title: 'Downloaded', description: 'Chart saved as PNG.' });
   };
+
+  const { pathname } = useLocation();
+  const isMyDashboard = pathname === '/my-dashboard';
 
   if (!isOpen) {
     if (!onOpen) return null;
+    if (isMyDashboard) return null;
 
     return (
       <motion.button
@@ -2002,14 +1431,8 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         title="Cohi – Ask about your pipeline & performance"
         aria-label="Open Cohi Insights"
       >
-        <Sparkles
-          className="w-5 h-5 text-white drop-shadow-sm"
-          strokeWidth={1.75}
-        />
-        <span
-          className="text-xs font-semibold tracking-tight"
-          style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}
-        >
+        <Sparkles className="w-5 h-5 text-white drop-shadow-sm" strokeWidth={1.75} />
+        <span className="text-xs font-semibold tracking-tight" style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}>
           Cohi
         </span>
       </motion.button>
@@ -2023,7 +1446,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         onClick={onClose}
         aria-hidden="true"
       />
-      <motion.div
+      <motion.div 
         initial={{ x: 500, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
         exit={{ x: 500, opacity: 0 }}
@@ -2044,81 +1467,54 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-base sm:text-lg font-semibold text-white tracking-tight truncate">
-                Cohi Insights
-              </h2>
-              <p className="text-[10px] sm:text-xs text-white/80 truncate">
-                Ask about your pipeline & performance
-              </p>
+              <h2 className="text-base sm:text-lg font-semibold text-white tracking-tight truncate">Cohi Insights</h2>
+              <p className="text-[10px] sm:text-xs text-white/80 truncate">Ask about your pipeline & performance</p>
             </div>
-            <Badge
-              variant="secondary"
-              className="bg-white/25 text-white text-[10px] px-2 py-0 border-0 shrink-0"
-            >
+            <Badge variant="secondary" className="bg-white/25 text-white text-[10px] px-2 py-0 border-0 shrink-0">
               AI
             </Badge>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Dashboard selector – adds to chat canvas */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-white/80 hover:text-white hover:bg-white/20 text-xs gap-1 max-w-[160px] truncate"
-                  title="Add dashboard to chat canvas"
-                >
-                  <LayoutDashboard className="w-3.5 h-3.5" />
-                  <span className="truncate">{lastDashboardLabel}</span>
-                  <ChevronDown className="w-3 h-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-[10001] w-72">
-                {CHAT_DASHBOARD_GROUPS.map((group, index) => (
-                  <div key={group.label}>
-                    <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
-                      {group.label}
-                    </DropdownMenuLabel>
-                    {group.items.map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <DropdownMenuItem
-                          key={item.id}
-                          onClick={() =>
-                            addDashboardToCanvas(item.id, item.title)
-                          }
-                          className="gap-2 py-2"
-                        >
-                          <Icon
-                            className={`w-4 h-4 ${
-                              item.iconClass ?? "text-slate-500"
-                            } shrink-0`}
-                          />
-                          <span className="truncate">{item.title}</span>
-                        </DropdownMenuItem>
-                      );
-                    })}
-                    {index < CHAT_DASHBOARD_GROUPS.length - 1 && (
-                      <DropdownMenuSeparator />
-                    )}
-                  </div>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* Voice Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
-              onClick={() => setVoiceEnabled(!voiceEnabled)}
-              title={voiceEnabled ? "Disable voice" : "Enable voice"}
-            >
-              {voiceEnabled ? (
-                <Volume2 className="w-4 h-4" />
-              ) : (
-                <VolumeX className="w-4 h-4" />
-              )}
-            </Button>
+            {/* Dashboard selector – only in fullscreen */}
+            {isFullscreen && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-white/80 hover:text-white hover:bg-white/20 text-xs gap-1 max-w-[160px] truncate"
+                    title="Add dashboard to chat canvas"
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5" />
+                    <span className="truncate">{lastDashboardLabel}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="z-[10001] w-72">
+                  {CHAT_DASHBOARD_GROUPS.map((group, index) => (
+                    <div key={group.label}>
+                      <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
+                        {group.label}
+                      </DropdownMenuLabel>
+                      {group.items.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <DropdownMenuItem
+                            key={item.id}
+                            onClick={() => addDashboardToCanvas(item.id, item.title)}
+                            className="gap-2 py-2"
+                          >
+                            <Icon className={`w-4 h-4 ${item.iconClass ?? 'text-slate-500'} shrink-0`} />
+                            <span className="truncate">{item.title}</span>
+                          </DropdownMenuItem>
+                        );
+                      })}
+                      {index < CHAT_DASHBOARD_GROUPS.length - 1 && <DropdownMenuSeparator />}
+                    </div>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -2145,11 +1541,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                 onClick={() => setIsExpanded(!isExpanded)}
                 title={isExpanded ? "Minimize width" : "Expand width"}
               >
-                {isExpanded ? (
-                  <Minimize2 className="w-4 h-4" />
-                ) : (
-                  <Maximize2 className="w-4 h-4" />
-                )}
+                {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
               </Button>
             )}
             <Button
@@ -2159,20 +1551,17 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
               onClick={() => setIsFullscreen(!isFullscreen)}
               title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
             >
-              {isFullscreen ? (
-                <Shrink className="w-4 h-4" />
-              ) : (
-                <Expand className="w-4 h-4" />
-              )}
+              {isFullscreen ? <Shrink className="w-4 h-4" /> : <Expand className="w-4 h-4" />}
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-white/90 hover:text-white hover:bg-white/25"
+              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
               onClick={onClose}
               title="Close"
+              aria-label="Close"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </Button>
           </div>
         </div>
@@ -2236,38 +1625,22 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                     style={{ minWidth: 260 }}
                   >
                     {chatCanvasItems.map((item, index) => {
-                      const isDashboardSection =
-                        item.type === "dashboard_section" &&
-                        item.payload.type === "dashboard_section";
+                      const isDashboardSection = item.type === 'dashboard_section' && item.payload.type === 'dashboard_section';
                       const payload = item.payload;
                       const hideableSections = isDashboardSection
-                        ? CHAT_HIDEABLE_SECTIONS[
-                            (payload as { sectionId: string }).sectionId
-                          ] ?? []
+                        ? CHAT_HIDEABLE_SECTIONS[(payload as { sectionId: string }).sectionId] ?? []
                         : [];
                       const hiddenSections = isDashboardSection
-                        ? (payload as { hiddenSections?: string[] })
-                            .hiddenSections ?? []
+                        ? ((payload as { hiddenSections?: string[] }).hiddenSections ?? [])
                         : [];
                       const displayMode = isDashboardSection
-                        ? (
-                            payload as {
-                              displayMode?: "full" | "compact" | "hidden";
-                            }
-                          ).displayMode ?? "full"
+                        ? ((payload as { displayMode?: 'full' | 'compact' | 'hidden' }).displayMode ?? 'full')
                         : undefined;
                       const onToggleSection = isDashboardSection
                         ? (sectionId: string, hidden: boolean) => {
-                            const prev =
-                              (payload as { hiddenSections?: string[] })
-                                .hiddenSections ?? [];
-                            const next = hidden
-                              ? [...prev, sectionId]
-                              : prev.filter((s) => s !== sectionId);
-                            updateCanvasWidgetPayload(item.i, {
-                              ...payload,
-                              hiddenSections: next,
-                            });
+                            const prev = (payload as { hiddenSections?: string[] }).hiddenSections ?? [];
+                            const next = hidden ? [...prev, sectionId] : prev.filter((s) => s !== sectionId);
+                            updateCanvasWidgetPayload(item.i, { ...payload, hiddenSections: next });
                           }
                         : undefined;
 
@@ -2279,12 +1652,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                           bounds="parent"
                           onDragStart={() => setSelectedCanvasId(item.i)}
                           onResizeStart={() => setSelectedCanvasId(item.i)}
-                          onDrag={(_, data) =>
-                            updateCanvasItemRect(item.i, {
-                              x: data.x,
-                              y: data.y,
-                            })
-                          }
+                          onDrag={(_, data) => updateCanvasItemRect(item.i, { x: data.x, y: data.y })}
                           onResize={(_, __, ref, ___, position) =>
                             updateCanvasItemRect(item.i, {
                               x: position.x,
@@ -2293,12 +1661,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                               h: ref.offsetHeight,
                             })
                           }
-                          onDragStop={(_, data) =>
-                            updateCanvasItemRect(item.i, {
-                              x: data.x,
-                              y: data.y,
-                            })
-                          }
+                          onDragStop={(_, data) => updateCanvasItemRect(item.i, { x: data.x, y: data.y })}
                           onResizeStop={(_, __, ref, ___, position) =>
                             updateCanvasItemRect(item.i, {
                               x: position.x,
@@ -2325,11 +1688,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                             displayMode={displayMode}
                             onChangeDisplayMode={
                               isDashboardSection
-                                ? (mode) =>
-                                    updateCanvasWidgetPayload(item.i, {
-                                      ...payload,
-                                      displayMode: mode,
-                                    })
+                                ? (mode) => updateCanvasWidgetPayload(item.i, { ...payload, displayMode: mode })
                                 : undefined
                             }
                           >
@@ -2338,8 +1697,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                               height={item.h}
                               width={item.w}
                               onUpdatePayload={
-                                item.type === "text_block" ||
-                                item.type === "rich_text"
+                                item.type === 'text_block' || item.type === 'rich_text'
                                   ? (p) => updateCanvasWidgetPayload(item.i, p)
                                   : undefined
                               }
@@ -2355,30 +1713,42 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
 
             <AnimatePresence>
               {messages.length === 0 && (
-                <motion.div
+                <motion.div 
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -16 }}
                   transition={{ duration: 0.35 }}
                   className="py-12 px-2"
                 >
-                  {/* Suggested Questions – minimalist */}
-                  <div className="space-y-1 max-w-[300px] mx-auto">
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-medium mb-4 text-center">
+                  {/* Suggested Questions – SummaryHeader style with pastel icons */}
+                  <div className="space-y-2 max-w-[320px] mx-auto">
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-medium mb-3 text-center">
                       Try asking
                     </p>
-                    {suggestedQuestions.slice(0, 4).map((question, index) => (
-                      <motion.button
-                        key={index}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: 0.1 + index * 0.05 }}
-                        onClick={() => handleSuggestionClick(question)}
-                        className="group block w-full text-left py-2.5 px-0 text-[13px] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors duration-150 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 last:border-0"
-                      >
-                        <span className="font-normal">{question}</span>
-                      </motion.button>
-                    ))}
+                    {suggestedQuestions.slice(0, 4).map((question, index) => {
+                      const icons = [
+                        { Icon: Sparkles, color: 'text-sky-400 dark:text-sky-300' },
+                        { Icon: Target, color: 'text-violet-400 dark:text-violet-300' },
+                        { Icon: TrendingUp, color: 'text-emerald-400 dark:text-emerald-300' },
+                        { Icon: BarChart3, color: 'text-amber-400 dark:text-amber-300' },
+                      ];
+                      const { Icon, color } = icons[index % icons.length];
+                      return (
+                        <motion.button
+                          key={index}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.1 + index * 0.05 }}
+                          onClick={() => handleSuggestionClick(question)}
+                          className="group block w-full text-left rounded-lg border-0 bg-muted/10 dark:bg-muted/20 p-3 hover:bg-muted/20 dark:hover:bg-muted/30 transition-colors duration-150"
+                        >
+                          <div className="flex items-start gap-2">
+                            <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${color}`} />
+                            <span className="text-xs text-foreground leading-snug font-normal">{question}</span>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
@@ -2399,72 +1769,47 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                   isExpanded={isExpanded}
                   voiceEnabled={voiceEnabled}
                   vizTypeOverride={vizTypeOverrides[message.id]}
-                  onDesignOptionClick={(id, type) =>
-                    setVizTypeOverrides((prev) => ({ ...prev, [id]: type }))
-                  }
-                  onExportPDF={(viz) =>
-                    handleDownloadPDF({ visualization: viz, title: viz.title })
-                  }
-                  onExportExcel={(viz) =>
-                    handleExportExcel({ visualization: viz, title: viz.title })
-                  }
-                  onExportPPT={(viz) =>
-                    handleAddToPowerPoint({
-                      visualization: viz,
-                      title: viz.title,
-                    })
-                  }
-                  onExportImage={(viz, msgId) =>
-                    handleExportImage(
-                      { visualization: viz, title: viz.title },
-                      msgId
-                    )
-                  }
-                  onCopyLink={(viz) =>
-                    handleCopyLink({ visualization: viz, title: viz.title })
-                  }
-                  onEmailWithScreenshot={(viz, msgId) =>
-                    handleEmailWithScreenshot(
-                      { visualization: viz, title: viz.title },
-                      msgId
-                    )
-                  }
-                  onEmailWithLink={(viz) =>
-                    handleEmailWithLink({
-                      visualization: viz,
-                      title: viz.title,
-                    })
-                  }
-                  onPinToCanvas={(payload) =>
-                    useCanvasPinStore.getState().addPinnedInsight(payload)
-                  }
-                  onAddToChatCanvas={(payload) =>
-                    addVisualizationToCanvas(payload)
-                  }
+                  onDesignOptionClick={(id, type) => setVizTypeOverrides(prev => ({ ...prev, [id]: type }))}
+                  onExportPDF={(viz) => handleDownloadPDF({ visualization: viz, title: viz.title })}
+                  onExportExcel={(viz) => handleExportExcel({ visualization: viz, title: viz.title })}
+                  onExportPPT={(viz) => handleAddToPowerPoint({ visualization: viz, title: viz.title })}
+                  onExportImage={(viz, msgId) => handleExportImage({ visualization: viz, title: viz.title }, msgId)}
+                  onCopyLink={(viz) => handleCopyLink({ visualization: viz, title: viz.title })}
+                  onEmailWithScreenshot={(viz, msgId) => handleEmailWithScreenshot({ visualization: viz, title: viz.title }, msgId)}
+                  onEmailWithLink={(viz) => handleEmailWithLink({ visualization: viz, title: viz.title })}
+                  onPinToCanvas={(payload) => useCanvasPinStore.getState().addPinnedInsight(payload)}
+                  onAddToChatCanvas={(payload) => addVisualizationToCanvas(payload)}
                 />
               </motion.div>
             ))}
-
+            
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
 
-        {/* Suggestions */}
+        {/* Suggestions – compact, minimal */}
         {messages.length > 0 && suggestedQuestions.length > 0 && !isLoading && (
-          <div className="px-4 py-2.5 border-t border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/40">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-              <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0 font-medium">
-                Suggestions
-              </span>
-              {suggestedQuestions.slice(0, 3).map((question, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleSuggestionClick(question)}
-                  className="shrink-0 text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-600/60 hover:border-blue-300 dark:hover:border-blue-500/50 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-all text-slate-600 dark:text-slate-300 font-medium"
-                >
-                  {question}
-                </button>
-              ))}
+          <div className="px-3 py-1.5 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/50 dark:bg-slate-800/20">
+            <div className="flex flex-wrap items-center gap-1">
+              {suggestedQuestions.slice(0, 4).map((question, index) => {
+                const icons = [
+                  { Icon: Sparkles, color: 'text-sky-400 dark:text-sky-300' },
+                  { Icon: Target, color: 'text-violet-400 dark:text-violet-300' },
+                  { Icon: TrendingUp, color: 'text-emerald-400 dark:text-emerald-300' },
+                  { Icon: BarChart3, color: 'text-amber-400 dark:text-amber-300' },
+                ];
+                const { Icon, color } = icons[index % icons.length];
+                return (
+                  <button
+                    key={index}
+                    onClick={() => handleSuggestionClick(question)}
+                    className="group flex items-center gap-1.5 rounded-md border-0 bg-muted/10 dark:bg-muted/20 px-2 py-1 hover:bg-muted/20 dark:hover:bg-muted/30 transition-colors duration-150 text-left min-w-0 max-w-[200px]"
+                  >
+                    <Icon className={`h-3 w-3 shrink-0 ${color}`} />
+                    <span className="text-[10px] text-foreground leading-tight font-normal truncate">{question}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -2474,9 +1819,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
           {uploadedFile && (
             <div className="flex items-center gap-2 mb-3 p-2.5 bg-blue-50/80 dark:bg-blue-900/25 rounded-xl text-sm border border-blue-200/50 dark:border-blue-800/50">
               {getFileIcon(uploadedFile.name)}
-              <span className="flex-1 truncate text-blue-700 dark:text-blue-300 font-medium">
-                {uploadedFile.name}
-              </span>
+              <span className="flex-1 truncate text-blue-700 dark:text-blue-300 font-medium">{uploadedFile.name}</span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -2493,16 +1836,15 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
               variant={isListening ? "destructive" : "outline"}
               size="icon"
               onClick={isListening ? stopVoiceRecording : startVoiceRecording}
-              className={cn("shrink-0", isListening && "animate-pulse")}
+              className={cn(
+                "shrink-0",
+                isListening && "animate-pulse"
+              )}
               title={isListening ? "Stop recording" : "Voice input"}
             >
-              {isListening ? (
-                <MicOff className="w-4 h-4" />
-              ) : (
-                <Mic className="w-4 h-4" />
-              )}
+              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </Button>
-
+            
             {/* File Upload Button */}
             <input
               ref={fileInputRef}
@@ -2521,25 +1863,19 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
             >
               <Paperclip className="w-4 h-4" />
             </Button>
-
+            
             <Input
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder={
-                uploadedFile
-                  ? "Ask about this file..."
-                  : "What important info do I need to know today?"
-              }
+              placeholder={uploadedFile ? "Ask about this file..." : "What important info do I need to know today?"}
               disabled={isLoading || isUploading}
               className="flex-1 rounded-xl border-slate-200/80 dark:border-slate-600/60 bg-white dark:bg-slate-800/50 focus-visible:ring-2 focus-visible:ring-blue-500/30"
             />
-            <Button
-              onClick={handleSend}
-              disabled={
-                (!input.trim() && !uploadedFile) || isLoading || isUploading
-              }
+            <Button 
+              onClick={handleSend} 
+              disabled={(!input.trim() && !uploadedFile) || isLoading || isUploading}
               size="icon"
               className="rounded-xl bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-500/25"
             >
@@ -2554,13 +1890,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
       </motion.div>
 
       {/* Save Dialog */}
-      <Dialog
-        open={saveDialog.isOpen}
-        onOpenChange={(open) =>
-          !open &&
-          setSaveDialog({ isOpen: false, visualization: null, question: "" })
-        }
-      >
+      <Dialog open={saveDialog.isOpen} onOpenChange={(open) => !open && setSaveDialog({ isOpen: false, visualization: null, question: '' })}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Save & Share</DialogTitle>
@@ -2588,7 +1918,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                 rows={2}
               />
             </div>
-
+            
             {/* Export Options */}
             <div className="space-y-3 pt-2">
               <Label className="text-sm text-slate-500">Export Options</Label>
@@ -2611,7 +1941,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                 </Button>
               </div>
             </div>
-
+            
             {/* Share Options */}
             <div className="space-y-3 pt-2">
               <Label className="text-sm text-slate-500">Share</Label>
@@ -2626,18 +1956,11 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                   ) : (
                     <Link className="w-4 h-4 text-blue-500" />
                   )}
-                  <span className="text-sm">
-                    {linkCopied ? "Copied!" : "Copy Link"}
-                  </span>
+                  <span className="text-sm">{linkCopied ? 'Copied!' : 'Copy Link'}</span>
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() =>
-                    handleEmailWithLink({
-                      visualization: saveDialog.visualization!,
-                      title: saveTitle,
-                    })
-                  }
+                  onClick={() => handleEmailWithLink({ visualization: saveDialog.visualization!, title: saveTitle })}
                   className="flex items-center gap-2 h-11 justify-start"
                 >
                   <Mail className="w-4 h-4 text-purple-500" />
@@ -2647,23 +1970,10 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
             </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() =>
-                setSaveDialog({
-                  isOpen: false,
-                  visualization: null,
-                  question: "",
-                })
-              }
-            >
+            <Button variant="outline" onClick={() => setSaveDialog({ isOpen: false, visualization: null, question: '' })}>
               Cancel
             </Button>
-            <Button
-              onClick={handleSave}
-              disabled={!saveTitle.trim()}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
+            <Button onClick={handleSave} disabled={!saveTitle.trim()} className="bg-blue-600 hover:bg-blue-700">
               <Save className="w-4 h-4 mr-2" />
               Save to Dashboard
             </Button>
@@ -2680,37 +1990,23 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
           {drilldownData && (
             <>
               {/* Header with pastel accent – pr-12 for sheet close button */}
-              <div
-                className={cn(
-                  "pl-5 pr-12 pt-5 pb-4 shrink-0 border-b",
-                  drilldownData.type === "loan_officer"
-                    ? "bg-violet-50/80 dark:bg-violet-950/30 border-violet-200/50 dark:border-violet-800/50"
-                    : "bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200/50 dark:border-emerald-800/50"
-                )}
-              >
+              <div className={cn(
+                "pl-5 pr-12 pt-5 pb-4 shrink-0 border-b",
+                drilldownData.type === 'loan_officer'
+                  ? "bg-violet-50/80 dark:bg-violet-950/30 border-violet-200/50 dark:border-violet-800/50"
+                  : "bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200/50 dark:border-emerald-800/50"
+              )}>
                 <div className="flex items-start gap-3">
-                  <div
-                    className={cn(
-                      "w-11 h-11 rounded-xl flex items-center justify-center shrink-0",
-                      drilldownData.type === "loan_officer"
-                        ? "bg-violet-200/70 dark:bg-violet-800/50 text-violet-600 dark:text-violet-400"
-                        : "bg-emerald-200/70 dark:bg-emerald-800/50 text-emerald-600 dark:text-emerald-400"
-                    )}
-                  >
-                    {drilldownData.type === "loan_officer" ? (
-                      <Users className="w-5 h-5" />
-                    ) : (
-                      <FileText className="w-5 h-5" />
-                    )}
+                  <div className={cn(
+                    "w-11 h-11 rounded-xl flex items-center justify-center shrink-0",
+                    drilldownData.type === 'loan_officer' ? "bg-violet-200/70 dark:bg-violet-800/50 text-violet-600 dark:text-violet-400" : "bg-emerald-200/70 dark:bg-emerald-800/50 text-emerald-600 dark:text-emerald-400"
+                  )}>
+                    {drilldownData.type === 'loan_officer' ? <Users className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h2 className="text-base font-semibold text-slate-900 dark:text-white truncate">
-                      {drilldownData.title || "Details"}
-                    </h2>
+                    <h2 className="text-base font-semibold text-slate-900 dark:text-white truncate">{drilldownData.title || 'Details'}</h2>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                      {drilldownData.type === "loan_officer"
-                        ? "Performance and metrics"
-                        : "Loan details and status"}
+                      {drilldownData.type === 'loan_officer' ? 'Performance and metrics' : 'Loan details and status'}
                     </p>
                   </div>
                 </div>
@@ -2720,104 +2016,34 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                 <div className="p-4 sm:p-5 space-y-5">
                   {/* Key metrics with pastel icon cards */}
                   {(() => {
-                    const skip = [
-                      "x",
-                      "y",
-                      "width",
-                      "height",
-                      "payload",
-                      "fill",
-                      "color",
-                      "cx",
-                      "cy",
-                    ];
-                    const entries = Object.entries(drilldownData.item).filter(
-                      ([key]) => !skip.includes(key) && !key.startsWith("_")
-                    );
-                    const norm = (k: string) =>
-                      k.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
-                    const keyMeta: Record<
-                      string,
-                      { icon: React.ReactNode; bg: string; label?: string }
-                    > = {
-                      name: {
-                        icon: <User className="w-4 h-4" />,
-                        bg: "bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400",
-                        label: "Name",
-                      },
-                      active_loans: {
-                        icon: <Activity className="w-4 h-4" />,
-                        bg: "bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400",
-                        label: "Active loans",
-                      },
-                      closed_ytd: {
-                        icon: <CheckCircle2 className="w-4 h-4" />,
-                        bg: "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400",
-                        label: "Closed YTD",
-                      },
-                      volume_ytd: {
-                        icon: <DollarSign className="w-4 h-4" />,
-                        bg: "bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400",
-                        label: "Volume YTD",
-                      },
-                      pull_through: {
-                        icon: <Percent className="w-4 h-4" />,
-                        bg: "bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400",
-                        label: "Pull-through %",
-                      },
-                      pullthrough: {
-                        icon: <Percent className="w-4 h-4" />,
-                        bg: "bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400",
-                        label: "Pull-through %",
-                      },
-                      nmls_id: {
-                        icon: <BadgeCheck className="w-4 h-4" />,
-                        bg: "bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400",
-                        label: "NMLS ID",
-                      },
-                      nmlsid: {
-                        icon: <BadgeCheck className="w-4 h-4" />,
-                        bg: "bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400",
-                        label: "NMLS ID",
-                      },
+                    const skip = ['x', 'y', 'width', 'height', 'payload', 'fill', 'color', 'cx', 'cy'];
+                    const entries = Object.entries(drilldownData.item)
+                      .filter(([key]) => !skip.includes(key) && !key.startsWith('_'));
+                    const norm = (k: string) => k.toLowerCase().replace(/\s+/g, '_').replace(/-/g, '_');
+                    const keyMeta: Record<string, { icon: React.ReactNode; bg: string; label?: string }> = {
+                      name: { icon: <User className="w-4 h-4" />, bg: 'bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400', label: 'Name' },
+                      active_loans: { icon: <Activity className="w-4 h-4" />, bg: 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400', label: 'Active loans' },
+                      closed_ytd: { icon: <CheckCircle2 className="w-4 h-4" />, bg: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400', label: 'Closed YTD' },
+                      volume_ytd: { icon: <DollarSign className="w-4 h-4" />, bg: 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400', label: 'Volume YTD' },
+                      pull_through: { icon: <Percent className="w-4 h-4" />, bg: 'bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400', label: 'Pull-through %' },
+                      pullthrough: { icon: <Percent className="w-4 h-4" />, bg: 'bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400', label: 'Pull-through %' },
+                      nmls_id: { icon: <BadgeCheck className="w-4 h-4" />, bg: 'bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400', label: 'NMLS ID' },
+                      nmlsid: { icon: <BadgeCheck className="w-4 h-4" />, bg: 'bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400', label: 'NMLS ID' },
                     };
                     const topEntries = entries.slice(0, 6);
                     return (
                       <div className="grid grid-cols-2 gap-3">
                         {topEntries.map(([key, value]) => {
-                          const meta = keyMeta[norm(key)] || {
-                            icon: <LayoutGrid className="w-4 h-4" />,
-                            bg: "bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400",
-                          };
-                          const label = meta.label ?? key.replace(/_/g, " ");
-                          const display =
-                            typeof value === "number"
-                              ? value.toLocaleString(undefined, {
-                                  maximumFractionDigits: 2,
-                                })
-                              : String(value ?? "-");
+                          const meta = keyMeta[norm(key)] || { icon: <LayoutGrid className="w-4 h-4" />, bg: 'bg-slate-200/80 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400' };
+                          const label = meta.label ?? key.replace(/_/g, ' ');
+                          const display = typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(value ?? '-');
                           return (
-                            <div
-                              key={key}
-                              className={cn(
-                                "rounded-xl border p-3.5",
-                                "bg-white/80 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-700/60 shadow-sm"
-                              )}
-                            >
-                              <div
-                                className={cn(
-                                  "w-8 h-8 rounded-lg flex items-center justify-center mb-2",
-                                  meta.bg
-                                )}
-                              >
+                            <div key={key} className={cn("rounded-xl border p-3.5", "bg-white/80 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-700/60 shadow-sm")}>
+                              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center mb-2", meta.bg)}>
                                 {meta.icon}
                               </div>
-                              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
-                                {label}
-                              </div>
-                              <div className="text-sm font-semibold text-slate-900 dark:text-white truncate mt-0.5">
-                                {display}
-                              </div>
+                              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">{label}</div>
+                              <div className="text-sm font-semibold text-slate-900 dark:text-white truncate mt-0.5">{display}</div>
                             </div>
                           );
                         })}
@@ -2829,52 +2055,26 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <LayoutGrid className="w-4 h-4 text-slate-400" />
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        All properties
-                      </h4>
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">All properties</h4>
                     </div>
                     <div className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 overflow-hidden bg-white/60 dark:bg-slate-800/40">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-slate-100/80 dark:bg-slate-800/60 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 border-b border-slate-200/70 dark:border-slate-700/70">
-                            <TableHead className="text-xs font-medium text-slate-500 dark:text-slate-400 w-1/3">
-                              Property
-                            </TableHead>
-                            <TableHead className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                              Value
-                            </TableHead>
+                            <TableHead className="text-xs font-medium text-slate-500 dark:text-slate-400 w-1/3">Property</TableHead>
+                            <TableHead className="text-xs font-medium text-slate-500 dark:text-slate-400">Value</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {Object.entries(drilldownData.item)
-                            .filter(
-                              ([key]) =>
-                                ![
-                                  "x",
-                                  "y",
-                                  "width",
-                                  "height",
-                                  "payload",
-                                  "fill",
-                                  "color",
-                                  "cx",
-                                  "cy",
-                                ].includes(key) && !key.startsWith("_")
-                            )
+                            .filter(([key]) => !['x', 'y', 'width', 'height', 'payload', 'fill', 'color', 'cx', 'cy'].includes(key) && !key.startsWith('_'))
                             .map(([key, value]) => (
-                              <TableRow
-                                key={key}
-                                className="border-slate-200/50 dark:border-slate-700/50"
-                              >
+                              <TableRow key={key} className="border-slate-200/50 dark:border-slate-700/50">
                                 <TableCell className="text-xs font-medium text-slate-600 dark:text-slate-400 py-2">
-                                  {key.replace(/_/g, " ")}
+                                  {key.replace(/_/g, ' ')}
                                 </TableCell>
                                 <TableCell className="text-xs text-slate-800 dark:text-slate-200 py-2">
-                                  {typeof value === "number"
-                                    ? value.toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : String(value ?? "-")}
+                                  {typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(value ?? '-')}
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -2887,28 +2087,17 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
 
               {/* Actions – hidden per design */}
               <div className="hidden p-4 border-t border-slate-200/70 dark:border-slate-700/70 bg-white/60 dark:bg-slate-800/40 flex gap-2 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 rounded-xl"
-                  onClick={() => setDrilldownOpen(false)}
-                >
+                <Button variant="outline" size="sm" className="flex-1 rounded-xl" onClick={() => setDrilldownOpen(false)}>
                   Close
                 </Button>
-                {drilldownData.type === "loan_officer" && (
-                  <Button
-                    size="sm"
-                    className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-700 text-white"
-                  >
+                {drilldownData.type === 'loan_officer' && (
+                  <Button size="sm" className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-700 text-white">
                     <User className="w-4 h-4 mr-2" />
                     Full profile
                   </Button>
                 )}
-                {drilldownData.type === "loan" && (
-                  <Button
-                    size="sm"
-                    className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
-                  >
+                {drilldownData.type === 'loan' && (
+                  <Button size="sm" className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white">
                     <FileText className="w-4 h-4 mr-2" />
                     Loan details
                   </Button>
@@ -2926,18 +2115,14 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
 // Enhanced Message Bubble Component
 // ============================================================================
 
-const VIZ_DESIGN_OPTIONS: {
-  type: VisualizationConfig["type"];
-  label: string;
-  Icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { type: "bar", label: "Bar", Icon: BarChart3 },
-  { type: "line", label: "Line", Icon: Activity },
-  { type: "pie", label: "Pie", Icon: PieChart },
-  { type: "area", label: "Area", Icon: BarChart3 },
-  { type: "donut", label: "Donut", Icon: PieChart },
-  { type: "horizontal_bar", label: "Horizontal", Icon: BarChart3 },
-  { type: "table", label: "Table", Icon: LayoutGrid },
+const VIZ_DESIGN_OPTIONS: { type: VisualizationConfig['type']; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
+  { type: 'bar', label: 'Bar', Icon: BarChart3 },
+  { type: 'line', label: 'Line', Icon: Activity },
+  { type: 'pie', label: 'Pie', Icon: PieChart },
+  { type: 'area', label: 'Area', Icon: BarChart3 },
+  { type: 'donut', label: 'Donut', Icon: PieChart },
+  { type: 'horizontal_bar', label: 'Horizontal', Icon: BarChart3 },
+  { type: 'table', label: 'Table', Icon: LayoutGrid },
 ];
 
 interface EnhancedChatMessageBubbleProps {
@@ -2947,11 +2132,8 @@ interface EnhancedChatMessageBubbleProps {
   onDrilldown: (item: any, level: string) => void;
   isExpanded: boolean;
   voiceEnabled: boolean;
-  vizTypeOverride?: VisualizationConfig["type"];
-  onDesignOptionClick?: (
-    messageId: string,
-    type: VisualizationConfig["type"]
-  ) => void;
+  vizTypeOverride?: VisualizationConfig['type'];
+  onDesignOptionClick?: (messageId: string, type: VisualizationConfig['type']) => void;
   onExportPDF?: (viz: VisualizationConfig) => void;
   onExportExcel?: (viz: VisualizationConfig) => void;
   onExportPPT?: (viz: VisualizationConfig) => void;
@@ -2959,21 +2141,13 @@ interface EnhancedChatMessageBubbleProps {
   onCopyLink?: (viz: VisualizationConfig) => void;
   onEmailWithScreenshot?: (viz: VisualizationConfig, messageId: string) => void;
   onEmailWithLink?: (viz: VisualizationConfig) => void;
-  onPinToCanvas?: (payload: {
-    title: string;
-    content: string;
-    visualization?: VisualizationConfig;
-  }) => void;
-  onAddToChatCanvas?: (payload: {
-    title: string;
-    content: string;
-    visualization?: VisualizationConfig;
-  }) => void;
+  onPinToCanvas?: (payload: { title: string; content: string; visualization?: VisualizationConfig }) => void;
+  onAddToChatCanvas?: (payload: { title: string; content: string; visualization?: VisualizationConfig }) => void;
 }
 
-const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
-  message,
-  onSave,
+const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({ 
+  message, 
+  onSave, 
   onSpeak,
   onDrilldown,
   isExpanded,
@@ -2990,29 +2164,44 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onPinToCanvas,
   onAddToChatCanvas,
 }) => {
-  const isUser = message.role === "user";
+  const isUser = message.role === 'user';
   const styling = !isUser ? getMessageStyling(message.content) : null;
-
-  // Don't parse content - render as markdown to preserve structure
-  const messageContent = message.content;
-
+  
+  // Parse bullet points from content
+  const parseContent = (content: string) => {
+    const lines = content.split('\n');
+    const bulletItems: string[] = [];
+    const textParts: string[] = [];
+    
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('*')) {
+        bulletItems.push(trimmed.replace(/^[•\-\*]\s*/, ''));
+      } else if (trimmed) {
+        textParts.push(trimmed);
+      }
+    });
+    
+    return { bulletItems, textParts };
+  };
+  
+  const { bulletItems, textParts } = !isUser ? parseContent(message.content) : { bulletItems: [], textParts: [message.content] };
+  
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[95%] rounded-2xl",
+          "max-w-[95%]",
           isUser
-            ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white px-4 py-2.5 shadow-sm"
-            : "border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/60 shadow-sm overflow-hidden"
+            ? "rounded-lg border-0 bg-muted/10 dark:bg-muted/20 p-3 shadow-sm text-slate-800 dark:text-slate-200"
+            : "rounded-2xl px-4 py-2.5 shadow-sm bg-slate-50/80 dark:bg-slate-800/60 overflow-hidden"
         )}
       >
         {message.isLoading ? (
           <div className="flex items-center gap-3 px-4 py-3">
             <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0" />
             <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Analyzing your data...
-              </span>
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Analyzing your data...</span>
               <div className="h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden w-28">
                 <motion.div
                   className="h-full bg-blue-500 rounded-full"
@@ -3025,55 +2214,41 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
           </div>
         ) : (
           <>
-            {/* Compact label bar – color accent only */}
-            {!isUser && styling && (
-              <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b border-slate-200/60 dark:border-slate-700/60">
-                <span
-                  className={cn(
-                    "w-1 h-4 rounded-full shrink-0",
-                    styling.type === "success" && "bg-emerald-500",
-                    styling.type === "warning" && "bg-amber-500",
-                    styling.type === "metric" && "bg-blue-500",
-                    styling.type === "error" && "bg-red-500",
-                    styling.type === "info" && "bg-slate-400"
-                  )}
+            {/* COHI structured response – no label bar or speaker; only icon + answer */}
+            {!isUser && message.responsePlan && message.responsePlan.sections?.length > 0 && (
+              <div className="px-4 pt-3 pb-3">
+                <CohiInsightPanel
+                  responsePlan={message.responsePlan}
+                  dataPayloads={message.dataPayloads ?? {}}
+                  excludeSectionTypes={['chart', 'ranked_table', 'grouped_table', 'kpi_cards']}
+                  compact
+                  className="space-y-2"
                 />
-                <span
-                  className={cn(
-                    "text-[11px] font-medium uppercase tracking-wider",
-                    styling.accentColor
-                  )}
-                >
-                  {styling.type === "success" && "Positive trend"}
-                  {styling.type === "warning" && "Needs attention"}
-                  {styling.type === "metric" && "Key metric"}
-                  {styling.type === "error" && "Alert"}
-                  {styling.type === "info" && "Analysis"}
-                </span>
-                {voiceEnabled && (
-                  <button
-                    onClick={() => onSpeak(message.content)}
-                    className="ml-auto p-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-700/60 transition-colors text-slate-500"
-                    title="Read aloud"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
               </div>
             )}
-
-            {/* Text content with full markdown support */}
-            {messageContent && (
-              <div
-                className={cn(
-                  "text-sm whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-200",
-                  isUser ? "" : "px-4 pt-3 pb-3"
-                )}
-              >
-                {renderMarkdownText(messageContent)}
+            
+            {/* Text content (when no responsePlan or as fallback) */}
+            {textParts.length > 0 && !message.responsePlan?.sections?.length && (
+              isUser ? (
+                <div className="flex items-start gap-2">
+                  <User className="h-4 w-4 text-sky-400 dark:text-sky-300 shrink-0 mt-0.5" />
+                  <p className="text-xs text-foreground leading-snug whitespace-pre-wrap">
+                    {textParts.join('\n')}
+                  </p>
+                </div>
+              ) : (
+                <p className="px-4 pt-3 pb-3 text-sm whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-200">
+                  {textParts.join('\n')}
+                </p>
+              )
+            )}
+            {/* Bullet points */}
+            {bulletItems.length > 0 && !message.responsePlan?.sections?.length && (
+              <div className="px-4 pb-3">
+                <AnimatedBulletList items={bulletItems} />
               </div>
             )}
-
+            
             {/* Error */}
             {message.error && (
               <div className="mx-4 mb-3 px-3 py-2 flex items-center gap-2 text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-950/30 rounded-xl">
@@ -3081,244 +2256,162 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                 <span>Error: {message.error}</span>
               </div>
             )}
-
+            
             {/* Chart + Insights – clean separation */}
-            {message.visualization &&
-              !message.error &&
-              (() => {
-                const effectiveType = (vizTypeOverride ??
-                  message.visualization!.type) as any;
-                const vizConfig = {
-                  ...message.visualization!,
-                  type: effectiveType,
-                };
-                return (
-                  <motion.div
-                    id={`cohi-viz-${message.id}`}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="mt-0 mx-0 mb-0 max-w-full min-w-0 border-t border-slate-200/60 dark:border-slate-700/60"
-                  >
-                    <EnhancedVisualization
-                      config={{
-                        type: effectiveType,
-                        title: vizConfig.title || "Data Analysis",
-                        subtitle: "Click on data points to drill down",
-                        data: vizConfig.data || [],
-                        xKey: vizConfig.xKey || vizConfig.nameKey,
-                        yKey: vizConfig.yKey || vizConfig.valueKey,
-                        yKeys: vizConfig.yKeys,
-                        colors: vizConfig.colors,
-                        showLegend: vizConfig.showLegend,
-                        showGrid: vizConfig.showGrid,
-                        stacked: vizConfig.stacked,
-                        animated: true,
-                        drilldownEnabled: true,
-                        insights: generateCohiInsights(vizConfig),
-                      }}
-                      height={isExpanded ? 300 : 220}
-                      showInsights={true}
-                      onDrilldown={onDrilldown}
-                    />
-
-                    {/* Design options – click to change chart type */}
-                    <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40">
-                      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">
-                        Design:
-                      </span>
-                      {VIZ_DESIGN_OPTIONS.map(({ type, label, Icon }) => (
-                        <Button
-                          key={type}
-                          variant="ghost"
-                          size="sm"
-                          className={cn(
-                            "h-7 px-2 text-xs rounded-lg",
-                            effectiveType === type
-                              ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium"
-                              : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
-                          )}
-                          onClick={() =>
-                            onDesignOptionClick?.(message.id, type)
-                          }
-                        >
-                          <Icon className="w-3 h-3 mr-1" />
-                          {label}
-                        </Button>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-3 bg-slate-100/60 dark:bg-slate-800/30">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                          {effectiveType}
-                        </span>
-                        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
-                          AI
-                        </span>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs h-8 rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                          >
-                            <Save className="w-3 h-3 mr-1.5" />
-                            Save & export
-                            <ChevronDown className="w-3 h-3 ml-1" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="w-64 z-[10001]"
-                          sideOffset={4}
-                        >
-                          <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
-                            Save
-                          </DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() => onSave(vizConfig, message.content)}
-                            className="gap-2 py-2"
-                          >
-                            <Save className="w-4 h-4 text-slate-500 shrink-0" />
-                            <span>Save to Dashboard</span>
-                          </DropdownMenuItem>
-                          {onAddToChatCanvas && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onAddToChatCanvas({
-                                  title: vizConfig.title ?? "Insight",
-                                  content: message.content,
-                                  visualization: vizConfig,
-                                })
-                              }
-                              className="gap-2 py-2"
-                            >
-                              <LayoutGrid className="w-4 h-4 text-indigo-500 shrink-0" />
-                              <span>Add to chat canvas</span>
-                            </DropdownMenuItem>
-                          )}
-                          {onPinToCanvas && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onPinToCanvas({
-                                  title: vizConfig.title ?? "Insight",
-                                  content: message.content,
-                                  visualization: vizConfig,
-                                })
-                              }
-                              className="gap-2 py-2"
-                            >
-                              <Pin className="w-4 h-4 text-amber-500 shrink-0" />
-                              <span>Pin to canvas</span>
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
-                            Export
-                          </DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() => onExportPDF?.(vizConfig)}
-                            className="gap-2 py-2"
-                          >
-                            <FileText className="w-4 h-4 text-red-500 shrink-0" />
-                            <span>Download PDF</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => onExportExcel?.(vizConfig)}
-                            className="gap-2 py-2"
-                          >
-                            <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>Export Excel (CSV)</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => onExportPPT?.(vizConfig)}
-                            className="gap-2 py-2"
-                          >
-                            <Presentation className="w-4 h-4 text-orange-500 shrink-0" />
-                            <span>Add to PowerPoint</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              onExportImage?.(vizConfig, message.id)
-                            }
-                            className="gap-2 py-2"
-                          >
-                            <Image className="w-4 h-4 text-violet-500 shrink-0" />
-                            <span>Download as Image</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
-                            Share
-                          </DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onClick={() => onCopyLink?.(vizConfig)}
-                            className="gap-2 py-2"
-                          >
-                            <Link className="w-4 h-4 text-blue-500 shrink-0" />
-                            <span>Copy link</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuSub>
-                            <DropdownMenuSubTrigger className="gap-2 py-2">
-                              <Mail className="w-4 h-4 text-purple-500 shrink-0" />
-                              <span>Email</span>
-                            </DropdownMenuSubTrigger>
-                            <DropdownMenuSubContent className="w-56 z-[10002]">
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  onEmailWithScreenshot?.(vizConfig, message.id)
-                                }
-                                className="gap-2 py-2.5"
-                              >
-                                <Image className="w-4 h-4 text-violet-500 shrink-0" />
-                                <div className="flex flex-col items-start gap-0.5">
-                                  <span className="text-sm font-medium">
-                                    Image in body
-                                  </span>
-                                  <span className="text-[10px] text-slate-400">
-                                    Screenshot copied; paste into email
-                                  </span>
-                                </div>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => onEmailWithLink?.(vizConfig)}
-                                className="gap-2 py-2.5"
-                              >
-                                <Link className="w-4 h-4 text-blue-500 shrink-0" />
-                                <div className="flex flex-col items-start gap-0.5">
-                                  <span className="text-sm font-medium">
-                                    Link to live chart
-                                  </span>
-                                  <span className="text-[10px] text-slate-400">
-                                    Recipient opens chart in app
-                                  </span>
-                                </div>
-                              </DropdownMenuItem>
-                            </DropdownMenuSubContent>
-                          </DropdownMenuSub>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </motion.div>
-                );
-              })()}
-            {/* COHI response plan – structured insights and charts from /api/cohi/query */}
-            {message.responsePlan && !message.error && (
+            {message.visualization && !message.error && (() => {
+              const effectiveType = (vizTypeOverride ?? message.visualization!.type) as any;
+              const vizConfig = { ...message.visualization!, type: effectiveType };
+              return (
               <motion.div
-                id={`cohi-insight-${message.id}`}
+                id={`cohi-viz-${message.id}`}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
                 className="mt-0 mx-0 mb-0 max-w-full min-w-0 border-t border-slate-200/60 dark:border-slate-700/60"
               >
-                <CohiInsightPanel
-                  responsePlan={message.responsePlan}
-                  dataPayloads={message.dataPayloads ?? {}}
-                  className="px-4 py-3"
+                <EnhancedVisualization
+                  config={{
+                    type: effectiveType,
+                    title: vizConfig.title || 'Data Analysis',
+                    subtitle: 'Click on data points to drill down',
+                    data: vizConfig.data || [],
+                    xKey: vizConfig.xKey || vizConfig.nameKey,
+                    yKey: vizConfig.yKey || vizConfig.valueKey,
+                    yKeys: vizConfig.yKeys,
+                    colors: vizConfig.colors,
+                    showLegend: vizConfig.showLegend,
+                    showGrid: vizConfig.showGrid,
+                    stacked: vizConfig.stacked,
+                    animated: true,
+                    drilldownEnabled: true,
+                    insights: generateCohiInsights(vizConfig),
+                  }}
+                  height={isExpanded ? 300 : 220}
+                  showInsights={true}
+                  onDrilldown={onDrilldown}
                 />
+
+                {/* Design options – click to change chart type */}
+                <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40">
+                  <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-1">Design:</span>
+                  {VIZ_DESIGN_OPTIONS.map(({ type, label, Icon }) => (
+                    <Button
+                      key={type}
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        "h-7 px-2 text-xs rounded-lg",
+                        effectiveType === type
+                          ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium"
+                          : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                      )}
+                      onClick={() => onDesignOptionClick?.(message.id, type)}
+                    >
+                      <Icon className="w-3 h-3 mr-1" />
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-3 bg-slate-100/60 dark:bg-slate-800/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">{effectiveType}</span>
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">AI</span>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-8 rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                      >
+                        <Save className="w-3 h-3 mr-1.5" />
+                        Save & export
+                        <ChevronDown className="w-3 h-3 ml-1" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64 z-[10001]" sideOffset={4}>
+                      <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
+                        Save
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => onSave(vizConfig, message.content)} className="gap-2 py-2">
+                        <Save className="w-4 h-4 text-slate-500 shrink-0" />
+                        <span>Save to Dashboard</span>
+                      </DropdownMenuItem>
+                      {onAddToChatCanvas && (
+                        <DropdownMenuItem
+                          onClick={() => onAddToChatCanvas({ title: vizConfig.title ?? 'Insight', content: message.content, visualization: vizConfig })}
+                          className="gap-2 py-2"
+                        >
+                          <LayoutGrid className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <span>Add to chat canvas</span>
+                        </DropdownMenuItem>
+                      )}
+                      {onPinToCanvas && (
+                        <DropdownMenuItem
+                          onClick={() => onPinToCanvas({ title: vizConfig.title ?? 'Insight', content: message.content, visualization: vizConfig })}
+                          className="gap-2 py-2"
+                        >
+                          <Pin className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span>Pin to canvas</span>
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
+                        Export
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => onExportPDF?.(vizConfig)} className="gap-2 py-2">
+                        <FileText className="w-4 h-4 text-red-500 shrink-0" />
+                        <span>Download PDF</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onExportExcel?.(vizConfig)} className="gap-2 py-2">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Export Excel (CSV)</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onExportPPT?.(vizConfig)} className="gap-2 py-2">
+                        <Presentation className="w-4 h-4 text-orange-500 shrink-0" />
+                        <span>Add to PowerPoint</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onExportImage?.(vizConfig, message.id)} className="gap-2 py-2">
+                        <Image className="w-4 h-4 text-violet-500 shrink-0" />
+                        <span>Download as Image</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
+                        Share
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => onCopyLink?.(vizConfig)} className="gap-2 py-2">
+                        <Link className="w-4 h-4 text-blue-500 shrink-0" />
+                        <span>Copy link</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="gap-2 py-2">
+                          <Mail className="w-4 h-4 text-purple-500 shrink-0" />
+                          <span>Email</span>
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="w-56 z-[10002]">
+                          <DropdownMenuItem onClick={() => onEmailWithScreenshot?.(vizConfig, message.id)} className="gap-2 py-2.5">
+                            <Image className="w-4 h-4 text-violet-500 shrink-0" />
+                            <div className="flex flex-col items-start gap-0.5">
+                              <span className="text-sm font-medium">Image in body</span>
+                              <span className="text-[10px] text-slate-400">Screenshot copied; paste into email</span>
+                            </div>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onEmailWithLink?.(vizConfig)} className="gap-2 py-2.5">
+                            <Link className="w-4 h-4 text-blue-500 shrink-0" />
+                            <div className="flex flex-col items-start gap-0.5">
+                              <span className="text-sm font-medium">Link to live chart</span>
+                              <span className="text-[10px] text-slate-400">Recipient opens chart in app</span>
+                            </div>
+                          </DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </motion.div>
-            )}
+              );
+            })()}
           </>
         )}
       </div>

@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Star, ArrowRight } from 'lucide-react';
 import { Navigation } from '@/components/layout/Navigation';
-import { WorkbenchTopBar } from '@/components/workbench/WorkbenchTopBar';
 import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
 import { AskCohiChat } from '@/components/workbench/AskCohiChat';
 import { IconBadge } from '@/components/workbench/IconBadge';
@@ -43,7 +42,6 @@ export default function Favorites() {
           onSidebarCollapsedChange={setSidebarCollapsed}
         />
         <div className="flex-1 flex flex-col min-w-0">
-          <WorkbenchTopBar onOpenSidebar={() => setSidebarOpen(true)} onAsk={sendPrompt} />
           <main className="flex-1 relative w-full min-h-0 overflow-hidden">
             <div className="h-full overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
               <div className="max-w-[1600px] mx-auto">
@@ -52,10 +50,10 @@ export default function Favorites() {
                     <IconBadge icon={Star} variant="amber" size="xl" rounded="2xl" />
                     <div>
                       <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                        Favorites
+                        Bookmarks
                       </h1>
                       <p className="mt-1.5 text-[15px] text-slate-600 dark:text-slate-400 max-w-xl">
-                        Quick access to dashboards and reports you have starred.
+                        Quick access to dashboards and reports you have bookmarked.
                       </p>
                       <Link
                         to="/my-dashboard"
@@ -70,9 +68,9 @@ export default function Favorites() {
 
                 <div className="rounded-2xl border border-dashed border-slate-200/80 dark:border-slate-700/70 bg-white/90 dark:bg-slate-900/70 p-6 sm:p-8 text-center">
                   <IconBadge icon={Star} variant="amber" size="lg" rounded="xl" className="mx-auto mb-3" />
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No favorites yet</p>
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">No bookmarks yet</p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Star a dashboard or report to pin it here for quick access.
+                    Bookmark a dashboard or report to pin it here for quick access.
                   </p>
                 </div>
               </div>
