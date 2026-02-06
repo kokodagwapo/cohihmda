@@ -74,7 +74,14 @@ function getPool(): pg.Pool {
     // - Elastic Beanstalk may not set NODE_ENV=production by default
     // - Default: enable SSL for any non-local host, but allow override via DB_SSL
     const dbSslEnv = (process.env.DB_SSL || '').trim().toLowerCase();
-    const isLocalHost = dbHost === '127.0.0.1' || dbHost === 'localhost';
+    // Treat common local/dev docker hostnames as "local" (no SSL by default)
+    // Docker Compose service names like "postgres" do not support SSL by default.
+    const isLocalHost =
+      dbHost === '127.0.0.1' ||
+      dbHost === 'localhost' ||
+      dbHost === 'postgres' ||
+      dbHost === 'coheus-postgres' ||
+      dbHost === 'host.docker.internal';
     const sslEnabled =
       dbSslEnv === 'true' || dbSslEnv === '1' || dbSslEnv === 'on'
         ? true

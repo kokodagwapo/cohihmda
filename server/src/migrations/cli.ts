@@ -36,14 +36,17 @@ dotenv.config({ path: path.join(__dirname, "../../.env") });
 
 const { Pool } = pg;
 
-// Database configuration from environment
+// Database configuration from environment (disable SSL for local/Docker hostnames)
+const rawHost = (process.env.DB_HOST || "localhost").trim();
 const isRemoteHost =
-  process.env.DB_HOST &&
-  process.env.DB_HOST !== "localhost" &&
-  process.env.DB_HOST !== "127.0.0.1";
+  rawHost !== "localhost" &&
+  rawHost !== "127.0.0.1" &&
+  rawHost !== "postgres" &&
+  rawHost !== "coheus-postgres" &&
+  rawHost !== "host.docker.internal";
 
 const DB_CONFIG = {
-  host: (process.env.DB_HOST || "localhost").trim(),
+  host: rawHost,
   port: parseInt(process.env.DB_PORT || "5432"),
   user: process.env.DB_USER || "postgres",
   password: process.env.DB_PASSWORD || "postgres",

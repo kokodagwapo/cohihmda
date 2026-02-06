@@ -114,9 +114,10 @@ export const TenantSelector = ({
 
   // Compact mode for header placement (nav-style)
   if (compact) {
-    const selectedTenantName = tenants.find(
-      (t) => t.id === selectedTenantId
-    )?.name;
+    const selectedTenantName =
+      selectedTenantId === "homestead"
+        ? "Homestead (local)"
+        : tenants.find((t) => t.id === selectedTenantId)?.name;
 
     return (
       <div className="flex items-center gap-2">
@@ -139,6 +140,9 @@ export const TenantSelector = ({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__default__">My Tenant (Default)</SelectItem>
+            {import.meta.env.DEV && (
+              <SelectItem value="homestead">Homestead (local DB)</SelectItem>
+            )}
             {tenants && Array.isArray(tenants) && tenants.length > 0
               ? tenants.map((tenant) => (
                   <SelectItem key={tenant.id} value={tenant.id}>
@@ -190,6 +194,9 @@ export const TenantSelector = ({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">My Tenant (Default)</SelectItem>
+              {import.meta.env.DEV && (
+                <SelectItem value="homestead">Homestead (local DB from env)</SelectItem>
+              )}
               {tenants && Array.isArray(tenants) && tenants.length > 0
                 ? tenants.map((tenant) => (
                     <SelectItem key={tenant.id} value={tenant.id}>
@@ -217,8 +224,10 @@ export const TenantSelector = ({
         {selectedTenantId && (
           <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-light">
             ⚠️ You are viewing data for:{" "}
-            {tenants.find((t) => t.id === selectedTenantId)?.name ||
-              "Selected Tenant"}
+            {selectedTenantId === "homestead"
+              ? "Homestead (local DB)"
+              : tenants.find((t) => t.id === selectedTenantId)?.name ||
+                "Selected Tenant"}
           </p>
         )}
       </CardContent>

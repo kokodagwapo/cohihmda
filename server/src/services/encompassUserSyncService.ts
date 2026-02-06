@@ -469,7 +469,7 @@ export class EncompassUserSyncService {
       if (invite_method === "email" && inviteToken) {
         try {
           const frontendUrl =
-            process.env.FRONTEND_URL || "http://localhost:5173";
+            process.env.FRONTEND_URL || "http://localhost:5000";
           const inviteUrl = `${frontendUrl}/accept-invite?token=${inviteToken}&email=${encodeURIComponent(encompassUser.email)}`;
 
           // Get tenant name

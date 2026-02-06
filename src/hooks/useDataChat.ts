@@ -45,12 +45,18 @@ export interface VisualizationConfig {
   };
 }
 
+import type { ResponsePlan } from "@/types/cohiResponsePlan";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Legacy single-chart response (data-chat/ask) */
   visualization?: VisualizationConfig;
   data?: any[];
+  /** COHI structured response (api/cohi/query) */
+  responsePlan?: ResponsePlan;
+  dataPayloads?: Record<string, unknown[]>;
   timestamp: Date;
   isLoading?: boolean;
   error?: string;
@@ -534,68 +540,63 @@ export function useDataChat(options: UseChatOptions = {}) {
 
       try {
         const effectiveTenantId = await getEffectiveTenantId();
-        const endpoint = effectiveTenantId
-          ? `/api/data-chat/ask?tenant_id=${encodeURIComponent(
-              effectiveTenantId
-            )}`
-          : "/api/data-chat/ask";
-        const response = await api.request<DataChatResponse>(endpoint, {
+        const cohiEndpoint = effectiveTenantId
+          ? `/api/cohi/query?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+          : "/api/cohi/query";
+        const cohiResponse = await api.request<{
+          responsePlan: ResponsePlan;
+          dataPayloads?: Record<string, unknown[]>;
+          audit?: { generatedAt: string; latencyMs?: number };
+        }>(cohiEndpoint, {
           method: "POST",
           body: JSON.stringify({
             question: question.trim(),
-            sessionId,
-            conversationHistory: messages.slice(-6).map((m) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              timestamp: m.timestamp,
-            })),
+            context: {},
           }),
         });
 
-        // Update assistant message with response
+        const plan = cohiResponse.responsePlan;
+        const dataPayloads = cohiResponse.dataPayloads ?? {};
+
         const assistantMessage: ChatMessage = {
           id: assistantMessageId,
           role: "assistant",
-          content: response.message,
-          visualization: response.visualization,
-          data: response.data,
+          content: plan.title && plan.sections?.length ? plan.title : "Here’s what I found.",
+          responsePlan: plan,
+          dataPayloads,
           timestamp: new Date(),
-          error: response.error,
+          error: undefined,
         };
 
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantMessageId ? assistantMessage : m))
         );
 
-        if (response.suggestedQuestions) {
-          setSuggestedQuestions(response.suggestedQuestions);
+        if (plan.missing_data_requests?.length) {
+          setSuggestedQuestions(plan.missing_data_requests.map((r) => r.question));
+        } else {
+          setSuggestedQuestions([
+            "Who are the top performers this month?",
+            "Show bottom performers by pull-through last 90 days",
+            "What do I need to know today?",
+          ]);
         }
       } catch (error: any) {
-        console.error(
-          "[DataChat] Error sending message, using demo mode:",
-          error
-        );
-
-        // Use demo response with visualizations when API fails
-        const demoResponse = generateDemoResponse(question.trim());
-
-        const demoMessage: ChatMessage = {
+        console.error("[DataChat] COHI query failed:", error);
+        const errorMessage: ChatMessage = {
           id: assistantMessageId,
           role: "assistant",
-          content: demoResponse.message,
-          visualization: demoResponse.visualization,
-          data: demoResponse.data,
+          content: "I couldn’t process that. Please check your connection and try again.",
           timestamp: new Date(),
+          error: error?.message ?? "Request failed",
         };
-
         setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? demoMessage : m))
+          prev.map((m) => (m.id === assistantMessageId ? errorMessage : m))
         );
-
-        if (demoResponse.suggestedQuestions) {
-          setSuggestedQuestions(demoResponse.suggestedQuestions);
-        }
+        setSuggestedQuestions([
+          "Who are the top performers this month?",
+          "What do I need to know today?",
+        ]);
       } finally {
         setIsLoading(false);
       }

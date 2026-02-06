@@ -48,6 +48,9 @@ import {
   TrendingUp,
   LineChart,
   Calculator,
+  MessageSquare,
+  Send,
+  Pin,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -77,6 +80,8 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useCanvasHistory } from '@/hooks/useCanvasHistory';
+import { useCohiQuery } from '@/hooks/useCohiQuery';
+import { CohiInsightPanel } from '@/components/cohi/CohiInsightPanel';
 import { useCanvasPinStore } from '@/stores/canvasPinStore';
 import { WidgetRenderer } from '@/components/workbench/canvas/WidgetRenderer';
 import { CanvasWidgetCard } from '@/components/workbench/canvas/CanvasWidgetCard';
@@ -341,9 +346,11 @@ function convertLayoutToPixels(
 export interface WorkbenchCanvasProps {
   loadCanvasId?: string | null;
   onLoaded?: () => void;
+  /** Optional tenant id for COHI chat in empty state (e.g. from useTenantStore) */
+  tenantId?: string;
 }
 
-export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps) {
+export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchCanvasProps) {
   const {
     items,
     annotations,
@@ -379,6 +386,8 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
+  const [cohiQuestion, setCohiQuestion] = useState('');
+  const { query: cohiQuery, loading: cohiLoading, responsePlan: cohiResponsePlan, dataPayloads: cohiDataPayloads, reset: cohiReset } = useCohiQuery({ tenantId });
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -615,6 +624,32 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
     },
     [items, setItemsWithHistory, toast]
   );
+
+  const handleCohiSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const q = cohiQuestion.trim();
+      if (!q || cohiLoading) return;
+      try {
+        await cohiQuery(q);
+      } catch {
+        toast({ title: 'Cohi query failed', variant: 'destructive' });
+      }
+    },
+    [cohiQuestion, cohiLoading, cohiQuery, toast]
+  );
+
+  const handlePinCohiToCanvas = useCallback(() => {
+    if (!cohiResponsePlan) return;
+    addWidget(
+      'cohi_insight',
+      { type: 'cohi_insight', responsePlan: cohiResponsePlan, dataPayloads: cohiDataPayloads },
+      { w: 480, h: 360 }
+    );
+    cohiReset();
+    setCohiQuestion('');
+    toast({ title: 'Insight pinned to canvas' });
+  }, [cohiResponsePlan, cohiDataPayloads, addWidget, cohiReset, toast]);
 
   const applyTemplate = useCallback(
     (template: (typeof CANVAS_TEMPLATES)[number]) => {
@@ -1758,7 +1793,57 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
                 );
               })
             ) : (
-              <div className="flex items-center justify-center p-8 min-h-[400px]">
+              <div className="flex flex-col items-center justify-center p-8 min-h-[400px] gap-8">
+                {/* COHI Chat in the center of the canvas */}
+                <div className="w-full max-w-xl mx-auto">
+                  <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/70 bg-white/95 dark:bg-slate-900/95 shadow-lg overflow-hidden">
+                    <div className="px-4 py-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/80 flex items-center gap-2">
+                      <MessageSquare className="h-5 w-5 text-sky-500 dark:text-sky-400" />
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Chat with Cohi</h3>
+                    </div>
+                    {!cohiResponsePlan ? (
+                      <>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 px-4 pt-3 pb-2">
+                          Ask about pipeline, fundings, TopTiering, or upload a CSV to analyze. Pin insights to this canvas.
+                        </p>
+                        <form onSubmit={handleCohiSubmit} className="p-4 flex gap-2">
+                          <Input
+                            placeholder="e.g. Show me loan volume by channel"
+                            value={cohiQuestion}
+                            onChange={(e) => setCohiQuestion(e.target.value)}
+                            disabled={cohiLoading}
+                            className="flex-1"
+                          />
+                          <Button type="submit" size="sm" disabled={!cohiQuestion.trim() || cohiLoading} className="gap-1.5">
+                            {cohiLoading ? (
+                              <>Sending…</>
+                            ) : (
+                              <>
+                                <Send className="h-4 w-4" />
+                                Ask
+                              </>
+                            )}
+                          </Button>
+                        </form>
+                      </>
+                    ) : (
+                      <div className="p-4 space-y-4">
+                        <div className="max-h-[50vh] overflow-auto rounded-lg border border-slate-200/70 dark:border-slate-700/70 bg-white dark:bg-slate-900/50 p-3">
+                          <CohiInsightPanel responsePlan={cohiResponsePlan} dataPayloads={cohiDataPayloads} />
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <Button variant="outline" size="sm" onClick={() => { cohiReset(); setCohiQuestion(''); }}>
+                            Ask another
+                          </Button>
+                          <Button size="sm" className="gap-1.5" onClick={handlePinCohiToCanvas}>
+                            <Pin className="h-4 w-4" />
+                            Pin to canvas
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div className="text-center max-w-md">
                   <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                     <LayoutDashboard className="w-8 h-8 text-slate-400 dark:text-slate-500" />

@@ -105,7 +105,12 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
 
     // Create tenant database schema
     // Use SSL for non-local hosts (Aurora requires SSL)
-    const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1';
+    const isLocalHost =
+      dbHost === 'localhost' ||
+      dbHost === '127.0.0.1' ||
+      dbHost === 'postgres' ||
+      dbHost === 'coheus-postgres' ||
+      dbHost === 'host.docker.internal';
     const tenantPool = new Pool({
       host: dbHost,
       port: dbPort,
@@ -158,7 +163,12 @@ async function createTenantDatabase(
   dbPort: number
 ): Promise<void> {
   // Connect to postgres database to create new database
-  const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1';
+  const isLocalHost =
+    dbHost === 'localhost' ||
+    dbHost === '127.0.0.1' ||
+    dbHost === 'postgres' ||
+    dbHost === 'coheus-postgres' ||
+    dbHost === 'host.docker.internal';
   
   console.log(`[TenantProvisioning] Creating database ${databaseName} on ${dbHost}:${dbPort}`);
   

@@ -166,24 +166,27 @@ export async function attachTenantContext(
         userRole,
         queryTenantId,
       });
-      // Verify tenant exists
-      const tenantCheck = await managementPool.query(
-        `SELECT id FROM coheus_tenants WHERE id = $1 AND status = 'active'`,
-        [queryTenantId]
-      );
-      if (tenantCheck.rows.length > 0) {
+      // Development: allow "homestead" without management DB record (uses env-based config)
+      const devHomestead =
+        process.env.NODE_ENV === "development" &&
+        (queryTenantId === "homestead" || process.env.USE_HOMESTEAD_DB === "true");
+      if (devHomestead) {
         tenantId = queryTenantId;
-        console.log(
-          "[TenantContext] Tenant verified, using query tenant:",
-          tenantId
-        );
+        console.log("[TenantContext] Using development homestead tenant");
       } else {
-        console.warn(
-          "[TenantContext] Tenant not found or inactive:",
-          queryTenantId
+        // Verify tenant exists in management DB (by id or slug)
+        const tenantCheck = await managementPool.query(
+          `SELECT id FROM coheus_tenants WHERE (id = $1 OR slug = $1) AND status = 'active'`,
+          [queryTenantId, queryTenantId]
         );
-        res.status(404).json({ error: "Tenant not found or inactive" });
-        return;
+        if (tenantCheck.rows.length > 0) {
+          tenantId = tenantCheck.rows[0].id;
+          console.log("[TenantContext] Tenant verified, using query tenant:", tenantId);
+        } else {
+          console.warn("[TenantContext] Tenant not found or inactive:", queryTenantId);
+          res.status(404).json({ error: "Tenant not found or inactive" });
+          return;
+        }
       }
     } else if (queryTenantId && !isPlatformStaff) {
       // Non-platform users cannot use tenant_id query param - silently ignore it

@@ -92,7 +92,11 @@ function getManagementPool(): pg.Pool {
       user: process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres",
       ssl:
-        rawHost !== "127.0.0.1" && rawHost !== "localhost"
+        rawHost !== "127.0.0.1" &&
+        rawHost !== "localhost" &&
+        rawHost !== "postgres" &&
+        rawHost !== "coheus-postgres" &&
+        rawHost !== "host.docker.internal"
           ? { rejectUnauthorized: false }
           : false,
       max: 10,
@@ -137,7 +141,11 @@ async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
       user: tenant.database_user || process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres", // TODO: Decrypt tenant password
       ssl:
-        dbHost !== "127.0.0.1" && dbHost !== "localhost"
+        dbHost !== "127.0.0.1" &&
+        dbHost !== "localhost" &&
+        dbHost !== "postgres" &&
+        dbHost !== "coheus-postgres" &&
+        dbHost !== "host.docker.internal"
           ? { rejectUnauthorized: false }
           : false,
       max: 5,
@@ -786,7 +794,7 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
     });
 
     // Send reset email
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5000";
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {

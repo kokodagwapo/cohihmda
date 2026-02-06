@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Download,
+  Share2,
   FileSpreadsheet,
   FileImage,
   FileText,
@@ -15,6 +15,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -130,47 +135,55 @@ export function ExportShareMenu({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            disabled={disabled}
-            aria-label="Export or share"
-          >
-            <Download className="w-4 h-4" />
-            Export / Share
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onClick={() => handleExport("excel")}>
-            <FileSpreadsheet className="w-4 h-4 mr-2" />
-            Excel
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleExport("pdf")}>
-            <FileText className="w-4 h-4 mr-2" />
-            PDF
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleExport("ppt")}>
-            <Presentation className="w-4 h-4 mr-2" />
-            PowerPoint
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleExport("png")}>
-            <FileImage className="w-4 h-4 mr-2" />
-            PNG
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleExport("jpeg")}>
-            <FileImage className="w-4 h-4 mr-2" />
-            JPEG
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setShareOpen(true)}>
-            <LinkIcon className="w-4 h-4 mr-2" />
-            Share link (PIN)
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  disabled={disabled}
+                  aria-label="Export or share"
+                >
+                  <Share2 className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => handleExport("excel")}>
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("ppt")}>
+                  <Presentation className="w-4 h-4 mr-2" />
+                  PowerPoint
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("png")}>
+                  <FileImage className="w-4 h-4 mr-2" />
+                  PNG
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("jpeg")}>
+                  <FileImage className="w-4 h-4 mr-2" />
+                  JPEG
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShareOpen(true)}>
+                  <LinkIcon className="w-4 h-4 mr-2" />
+                  Share link (PIN)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs font-normal">
+          Export / Share
+        </TooltipContent>
+      </Tooltip>
 
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent className="w-[95vw] max-w-md bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">

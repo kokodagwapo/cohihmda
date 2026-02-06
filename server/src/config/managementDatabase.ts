@@ -26,7 +26,15 @@ function createManagementPool(): pg.Pool {
     database: managementDbName,
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
-    ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
+    // Disable SSL for local/dev docker hostnames; enable SSL for typical remote hosts (RDS/Aurora)
+    ssl:
+      rawHost !== '127.0.0.1' &&
+      rawHost !== 'localhost' &&
+      rawHost !== 'postgres' &&
+      rawHost !== 'coheus-postgres' &&
+      rawHost !== 'host.docker.internal'
+        ? { rejectUnauthorized: false }
+        : false,
     max: 20, // Increased pool size
     min: 2, // Keep minimum connections alive
     idleTimeoutMillis: 60000, // 60 seconds idle timeout

@@ -46,6 +46,36 @@ class TenantDatabaseManager {
     tenantIdOrSlug: string,
     retries = 2
   ): Promise<TenantDatabaseConfig> {
+    // Development fallback: use env-based homestead tenant when not in management DB
+    const useHomesteadDev =
+      process.env.NODE_ENV === "development" &&
+      (tenantIdOrSlug === "homestead" || process.env.USE_HOMESTEAD_DB === "true");
+    if (useHomesteadDev) {
+      const dbHost = process.env.DB_HOST || "127.0.0.1";
+      const dbPort = parseInt(process.env.DB_PORT || "5432", 10);
+      const dbName =
+        process.env.HOMESTEAD_DB_NAME || "coheus_tenant_homestead";
+      const dbUser = process.env.DB_USER || "postgres";
+      const dbPassword = process.env.DB_PASSWORD || "postgres";
+      console.log("[TenantDB] Using development homestead config from env", {
+        database_name: dbName,
+        host: dbHost,
+        port: dbPort,
+      });
+      return {
+        id: "homestead",
+        name: "Homestead (local)",
+        slug: "homestead",
+        database_name: dbName,
+        database_host: dbHost,
+        database_port: dbPort,
+        database_user: dbUser,
+        database_password: dbPassword,
+        status: "active",
+        deployment_type: "development",
+      };
+    }
+
     let lastError: Error | null = null;
 
     // Determine if this is a UUID or a slug
@@ -183,8 +213,14 @@ class TenantDatabaseManager {
     const isLocalHost =
       config.database_host === "localhost" ||
       config.database_host === "127.0.0.1" ||
+      // Docker Compose service/container hostnames (local dev)
+      config.database_host === "postgres" ||
+      config.database_host === "coheus-postgres" ||
+      config.database_host === "host.docker.internal" ||
+      // Common private network ranges (local/VPN/dev)
+      config.database_host.startsWith("10.") ||
       config.database_host.startsWith("172.") ||
-      config.database_host.startsWith("10.");
+      config.database_host.startsWith("192.168.");
     const sslEnabled = !isLocalHost;
 
     // Create pool for tenant database with balanced settings

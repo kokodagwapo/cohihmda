@@ -40,7 +40,11 @@ function getManagementPool(): pg.Pool {
       user: process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres",
       ssl:
-        rawHost !== "127.0.0.1" && rawHost !== "localhost"
+        rawHost !== "127.0.0.1" &&
+        rawHost !== "localhost" &&
+        rawHost !== "postgres" &&
+        rawHost !== "coheus-postgres" &&
+        rawHost !== "host.docker.internal"
           ? { rejectUnauthorized: false }
           : false,
       max: 10,
@@ -73,7 +77,11 @@ async function getTenantPoolBySlug(
       user: tenant.database_user || process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres",
       ssl:
-        dbHost !== "127.0.0.1" && dbHost !== "localhost"
+        dbHost !== "127.0.0.1" &&
+        dbHost !== "localhost" &&
+        dbHost !== "postgres" &&
+        dbHost !== "coheus-postgres" &&
+        dbHost !== "host.docker.internal"
           ? { rejectUnauthorized: false }
           : false,
       max: 5,
@@ -96,18 +104,52 @@ function getJwtSecret(): string {
 interface SsoState {
   tenantSlug?: string;
   returnUrl?: string;
+  redirectUri?: string; // same redirect_uri used in authorize, for token exchange
   nonce: string;
   timestamp: number;
 }
 
 /**
- * Get the primary frontend URL for SSO redirects
- * FRONTEND_URL may contain comma-separated values for CORS, but we need just the first one
+ * Get the primary frontend URL for SSO redirects (must match Cognito Allowed callback URLs).
+ * FRONTEND_URL may contain comma-separated values for CORS; we use the first for redirect_uri.
+ * Default 5000 matches vite.config.ts dev server port.
  */
 function getPrimaryFrontendUrl(): string {
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-  // Handle comma-separated URLs (take the first one)
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5000";
   return frontendUrl.split(",")[0].trim();
+}
+
+/** Allowed origins for redirect_uri (localhost, 127.0.0.1, or any origin in FRONTEND_URL). */
+function getAllowedOrigins(): string[] {
+  const fromEnv = (process.env.FRONTEND_URL || "http://localhost:5000")
+    .split(",")
+    .map((u) => u.trim().replace(/\/$/, ""));
+  return [
+    "http://localhost:5000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://localhost:8084",
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:8084",
+    ...fromEnv,
+  ];
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin || typeof origin !== "string") return false;
+  const normalized = origin.trim().toLowerCase().replace(/\/$/, "");
+  const allowed = getAllowedOrigins().map((o) => o.trim().toLowerCase().replace(/\/$/, ""));
+  if (allowed.includes(normalized)) return true;
+  // Allow any localhost or 127.0.0.1 with any port in dev
+  try {
+    const u = new URL(origin);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return true;
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -135,10 +177,19 @@ router.get("/authorize", async (req, res) => {
     const returnUrl = req.query.returnUrl as string | undefined;
     const idpHint = req.query.idp as string | undefined;
 
-    // Build state with nonce for CSRF protection
+    // Use origin from request if provided and allowed (fixes redirect_mismatch when using different port/host)
+    const requestOrigin = (req.query.origin as string)?.trim();
+    const baseUrl =
+      requestOrigin && isAllowedOrigin(requestOrigin)
+        ? requestOrigin
+        : getPrimaryFrontendUrl();
+    const redirectUri = `${baseUrl}/auth/sso/callback`;
+
+    // Build state with nonce for CSRF protection; include redirectUri for callback token exchange
     const state: SsoState = {
       tenantSlug,
       returnUrl,
+      redirectUri,
       nonce: crypto.randomBytes(16).toString("hex"),
       timestamp: Date.now(),
     };
@@ -146,14 +197,13 @@ router.get("/authorize", async (req, res) => {
     const stateEncoded = Buffer.from(JSON.stringify(state)).toString(
       "base64url",
     );
-    const frontendUrl = getPrimaryFrontendUrl();
-    const redirectUri = `${frontendUrl}/auth/sso/callback`;
 
     const authUrl = buildAuthorizationUrl(redirectUri, stateEncoded, idpHint);
 
     logInfo("[CognitoAuth] Redirecting to Cognito", {
       tenantSlug,
       hasIdpHint: !!idpHint,
+      redirectUri,
     });
 
     return res.redirect(authUrl);
@@ -195,8 +245,13 @@ router.post("/callback", async (req, res) => {
       }
     }
 
-    const frontendUrl = getPrimaryFrontendUrl();
-    const redirectUri = `${frontendUrl}/auth/sso/callback`;
+    // Use same redirect_uri as in authorize (from state); must match exactly for Cognito token exchange
+    const redirectUriFromState =
+      ssoState?.redirectUri &&
+      isAllowedOrigin(ssoState.redirectUri.replace(/\/auth\/sso\/callback$/, ""));
+    const redirectUri = redirectUriFromState
+      ? ssoState!.redirectUri!
+      : `${getPrimaryFrontendUrl()}/auth/sso/callback`;
 
     // Exchange code for tokens
     const tokens = await exchangeCodeForTokens(code, redirectUri);

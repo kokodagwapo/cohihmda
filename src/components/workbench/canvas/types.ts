@@ -3,6 +3,7 @@
  */
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
+import type { ResponsePlan } from '@/types/cohiResponsePlan';
 
 /** Single upload record for canvas (file analyzed via /api/data-chat/analyze-file) */
 export interface CanvasUpload {
@@ -47,7 +48,8 @@ export type CanvasWidgetType =
   | 'news_card'
   | 'text_block'
   | 'rich_text'
-  | 'image';
+  | 'image'
+  | 'cohi_insight';
 
 export interface CanvasLayoutItem {
   i: string;
@@ -70,7 +72,8 @@ export type CanvasWidgetPayload =
   | { type: 'news_card'; title: string; summary: string; link?: string }
   | { type: 'text_block'; content: string; title?: string }
   | { type: 'rich_text'; html: string }
-  | { type: 'image'; src: string; alt?: string };
+  | { type: 'image'; src: string; alt?: string }
+  | { type: 'cohi_insight'; responsePlan: ResponsePlan; dataPayloads?: Record<string, unknown[]> };
 
 export const DEFAULT_LAYOUT_ITEM: Partial<CanvasLayoutItem> = {
   w: 360,

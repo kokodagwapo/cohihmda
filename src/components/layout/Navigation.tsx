@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -77,6 +77,15 @@ const iconStyleMap: Record<string, { bg: string; icon: string }> = {
   emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', icon: 'text-emerald-500 dark:text-emerald-400' },
 };
 
+const topNavPillBase = "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group border";
+const topNavPillActive = "text-slate-900 dark:text-slate-100 bg-white/90 dark:bg-slate-900/70 border-slate-200/80 dark:border-slate-700/80 shadow-sm";
+const topNavPillDefault = "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-700/60 hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100";
+
+const dropdownItemBase = "flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 border group relative overflow-hidden";
+const dropdownItemActive = "text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/80 shadow-sm";
+const dropdownItemFocus = "text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border-slate-200/80 dark:border-slate-700/80";
+const dropdownItemDefault = "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/40 border-transparent hover:bg-slate-100/80 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100 hover:border-slate-200/80 dark:hover:border-slate-700/80";
+
 // Route mapping for navigation
 const routeMap: Record<string, string> = {
   'loanFunnel': '/loan-funnel',
@@ -112,6 +121,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
   // Dropdown state
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [topTieringOpen, setTopTieringOpen] = useState(false);
+  const [topTieringSubOpen, setTopTieringSubOpen] = useState(false);
   const [allPagesOpen, setAllPagesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const insightsRef = useRef<HTMLDivElement>(null);
@@ -530,7 +540,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
+            <Grid3X3 className="w-4 h-4 flex-shrink-0" />
             <span>My Workbench</span>
           </button>
         </div>
@@ -605,10 +615,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   aria-expanded={insightsOpen}
                   aria-label="Insights menu"
                   className={cn(
-                    "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group",
-                    (insightsOpen || isInsightsPage)
-                      ? "text-slate-900 dark:text-slate-100"
-                      : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
+                    topNavPillBase,
+                    (insightsOpen || isInsightsPage) ? topNavPillActive : topNavPillDefault
                   )}
                 >
                   <LayoutGrid className={cn(
@@ -648,6 +656,10 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                         <div className="flex flex-col gap-2">
                           {insightsMenuConfig.map((section, index) => {
                             const Icon = section.icon;
+                            const style =
+                              section.id === 'aletheiaInsights'
+                                ? iconStyleMap.indigo
+                                : iconStyleMap.amber;
                             const isSectionActive = isInsightsPage && location.hash === `#section-${section.id}`;
                             const isFocused = focusedIndex === index;
                             return (
@@ -656,21 +668,18 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                                 onClick={() => scrollToSection(section.id)}
                                 onFocus={() => setFocusedIndex(index)}
                                 className={cn(
-                                  "flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
+                                  dropdownItemBase,
                                   isSectionActive
-                                    ? "text-blue-700 dark:text-blue-300 bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 dark:from-blue-950/40 dark:via-indigo-950/40 dark:to-blue-950/40 border-blue-300 dark:border-blue-700 shadow-md shadow-blue-500/20 dark:shadow-blue-500/10 scale-[1.02]"
+                                    ? dropdownItemActive
                                     : isFocused
-                                    ? "text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-600 shadow-sm"
-                                    : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-950/30 dark:hover:to-indigo-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
+                                    ? dropdownItemFocus
+                                    : dropdownItemDefault
                                 )}
                                 role="menuitem"
                               >
-                                <Icon className={cn(
-                                  "w-4 h-4 flex-shrink-0 transition-all duration-300",
-                                  isSectionActive 
-                                    ? "text-blue-600 dark:text-blue-400 scale-110" 
-                                    : "text-slate-500 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:scale-110"
-                                )} />
+                                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isSectionActive && "ring-1 ring-slate-200/60 dark:ring-slate-700/60")}>
+                                  <Icon className={cn("w-4 h-4 transition-all duration-300", style.icon, isSectionActive && "scale-110")} />
+                                </div>
                                 <span className="whitespace-nowrap text-left">{section.label}</span>
                               </button>
                             );
@@ -707,10 +716,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   aria-expanded={topTieringOpen}
                   aria-label="Dashboard menu"
                   className={cn(
-                    "relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 group",
-                    (topTieringOpen || isTopTieringPage)
-                      ? "text-slate-900 dark:text-slate-100"
-                      : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
+                    topNavPillBase,
+                    (topTieringOpen || isTopTieringPage) ? topNavPillActive : topNavPillDefault
                   )}
                 >
                   <TrendingUp className={cn(
@@ -742,7 +749,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                       aria-label="Dashboard submenu"
                     >
                       <div className="p-5 space-y-5">
-                        {/* Dashboard Section - Links to Insights page sections */}
+                        {/* Dashboard - main category */}
                         <div>
                           <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                             <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
@@ -752,7 +759,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                             {[
                               { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, hash: '#section-leaderboard', iconColor: 'amber' as const },
                               { id: 'executiveDashboard', label: 'Business Overview', icon: Target, hash: '#section-executiveDashboard', iconColor: 'blue' as const },
-                              { id: 'topTieringLink', label: 'Top Tiering', icon: ArrowLeftRight, iconColor: 'blue' as const, route: '/loan-funnel' },
                               { id: 'closingFalloutForecast', label: 'Closing & Fallout Forecast', icon: BarChart3, hash: '#section-closingFalloutForecast', iconColor: 'indigo' as const },
                             ].map((item) => {
                               const Icon = item.icon;
@@ -773,10 +779,8 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                                     }
                                   }}
                                   className={cn(
-                                    "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
-                                    isItemActive
-                                      ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
-                                      : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
+                                    dropdownItemBase,
+                                    isItemActive ? dropdownItemActive : dropdownItemDefault
                                   )}
                                   role="menuitem"
                                 >
@@ -790,149 +794,159 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                           </div>
                         </div>
 
-                        {/* Top Tiering Section */}
+                        {/* Top Tiering Submenu */}
                         <div>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
-                            Top Tiering
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {topTieringMenuGroups.coreAnalytics.items.map((item) => {
-                              const Icon = item.icon;
-                              const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                              const itemRoute = routeMap[item.id];
-                              const isItemActive = itemRoute && location.pathname === itemRoute;
-                              return (
-                                <button
-                                  key={item.id}
-                                  onClick={() => handleTopTieringClick(item.id)}
-                                  className={cn(
-                                    "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
-                                    isItemActive
-                                      ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
-                                      : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
-                                  )}
-                                  role="menuitem"
-                                >
-                                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                    <Icon className={cn("w-4 h-4", style.icon, isItemActive && "scale-110")} />
-                                  </div>
-                                  <span className="whitespace-nowrap text-left">{item.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setTopTieringSubOpen((prev) => !prev)}
+                            className={cn(
+                              dropdownItemBase,
+                              topTieringSubOpen ? dropdownItemActive : dropdownItemDefault,
+                              "w-full justify-between"
+                            )}
+                          >
+                            <span className="flex items-center gap-2.5">
+                              <ArrowLeftRight className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                              Top Tiering
+                            </span>
+                            <ChevronDown className={cn("w-4 h-4 transition-transform", topTieringSubOpen && "rotate-180")} />
+                          </button>
 
-                          {/* Sales & Operations */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 mt-3 border-t border-slate-200/80 dark:border-slate-700/80">
-                            {/* Sales */}
-                            <div>
-                              <div className="flex items-center gap-2 mb-3 px-2">
-                                <Users className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                  Sales
+                          {topTieringSubOpen && (
+                            <div className="mt-3 space-y-5">
+                              <div>
+                                <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                  <div className="w-1 h-4 bg-gradient-to-b from-blue-500 to-indigo-500 rounded-full" />
+                                  Core Analytics
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {topTieringMenuGroups.coreAnalytics.items.map((item) => {
+                                    const Icon = item.icon;
+                                    const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                    const itemRoute = routeMap[item.id];
+                                    const isItemActive = itemRoute && location.pathname === itemRoute;
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        onClick={() => handleTopTieringClick(item.id)}
+                                        className={cn(
+                                          dropdownItemBase,
+                                          isItemActive ? dropdownItemActive : dropdownItemDefault
+                                        )}
+                                        role="menuitem"
+                                      >
+                                        <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                          <Icon className={cn("w-4 h-4", style.icon, isItemActive && "scale-110")} />
+                                        </div>
+                                        <span className="whitespace-nowrap text-left">{item.label}</span>
+                                      </button>
+                                    );
+                                  })}
                                 </div>
                               </div>
-                              <div className="space-y-1.5">
-                                {topTieringMenuGroups.sales.items.map((item) => {
-                                  const Icon = item.icon;
-                                  const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                  const itemRoute = routeMap[item.id];
-                                  const isItemActive = itemRoute && location.pathname === itemRoute;
-                                  return (
-                                    <button
-                                      key={item.id}
-                                      onClick={() => handleTopTieringClick(item.id)}
-                                      className={cn(
-                                        "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
-                                        isItemActive
-                                          ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
-                                          : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
-                                      )}
-                                      role="menuitem"
-                                    >
-                                      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                        <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
-                                      </div>
-                                      <span className="whitespace-nowrap">{item.label}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
 
-                            {/* Operations */}
-                            <div>
-                              <div className="flex items-center gap-2 mb-3 px-2">
-                                <Settings className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                  Operations
-                                </div>
-                              </div>
-                              <div className="space-y-1.5">
-                                {topTieringMenuGroups.operations.items.map((item) => {
-                                  const Icon = item.icon;
-                                  const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                  const itemRoute = routeMap[item.id];
-                                  const isItemActive = itemRoute && location.pathname === itemRoute;
-                                  return (
-                                    <button
-                                      key={item.id}
-                                      onClick={() => handleTopTieringClick(item.id)}
-                                      className={cn(
-                                        "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
-                                        isItemActive
-                                          ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
-                                          : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
-                                      )}
-                                      role="menuitem"
-                                    >
-                                      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                        <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
-                                      </div>
-                                      <span className="whitespace-nowrap">{item.label}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Financial Modeling */}
-                          <div className="pt-3 mt-3 border-t border-slate-200/80 dark:border-slate-700/80">
-                            <div className="flex items-center gap-2 mb-3 px-2">
-                              <Calculator className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                                Financial Modeling
-                              </div>
-                            </div>
-                            <div className="space-y-1.5">
-                              {topTieringMenuGroups.performance.items.map((item) => {
-                                const Icon = item.icon;
-                                const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
-                                const itemRoute = routeMap[item.id];
-                                const isItemActive = itemRoute && location.pathname === itemRoute;
-                                return (
-                                  <button
-                                    key={item.id}
-                                    onClick={() => handleTopTieringClick(item.id)}
-                                    className={cn(
-                                      "w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-300 border group relative overflow-hidden",
-                                      isItemActive
-                                        ? "text-emerald-700 dark:text-emerald-300 bg-gradient-to-r from-emerald-50 via-emerald-50 to-emerald-50 dark:from-emerald-950/40 dark:via-emerald-950/40 dark:to-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-md shadow-emerald-500/20 dark:shadow-emerald-500/10 scale-[1.02]"
-                                        : "text-slate-700 dark:text-slate-300 bg-slate-50/80 dark:bg-slate-800/50 hover:bg-gradient-to-r hover:from-blue-50 hover:via-indigo-50 hover:to-blue-50 dark:hover:from-blue-950/30 dark:hover:via-indigo-950/30 dark:hover:to-blue-950/30 hover:text-blue-700 dark:hover:text-blue-300 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md hover:shadow-blue-500/10 dark:hover:shadow-blue-500/5 hover:scale-[1.01] border-transparent"
-                                    )}
-                                    role="menuitem"
-                                  >
-                                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
-                                      <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200/80 dark:border-slate-700/80">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-3 px-2">
+                                    <Users className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                                    <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                      Sales
                                     </div>
-                                    <span className="whitespace-nowrap">{item.label}</span>
-                                  </button>
-                                );
-                              })}
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {topTieringMenuGroups.sales.items.map((item) => {
+                                      const Icon = item.icon;
+                                      const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                      const itemRoute = routeMap[item.id];
+                                      const isItemActive = itemRoute && location.pathname === itemRoute;
+                                      return (
+                                        <button
+                                          key={item.id}
+                                          onClick={() => handleTopTieringClick(item.id)}
+                                          className={cn(
+                                            dropdownItemBase,
+                                            isItemActive ? dropdownItemActive : dropdownItemDefault
+                                          )}
+                                          role="menuitem"
+                                        >
+                                          <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                            <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                          </div>
+                                          <span className="whitespace-nowrap">{item.label}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <div className="flex items-center gap-2 mb-3 px-2">
+                                    <Settings className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                                    <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                      Operations
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {topTieringMenuGroups.operations.items.map((item) => {
+                                      const Icon = item.icon;
+                                      const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                      const itemRoute = routeMap[item.id];
+                                      const isItemActive = itemRoute && location.pathname === itemRoute;
+                                      return (
+                                        <button
+                                          key={item.id}
+                                          onClick={() => handleTopTieringClick(item.id)}
+                                          className={cn(
+                                            dropdownItemBase,
+                                            isItemActive ? dropdownItemActive : dropdownItemDefault
+                                          )}
+                                          role="menuitem"
+                                        >
+                                          <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                            <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                          </div>
+                                          <span className="whitespace-nowrap">{item.label}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="pt-3 border-t border-slate-200/80 dark:border-slate-700/80">
+                                <div className="flex items-center gap-2 mb-3 px-2">
+                                  <Calculator className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                    Financial Modeling
+                                  </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {topTieringMenuGroups.performance.items.map((item) => {
+                                    const Icon = item.icon;
+                                    const style = iconStyleMap[item.iconColor] || iconStyleMap.blue;
+                                    const itemRoute = routeMap[item.id];
+                                    const isItemActive = itemRoute && location.pathname === itemRoute;
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        onClick={() => handleTopTieringClick(item.id)}
+                                        className={cn(
+                                          dropdownItemBase,
+                                          isItemActive ? dropdownItemActive : dropdownItemDefault
+                                        )}
+                                        role="menuitem"
+                                      >
+                                        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300", style.bg, isItemActive && "ring-1 ring-emerald-400/50")}>
+                                          <Icon className={cn("w-3.5 h-3.5", style.icon, isItemActive && "scale-110")} />
+                                        </div>
+                                        <span className="whitespace-nowrap">{item.label}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -954,7 +968,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 )}
                 aria-label="My Workbench"
               >
-                <LayoutPanelLeft className={cn(
+                <Grid3X3 className={cn(
                   "w-4 h-4 transition-colors duration-200",
                   isActive('/my-dashboard')
                     ? "text-slate-900 dark:text-slate-100"

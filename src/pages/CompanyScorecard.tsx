@@ -48,8 +48,12 @@ const CompanyScorecard = () => {
   const { selectedTenantId } = useTenantStore();
   const { user } = useAuth();
   
-  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant
-  const tenantId = selectedTenantId || user?.tenant_id || null;
+  // Get tenant_id - prefer global selection (for admins), fall back to user's tenant.
+  // In development, default to "homestead" when no tenant selected so local DB data is shown.
+  const tenantId =
+    selectedTenantId ||
+    user?.tenant_id ||
+    (import.meta.env.DEV ? 'homestead' : null);
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -452,6 +456,157 @@ const CompanyScorecard = () => {
     ],
   });
 
+  const renderHeaderSection = (compact = false) => (
+    <div className={compact ? "mb-4 space-y-4" : "mb-4"}>
+      <div className={`flex ${compact ? 'flex-col items-start gap-3' : 'items-center justify-between mb-4'}`}>
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">Company Scorecard</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{getDatePeriodLabel()} Performance ({selectedYear})</p>
+        </div>
+        <div className={`flex items-center gap-3 flex-wrap ${compact ? 'w-full' : ''}`}>
+          <DatePeriodPicker
+            year={selectedYear}
+            onYearChange={setSelectedYear}
+            onDateRangeChange={setDateRange}
+            yearsToShow={4}
+            size="default"
+          />
+
+          <Select value={selectedDateField} onValueChange={setSelectedDateField}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Date Type" />
+            </SelectTrigger>
+            <SelectContent>
+              {dateFieldOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
+
+          <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Branch" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {data?.branches.map(branch => (
+                <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={selectedLoanOfficer} onValueChange={setSelectedLoanOfficer}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Loan Officer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Loan Officers</SelectItem>
+              {data?.loanOfficers.map(lo => (
+                <SelectItem key={lo} value={lo}>{lo}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <ExportShareMenu
+            title="Company Scorecard"
+            targetRef={pageRef}
+            getExportData={getExportData}
+            shareTarget={{
+              type: "company-scorecard",
+              label: "Company Scorecard",
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('Units (Applications Taken)', 'applicationsTaken')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">UNITS</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(kpiData.totalLoansWithRespa)}</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('Volume (Applications Taken $)', 'applicationsTakenDollar')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">VOLUME</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(kpiData.totalVolume)}</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('Average Loan Size', 'avgLoanSize')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">AVERAGE LOAN SIZE</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(Math.round(averageLoanSize))}</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('WAC', 'wac')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WAC</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{kpiData.wac.toFixed(3)}</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('WA FICO', 'waFico')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA FICO</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{Math.round(kpiData.waFico || 0)}</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('WA LTV', 'waLtv')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA LTV</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waLtv || 0).toFixed(1)}</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => openDrilldown('WA DTI', 'waDti')}
+          className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+        >
+          <CardContent className="pt-6">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA DTI</p>
+            <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waDti || 0).toFixed(1)}</p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+
   const SummaryTable = () => (
     <Card className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
       <div className="overflow-x-auto">
@@ -694,226 +849,9 @@ const CompanyScorecard = () => {
 
       <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3 max-w-[1800px] mx-auto">
         {/* Header Section */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-1">Company Scorecard</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-400">{getDatePeriodLabel()} Performance ({selectedYear})</p>
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              {/* Date Period Picker - Reusable component with year selection + custom date range */}
-              <DatePeriodPicker
-                year={selectedYear}
-                onYearChange={setSelectedYear}
-                onDateRangeChange={setDateRange}
-                yearsToShow={4}
-                size="default"
-              />
-              
-              {/* Date Field Selector - Which date to filter all metrics on */}
-              <Select value={selectedDateField} onValueChange={setSelectedDateField}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Date Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dateFieldOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
-              <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
-              
-              <Select value={selectedBranch} onValueChange={setSelectedBranch}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {data?.branches.map(branch => (
-                    <SelectItem key={branch} value={branch}>{branch}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={selectedLoanOfficer} onValueChange={setSelectedLoanOfficer}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Loan Officer" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Loan Officers</SelectItem>
-                  {data?.loanOfficers.map(lo => (
-                    <SelectItem key={lo} value={lo}>{lo}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <ExportShareMenu
-                title="Company Scorecard"
-                targetRef={pageRef}
-                getExportData={getExportData}
-                shareTarget={{
-                  type: "company-scorecard",
-                  label: "Company Scorecard",
-                }}
-              />
-            </div>
-          </div>
+        {renderHeaderSection()}
 
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('Units (Applications Taken)', 'applicationsTaken')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">UNITS</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(kpiData.totalLoansWithRespa)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('Volume (Applications Taken $)', 'applicationsTakenDollar')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">VOLUME</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(kpiData.totalVolume)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('Average Loan Size', 'avgLoanSize')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">AVERAGE LOAN SIZE</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(Math.round(averageLoanSize))}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('WAC', 'wac')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WAC</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{kpiData.wac.toFixed(3)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('WA FICO', 'waFico')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA FICO</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{Math.round(kpiData.waFico || 0)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('WA LTV', 'waLtv')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA LTV</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waLtv || 0).toFixed(1)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
-              onClick={() => openDrilldown('WA DTI', 'waDti')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA DTI</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waDti || 0).toFixed(1)}</p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          <Card
-            role="button"
-            tabIndex={0}
-            onClick={() => openDrilldown('Volume by Branch', 'applicationsTakenDollar', 'branch')}
-            className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-          >
-            <CardHeader>
-              <CardTitle className="text-lg">Volume by Branch ($M)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {branchVolumeData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={branchVolumeData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
-                    <XAxis dataKey="name" stroke={isDarkMode ? '#cbd5e1' : '#64748b'} />
-                    <YAxis stroke={isDarkMode ? '#cbd5e1' : '#64748b'} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
-                        border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                      }}
-                      formatter={(value: any, name: any, props: any) => [`$${value}M`, props.payload.fullName]}
-                    />
-                    <Bar dataKey="volume" fill="#3b82f6" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-[300px] text-slate-500">No branch data available</div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card
-            role="button"
-            tabIndex={0}
-            onClick={() => openDrilldown('Pull-Through by Branch', 'originatedUnitsPct', 'branch')}
-            className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-          >
-            <CardHeader>
-              <CardTitle className="text-lg">Pull-Through by Branch (%)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {branchPullThroughData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={branchPullThroughData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
-                    <XAxis dataKey="name" stroke={isDarkMode ? '#cbd5e1' : '#64748b'} />
-                    <YAxis stroke={isDarkMode ? '#cbd5e1' : '#64748b'} domain={[0, 100]} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
-                        border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                      }}
-                      formatter={(value: any, name: any, props: any) => [`${value.toFixed(1)}%`, props.payload.fullName]}
-                    />
-                    <Bar dataKey="pullThrough" fill="#10b981" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-[300px] text-slate-500">No branch data available</div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        {/* Charts Section removed per request */}
 
         {/* Tabular Data Section */}
         {summaryData && (
@@ -1040,6 +978,7 @@ const CompanyScorecard = () => {
                       }}
                     >
                       <DialogContent className="!fixed !inset-0 !left-0 !top-0 !right-0 !bottom-0 !translate-x-0 !translate-y-0 !max-w-none !max-h-none w-screen h-screen rounded-none border-0 p-4 sm:p-6 gap-4 overflow-hidden">
+                        {renderHeaderSection(true)}
                         <DialogHeader className="items-start">
                           <DialogTitle className="text-lg sm:text-xl">{drilldownTitle || 'Company Scorecard Detail'}</DialogTitle>
                         </DialogHeader>

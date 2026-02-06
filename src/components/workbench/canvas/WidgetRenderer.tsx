@@ -15,6 +15,7 @@ import { OperationScorecardTrendsView } from "@/components/dashboard/views/Opera
 import { FinancialModelingSandboxView } from "@/components/dashboard/views/FinancialModelingSandboxView";
 import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
+import { CohiInsightPanel } from "@/components/cohi/CohiInsightPanel";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
 import type { CanvasLayoutItem, CanvasWidgetPayload } from "./types";
@@ -849,6 +850,13 @@ export function WidgetRenderer({
             className="max-h-full max-w-full object-contain"
           />
         </div>
+      </div>
+    );
+  }
+  if (type === 'cohi_insight' && payload.type === 'cohi_insight') {
+    return (
+      <div style={style} className="h-full w-full overflow-auto p-2">
+        <CohiInsightPanel responsePlan={payload.responsePlan} dataPayloads={payload.dataPayloads} />
       </div>
     );
   }

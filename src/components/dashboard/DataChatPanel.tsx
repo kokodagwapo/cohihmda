@@ -82,6 +82,7 @@ import {
   EnhancedVisualizationConfig,
   CohiInsight,
 } from "@/components/visualizations/EnhancedVisualization";
+import { CohiInsightPanel } from "@/components/cohi/CohiInsightPanel";
 import { useToast } from "@/components/ui/use-toast";
 import { useCanvasPinStore } from "@/stores/canvasPinStore";
 import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
@@ -3302,6 +3303,22 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                   </motion.div>
                 );
               })()}
+            {/* COHI response plan – structured insights and charts from /api/cohi/query */}
+            {message.responsePlan && !message.error && (
+              <motion.div
+                id={`cohi-insight-${message.id}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className="mt-0 mx-0 mb-0 max-w-full min-w-0 border-t border-slate-200/60 dark:border-slate-700/60"
+              >
+                <CohiInsightPanel
+                  responsePlan={message.responsePlan}
+                  dataPayloads={message.dataPayloads ?? {}}
+                  className="px-4 py-3"
+                />
+              </motion.div>
+            )}
           </>
         )}
       </div>

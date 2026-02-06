@@ -26,7 +26,14 @@ function getManagementPool(): pg.Pool {
       database: process.env.MANAGEMENT_DB_NAME || 'coheus_management',
       user: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
-      ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
+      ssl:
+        rawHost !== '127.0.0.1' &&
+        rawHost !== 'localhost' &&
+        rawHost !== 'postgres' &&
+        rawHost !== 'coheus-postgres' &&
+        rawHost !== 'host.docker.internal'
+          ? { rejectUnauthorized: false }
+          : false,
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,

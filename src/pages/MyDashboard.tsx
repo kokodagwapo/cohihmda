@@ -7,14 +7,19 @@ import { MultiCohortComparison } from '@/components/workbench/MultiCohortCompari
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api } from '@/lib/api';
+import { useTenantStore } from '@/stores/tenantStore';
+import { useAuth } from '@/contexts/AuthContext';
 import { WorkbenchCanvas } from '@/components/workbench/WorkbenchCanvas';
-import { LayoutGrid, BarChart3, Users, Palette, FolderOpen, Heart, Search } from 'lucide-react';
+import { LayoutGrid, BarChart3, Users, Palette, FolderOpen, Heart, Search, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 type CanvasListItem = { id: string; title: string; content: any; created_at: string; updated_at: string; favorited: boolean };
 
 export default function MyDashboard() {
+  const { user } = useAuth();
+  const { selectedTenantId } = useTenantStore();
+  const effectiveTenantId = selectedTenantId || user?.tenant_id;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [activeTab, setActiveTab] = useState('canvas');
@@ -65,20 +70,32 @@ export default function MyDashboard() {
                           </h1>
                         </div>
                       </div>
-                      <TabsList className="shrink-0">
-                        <TabsTrigger value="canvas" className="gap-2">
-                          <Palette className="h-4 w-4" />
-                          Canvas
-                        </TabsTrigger>
-                        <TabsTrigger value="selection" className="gap-2">
-                          <BarChart3 className="h-4 w-4" />
-                          Current Selection
-                        </TabsTrigger>
-                        <TabsTrigger value="comparison" className="gap-2">
-                          <Users className="h-4 w-4" />
-                          Cohort Comparison
-                        </TabsTrigger>
-                      </TabsList>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <TabsList>
+                          <TabsTrigger value="canvas" className="gap-2">
+                            <Palette className="h-4 w-4" />
+                            Canvas
+                          </TabsTrigger>
+                          <TabsTrigger value="selection" className="gap-2">
+                            <BarChart3 className="h-4 w-4" />
+                            Current Selection
+                          </TabsTrigger>
+                          <TabsTrigger value="comparison" className="gap-2">
+                            <Users className="h-4 w-4" />
+                            Cohort Comparison
+                          </TabsTrigger>
+                        </TabsList>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                          onClick={() => window.dispatchEvent(new Event('cohi-chat-open'))}
+                          title="Open Cohi Chat to ask questions and add insights to this canvas"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Cohi Chat
+                        </Button>
+                      </div>
                     </div>
                   </div>
                   {activeTab === 'canvas' && canvasList.length > 0 && (
@@ -125,6 +142,7 @@ export default function MyDashboard() {
                         setLoadCanvasId(null);
                         fetchCanvases();
                       }}
+                      tenantId={effectiveTenantId}
                     />
                   </TabsContent>
 

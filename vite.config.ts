@@ -16,7 +16,8 @@ export default defineConfig(({ mode }) => ({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        // Default 3002 = Docker backend; set VITE_PROXY_API_PORT=3001 for local npm run dev:backend
+        target: process.env.VITE_PROXY_API_PORT === '3001' ? 'http://localhost:3001' : 'http://localhost:3002',
         changeOrigin: true,
         secure: false,
       },

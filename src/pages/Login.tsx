@@ -96,8 +96,17 @@ export const Login = () => {
     return () => clearInterval(interval);
   }, [apiUrl, isBackendConfigured, loadTenants]);
 
-  // Check if Cognito SSO is configured
+  // When running locally, never use SSO so sign-in stays on localhost (no redirect to Amazon/Cognito)
+  const isLocalHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  // Check if Cognito SSO is configured (skip when local: keep sign-in local only)
   const checkSsoConfig = async () => {
+    if (isLocalHost) {
+      setSsoConfigured(false);
+      return;
+    }
     try {
       const response = await fetch(`${apiUrl}/api/auth/cognito/config`);
       if (response.ok) {
@@ -162,7 +171,9 @@ export const Login = () => {
     if (returnTo) {
       params.set('returnUrl', returnTo);
     }
-    
+    // Pass current origin so backend uses it for Cognito redirect_uri (fixes redirect_mismatch)
+    params.set('origin', window.location.origin);
+
     // Redirect to Cognito authorize endpoint
     window.location.href = `${apiUrl}/api/auth/cognito/authorize?${params.toString()}`;
   };

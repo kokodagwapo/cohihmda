@@ -5,6 +5,8 @@
 
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+import Papa from 'papaparse';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
 import { 
@@ -23,6 +25,11 @@ import {
 import { apiLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 // ============================================================================
 // Helper Functions
@@ -535,6 +542,82 @@ router.post('/refresh-visualization/:id', authenticateToken, attachTenantContext
     res.status(500).json({ 
       error: 'Failed to refresh visualization',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * POST /api/data-chat/analyze-file
+ * Analyze an uploaded CSV and return a summary (and optional table visualization).
+ * Only CSV is supported for structured analysis.
+ */
+router.post('/analyze-file', authenticateToken, apiLimiter, upload.single('file'), async (req: AuthRequest, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const question = (req.body?.question as string)?.trim() || `Analyze this ${req.file.originalname}`;
+    const mimetype = (req.file.mimetype || '').toLowerCase();
+    const name = (req.file.originalname || '').toLowerCase();
+    const isCsv = mimetype === 'text/csv' || name.endsWith('.csv');
+    if (!isCsv) {
+      return res.status(400).json({
+        error: 'Only CSV files are supported for analysis',
+        analysis: `Uploaded file "${req.file.originalname}" is not a CSV. Please upload a CSV file to get a structured analysis.`,
+      });
+    }
+    let csvText = req.file.buffer.toString('utf-8');
+    if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
+    if (!csvText || !csvText.trim()) {
+      return res.status(400).json({ error: 'CSV file is empty' });
+    }
+    const parseResult = Papa.parse<Record<string, string>>(csvText, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h) => h.trim(),
+    });
+    const rows = parseResult.data || [];
+    const errors = parseResult.errors || [];
+    const columns = rows.length > 0 ? Object.keys(rows[0]) : (parseResult.meta?.fields || []);
+    const rowCount = rows.length;
+    const colCount = columns.length;
+    const sample = rows.slice(0, 10);
+    let analysis = `**${req.file.originalname}**\n\n`;
+    analysis += `- **Rows:** ${rowCount}\n`;
+    analysis += `- **Columns:** ${colCount} (${columns.join(', ')})\n\n`;
+    if (errors.length > 0) {
+      analysis += `Parsing notes: ${errors.length} non-fatal issue(s).\n\n`;
+    }
+    analysis += `**Sample (first ${sample.length} rows):**\n`;
+    analysis += columns.join(' | ') + '\n';
+    analysis += columns.map(() => '---').join(' | ') + '\n';
+    for (const row of sample) {
+      analysis += columns.map((c) => String(row[c] ?? '').slice(0, 30)).join(' | ') + '\n';
+    }
+    const summary = `CSV has ${rowCount} rows and ${colCount} columns: ${columns.join(', ')}.`;
+    const visualization: VisualizationConfig | undefined =
+      rowCount > 0 && colCount > 0
+        ? {
+            type: 'table',
+            title: `Sample: ${req.file.originalname}`,
+            data: sample,
+            tableConfig: {
+              columns: columns.map((key) => ({ key, label: key, format: 'text' })),
+              sortable: true,
+              pageSize: 10,
+            },
+          }
+        : undefined;
+    res.json({
+      analysis,
+      summary,
+      visualization,
+    });
+  } catch (error: any) {
+    console.error('[DataChat] analyze-file error:', error);
+    res.status(500).json({
+      error: 'Failed to analyze file',
+      analysis: error?.message || 'An error occurred while processing the file.',
     });
   }
 });
