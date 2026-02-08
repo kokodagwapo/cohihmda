@@ -16,6 +16,7 @@ import {
   deleteTenant,
   CreateTenantOptions,
 } from '../services/tenantProvisioningService.js';
+import { duplicateTenantAnonymized } from '../services/tenantDuplicationService.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -192,6 +193,47 @@ router.delete(
     } catch (error: any) {
       console.error('[Tenants] Error deleting tenant:', error);
       res.status(500).json({ error: 'Failed to delete tenant' });
+    }
+  }
+);
+
+/**
+ * POST /api/tenants/:id/duplicate
+ * Duplicate a tenant with anonymized personnel data (super_admin only)
+ */
+router.post(
+  '/:id/duplicate',
+  authenticateToken,
+  requireRole('super_admin'),
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const sourceId = req.params.id as string;
+
+      const schema = z.object({
+        name: z.string().min(1, 'Tenant name is required'),
+        slug: z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
+      });
+
+      const validated = schema.parse(req.body);
+
+      console.log(
+        `[Tenants] Duplicating tenant ${sourceId} -> "${validated.name}" (${validated.slug})`
+      );
+
+      const result = await duplicateTenantAnonymized(
+        sourceId,
+        validated.name,
+        validated.slug
+      );
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error('[Tenants] Error duplicating tenant:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', details: error.errors });
+      }
+      res.status(500).json({ error: error.message || 'Failed to duplicate tenant' });
     }
   }
 );

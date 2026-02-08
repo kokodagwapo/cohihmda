@@ -7100,12 +7100,16 @@ router.post(
           .map((l) => l.current_loan_status),
       });
 
-      // For pullthrough calculations, we need historical loans too (limited set)
-      // Exclude 'Active Loan' status (exact match, consistent with active loans query)
+      // Historical loans for calibration + pullthrough. Same columns as active so prepareLoanData/bucketing have fico, DTI, LTV, etc.
       const historicalLoansQuery = `
       SELECT 
-        loan_id, current_loan_status, loan_officer, underwriter, closer, processor,
-        application_date, funding_date
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
+        current_loan_status, current_milestone, branch, loan_officer,
+        fico_score, be_dti_ratio, ltv_ratio, cltv,
+        loan_purpose, property_type, occupancy_type, channel,
+        underwriter, closer, processor
       FROM public.loans 
       WHERE current_loan_status != 'Active Loan' OR current_loan_status IS NULL
       ORDER BY application_date DESC

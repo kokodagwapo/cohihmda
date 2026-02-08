@@ -251,8 +251,8 @@ const daysSinceLocal = (
 
 /**
  * Determines if an active loan is likely to close late.
- * Checks if the loan has exceeded its expected closing date by more than 72 hours (3 days).
- * Falls back to checking if loan has been in pipeline > threshold days if no expected close date.
+ * Uses the server-computed closeLateRisk field (from historical on-time analysis + pipeline stage).
+ * Falls back to checking estimated_closing_date if the server field isn't present.
  */
 const isLikelyCloseLateForecast = (
   loan: any,
@@ -262,27 +262,28 @@ const isLikelyCloseLateForecast = (
   const status = mapForecastStatus(loan);
   if (!status || status !== "Active") return false;
 
-  // Primary check: Has the loan exceeded its expected/estimated close date?
+  // Primary: use server-computed close-late risk (from prediction API)
+  if (loan?.closeLateRisk != null) {
+    return loan.closeLateRisk === true;
+  }
+
+  // Fallback: check estimated_closing_date (the actual DB field name)
   const expectedCloseDate =
-    loan?.expected_close_date ||
-    loan?.estimated_completion_date ||
-    loan?.["Expected Close Date"] ||
-    loan?.["Estimated Closing Date"] ||
-    loan?.target_close_date;
+    loan?.estimated_closing_date ||
+    loan?.estimatedClosingDate ||
+    loan?.expected_close_date;
 
   if (expectedCloseDate) {
     const expected = new Date(expectedCloseDate);
     if (!Number.isNaN(expected.getTime())) {
-      // Loan is late if it's more than 3 days past expected close date
       const daysPastExpected = Math.floor(
         (now.getTime() - expected.getTime()) / (1000 * 60 * 60 * 24)
       );
-      return daysPastExpected > 3; // More than 72 hours past expected close
+      return daysPastExpected > 3;
     }
   }
 
-  // Fallback: If no expected close date, check if loan has been in pipeline too long
-  // Average mortgage cycle is 30-45 days, so loans > threshold days are considered at risk
+  // Last resort: loan has been in pipeline too long
   const days = daysSinceLocal(loan?.application_date, now);
   return days !== null && days > thresholdDays;
 };
@@ -597,6 +598,7 @@ function computeMetricsFromLoans(
   closedLoansMTD: number;
   predictedClosing: number;
   likelyCloseLate: number;
+  pastEstClose: number;
   likelyWithdraw: number;
   likelyDecline: number;
   predictedFalloutTotal: number;
@@ -615,6 +617,7 @@ function computeMetricsFromLoans(
   let activeCount = 0;
   let activePipelineValue = 0;
   let likelyCloseLateCount = 0;
+  let pastEstCloseCount = 0; // Active loans past their estimated closing date
   let fundedInPeriodCount = 0;
   let fundedTotalByStatus = 0; // Count funded loans by status (for 'all' period fallback)
   let startedInPeriodCount = 0;
@@ -637,6 +640,15 @@ function computeMetricsFromLoans(
       strictAppDate != null && String(strictAppDate).trim() !== "";
 
     if (isActiveLoan(loan) && hasStrictAppDate) {
+      // Past est. close is a snapshot metric — count ALL active loans regardless of period filter
+      const estClose = loan?.estimated_closing_date || loan?.estimatedClosingDate;
+      if (estClose) {
+        const estCloseDate = new Date(estClose);
+        if (!Number.isNaN(estCloseDate.getTime()) && estCloseDate < now) {
+          pastEstCloseCount++;
+        }
+      }
+
       // Apply active loans period filter if specified (filters by application date range)
       const passesActivePeriodFilter =
         !activeLoansPeriodFilter ||
@@ -810,6 +822,7 @@ function computeMetricsFromLoans(
     closedLoansMTD,
     predictedClosing,
     likelyCloseLate: likelyCloseLateCount,
+    pastEstClose: pastEstCloseCount,
     likelyWithdraw,
     likelyDecline,
     predictedFalloutTotal,
@@ -842,6 +855,11 @@ const getMetricExplanation = (label: string) => {
         title: "Forecasted Leakage",
         desc: "AI-calculated estimate of loan volume that will fail to fund based on real-time behavior signals and market conditions.",
       };
+    case "High Risk":
+      return {
+        title: "High Risk Loans",
+        desc: "Active pipeline loans with a high risk score based on credit, process, personnel pull-through, and pipeline signals. Threshold is set by the rule-based model (bucket = high).",
+      };
     case "Predicted Closing":
       return {
         title: "Closing Forecast",
@@ -857,10 +875,15 @@ const getMetricExplanation = (label: string) => {
         title: "Lender Says No",
         desc: "Lender decision - loan failing underwriting criteria, credit issues, or documentation requirements.",
       };
+    case "Past Est. Close":
+      return {
+        title: "Past Estimated Closing",
+        desc: "Active loans whose estimated closing date has already passed. These need immediate attention.",
+      };
     case "Likely Close Late":
       return {
         title: "Pipeline Stagnation",
-        desc: "Active loans that have exceeded their expected closing date by more than 72 hours, or have been in pipeline longer than 30 days without an expected close date.",
+        desc: "Active loans predicted to close late based on pipeline stage, estimated closing date, and historical on-time closing rates. Click to see details.",
       };
     default:
       return {
@@ -1046,6 +1069,35 @@ export const ClosingFalloutForecast = ({
   // PERFORMANCE: Uses deferredPeriod to allow UI to remain responsive during rapid period changes
   const metrics = useMemo(() => {
     const now = new Date();
+    // High risk count from bucketed loans (merged into cached/computed result below)
+    const highRiskCount =
+      bucketedLoans?.length > 0
+        ? bucketedLoans.filter((l: any) => l?.bucket === "high").length
+        : 0;
+
+    // Close-late count from server-computed closeLateRisk on bucketed loans.
+    // Only use this if at least one bucketed loan has the closeLateRisk field populated (not null).
+    // If no loans have the field, it means predictions were saved before the close-late feature — fall back to heuristic.
+    const serverCloseLateCount = (() => {
+      if (!bucketedLoans || bucketedLoans.length === 0) return null;
+      const hasCloseLateData = bucketedLoans.some((l: any) => l?.closeLateRisk != null);
+      if (!hasCloseLateData) return null; // Field not saved yet — fall back to heuristic
+      return bucketedLoans.filter((l: any) => l?.closeLateRisk === true).length;
+    })();
+
+    // Past est. close count from bucketed loans (snapshot metric — not filtered by period).
+    // Bucketed loans have estimated_closing_date from the prediction save.
+    const bucketedPastEstCloseCount = (() => {
+      if (!bucketedLoans || bucketedLoans.length === 0) return null;
+      const now = new Date();
+      return bucketedLoans.filter((l: any) => {
+        const estClose = l?.estimated_closing_date || l?.estimatedClosingDate;
+        if (!estClose) return false;
+        const d = new Date(estClose);
+        return !Number.isNaN(d.getTime()) && d < now;
+      }).length;
+    })();
+
     const hasLoans = loansRaw && loansRaw.length > 0 && !loansError;
 
     if (hasLoans) {
@@ -1090,7 +1142,13 @@ export const ClosingFalloutForecast = ({
       }`;
       const cached = cache.cache.get(periodKey);
       if (cached) {
-        return cached;
+        const totalActiveInPanel = bucketedLoans?.length ?? cached.activeLoansToday ?? 0;
+        const highRiskRate = totalActiveInPanel > 0 ? Math.round((highRiskCount / totalActiveInPanel) * 100) : 0;
+        const likelyCloseLate = serverCloseLateCount != null ? serverCloseLateCount : cached.likelyCloseLate;
+        const pastEstClose = bucketedPastEstCloseCount != null
+          ? Math.max(bucketedPastEstCloseCount, cached.pastEstClose)
+          : cached.pastEstClose;
+        return { ...cached, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose };
       }
 
       // Pass server-side active loans count to computeMetricsFromLoans
@@ -1168,7 +1226,13 @@ export const ClosingFalloutForecast = ({
         );
       }
 
-      return result;
+      const totalActiveInPanel = bucketedLoans?.length ?? result.activeLoansToday ?? 0;
+      const highRiskRate = totalActiveInPanel > 0 ? Math.round((highRiskCount / totalActiveInPanel) * 100) : 0;
+      const likelyCloseLate = serverCloseLateCount != null ? serverCloseLateCount : result.likelyCloseLate;
+      const pastEstClose = bucketedPastEstCloseCount != null
+        ? Math.max(bucketedPastEstCloseCount, result.pastEstClose)
+        : result.pastEstClose;
+      return { ...result, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose };
     }
 
     // Active Loans Today
@@ -1197,12 +1261,10 @@ export const ClosingFalloutForecast = ({
         ? Math.round((activeLoansToday * pullThroughRate) / 100)
         : 0;
 
-    // Likely Close Late - estimate based on cycle time (loans over 30 days old)
-    // This is a simplified calculation - in production, this would come from actual loan data
+    // Likely Close Late - use server-computed count from prediction summary if available
     const likelyCloseLate =
-      activeLoansToday > 0
-        ? Math.round(activeLoansToday * 0.15) // Estimate 15% of active loans will close late
-        : 0;
+      (predictions as any)?.summary?.likelyCloseLateCount ??
+      (activeLoansToday > 0 ? Math.round(activeLoansToday * 0.15) : 0);
 
     // Fallout metrics - use predictions ONLY (not funnel data fallback)
     // These should be populated by AI predictions, not historical funnel data
@@ -1230,6 +1292,14 @@ export const ClosingFalloutForecast = ({
         ? Math.round((predictedFalloutTotal / activeLoansToday) * 100)
         : 0;
 
+    // High risk: use count from top of useMemo; totalActiveInPanel/highRiskRate use activeLoansToday when no bucketed data
+    const totalActiveInPanel =
+      bucketedLoans?.length ?? activeLoansToday;
+    const highRiskRate =
+      totalActiveInPanel > 0
+        ? Math.round((highRiskCount / totalActiveInPanel) * 100)
+        : 0;
+
     // Locked loans
     const lockedLoans = statsData?.locked ?? 0;
 
@@ -1241,6 +1311,7 @@ export const ClosingFalloutForecast = ({
       closedLoansMTD,
       predictedClosing,
       likelyCloseLate,
+      pastEstClose: 0,
       likelyWithdraw,
       likelyDecline,
       predictedFalloutTotal,
@@ -1251,6 +1322,9 @@ export const ClosingFalloutForecast = ({
       lockedRolling90: lockedLoans, // Fallback: use total locks when no loan data available
       avgCycleTime,
       pipelineValue,
+      highRiskCount,
+      totalActiveInPanel,
+      highRiskRate,
     };
   }, [
     statsData,
@@ -1262,6 +1336,7 @@ export const ClosingFalloutForecast = ({
     pullThroughRateFromMetrics,
     activeLoansPeriod,
     serverActiveLoansCount, // Server-side active loans count with date filter
+    bucketedLoans,
   ]);
 
   const getExportData = (): ExportData => ({
@@ -1275,9 +1350,11 @@ export const ClosingFalloutForecast = ({
           ["Closed Loans MTD", metrics.closedLoansMTD],
           ["Predicted Closings", metrics.predictedClosing],
           ["Likely Close Late", metrics.likelyCloseLate],
+          ["Past Est. Close Date", metrics.pastEstClose],
           ["Likely Withdraw", metrics.likelyWithdraw],
           ["Likely Decline", metrics.likelyDecline],
           ["Predicted Fallout Total", metrics.predictedFalloutTotal],
+          ["High Risk (active)", `${metrics.highRiskCount} of ${metrics.totalActiveInPanel}`],
           ["Pipeline Value (M)", metrics.pipelineValueM],
           ["Pull-Through Rate", `${metrics.pullThroughRateDisplay}%`],
           ["Fallout Rate", `${metrics.falloutRate}%`],
@@ -1492,7 +1569,7 @@ export const ClosingFalloutForecast = ({
             };
           }>;
           count: number;
-          summary: { withdraw: number; deny: number; originate: number };
+          summary: { withdraw: number; deny: number; originate: number; likelyCloseLateCount?: number };
           dateFilter?: {
             startDate: string;
             endDate: string;
@@ -1577,8 +1654,8 @@ export const ClosingFalloutForecast = ({
       // Don't send loanIds - let the backend query the full database with proper filters
       // The frontend's 5000-loan sample may not match the backend's "Active Loan" criteria
       const predictUrl = selectedTenantId
-        ? `/api/loans/predict?tenant_id=${selectedTenantId}`
-        : "/api/loans/predict";
+        ? `/api/predictions?tenant_id=${selectedTenantId}`
+        : "/api/predictions";
       const response = await api.request<{
         predictions: Array<{ predictedOutcome: string; loanId: string }>;
         bucketedLoans?: any[];
@@ -1663,7 +1740,7 @@ export const ClosingFalloutForecast = ({
             loanData?: any;
           }>;
           count: number;
-          summary: { withdraw: number; deny: number; originate: number };
+          summary: { withdraw: number; deny: number; originate: number; likelyCloseLateCount?: number };
           dateFilter?: {
             startDate: string;
             endDate: string;
@@ -1852,15 +1929,9 @@ export const ClosingFalloutForecast = ({
 
     const getRaw = (loanId: string) => rawByLoanId.get(String(loanId));
 
-    // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
-    // Fall back to loansRaw if no bucketed data
+    // Use bucketedLoans (from prediction endpoint) as primary source - show all active loans; user can sort by risk
     if (bucketedLoans && bucketedLoans.length > 0) {
-      // Filter to high-risk loans from bucketed data
-      const highRiskLoans = bucketedLoans.filter(
-        (l: any) => l.bucket === "high"
-      );
-
-      return highRiskLoans.map((l: any) => {
+      return bucketedLoans.map((l: any) => {
         // Use snake_case field names matching database columns
         const loanId = l.loan_id || l.id || l.guid || "";
         const raw = getRaw(loanId);
@@ -1900,38 +1971,10 @@ export const ClosingFalloutForecast = ({
           reason = l.riskSummary;
         }
 
-        // Calculate risk score aligned with backend count-based bucket logic
-        const signals = [
-          l.creditMetricsSignalStrength,
-          l.loanCharacteristicsSignalStrength,
-          l.timeInMotionSignalStrength,
-          l.mloAeFalloutProneSignalStrength,
-          l.interestLockVsMarketSignalStrength,
-        ].filter((s): s is number => typeof s === "number" && !isNaN(s));
-
-        let riskScore = 75;
-        if (signals.length > 0) {
-          const avgSignal =
-            signals.reduce((sum, s) => sum + s, 0) / signals.length;
-          const severeCount = signals.filter((s) => s >= 5).length;
-          const elevatedCount = signals.filter((s) => s >= 4).length;
-          let bucket: "low" | "medium" | "high";
-          if (severeCount >= 3) bucket = "high";
-          else if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5)
-            bucket = "medium";
-          else if (avgSignal <= 3) bucket = "low";
-          else bucket = "medium";
-          if (bucket === "low") {
-            riskScore = Math.round(40 + (avgSignal / 3) * 15);
-          } else if (bucket === "medium") {
-            riskScore = Math.round(55 + (avgSignal / 6) * 20);
-          } else {
-            riskScore = Math.round(75 + (avgSignal / 6) * 25);
-          }
-          riskScore = Math.min(100, Math.max(40, riskScore));
-        } else if (l.riskSummary?.confidence) {
-          riskScore = l.riskSummary.confidence;
-        }
+        // Use backend-computed riskScore (process/credit split, max-based, 1-100 scale)
+        // Falls back to riskSummary.riskScore, then confidence, then 50
+        const riskScore: number =
+          l.riskScore ?? l.riskSummary?.riskScore ?? l.riskSummary?.confidence ?? 50;
 
         // Return in LoanCardsContainer expected format
         // Use snake_case field names matching database columns
@@ -1997,28 +2040,11 @@ export const ClosingFalloutForecast = ({
       });
     }
 
-    // Fallback: use loansRaw if no bucketed data available
+    // Fallback: use loansRaw if no bucketed data available - show all active loans
     if (!loansRaw || loansRaw.length === 0) return [];
 
     const now = new Date();
-    // Filter to only active loans that are predicted to fallout (withdraw or decline)
-    const activeRaw = loansRaw.filter((l) => {
-      // Must be active
-      if (mapForecastStatus(l) !== "Active") return false;
-
-      // Check if this loan is predicted to fallout
-      const loanId = l.loan_id || l.id;
-      if (!loanId) return false;
-
-      const predictedOutcome = loanPredictions[loanId];
-      // Include loans predicted to withdraw or decline (API returns lowercase: 'withdraw', 'deny', 'originate')
-      const outcomeLower = (predictedOutcome || "").toLowerCase();
-      return (
-        outcomeLower === "withdraw" ||
-        outcomeLower === "deny" ||
-        outcomeLower === "decline"
-      );
-    });
+    const activeRaw = loansRaw.filter((l) => mapForecastStatus(l) === "Active");
 
     return activeRaw.map((l) => {
       const base = transformLoanToCard(l);
@@ -2488,10 +2514,22 @@ export const ClosingFalloutForecast = ({
     600,
     isAnimating
   );
+  const animatedPastEstClose = useCountUp(
+    metrics.pastEstClose,
+    1500,
+    700,
+    isAnimating
+  );
 
   // Animated values for outcome metrics
   const animatedPredictedFallout = useCountUp(
     metrics.predictedFalloutTotal,
+    1500,
+    0,
+    isAnimating
+  );
+  const animatedHighRisk = useCountUp(
+    metrics.highRiskCount,
     1500,
     0,
     isAnimating
@@ -2621,7 +2659,7 @@ export const ClosingFalloutForecast = ({
       <div className="mb-8 md:mb-12">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch">
           {/* Main Forecast Section */}
-          <div className="md:col-span-8 lg:col-span-9 flex flex-col">
+          <div className="md:col-span-12 flex flex-col">
             <div ref={forecastRef}>
               <DashboardCard className="relative flex-1 flex flex-col">
                 <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col">
@@ -2677,8 +2715,8 @@ export const ClosingFalloutForecast = ({
                     </div>
                   </div>
 
-                  {/* Main Metrics Grid - 3 KPIs centered */}
-                  <div className="grid grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-4xl mx-auto">
+                  {/* Main Metrics Grid - 4 KPIs centered */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-5xl mx-auto">
                     {/* Active Loans Today */}
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -2749,7 +2787,10 @@ export const ClosingFalloutForecast = ({
                     {/* Likely Close Late */}
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
+                        <div
+                          onClick={() => handleMetricClick("Likely Close Late")}
+                          className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300 cursor-pointer hover:opacity-80"
+                        >
                           <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                             <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                               Likely Close Late
@@ -2771,6 +2812,44 @@ export const ClosingFalloutForecast = ({
                         </p>
                         <p className="text-xs text-slate-300">
                           {getMetricExplanation("Likely Close Late").desc}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+
+                    {/* Past Est. Close Date */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
+                          <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
+                            <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                              Past Est. Close
+                            </p>
+                            {metrics.pastEstClose > 0 && (
+                              <span className="px-1 sm:px-1.5 py-0.5 rounded text-[6px] sm:text-[7px] font-bold uppercase tracking-wide bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400">
+                                Alert
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-thin tracking-[-0.04em] ${
+                            metrics.pastEstClose > 0
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "text-slate-900 dark:text-slate-50"
+                          }`}>
+                            {isAnimating
+                              ? animatedPastEstClose.toLocaleString()
+                              : metrics.pastEstClose.toLocaleString()}
+                          </p>
+                          <p className="text-[8px] md:text-[9px] lg:text-xs text-slate-500/60 dark:text-slate-400/70 font-medium">
+                            Units
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                        <p className="font-semibold mb-1 text-white">
+                          {getMetricExplanation("Past Est. Close").title}
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {getMetricExplanation("Past Est. Close").desc}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -2842,32 +2921,32 @@ export const ClosingFalloutForecast = ({
 
                   {/* Outcome Metrics Grid */}
                   <div className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mt-auto">
-                    {/* Predicted Fallout */}
+                    {/* High Risk */}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <div
-                          onClick={() => handleMetricClick("Predicted Fallout")}
+                          onClick={() => handleMetricClick("High Risk")}
                           className="p-3 sm:p-5 md:p-6 lg:p-8 rounded-xl md:rounded-xl lg:rounded-2xl border transition-all duration-300 cursor-pointer group/outcome text-center overflow-hidden bg-white dark:bg-slate-900/30 border-slate-200/60 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10 shadow-[0_1px_4px_rgba(0,0,0,0.04)] dark:hover:bg-slate-800/50 hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
                         >
                           <p className="text-[8px] sm:text-[10px] md:text-[11px] lg:text-xs font-semibold uppercase tracking-wide sm:tracking-widest mb-1.5 sm:mb-2 lg:mb-3 leading-tight text-rose-600 dark:text-rose-400">
-                            Predicted Fallout
+                            High Risk
                           </p>
                           <p className="text-base sm:text-xl md:text-2xl lg:text-3xl font-light tracking-tight text-rose-500 dark:text-rose-400">
                             {isAnimating
-                              ? animatedPredictedFallout.toLocaleString()
-                              : metrics.predictedFalloutTotal.toLocaleString()}
+                              ? animatedHighRisk.toLocaleString()
+                              : metrics.highRiskCount.toLocaleString()}
                           </p>
                           <p className="text-[8px] sm:text-xs md:text-sm text-slate-400 font-normal mt-1 uppercase">
-                            {metrics.falloutRate}%
+                            of {metrics.totalActiveInPanel} active
                           </p>
                         </div>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
                         <p className="font-semibold mb-1 text-white">
-                          {getMetricExplanation("Predicted Fallout").title}
+                          {getMetricExplanation("High Risk").title}
                         </p>
                         <p className="text-xs text-slate-300">
-                          {getMetricExplanation("Predicted Fallout").desc}
+                          {getMetricExplanation("High Risk").desc}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -2937,52 +3016,7 @@ export const ClosingFalloutForecast = ({
             </div>
           </div>
 
-          {/* Pipeline Snapshot Section */}
-          <div className="md:col-span-4 lg:col-span-3 flex flex-col order-first md:order-none">
-            <section className="bg-[#1A56DB] rounded-xl md:rounded-2xl p-6 md:p-10 lg:p-12 text-white shadow-[0_20px_50px_-15px_rgba(26,86,219,0.4)] flex-1 flex flex-col">
-              <h3 className="text-[10px] md:text-[11px] font-semibold uppercase tracking-widest mb-6 opacity-80">
-                Pipeline Snapshot
-              </h3>
-              <div className="space-y-6 md:space-y-8 flex-1 flex flex-col justify-between">
-                {kpis.map((kpi) => (
-                  <Tooltip key={kpi.label}>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="group cursor-pointer hover:bg-white/5 rounded-xl p-3 -mx-3 transition-all duration-200"
-                        onClick={() => handleMetricClick(kpi.label)}
-                      >
-                        <p className="text-[9px] md:text-[10px] font-semibold uppercase tracking-[0.2em] mb-2 opacity-60 group-hover:opacity-90 transition-opacity">
-                          {kpi.label}
-                        </p>
-                        <div className="flex items-baseline justify-between">
-                          <p className="text-2xl md:text-4xl lg:text-5xl font-thin tracking-tight group-hover:scale-[1.02] transition-transform">
-                            {kpi.value}
-                          </p>
-                          <div className="text-right">
-                            <span className="text-[7px] md:text-[8px] font-medium uppercase tracking-wider opacity-50 block">
-                              {kpi.secondaryLabel}
-                            </span>
-                            <span className="text-[10px] md:text-xs font-semibold text-white/90">
-                              {kpi.secondaryValue}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="mt-3 md:mt-4 h-px w-full bg-white/10 group-hover:bg-white/20 transition-colors"></div>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
-                      <p className="font-semibold mb-1 text-white">
-                        {kpi.label}
-                      </p>
-                      <p className="text-xs text-slate-300">
-                        {kpi.explanation}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-            </section>
-          </div>
+          {/* Pipeline Snapshot Section removed — KPIs moved to main panel */}
         </div>
 
         {/* ============================================================================
@@ -3699,6 +3733,8 @@ export const ClosingFalloutForecast = ({
               ? metrics.predictedClosing
               : metricModalLabel === "Predicted Fallout"
               ? metrics.predictedFalloutTotal
+              : metricModalLabel === "High Risk"
+              ? metrics.highRiskCount
               : undefined
           }
           subLabel={
@@ -3710,6 +3746,8 @@ export const ClosingFalloutForecast = ({
               ? `${metrics.pullThroughRateDisplay}% Pull-Through (Rolling 90D)`
               : metricModalLabel === "Predicted Fallout"
               ? `${metrics.falloutRate}%`
+              : metricModalLabel === "High Risk"
+              ? `${metrics.highRiskRate}% of ${metrics.totalActiveInPanel} active`
               : undefined
           }
           fallbackActiveVolume={metrics.pipelineValue}

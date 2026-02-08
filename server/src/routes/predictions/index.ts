@@ -56,13 +56,16 @@ router.post(
       // Fetch active loans using same criteria as metricsService
       const activeLoansQuery = `
       SELECT 
-        loan_id, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, lock_expiration_date, closing_date, funding_date,
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
         uw_denied_date, uw_suspended_date, last_modified_date,
         current_loan_status, current_milestone, branch, loan_officer,
         fico_score, be_dti_ratio, ltv_ratio, cltv,
         loan_purpose, property_type, occupancy_type, channel,
-        underwriter, closer, processor
+        underwriter, closer, processor,
+        ctc_date, approval_date, uw_final_approval_date,
+        cond_approval_date, conditional_approval_date,
+        submitted_to_processing_date, submitted_to_underwriting_date
       FROM public.loans 
       WHERE current_loan_status = 'Active Loan'
         AND application_date IS NOT NULL
@@ -83,11 +86,19 @@ router.post(
       );
       let activeLoans = loansResult.rows;
 
-      // Fetch historical loans for pull-through calculations
+      // Historical loans for calibration + pullthrough. Same columns as active so prepareLoanData/bucketing have fico, DTI, LTV, etc.
       const historicalLoansQuery = `
       SELECT 
-        loan_id, current_loan_status, loan_officer, underwriter, closer, processor,
-        application_date, funding_date
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
+        current_loan_status, current_milestone, branch, loan_officer,
+        fico_score, be_dti_ratio, ltv_ratio, cltv,
+        loan_purpose, property_type, occupancy_type, channel,
+        underwriter, closer, processor,
+        ctc_date, approval_date, uw_final_approval_date,
+        cond_approval_date, conditional_approval_date,
+        submitted_to_processing_date, submitted_to_underwriting_date
       FROM public.loans 
       WHERE current_loan_status != 'Active Loan' OR current_loan_status IS NULL
       ORDER BY application_date DESC
@@ -117,6 +128,7 @@ router.post(
             predictedWithdraw: 0,
             predictedDeny: 0,
             predictedOriginate: 0,
+            likelyCloseLateCount: 0,
           },
           metadata: {
             model: process.env.PREDICTION_MODEL || "gpt-4o",
@@ -246,6 +258,13 @@ router.post(
         "loPullthroughSignal",
         "marketChangeDeltaSignal",
         "riskSummary",
+        "riskScore",
+        "creditRiskScore",
+        "processRiskScore",
+        "closeOnTimeProbability",
+        "closeLateRisk",
+        "pipelineStage",
+        "pipelineReadiness",
       ];
 
       const rawByLoanIdPred = new Map<string, any>();
@@ -338,9 +357,17 @@ router.post(
       };
 
       const responseSize = JSON.stringify(slimResult).length;
+      const outcomeCounts = { withdraw: 0, deny: 0, originate: 0, at_risk: 0 };
+      for (const loan of limitedLoans) {
+        const outcome = loan.ruleBasedSummary?.predictedOutcome || loan.predictedOutcome;
+        if (outcome && outcome in outcomeCounts) {
+          outcomeCounts[outcome as keyof typeof outcomeCounts]++;
+        }
+      }
       logInfo("[Predictions] Response", {
-        predictions: slimResult.predictions?.length || 0,
-        bucketedLoans: slimResult.bucketedLoans?.length || 0,
+        totalBucketedLoans: result.bucketedLoans?.length || 0,
+        bucketedLoansInResponse: slimResult.bucketedLoans?.length || 0,
+        outcomeCounts,
         responseSizeMB: (responseSize / 1024 / 1024).toFixed(2),
       });
 
@@ -842,6 +869,11 @@ router.get(
                   ? "low"
                   : "medium",
             },
+            // Close-late prediction fields (from stored loan_data)
+            closeOnTimeProbability: mergedLoanData.closeOnTimeProbability ?? null,
+            closeLateRisk: mergedLoanData.closeLateRisk ?? null,
+            pipelineStage: mergedLoanData.pipelineStage ?? null,
+            pipelineReadiness: mergedLoanData.pipelineReadiness ?? null,
           },
         };
       });
@@ -867,6 +899,11 @@ router.get(
         },
       });
 
+      // Count close-late risk from stored loan data
+      const likelyCloseLateCount = predictions.filter(
+        (p: any) => p.loanData?.closeLateRisk === true
+      ).length;
+
       res.json({
         predictions,
         count: predictions.length,
@@ -877,6 +914,7 @@ router.get(
           originate: predictions.filter(
             (p) => p.predictedOutcome === "originate"
           ).length,
+          likelyCloseLateCount,
         },
         dateFilter: dateRange
           ? {

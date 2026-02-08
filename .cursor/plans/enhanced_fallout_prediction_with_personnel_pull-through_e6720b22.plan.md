@@ -4,28 +4,28 @@ overview: Enhance the fallout prediction system to leverage per-loan personnel p
 todos:
   - id: enhance-personnel-pullthrough
     content: Enhance generateRuleBasedSummary to use all personnel pull-through signals (UW, Closer, Processor) in risk scoring, not just MLO
-    status: pending
+    status: completed
   - id: calibrate-thresholds
     content: Add historical fallout rate calibration - calculate org-wide fallout rate and use percentile-based thresholds instead of fixed values
-    status: pending
+    status: completed
   - id: historical-pattern-comparison
     content: Add compareToHistoricalFallouts function to find similar historical loans that fell out and use their outcomes to adjust predictions
-    status: pending
+    status: completed
   - id: team-composition-risk
     content: Add calculateTeamRisk function to detect when multiple personnel have low pull-through (multiplicative risk effect)
-    status: pending
+    status: completed
   - id: recent-trend-analysis
     content: Add calculateRecentTrend function to detect declining personnel performance (recent vs. overall pull-through)
-    status: pending
+    status: completed
   - id: stage-progression-risk
     content: Add calculateStageProgressionRisk function to detect loans stuck in a stage longer than typical
-    status: pending
+    status: completed
   - id: integrate-all-features
     content: Update generateRuleBasedSummary to integrate all new features (team risk, historical comparison, trends, stage progression) with proper weighting
-    status: pending
+    status: completed
   - id: test-validation
     content: Add logging and validation to compare predicted vs. actual outcomes and track which features are most predictive
-    status: pending
+    status: completed
 isProject: false
 ---
 
