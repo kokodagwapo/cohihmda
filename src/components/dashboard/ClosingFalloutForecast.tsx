@@ -621,9 +621,8 @@ function computeMetricsFromLoans(
   let fundedInPeriodCount = 0;
   let fundedTotalByStatus = 0; // Count funded loans by status (for 'all' period fallback)
   let startedInPeriodCount = 0;
-  let lockedCount = 0;
-  let lockedInPeriodCount = 0;
-  let lockedInRolling90 = 0; // Locks in rolling 90 days for Pipeline Snapshot KPI
+  let lockedCount = 0; // All active loans with lock dates (snapshot)
+  let lockedInPeriodCount = 0; // Active loans with lock dates that pass the period filter
 
   // Single pass through all loans
   for (let i = 0; i < loans.length; i++) {
@@ -654,6 +653,12 @@ function computeMetricsFromLoans(
         !activeLoansPeriodFilter ||
         isDateInPeriod(strictAppDate, activeLoansPeriodFilter, now);
 
+      // Check if this active loan has a lock date (regardless of period filter)
+      const hasLockDate = hasAnyValue(getForecastLockDate(loan));
+      if (hasLockDate) {
+        lockedCount++;
+      }
+
       if (passesActivePeriodFilter) {
         activeCount++;
         activePipelineValue += getLoanAmountNumber(loan);
@@ -661,6 +666,11 @@ function computeMetricsFromLoans(
         // Check if likely close late (only for active loans)
         if (isLikelyCloseLateForecast(loan, 30, now)) {
           likelyCloseLateCount++;
+        }
+
+        // Count locked active loans within the period filter
+        if (hasLockDate) {
+          lockedInPeriodCount++;
         }
       }
     }
@@ -678,22 +688,6 @@ function computeMetricsFromLoans(
     // Check if application started in period (for pull-through calculation)
     if (appDate && isDateInPeriod(appDate, period, now)) {
       startedInPeriodCount++;
-    }
-
-    // Check if locked (needs to be active first)
-    if (isLockedForForecast(loan)) {
-      lockedCount++;
-      // Check if locked in period - use getForecastLockDate to get the lock date from multiple possible field names
-      const lockDateValue = getForecastLockDate(loan);
-      if (lockDateValue) {
-        if (isDateInPeriod(String(lockDateValue), period, now)) {
-          lockedInPeriodCount++;
-        }
-        // Also count locks in rolling 90 days for the Pipeline Snapshot KPI
-        if (isDateInPeriod(String(lockDateValue), "rolling_90_days", now)) {
-          lockedInRolling90++;
-        }
-      }
     }
   }
 
@@ -790,13 +784,11 @@ function computeMetricsFromLoans(
       ? Math.round((activeLoansToday * pullThroughRate) / 100)
       : 0;
 
-  // Locked loans - use statsData for 'all', client-side count for filtered periods
+  // Locked loans - active loans with lock dates, filtered by period
+  // For 'all' period: count all active loans with lock dates
+  // For filtered periods: count active loans with lock dates that pass the application date filter
   const lockedLoans =
-    period === "all"
-      ? statsData?.locked ?? lockedCount
-      : lockedInPeriodCount > 0
-      ? lockedInPeriodCount
-      : 0;
+    period === "all" ? lockedCount : lockedInPeriodCount;
 
   // Funded/Closed loans - IMPORTANT: Use statsData?.closed for 'all' period
   // This ensures it matches ExecutiveDashboard's "Closed Loans" metric
@@ -810,12 +802,8 @@ function computeMetricsFromLoans(
   // Average cycle time (from statsData or default)
   const avgCycleTime = statsData?.avgCycleTime ?? 24;
 
-  // For rolling 90-day locks, use client-side calculation if available, otherwise fall back to statsData.locked
-  // This handles cases where lock_date might not be populated or parseable
-  const lockedRolling90Value =
-    lockedInRolling90 > 0
-      ? lockedInRolling90
-      : statsData?.locked ?? lockedCount;
+  // For rolling 90-day locks, just use the total locked active count
+  const lockedRolling90Value = lockedCount;
 
   return {
     activeLoansToday,
@@ -1085,6 +1073,18 @@ export const ClosingFalloutForecast = ({
       return bucketedLoans.filter((l: any) => l?.closeLateRisk === true).length;
     })();
 
+    // Locked count from bucketed loans (snapshot metric — active loans with lock dates).
+    // Bucketed loans include lock_date in essentialFields from prediction save.
+    const bucketedLockedCount = (() => {
+      if (!bucketedLoans || bucketedLoans.length === 0) return null;
+      return bucketedLoans.filter((l: any) => {
+        const lockDate = l?.lock_date ?? l?.["Lock Date"] ?? l?.["Trans Details Lock Date"];
+        if (lockDate === null || lockDate === undefined) return false;
+        if (typeof lockDate === "string") return lockDate.trim().length > 0;
+        return true;
+      }).length;
+    })();
+
     // Past est. close count from bucketed loans (snapshot metric — not filtered by period).
     // Bucketed loans have estimated_closing_date from the prediction save.
     const bucketedPastEstCloseCount = (() => {
@@ -1148,7 +1148,10 @@ export const ClosingFalloutForecast = ({
         const pastEstClose = bucketedPastEstCloseCount != null
           ? Math.max(bucketedPastEstCloseCount, cached.pastEstClose)
           : cached.pastEstClose;
-        return { ...cached, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose };
+        const lockedLoans = bucketedLockedCount != null
+          ? Math.max(bucketedLockedCount, cached.lockedLoans)
+          : cached.lockedLoans;
+        return { ...cached, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose, lockedLoans };
       }
 
       // Pass server-side active loans count to computeMetricsFromLoans
@@ -1232,7 +1235,10 @@ export const ClosingFalloutForecast = ({
       const pastEstClose = bucketedPastEstCloseCount != null
         ? Math.max(bucketedPastEstCloseCount, result.pastEstClose)
         : result.pastEstClose;
-      return { ...result, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose };
+      const lockedLoans = bucketedLockedCount != null
+        ? Math.max(bucketedLockedCount, result.lockedLoans)
+        : result.lockedLoans;
+      return { ...result, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose, lockedLoans };
     }
 
     // Active Loans Today
@@ -1372,8 +1378,8 @@ export const ClosingFalloutForecast = ({
         ? `$${(metrics.pipelineValue / 1000000).toFixed(1)}M`
         : "$0M";
 
-    // Use locked loans from useMetrics (rolling 90 days) - same approach as ExecutiveDashboard
-    const locksCount = lockedLoansRolling90;
+    // Active locked loans count — how many of the current active loans have a lock date
+    const lockedActiveCount = metrics.lockedLoans;
 
     const pullThrough = `${metrics.pullThroughRateDisplay}%`;
 
@@ -1387,12 +1393,12 @@ export const ClosingFalloutForecast = ({
           "Total Unpaid Principal Balance of active loans. Forward-looking revenue indicator.",
       },
       {
-        label: "Locks (90D)",
-        value: locksCount.toString(),
-        secondaryLabel: "Rolling 90 Days",
-        secondaryValue: locksCount.toString(),
+        label: "Locked Loans",
+        value: lockedActiveCount.toString(),
+        secondaryLabel: "Active w/ Lock",
+        secondaryValue: `${lockedActiveCount} of ${metrics.activeLoansToday}`,
         explanation:
-          "Loans with secured rate locks in the past 90 days. Matches ExecutiveDashboard methodology.",
+          "Active loans that have a rate lock date. Only counts loans currently in the active pipeline.",
       },
       {
         label: "Pull-Through",
@@ -1403,7 +1409,7 @@ export const ClosingFalloutForecast = ({
           "Historical success rate - % of loans that successfully fund. Uses rolling 90-day window for accuracy.",
       },
     ];
-  }, [metrics, lockedLoansRolling90]);
+  }, [metrics]);
 
   // PERFORMANCE: Only trigger animation on initial data load, not on period changes
   // This prevents stutter when switching between periods
