@@ -44,6 +44,7 @@ import {
   getUserLoanAccessFilter,
   type LoanAccessContext,
 } from "../services/userLoanAccessService.js";
+import { sendLoanCardEmail } from "../services/emailService.js";
 import {
   isActorMissing,
   filterByChannel,
@@ -138,6 +139,36 @@ router.get(
     }
   }
 );
+
+/**
+ * POST /api/loans/email-card
+ * Send loan card as email with inline image
+ * Body: { to: string, loanId: string, officerName?: string, imageBase64: string }
+ */
+router.post('/email-card', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { to, loanId, officerName, imageBase64 } = req.body;
+    if (!to || typeof to !== 'string' || !to.trim()) {
+      return res.status(400).json({ error: 'Recipient email (to) is required' });
+    }
+    if (!loanId || typeof loanId !== 'string' || !loanId.trim()) {
+      return res.status(400).json({ error: 'Loan ID is required' });
+    }
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'Image data (imageBase64) is required' });
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(to.trim())) {
+      return res.status(400).json({ error: 'Invalid recipient email address' });
+    }
+    const subject = `Loan Update: ${loanId}${officerName ? ` - ${officerName}` : ''}`;
+    await sendLoanCardEmail(to.trim(), subject, loanId, officerName || '', imageBase64);
+    res.json({ success: true, message: 'Email sent' });
+  } catch (error: any) {
+    logError('Error sending loan card email', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to send email' });
+  }
+});
 
 // Helper function to categorize columns
 function categorizeColumn(columnName: string): string {

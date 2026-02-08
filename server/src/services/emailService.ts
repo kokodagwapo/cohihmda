@@ -625,3 +625,182 @@ If you have any questions or concerns, please contact our support team.
     text,
   });
 }
+
+/**
+ * Send loan card email with inline image
+ * Uses provider-specific methods for attachments with Content-ID
+ */
+export async function sendLoanCardEmail(
+  to: string,
+  subject: string,
+  loanId: string,
+  officerName: string,
+  imageBase64: string,
+): Promise<void> {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #334155; margin: 0; padding: 20px; }
+        .container { max-width: 640px; margin: 0 auto; }
+        .intro { margin-bottom: 20px; color: #64748b; font-size: 14px; }
+        .card-img { max-width: 100%; height: auto; display: block; border-radius: 8px; }
+        .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <p class="intro">Loan card for ${loanId}${officerName ? ` (${officerName})` : ""}:</p>
+        <img src="cid:cardImage" alt="Loan card" class="card-img" />
+        <div class="footer">
+          <p>Sent from Coheus</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const text = `Loan card for ${loanId}${officerName ? ` (${officerName})` : ""}. View the attached image for full details. — Sent from Coheus`;
+
+  const emailProvider = process.env.EMAIL_PROVIDER || "ses";
+
+  try {
+    switch (emailProvider) {
+      case "ses":
+        await sendLoanCardViaSES(to, subject, html, text, imageBase64);
+        break;
+      case "sendgrid":
+        await sendLoanCardViaSendGrid(to, subject, html, text, imageBase64);
+        break;
+      case "resend":
+        await sendLoanCardViaResend(to, subject, html, text, imageBase64);
+        break;
+      default:
+        console.warn(`Unknown email provider: ${emailProvider}. Loan card email not sent.`);
+    }
+  } catch (error: any) {
+    console.error("Loan card email error:", error);
+    throw error;
+  }
+}
+
+async function sendLoanCardViaSES(
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+  imageBase64: string,
+): Promise<void> {
+  const sesModule = (await import("@aws-sdk/client-ses")) as any;
+  const { SESClient, SendRawEmailCommand } = sesModule;
+  const sesClient = new SESClient({
+    region: process.env.AWS_SES_REGION || "us-east-1",
+  });
+
+  const boundary1 = "boundary1_" + Math.random().toString(36).slice(2);
+  const boundary2 = "boundary2_" + Math.random().toString(36).slice(2);
+  const from = process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com";
+
+  const rawMessage = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/related; boundary="${boundary1}"`,
+    "",
+    `--${boundary1}`,
+    `Content-Type: multipart/alternative; boundary="${boundary2}"`,
+    "",
+    `--${boundary2}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    text,
+    "",
+    `--${boundary2}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "",
+    html,
+    "",
+    `--${boundary2}--`,
+    `--${boundary1}`,
+    'Content-Type: image/png; name="card.png"',
+    'Content-Disposition: inline; filename="card.png"',
+    "Content-ID: <cardImage>",
+    "Content-Transfer-Encoding: base64",
+    "",
+    imageBase64,
+    "",
+    `--${boundary1}--`,
+  ].join("\r\n");
+
+  const command = new SendRawEmailCommand({
+    RawMessage: {
+      Data: Buffer.from(rawMessage, "utf-8"),
+    },
+  });
+
+  await sesClient.send(command);
+  console.log(`✅ Loan card email sent via SES to ${to}`);
+}
+
+async function sendLoanCardViaSendGrid(
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+  imageBase64: string,
+): Promise<void> {
+  const sgMail = (await import("@sendgrid/mail")) as any;
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY || "");
+
+  await sgMail.send({
+    to,
+    from: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        content: imageBase64,
+        filename: "card.png",
+        type: "image/png",
+        disposition: "inline",
+        content_id: "cardImage",
+      },
+    ],
+  });
+
+  console.log(`✅ Loan card email sent via SendGrid to ${to}`);
+}
+
+async function sendLoanCardViaResend(
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+  imageBase64: string,
+): Promise<void> {
+  const resendModule = (await import("resend")) as any;
+  const { Resend } = resendModule;
+  const resend = new Resend(process.env.RESEND_API_KEY || "");
+
+  await resend.emails.send({
+    from: process.env.EMAIL_FROM_ADDRESS || "noreply@coheus.com",
+    to,
+    subject,
+    html,
+    text,
+    attachments: [
+      {
+        content: imageBase64,
+        filename: "card.png",
+        content_id: "cardImage",
+      },
+    ],
+  });
+
+  console.log(`✅ Loan card email sent via Resend to ${to}`);
+}

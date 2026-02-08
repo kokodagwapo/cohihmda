@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
   Card,
@@ -177,8 +177,8 @@ import { useTenantStore } from "@/stores/tenantStore";
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-
   // Use AuthContext for proper authentication (not useEdit)
   const {
     isAuthenticated: authContextAuthenticated,
@@ -208,6 +208,27 @@ const Dashboard = () => {
 
   // Tenant selection from global store (shared with Navigation header)
   const { selectedTenantId, setSelectedTenantId } = useTenantStore();
+
+  const openLoanId = searchParams.get("loan");
+  const closingFalloutSectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (openLoanId && closingFalloutSectionRef.current) {
+      setTimeout(() => {
+        closingFalloutSectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 300);
+    }
+  }, [openLoanId]);
+
+  const handleLoanIdHandled = useCallback(() => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.delete("loan");
+    const newSearch = newParams.toString();
+    setSearchParams(newSearch ? `?${newSearch}` : "", { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Track user ID to detect user changes and reset state
   // Initialize with current user ID to avoid resetting on first mount
@@ -1474,6 +1495,7 @@ const Dashboard = () => {
                   {/* Closing & Fallout Forecast */}
                   {dashboardVisibility.closingFalloutForecast && (
                     <div
+                      ref={closingFalloutSectionRef}
                       id="closingFalloutForecast"
                       className="section-closing-fallout-forecast"
                     >
@@ -1481,6 +1503,8 @@ const Dashboard = () => {
                         dateFilter={dateFilter}
                         selectedTenantId={selectedTenantId}
                         selectedChannel={selectedChannel}
+                        openLoanId={openLoanId || undefined}
+                        onOpenLoanIdHandled={handleLoanIdHandled}
                       />
                     </div>
                   )}

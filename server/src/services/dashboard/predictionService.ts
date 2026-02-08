@@ -2101,18 +2101,72 @@ export async function bucketLoanData(
 
     // LO Pullthrough: High pullthrough = less fallout prone (1), Low pullthrough = more fallout prone (6)
     const loNameLower = loName ? loName.toLowerCase().trim() : null;
-    const loPullthroughPct = loNameLower ? loPullthrough[loNameLower] : null;
+    // Try pullthrough map first (calculated from historical loans), fallback to loan's existing loPullthroughPercentage if available
+    // Also check snake_case variant (lo_pullthrough_percentage) for database compatibility
+    // IMPORTANT: Check multiple possible field names and formats to ensure we find the percentage
+    // Try multiple name variations to match the pullthrough map (which uses normalized names)
+    let loPullthroughPct = null;
+    if (loNameLower) {
+      loPullthroughPct = loPullthrough[loNameLower] ?? null;
+      // If not found, try raw loan_officer field (in case prepareLoanData extracted it differently)
+      if (!loPullthroughPct && loan.loan_officer) {
+        const rawLoNameLower = String(loan.loan_officer).toLowerCase().trim();
+        loPullthroughPct = loPullthrough[rawLoNameLower] ?? null;
+      }
+      // Also try loanOfficerName directly (in case it's set differently)
+      if (!loPullthroughPct && loan.loanOfficerName && loan.loanOfficerName !== loName) {
+        const altLoNameLower = String(loan.loanOfficerName).toLowerCase().trim();
+        loPullthroughPct = loPullthrough[altLoNameLower] ?? null;
+      }
+    }
+    // Normalize percentage value: handle both number and string types, ensure it's a valid number
+    // Check multiple possible field name variations (camelCase, snake_case, and any nested paths)
+    const loPullthroughPctRaw = loPullthroughPct ?? 
+                                loan.loPullthroughPercentage ?? 
+                                (loan as any).lo_pullthrough_percentage ??
+                                (loan as any).loPullthroughPct ??
+                                (loan as any).lo_pullthrough_pct ??
+                                null;
+    // Convert to number if it's a string, handle null/undefined
+    const loPullthroughPctFinal = loPullthroughPctRaw != null 
+      ? (typeof loPullthroughPctRaw === 'string' ? parseFloat(loPullthroughPctRaw) : Number(loPullthroughPctRaw))
+      : null;
+    // Ensure it's a valid number (not NaN)
+    const loPullthroughPctValid = (loPullthroughPctFinal != null && !isNaN(loPullthroughPctFinal)) ? loPullthroughPctFinal : null;
     
-    // Debug logging for LO Pullthrough (reduced verbosity - only log in debug mode)
-    // This is expected for loans where the LO doesn't have historical data, so we don't spam logs
+    // Debug logging: Log when we have a percentage but bucket is still null (for troubleshooting)
+    if (loPullthroughPctValid != null && loPullthroughPctValid > 0 && loPullthroughPctValid <= 100) {
+      const testBucket = bucketNumeric(loPullthroughPctValid, [
+        { min: 85, max: null, bucket: 1 },
+        { min: 78, max: 84.999, bucket: 2 },
+        { min: 70, max: 77.999, bucket: 3 },
+        { min: 60, max: 69.999, bucket: 4 },
+        { min: 50, max: 59.999, bucket: 5 },
+        { min: null, max: 49.999, bucket: 6 }
+      ]);
+      if (testBucket == null) {
+        logInfo('[PredictDebug] LO Pullthrough bucket calculation returned null despite valid percentage', {
+          loanId: loan.loanId,
+          loName: loName,
+          loPullthroughPctValid,
+          loPullthroughPctRaw,
+          loPullthroughPct,
+          loanHasLoPullthroughPercentage: !!loan.loPullthroughPercentage,
+          loanHasLoPullthroughPercentageSnake: !!(loan as any).lo_pullthrough_percentage
+        });
+      }
+    }
     
-    const loPullthroughBucket = bucketNumeric(loPullthroughPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+    // Calculate bucket from final percentage value (includes fallback)
+    // IMPORTANT: Always calculate bucket if percentage exists, even if it's from fallback
+    // Note: Ranges must cover all possible values without gaps. Using 84.999 to ensure 84.78 matches bucket 2, etc.
+    const loPullthroughBucket = bucketNumeric(loPullthroughPctValid, [
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     // Market Change Delta: Negative (favorable) = less fallout prone (1), Positive (unfavorable) = more fallout prone (6)
@@ -2120,11 +2174,11 @@ export async function bucketLoanData(
     // Positive delta = rates went DOWN since lock (better rates available, withdrawal risk)
     const marketDeltaBucket = bucketNumeric(marketDelta.marketChangeDelta, [
       { min: null, max: -0.3, bucket: 1 }, // Very favorable (rates up ≥0.3%, less fallout prone)
-      { min: -0.29, max: -0.1, bucket: 2 }, // Favorable (rates up 0.1-0.3%)
-      { min: -0.09, max: 0.05, bucket: 3 }, // Neutral (minimal change)
-      { min: 0.06, max: 0.2, bucket: 4 }, // Slightly unfavorable (rates down 0.06-0.2%)
-      { min: 0.21, max: 0.5, bucket: 5 }, // Unfavorable (rates down 0.21-0.5%)
-      { min: 0.51, max: null, bucket: 6 } // Very unfavorable (rates down >0.5%, more fallout prone)
+      { min: -0.299, max: -0.1, bucket: 2 }, // Favorable (rates up 0.1-0.3%) - Fixed: -0.299 to cover gap
+      { min: -0.099, max: 0.05, bucket: 3 }, // Neutral (minimal change) - Fixed: -0.099 to cover gap
+      { min: 0.051, max: 0.2, bucket: 4 }, // Slightly unfavorable (rates down 0.06-0.2%) - Fixed: 0.051 to cover gap
+      { min: 0.201, max: 0.5, bucket: 5 }, // Unfavorable (rates down 0.21-0.5%) - Fixed: 0.201 to cover gap
+      { min: 0.501, max: null, bucket: 6 } // Very unfavorable (rates down >0.5%, more fallout prone) - Fixed: 0.501 to cover gap
     ]);
 
     // Step 5: Calculate composite signals
@@ -2146,32 +2200,32 @@ export async function bucketLoanData(
     // High pullthrough = less fallout prone (1), Low pullthrough = more fallout prone (6)
     const uwPct = uwName ? uwPullthrough[uwName] : null;
     const uwPullthroughBucket = bucketNumeric(uwPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     const closerPct = closerName ? closerPullthrough[closerName] : null;
     const closerPullthroughBucket = bucketNumeric(closerPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     const processorPct = processorName ? processorPullthrough[processorName] : null;
     const processorPullthroughBucket = bucketNumeric(processorPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     // Time in Motion Signal - Active Days only (no milestones)
@@ -2378,12 +2432,12 @@ export async function bucketLoanData(
       ]) : null,
       // Lender Credit Amount: Higher credit = less fallout prone (1), Lower/no credit = more fallout prone (6)
       lenderCreditAmountSignal: loan.lenderCreditAmount ? bucketNumeric(loan.lenderCreditAmount, [
-        { min: 5000, max: null, bucket: 1 }, // High lender credit (less fallout prone)
-        { min: 2000, max: 4999, bucket: 2 }, // Moderate lender credit
-        { min: 1000, max: 1999, bucket: 3 }, // Low lender credit
-        { min: 500, max: 999, bucket: 4 }, // Minimal lender credit
-        { min: 1, max: 499, bucket: 5 }, // Very minimal lender credit
-        { min: null, max: 0, bucket: 6 } // No lender credit (more fallout prone)
+        { min: 5000, max: null, bucket: 1 }, // High lender credit (less fallout prone) - $5000+
+        { min: 2000, max: 4999.999, bucket: 2 }, // Moderate lender credit - $2000-4999.999
+        { min: 1000, max: 1999.999, bucket: 3 }, // Low lender credit - $1000-1999.999
+        { min: 500, max: 999.999, bucket: 4 }, // Minimal lender credit - $500-999.999
+        { min: 0.001, max: 499.999, bucket: 5 }, // Very minimal lender credit - $0.001-499.999 (Fixed: 0.001 to cover gap)
+        { min: null, max: 0, bucket: 6 } // No lender credit (more fallout prone) - $0
       ]) : null,
       loanAmountSignal: loanAmountBucket,
       loanTypeSignal: loanTypeBucket,
@@ -2427,40 +2481,15 @@ export async function bucketLoanData(
       lockMarketRate: marketDelta.lockMarketRate,
       closeMarketRate: marketDelta.closeMarketRate,
       
-      // Pullthrough details
-      loPullthroughPercentage: loPullthroughPct,
+      // Pullthrough details (use final validated value that includes fallback from loan data)
+      loPullthroughPercentage: loPullthroughPctValid,
       uwPullthroughPercentage: uwPct,
       closerPullthroughPercentage: closerPct,
       processorPullthroughPercentage: processorPct,
       
-      // Overall bucket (high/medium/low) based on composite signal strengths
-      bucket: (() => {
-        const compositeSignals = [
-          creditSignal, 
-          loanCharacteristicsSignal, 
-          timeInMotionSignal, 
-          mloAeFalloutProneSignal,
-          interestLockVsMarketSignal
-        ].filter(s => s !== null) as number[];
-        
-        if (compositeSignals.length === 0) return 'unknown';
-        
-        // Original: average-based thresholds
-        // const avgSignal = compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length;
-        // if (avgSignal <= 3) return 'low';
-        // if (avgSignal <= 4) return 'medium';
-        // return 'high';
-        
-        // Count-based: severe (>=5), elevated (>=4), any at max (6)
-        const avgSignal = compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length;
-        const severeCount = compositeSignals.filter(s => s >= 5).length;
-        const elevatedCount = compositeSignals.filter(s => s >= 4).length;
-        
-        if (severeCount >= 3) return 'high';
-        if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5) return 'medium';
-        if (avgSignal <= 3) return 'low';
-        return 'medium';
-      })(),
+      // Overall bucket (high/medium/low) - will be set after generateRuleBasedSummary is called
+      // Bucket calculation moved to generateRuleBasedSummary to avoid duplicate logic
+      bucket: 'medium', // Placeholder - will be overwritten after riskSummary is calculated
       
       // Signal strength for sorting (average of composite signals, higher = more risk)
       signal_strength: (() => {
@@ -2610,6 +2639,17 @@ async function getCachedHistoricalBucketLoanIds(tenantId: string | null, dbPool:
   }
 }
 
+/** Clear all rows from historical_loan_bucket_cache so the next predict run will re-bucket from scratch. */
+export async function clearHistoricalBucketCache(dbPool: pg.Pool): Promise<void> {
+  try {
+    await dbPool.query('TRUNCATE TABLE public.historical_loan_bucket_cache');
+    logInfo('Cleared historical loan bucket cache');
+  } catch (err: any) {
+    logError('Failed to clear historical bucket cache', err, {});
+    throw err;
+  }
+}
+
 /** True if tenant has at least one active row in ai_pattern_learnings (historical_patterns). */
 async function hasActivePatternLearnings(tenantId: string | null, dbPool: pg.Pool): Promise<boolean> {
   if (!tenantId) return false;
@@ -2744,6 +2784,11 @@ async function runPredictFlow(
 
   let allBucketedHistorical: any[] = [];
 
+  // ——— Step 0 (optional): Clear bucket cache when requested (e.g. CLEAR_BUCKET_CACHE=1). ———
+  if (process.env.CLEAR_BUCKET_CACHE === '1' || process.env.CLEAR_BUCKET_CACHE === 'true') {
+    await clearHistoricalBucketCache(dbPool);
+  }
+
   // ——— Step 1: If historical bucket cache is empty, bucket and save all historical loans. ———
   const cachedIds = await getCachedHistoricalBucketLoanIds(tenantId, dbPool);
   if (cachedIds.size === 0 && historicalLoans.length > 0) {
@@ -2752,8 +2797,10 @@ async function runPredictFlow(
     await saveHistoricalBuckets(tenantId, bucketed, dbPool);
     allBucketedHistorical = bucketed;
     logInfo('Step 1/3: Done — saved all historical buckets', { count: bucketed.length });
-  } else {
+  } else if (cachedIds.size > 0) {
     logInfo('Step 1/3: Historical bucket cache not empty — skipping', { cachedCount: cachedIds.size });
+  } else {
+    logInfo('Step 1/3: No historical loans to bucket — skipping');
   }
 
   // ——— Step 2: If cache isn't empty, for each historical loan not in cache: bucket and save. ———
@@ -2788,10 +2835,17 @@ async function runPredictFlow(
     bucketedLoans = await bucketLoanData(preparedLoans, allLoansForPullthrough, { logContext: 'active' });
     
     // Add rule-based risk summaries to each loan
-    bucketedLoans = bucketedLoans.map(loan => ({
-      ...loan,
-      riskSummary: generateRuleBasedSummary(loan)
-    }));
+    // generateRuleBasedSummary now calculates bucket and riskScore, so we use those values
+    bucketedLoans = bucketedLoans.map(loan => {
+      const riskSummary = generateRuleBasedSummary(loan);
+      
+      return {
+        ...loan,
+        riskSummary,
+        bucket: riskSummary.bucket, // Use bucket from riskSummary (calculated in generateRuleBasedSummary)
+        riskScore: riskSummary.riskScore // Store riskScore on loan object
+      };
+    });
     
     logInfo('Step 3/3: Active loan bucketing done', {
       activeCount: bucketedLoans.length,
@@ -2894,8 +2948,10 @@ export function generateRuleBasedSummary(loan: any): {
   risks: string[];
   positives: string[];
   overallRisk: string;
-  predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk';
+  predictedOutcome: 'originate' | 'withdraw' | 'deny';
   confidence: number;
+  bucket: 'high' | 'medium' | 'low';
+  riskScore: number;
 } {
   const risks: string[] = [];
   const positives: string[] = [];
@@ -2904,12 +2960,13 @@ export function generateRuleBasedSummary(loan: any): {
   let creditRiskScore = 0;  // Issues that lead to DENY (lender rejection)
   let processRiskScore = 0; // Issues that lead to WITHDRAW (borrower cancellation)
   
-  // Credit Risk Score (denial risk): FICO, DTI, LTV ≥ 5: +1 each; Loan characteristics ≥ 3: +2; UW pullthrough ≥ 4: +1
+  // Credit Risk Score (denial risk): FICO, DTI, LTV ≥ 5: +2-3 each; Loan characteristics ≥ 3: +2
+  // COMMENTED OUT: UW pullthrough ≥ 4: +1
   if (loan.ficoScoreSignal === 6) {
     risks.push('Credit metrics indicate elevated risk (low FICO, high DTI, or high LTV)');
-    creditRiskScore += 3;
+    creditRiskScore += 4;
   } else if (loan.ficoScoreSignal >= 5) {
-    creditRiskScore += 2;
+    creditRiskScore += 3;
   }
   if (loan.dtiSignal === 6) {
     creditRiskScore += 3;
@@ -2925,6 +2982,11 @@ export function generateRuleBasedSummary(loan: any): {
     risks.push('Loan characteristics indicate higher risk (jumbo, investment, cash-out refi)');
     creditRiskScore += 2;
   }
+  // COMMENTED OUT: UW pullthrough contribution to credit risk score
+  // if (loan.uwPullthroughSignalStrength >= 4) {
+  //   risks.push('Underwriter has moderate historical fallout rate');
+  //   creditRiskScore += 1;
+  // }
   
   // Process Risk Score (withdrawal risk): Time in Motion ≥ 5: +2, ≥ 4: +1; MLO pullthrough ≥ 5: +2; Interest Lock vs Market ≥ 5: +3, ≥ 4: +1; FICO ≤ 2: +2 (shop/withdraw risk)
   if (loan.timeInMotionSignalStrength >= 5) {
@@ -2948,10 +3010,7 @@ export function generateRuleBasedSummary(loan: any): {
   if (loan.ficoScoreSignal <= 2) {
     processRiskScore += 2; // Strong borrower - shop/withdraw risk
   }
-  if (loan.uwPullthroughSignalStrength >= 4) {
-    risks.push('Underwriter has moderate historical fallout rate');
-    creditRiskScore += 1;
-  }
+
   
   // Low risk signals (bucket 1-2) - indicates likely to close
   if (loan.creditMetricsSignalStrength <= 2) {
@@ -2970,29 +3029,91 @@ export function generateRuleBasedSummary(loan: any): {
     positives.push('Rate lock is favorable compared to market');
   }
   
-  // Determine overall prediction based on risk bucket AND risk category
-  const overallRisk = loan.bucket || 'unknown';
-  let predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk' = 'originate';
+  // Determine predicted outcome directly from creditRiskScore and processRiskScore
+  // No overall risk level calculation - predictions based solely on credit vs process risk scores
+  let predictedOutcome: 'originate' | 'withdraw' | 'deny' = 'originate';
   let confidence = 70;
   
-  if (overallRisk === 'high') {
-    // Determine whether likely to be denied (credit issues) or withdrawn (process/market issues)
-    if (creditRiskScore > 6 || creditRiskScore > processRiskScore) {
-      predictedOutcome = 'deny';
-      confidence = 55 + Math.min(creditRiskScore * 5, 30);
-    } else if (processRiskScore > 6 || processRiskScore > creditRiskScore) {
-      predictedOutcome = 'withdraw';
-      confidence = 55 + Math.min(processRiskScore * 5, 30);
-    } else {
-      predictedOutcome = 'withdraw';
-      confidence = 55 + Math.min(processRiskScore * 5, 30);
-    }
-  } else if (overallRisk === 'medium') {
-    predictedOutcome = 'at_risk';
-    confidence = 50 + Math.min(positives.length * 5, 20);
-  } else if (overallRisk === 'low') {
+  // Determine whether likely to be denied (credit issues) or withdrawn (process/market issues)
+  if (creditRiskScore > 7 && creditRiskScore > processRiskScore) {
+    predictedOutcome = 'deny';
+    confidence = 55 + Math.min(creditRiskScore * 5, 30);
+  } else if (processRiskScore > 6 && processRiskScore > creditRiskScore) {
+    predictedOutcome = 'withdraw';
+    confidence = 55 + Math.min(processRiskScore * 5, 30);
+  } else if ((creditRiskScore > 7 || processRiskScore > 6) && creditRiskScore === processRiskScore) {
+    // Both scores are high, or they're equal - default to withdraw as process risk
+    predictedOutcome = 'withdraw';
+    confidence = 55 + Math.min(Math.max(creditRiskScore, processRiskScore) * 5, 30);
+  } else {
+    // Both scores are low/balanced - default to originate
     predictedOutcome = 'originate';
     confidence = 70 + Math.min(positives.length * 5, 25);
+  }
+  
+  // Derive overallRisk from predictedOutcome for API response (not used in prediction logic)
+  let overallRisk: string;
+  if (predictedOutcome === 'deny' || predictedOutcome === 'withdraw') {
+    overallRisk = 'high';
+  } else {
+    // 'originate' or any other case
+    overallRisk = 'low';
+  }
+  
+  // Calculate riskScore based on process risk and credit risk (split approach)
+  // Process Risk: Time in Motion, MLO AE Fallout Prone, Interest Lock vs Market, Inverse FICO
+  // Credit Risk: FICO, DTI, LTV, Loan Characteristics, UW Pullthrough
+  // Final Risk Score = max(process risk, credit risk)
+  
+  // Process risk buckets (inverse FICO: higher FICO = stronger borrower = more shop/withdraw risk)
+  const processRiskBuckets = [
+    loan.timeInMotionSignalStrength,
+    loan.mloAeFalloutProneSignalStrength,
+    loan.interestLockVsMarketSignalStrength,
+    loan.ficoScoreSignal !== null && loan.ficoScoreSignal !== undefined 
+      ? 7 - loan.ficoScoreSignal // Invert: FICO bucket 1 (excellent) → 6 (high process risk), FICO bucket 6 (poor) → 1 (low process risk)
+      : null
+  ].filter(b => b !== null && b !== undefined && typeof b === 'number') as number[];
+  
+  // Credit risk buckets
+  const creditRiskBuckets = [
+    loan.ficoScoreSignal,
+    loan.dtiSignal,
+    loan.ltvSignal,
+    loan.loanCharacteristicsSignalStrength,
+    // COMMENTED OUT: loan.uwPullthroughSignalStrength
+  ].filter(b => b !== null && b !== undefined && typeof b === 'number') as number[];
+  
+  let riskScore: number;
+  if (processRiskBuckets.length === 0 && creditRiskBuckets.length === 0) {
+    // Fallback if no signal buckets available
+    riskScore = 50;
+  } else {
+    // Calculate average for each risk type
+    const processRiskAvg = processRiskBuckets.length > 0
+      ? processRiskBuckets.reduce((sum, b) => sum + b, 0) / processRiskBuckets.length
+      : 0;
+    const creditRiskAvg = creditRiskBuckets.length > 0
+      ? creditRiskBuckets.reduce((sum, b) => sum + b, 0) / creditRiskBuckets.length
+      : 0;
+    
+    // Use max of process risk and credit risk
+    const maxRiskAvg = Math.max(processRiskAvg, creditRiskAvg);
+    
+    // Scale from 1-6 range to 1-100 range: (avg - 1) / 5 * 99 + 1
+    riskScore = Math.round(((maxRiskAvg - 1) / 5) * 99 + 1);
+    // Clamp to ensure it stays within 1-100
+    riskScore = Math.min(100, Math.max(1, riskScore));
+  }
+  
+  // Calculate bucket based on riskScore ranges
+  let bucket: 'high' | 'medium' | 'low';
+  if (riskScore >= 75) {
+    bucket = 'high';
+  } else if (riskScore >= 50) {
+    bucket = 'medium';
+  } else {
+    bucket = 'low';
   }
   
   return {
@@ -3000,7 +3121,9 @@ export function generateRuleBasedSummary(loan: any): {
     positives,
     overallRisk,
     predictedOutcome,
-    confidence
+    confidence,
+    bucket,
+    riskScore
   };
 }
 

@@ -147,6 +147,7 @@ All colors MUST be HSL.
   /* Smooth scrolling */
   html {
     scroll-behavior: smooth;
+    scrollbar-gutter: stable;
   }
 
   /* Better focus styles */

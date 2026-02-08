@@ -1,5 +1,5 @@
 import React, { useState, useCallback, memo } from "react";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, Heart } from "lucide-react";
 import { api } from "@/lib/api";
 import { LoanRiskDistribution } from "./LoanRiskDistribution";
 
@@ -22,6 +22,7 @@ export interface LoanCardContentLoan {
   channel?: string | null;
   currentMilestone?: string | null;
   activeDays?: number | null;
+  estimatedClosingDate?: string | null;
   interestRate?: number | null;
   marketRate?: number | null;
   lockMarketRate?: number | null;
@@ -101,6 +102,9 @@ interface LoanCardContentProps {
   compact?: boolean;
   /** Selected tenant ID for platform admins */
   selectedTenantId?: string | null;
+  isFavorited?: boolean;
+  onToggleFavorite?: (e: React.MouseEvent) => void;
+  showFavoriteButton?: boolean;
 }
 
 export const LoanCardContent = memo(
@@ -112,6 +116,9 @@ export const LoanCardContent = memo(
     showRiskBreakdown = false,
     compact = false,
     selectedTenantId,
+    isFavorited,
+    onToggleFavorite,
+    showFavoriteButton,
   }: LoanCardContentProps) => {
     const [aiRecommendations, setAiRecommendations] = useState<string[] | null>(
       null
@@ -829,6 +836,28 @@ export const LoanCardContent = memo(
               isDarkMode ? "border-slate-700/50" : "border-slate-100"
             }`}
           >
+            {showFavoriteButton && onToggleFavorite && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFavorite(e);
+                }}
+                className="flex-shrink-0 p-0.5 rounded hover:opacity-80 transition-opacity"
+                aria-label={isFavorited ? "Remove from favorites" : "Add to favorites"}
+              >
+                {isFavorited ? (
+                  <Heart className="w-4 h-4 text-blue-500 fill-blue-500" />
+                ) : (
+                  <Heart
+                    className="w-4 h-4 text-slate-400"
+                    fill="none"
+                    strokeWidth={2}
+                    stroke="currentColor"
+                  />
+                )}
+              </button>
+            )}
             <span
               className={`text-[9px] sm:text-[10px] ${
                 isDarkMode ? "text-slate-600" : "text-slate-400"
