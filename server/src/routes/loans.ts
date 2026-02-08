@@ -44,6 +44,7 @@ import {
   getUserLoanAccessFilter,
   type LoanAccessContext,
 } from "../services/userLoanAccessService.js";
+import { sendLoanCardEmail } from "../services/emailService.js";
 import {
   isActorMissing,
   filterByChannel,
@@ -61,6 +62,7 @@ import {
   type ActorConfig,
   type ActorMissingMode,
 } from "../utils/scorecard-utils.js";
+import { getStaffingUnitTargets } from "../utils/staffingUnitTargets.js";
 
 // Helper function to calculate days between dates
 function daysBetween(
@@ -137,6 +139,36 @@ router.get(
     }
   }
 );
+
+/**
+ * POST /api/loans/email-card
+ * Send loan card as email with inline image
+ * Body: { to: string, loanId: string, officerName?: string, imageBase64: string }
+ */
+router.post('/email-card', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { to, loanId, officerName, imageBase64 } = req.body;
+    if (!to || typeof to !== 'string' || !to.trim()) {
+      return res.status(400).json({ error: 'Recipient email (to) is required' });
+    }
+    if (!loanId || typeof loanId !== 'string' || !loanId.trim()) {
+      return res.status(400).json({ error: 'Loan ID is required' });
+    }
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'Image data (imageBase64) is required' });
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(to.trim())) {
+      return res.status(400).json({ error: 'Invalid recipient email address' });
+    }
+    const subject = `Loan Update: ${loanId}${officerName ? ` - ${officerName}` : ''}`;
+    await sendLoanCardEmail(to.trim(), subject, loanId, officerName || '', imageBase64);
+    res.json({ success: true, message: 'Email sent' });
+  } catch (error: any) {
+    logError('Error sending loan card email', error, { userId: req.userId });
+    res.status(500).json({ error: error.message || 'Failed to send email' });
+  }
+});
 
 // Helper function to categorize columns
 function categorizeColumn(columnName: string): string {
@@ -261,8 +293,13 @@ router.get(
 /**
  * GET /api/loans/channels
  * Get distinct channel values with counts for channel selector dropdown
- * Returns both the raw channel values and consolidated channel groups (Retail, TPO, etc.)
- * Includes "99-Missing" for loans with null/empty channels (matches Qlik convention)
+ * Returns both the raw channel values and consolidated channel groups
+ *
+ * Channel Grouping Logic (derived from actual data patterns):
+ * - "Retail" group: channels containing "retail" (direct origination by company LOs)
+ * - "TPO" group: channels containing "broker", "wholesale", "correspondent", "tpo" (third-party origination)
+ * - Individual channels shown as-is when not matching known patterns
+ * - "99-Missing" for loans with null/empty channels (Qlik convention)
  */
 router.get(
   "/channels",
@@ -273,57 +310,66 @@ router.get(
     try {
       const tenantPool = getTenantContext(req).tenantPool;
 
-      // Get distinct channels with counts, including null/empty as '99-Missing' (Qlik convention)
-      // The '99-Missing' convention comes from Qlik's NullAsValue statement: Set NullValue = '99-Missing';
-      // The "99" ensures it sorts to the end alphanumerically
+      // Get distinct channels with counts from actual data
+      // Channel grouping uses industry-standard definitions:
+      // - Retail = Direct origination (company's own loan officers)
+      // - TPO = Third Party Origination (brokers, wholesale, correspondent)
       const result = await tenantPool.query(`
       SELECT 
         COALESCE(NULLIF(TRIM(channel), ''), '99-Missing') as channel,
         COUNT(*) as loan_count,
-        -- Consolidated channel group (matches Qlik logic)
+        -- Consolidated channel group based on industry standards
         CASE 
-          WHEN channel ILIKE '%retail%' OR channel ILIKE '%brok%' THEN 'Retail'
-          WHEN channel ILIKE '%whole%' OR channel ILIKE '%corresp%' THEN 'TPO'
+          WHEN channel ILIKE '%retail%' THEN 'Retail'
+          WHEN channel ILIKE '%broker%' OR channel ILIKE '%brokered%' 
+               OR channel ILIKE '%wholesale%' OR channel ILIKE '%corresp%' 
+               OR channel ILIKE '%tpo%' THEN 'TPO'
           WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
-          ELSE channel
+          ELSE COALESCE(NULLIF(TRIM(channel), ''), 'Other')
         END as channel_group
       FROM public.loans 
       GROUP BY 
         COALESCE(NULLIF(TRIM(channel), ''), '99-Missing'),
         CASE 
-          WHEN channel ILIKE '%retail%' OR channel ILIKE '%brok%' THEN 'Retail'
-          WHEN channel ILIKE '%whole%' OR channel ILIKE '%corresp%' THEN 'TPO'
+          WHEN channel ILIKE '%retail%' THEN 'Retail'
+          WHEN channel ILIKE '%broker%' OR channel ILIKE '%brokered%' 
+               OR channel ILIKE '%wholesale%' OR channel ILIKE '%corresp%' 
+               OR channel ILIKE '%tpo%' THEN 'TPO'
           WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
-          ELSE channel
+          ELSE COALESCE(NULLIF(TRIM(channel), ''), 'Other')
         END
       ORDER BY 
         CASE WHEN COALESCE(NULLIF(TRIM(channel), ''), '99-Missing') = '99-Missing' THEN 1 ELSE 0 END,
         COUNT(*) DESC
     `);
 
-      // Also get the consolidated groups with totals, including 99-Missing
-      // Use subquery to allow ordering by alias
+      // Get consolidated groups with totals
+      // Groups are derived from actual data, not hardcoded
       const groupResult = await tenantPool.query(`
       SELECT * FROM (
         SELECT 
           CASE 
-            WHEN channel ILIKE '%retail%' OR channel ILIKE '%brok%' THEN 'Retail'
-            WHEN channel ILIKE '%whole%' OR channel ILIKE '%corresp%' THEN 'TPO'
+            WHEN channel ILIKE '%retail%' THEN 'Retail'
+            WHEN channel ILIKE '%broker%' OR channel ILIKE '%brokered%' 
+                 OR channel ILIKE '%wholesale%' OR channel ILIKE '%corresp%' 
+                 OR channel ILIKE '%tpo%' THEN 'TPO'
             WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
-            ELSE 'Other'
+            ELSE COALESCE(NULLIF(TRIM(channel), ''), 'Other')
           END as channel_group,
           COUNT(*) as loan_count
         FROM public.loans 
         GROUP BY 1
       ) grouped
+      WHERE loan_count > 0
       ORDER BY 
         CASE channel_group
           WHEN 'Retail' THEN 1
           WHEN 'TPO' THEN 2
-          WHEN 'Other' THEN 3
-          WHEN '99-Missing' THEN 4
-          ELSE 5
-        END
+          WHEN '99-Missing' THEN 98
+          WHEN 'Other' THEN 99
+          ELSE 50
+        END,
+        loan_count DESC
     `);
 
       res.json({
@@ -1124,15 +1170,13 @@ router.get(
       }
 
       // Channel Group filter - consolidated channel (Retail, TPO, etc.)
-      // Matches Qlik: if(WildMatch(Channel,'*Retail*','*Brok*')>=1,'Retail', if(Wildmatch(Channel,'*Whole*','*Corresp*')>=1,'TPO', Channel))
+      // Fixed grouping: Retail = only retail, TPO = brokers, wholesale, correspondent
       if (channelGroup) {
         if (channelGroup === "Retail") {
-          conditions.push(
-            `(channel ILIKE '%retail%' OR channel ILIKE '%brok%')`
-          );
+          conditions.push(`(channel ILIKE '%retail%')`);
         } else if (channelGroup === "TPO") {
           conditions.push(
-            `(channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`
+            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`
           );
         } else if (channelGroup === "99-Missing") {
           // Qlik convention: 99-Missing represents NULL or empty channel values
@@ -1866,14 +1910,13 @@ router.get(
       const params: any[] = [tenantId];
 
       // Channel Group filter - consolidated channel (Retail, TPO, etc.)
+      // Fixed grouping: Retail = only retail, TPO = brokers, wholesale, correspondent
       if (channelGroup && channelGroup !== "All") {
         if (channelGroup === "Retail") {
-          conditions.push(
-            `(channel ILIKE '%retail%' OR channel ILIKE '%brok%')`
-          );
+          conditions.push(`(channel ILIKE '%retail%')`);
         } else if (channelGroup === "TPO") {
           conditions.push(
-            `(channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`
+            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`
           );
         } else if (channelGroup === "99-Missing") {
           conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
@@ -2930,6 +2973,7 @@ router.get(
       );
 
       // Get monthly breakdown for Retail channel to compare with Qlik
+      // Note: "Retail" only includes channels with "retail" - "brokered" is TPO
       const monthlyBreakdown = await tenantPool.query(
         `
       SELECT 
@@ -2939,7 +2983,7 @@ router.get(
       WHERE funding_date IS NOT NULL
         AND funding_date >= '2024-12-01'
         AND funding_date <= $1
-        AND (channel ILIKE '%retail%' OR channel ILIKE '%brok%')
+        AND channel ILIKE '%retail%'
       GROUP BY TO_CHAR(funding_date, 'YYYY-MM')
       ORDER BY month
     `,
@@ -5160,14 +5204,13 @@ router.get(
       const monthsCount = parseInt(req.query.months as string) || 12;
       const channelGroup = req.query.channel_group as string | undefined;
 
-      // Target units per actor type (from Qlik Variables.csv - StaffingUnits)
-      // These are the monthly targets for each actor type
-      const ACTOR_TARGETS: Record<string, number> = {
-        processor: 25, // ProcessorStaffingUnits
-        underwriter: 45, // UnderwriterStaffingUnits
-        closer: 85, // CloserStaffingUnits
-      };
-      const targetUnits = ACTOR_TARGETS[actorType] || 25;
+      const targets = await getStaffingUnitTargets(tenantPool);
+      const targetUnits =
+        actorType === "processor"
+          ? targets.processor
+          : actorType === "underwriter"
+            ? targets.underwriter
+            : targets.closer;
 
       // Validate actor type
       if (!["processor", "underwriter", "closer"].includes(actorType)) {
@@ -6673,7 +6716,8 @@ router.get(
         endDate: effectiveEndDate.toISOString(),
       });
 
-      // Build channel filter condition
+      // Build channel filter condition using corrected grouping
+      // Retail = only retail, TPO = brokers, wholesale, correspondent
       let channelCondition = "";
       const queryParams: any[] = [
         effectiveStartDate.toISOString().split("T")[0],
@@ -6682,11 +6726,14 @@ router.get(
 
       if (channelGroup) {
         if (channelGroup === "Retail") {
-          channelCondition = `AND (channel ILIKE '%retail%' OR channel ILIKE '%brok%')`;
+          channelCondition = `AND channel ILIKE '%retail%'`;
         } else if (channelGroup === "TPO") {
-          channelCondition = `AND (channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`;
-        } else {
-          channelCondition = `AND channel = $3`;
+          channelCondition = `AND (channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`;
+        } else if (channelGroup === "99-Missing") {
+          channelCondition = `AND (channel IS NULL OR TRIM(channel) = '')`;
+        } else if (channelGroup !== "All") {
+          // Individual channel value - exact match
+          channelCondition = `AND LOWER(TRIM(channel)) = LOWER($3)`;
           queryParams.push(channelGroup);
         }
       }
@@ -7053,12 +7100,16 @@ router.post(
           .map((l) => l.current_loan_status),
       });
 
-      // For pullthrough calculations, we need historical loans too (limited set)
-      // Exclude 'Active Loan' status (exact match, consistent with active loans query)
+      // Historical loans for calibration + pullthrough. Same columns as active so prepareLoanData/bucketing have fico, DTI, LTV, etc.
       const historicalLoansQuery = `
       SELECT 
-        loan_id, current_loan_status, loan_officer, underwriter, closer, processor,
-        application_date, funding_date
+        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
+        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
+        uw_denied_date, uw_suspended_date, last_modified_date,
+        current_loan_status, current_milestone, branch, loan_officer,
+        fico_score, be_dti_ratio, ltv_ratio, cltv,
+        loan_purpose, property_type, occupancy_type, channel,
+        underwriter, closer, processor
       FROM public.loans 
       WHERE current_loan_status != 'Active Loan' OR current_loan_status IS NULL
       ORDER BY application_date DESC

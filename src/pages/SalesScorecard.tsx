@@ -674,223 +674,268 @@ const SalesScorecard = () => {
                         </TabsList>
                       </CardHeader>
 
-                      {/* TTS Weights Tab Content - 6 components from Qlik TTS Formula Documentation */}
+                      {/* TTS Weights Tab Content - Dynamic weights from tenant config */}
                       <TabsContent value="weights" className="mt-0">
                         <CardContent className="space-y-3 pt-4">
-                          {/* Unit Weight - 20% */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span
-                                className={`text-xs font-medium ${
-                                  isDarkMode ? "text-cyan-400" : "text-cyan-600"
-                                }`}
-                              >
-                                Unit Rating
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="font-mono text-[10px] px-1.5 py-0"
-                              >
-                                20%
-                              </Badge>
-                            </div>
-                            <div
-                              className={`h-2 rounded-full overflow-hidden ${
-                                isDarkMode
-                                  ? "bg-slate-800/60"
-                                  : "bg-slate-200/80"
-                              }`}
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 rounded-full"
-                                style={{ width: "20%" }}
-                              />
-                            </div>
-                          </div>
+                          {(() => {
+                            // Get weights from API response, with defaults
+                            const weights = scorecardData?.weightConfig || {
+                              unit: 0.2,
+                              volume: 0.2,
+                              margin: 0.2,
+                              concession: 0.2,
+                              pullThrough: 0.2,
+                              turnTime: 0.2,
+                            };
+                            // Calculate total for normalization display
+                            const totalWeight =
+                              weights.unit +
+                              weights.volume +
+                              weights.margin +
+                              weights.concession +
+                              weights.pullThrough +
+                              weights.turnTime;
+                            // Helper to format weight as percentage
+                            const formatWeight = (w: number) =>
+                              `${((w / totalWeight) * 100).toFixed(0)}%`;
+                            const getBarWidth = (w: number) =>
+                              `${(w / totalWeight) * 100}%`;
 
-                          {/* Volume Weight - 20% */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span
-                                className={`text-xs font-medium ${
-                                  isDarkMode ? "text-blue-400" : "text-blue-600"
-                                }`}
-                              >
-                                Volume Rating
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="font-mono text-[10px] px-1.5 py-0"
-                              >
-                                20%
-                              </Badge>
-                            </div>
-                            <div
-                              className={`h-2 rounded-full overflow-hidden ${
-                                isDarkMode
-                                  ? "bg-slate-800/60"
-                                  : "bg-slate-200/80"
-                              }`}
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full"
-                                style={{ width: "20%" }}
-                              />
-                            </div>
-                          </div>
+                            return (
+                              <>
+                                {/* Unit Weight */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span
+                                      className={`text-xs font-medium ${
+                                        isDarkMode
+                                          ? "text-cyan-400"
+                                          : "text-cyan-600"
+                                      }`}
+                                    >
+                                      Unit Rating
+                                    </span>
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono text-[10px] px-1.5 py-0"
+                                    >
+                                      {formatWeight(weights.unit)}
+                                    </Badge>
+                                  </div>
+                                  <div
+                                    className={`h-2 rounded-full overflow-hidden ${
+                                      isDarkMode
+                                        ? "bg-slate-800/60"
+                                        : "bg-slate-200/80"
+                                    }`}
+                                  >
+                                    <div
+                                      className="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 rounded-full transition-all"
+                                      style={{ width: getBarWidth(weights.unit) }}
+                                    />
+                                  </div>
+                                </div>
 
-                          {/* Margin Weight - 20% */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span
-                                className={`text-xs font-medium ${
-                                  isDarkMode
-                                    ? "text-purple-400"
-                                    : "text-purple-600"
-                                }`}
-                              >
-                                Margin Rating
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="font-mono text-[10px] px-1.5 py-0"
-                              >
-                                20%
-                              </Badge>
-                            </div>
-                            <div
-                              className={`h-2 rounded-full overflow-hidden ${
-                                isDarkMode
-                                  ? "bg-slate-800/60"
-                                  : "bg-slate-200/80"
-                              }`}
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-purple-600 to-purple-400 rounded-full"
-                                style={{ width: "20%" }}
-                              />
-                            </div>
-                          </div>
+                                {/* Volume Weight */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span
+                                      className={`text-xs font-medium ${
+                                        isDarkMode
+                                          ? "text-blue-400"
+                                          : "text-blue-600"
+                                      }`}
+                                    >
+                                      Volume Rating
+                                    </span>
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono text-[10px] px-1.5 py-0"
+                                    >
+                                      {formatWeight(weights.volume)}
+                                    </Badge>
+                                  </div>
+                                  <div
+                                    className={`h-2 rounded-full overflow-hidden ${
+                                      isDarkMode
+                                        ? "bg-slate-800/60"
+                                        : "bg-slate-200/80"
+                                    }`}
+                                  >
+                                    <div
+                                      className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full transition-all"
+                                      style={{ width: getBarWidth(weights.volume) }}
+                                    />
+                                  </div>
+                                </div>
 
-                          {/* Concession Weight - 20% */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span
-                                className={`text-xs font-medium ${
-                                  isDarkMode
-                                    ? "text-amber-400"
-                                    : "text-amber-600"
-                                }`}
-                              >
-                                Concession Rating
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="font-mono text-[10px] px-1.5 py-0"
-                              >
-                                20%
-                              </Badge>
-                            </div>
-                            <div
-                              className={`h-2 rounded-full overflow-hidden ${
-                                isDarkMode
-                                  ? "bg-slate-800/60"
-                                  : "bg-slate-200/80"
-                              }`}
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full"
-                                style={{ width: "20%" }}
-                              />
-                            </div>
-                          </div>
+                                {/* Margin Weight */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span
+                                      className={`text-xs font-medium ${
+                                        isDarkMode
+                                          ? "text-purple-400"
+                                          : "text-purple-600"
+                                      }`}
+                                    >
+                                      Margin Rating
+                                    </span>
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono text-[10px] px-1.5 py-0"
+                                    >
+                                      {formatWeight(weights.margin)}
+                                    </Badge>
+                                  </div>
+                                  <div
+                                    className={`h-2 rounded-full overflow-hidden ${
+                                      isDarkMode
+                                        ? "bg-slate-800/60"
+                                        : "bg-slate-200/80"
+                                    }`}
+                                  >
+                                    <div
+                                      className="h-full bg-gradient-to-r from-purple-600 to-purple-400 rounded-full transition-all"
+                                      style={{ width: getBarWidth(weights.margin) }}
+                                    />
+                                  </div>
+                                </div>
 
-                          {/* Pull-Through Weight - 15% */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span
-                                className={`text-xs font-medium ${
-                                  isDarkMode
-                                    ? "text-emerald-400"
-                                    : "text-emerald-600"
-                                }`}
-                              >
-                                Pull-Through Rating
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="font-mono text-[10px] px-1.5 py-0"
-                              >
-                                15%
-                              </Badge>
-                            </div>
-                            <div
-                              className={`h-2 rounded-full overflow-hidden ${
-                                isDarkMode
-                                  ? "bg-slate-800/60"
-                                  : "bg-slate-200/80"
-                              }`}
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full"
-                                style={{ width: "15%" }}
-                              />
-                            </div>
-                          </div>
+                                {/* Concession Weight */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span
+                                      className={`text-xs font-medium ${
+                                        isDarkMode
+                                          ? "text-amber-400"
+                                          : "text-amber-600"
+                                      }`}
+                                    >
+                                      Concession Rating
+                                    </span>
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono text-[10px] px-1.5 py-0"
+                                    >
+                                      {formatWeight(weights.concession)}
+                                    </Badge>
+                                  </div>
+                                  <div
+                                    className={`h-2 rounded-full overflow-hidden ${
+                                      isDarkMode
+                                        ? "bg-slate-800/60"
+                                        : "bg-slate-200/80"
+                                    }`}
+                                  >
+                                    <div
+                                      className="h-full bg-gradient-to-r from-amber-600 to-amber-400 rounded-full transition-all"
+                                      style={{
+                                        width: getBarWidth(weights.concession),
+                                      }}
+                                    />
+                                  </div>
+                                </div>
 
-                          {/* Turn Time Weight - 5% */}
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span
-                                className={`text-xs font-medium ${
-                                  isDarkMode ? "text-rose-400" : "text-rose-600"
-                                }`}
-                              >
-                                Turn Time Rating
-                              </span>
-                              <Badge
-                                variant="secondary"
-                                className="font-mono text-[10px] px-1.5 py-0"
-                              >
-                                5%
-                              </Badge>
-                            </div>
-                            <div
-                              className={`h-2 rounded-full overflow-hidden ${
-                                isDarkMode
-                                  ? "bg-slate-800/60"
-                                  : "bg-slate-200/80"
-                              }`}
-                            >
-                              <div
-                                className="h-full bg-gradient-to-r from-rose-600 to-rose-400 rounded-full"
-                                style={{ width: "5%" }}
-                              />
-                            </div>
-                            <p
-                              className={`text-[9px] mt-0.5 ${
-                                isDarkMode ? "text-slate-500" : "text-slate-400"
-                              }`}
-                            >
-                              Inverse: faster = higher score
-                            </p>
-                          </div>
+                                {/* Pull-Through Weight */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span
+                                      className={`text-xs font-medium ${
+                                        isDarkMode
+                                          ? "text-emerald-400"
+                                          : "text-emerald-600"
+                                      }`}
+                                    >
+                                      Pull-Through Rating
+                                    </span>
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono text-[10px] px-1.5 py-0"
+                                    >
+                                      {formatWeight(weights.pullThrough)}
+                                    </Badge>
+                                  </div>
+                                  <div
+                                    className={`h-2 rounded-full overflow-hidden ${
+                                      isDarkMode
+                                        ? "bg-slate-800/60"
+                                        : "bg-slate-200/80"
+                                    }`}
+                                  >
+                                    <div
+                                      className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full transition-all"
+                                      style={{
+                                        width: getBarWidth(weights.pullThrough),
+                                      }}
+                                    />
+                                  </div>
+                                </div>
 
-                          <div
-                            className={`pt-2 mt-2 border-t ${
-                              isDarkMode
-                                ? "border-slate-700"
-                                : "border-slate-200"
-                            }`}
-                          >
-                            <p
-                              className={`text-[10px] ${
-                                isDarkMode ? "text-slate-400" : "text-slate-500"
-                              }`}
-                            >
-                              TTS = Sum of (Rating × Weight) / 100
-                            </p>
-                          </div>
+                                {/* Turn Time Weight */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span
+                                      className={`text-xs font-medium ${
+                                        isDarkMode
+                                          ? "text-rose-400"
+                                          : "text-rose-600"
+                                      }`}
+                                    >
+                                      Turn Time Rating
+                                    </span>
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono text-[10px] px-1.5 py-0"
+                                    >
+                                      {formatWeight(weights.turnTime)}
+                                    </Badge>
+                                  </div>
+                                  <div
+                                    className={`h-2 rounded-full overflow-hidden ${
+                                      isDarkMode
+                                        ? "bg-slate-800/60"
+                                        : "bg-slate-200/80"
+                                    }`}
+                                  >
+                                    <div
+                                      className="h-full bg-gradient-to-r from-rose-600 to-rose-400 rounded-full transition-all"
+                                      style={{
+                                        width: getBarWidth(weights.turnTime),
+                                      }}
+                                    />
+                                  </div>
+                                  <p
+                                    className={`text-[9px] mt-0.5 ${
+                                      isDarkMode
+                                        ? "text-slate-500"
+                                        : "text-slate-400"
+                                    }`}
+                                  >
+                                    Inverse: faster = higher score
+                                  </p>
+                                </div>
+
+                                <div
+                                  className={`pt-2 mt-2 border-t ${
+                                    isDarkMode
+                                      ? "border-slate-700"
+                                      : "border-slate-200"
+                                  }`}
+                                >
+                                  <p
+                                    className={`text-[10px] ${
+                                      isDarkMode
+                                        ? "text-slate-400"
+                                        : "text-slate-500"
+                                    }`}
+                                  >
+                                    TTS = Sum of (Rating × Weight) / Total Weight
+                                  </p>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </CardContent>
                       </TabsContent>
 
@@ -910,8 +955,8 @@ const SalesScorecard = () => {
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
-                              TTS measures performance relative to the company
-                              average. A score of 100 = average performance.
+                              TTS uses percentile-based ranking following the Pareto
+                              principle of production distribution.
                             </p>
                           </div>
 
@@ -927,7 +972,47 @@ const SalesScorecard = () => {
                                   : "text-emerald-600"
                               }`}
                             >
-                              Tier Assignment (Score-Based)
+                              Pareto Distribution
+                            </h4>
+                            <ul
+                              className={`text-[10px] space-y-1.5 ${
+                                isDarkMode ? "text-slate-400" : "text-slate-600"
+                              }`}
+                            >
+                              <li className="flex items-start gap-2">
+                                <span className="font-bold text-tier-top min-w-[60px]">
+                                  Top 20%
+                                </span>
+                                <span>→ Produce ~50% of total value</span>
+                              </li>
+                              <li className="flex items-start gap-2">
+                                <span className="font-bold text-tier-second min-w-[60px]">
+                                  Middle 30%
+                                </span>
+                                <span>→ Produce ~30% of total value</span>
+                              </li>
+                              <li className="flex items-start gap-2">
+                                <span className="font-bold text-tier-bottom min-w-[60px]">
+                                  Bottom 50%
+                                </span>
+                                <span>→ Produce ~20% of total value</span>
+                              </li>
+                            </ul>
+                          </div>
+
+                          <div
+                            className={`p-2.5 rounded-lg ${
+                              isDarkMode ? "bg-slate-800/50" : "bg-emerald-50/30"
+                            }`}
+                          >
+                            <h4
+                              className={`text-[11px] font-semibold mb-1.5 ${
+                                isDarkMode
+                                  ? "text-emerald-400"
+                                  : "text-emerald-600"
+                              }`}
+                            >
+                              Tier Assignment (Percentile-Based)
                             </h4>
                             <ul
                               className={`text-[10px] space-y-1 ${
@@ -938,19 +1023,19 @@ const SalesScorecard = () => {
                                 <span className="font-medium text-tier-top">
                                   Top Tier:
                                 </span>{" "}
-                                TTS &gt; 120 (20%+ above avg)
+                                80th+ percentile (top 20%)
                               </li>
                               <li>
                                 <span className="font-medium text-tier-second">
                                   Second Tier:
                                 </span>{" "}
-                                TTS 100-120 (above avg)
+                                50th-80th percentile (middle 30%)
                               </li>
                               <li>
                                 <span className="font-medium text-tier-bottom">
                                   Bottom Tier:
                                 </span>{" "}
-                                TTS &lt; 100 (below avg)
+                                Below 50th percentile (bottom 50%)
                               </li>
                             </ul>
                           </div>
@@ -965,7 +1050,7 @@ const SalesScorecard = () => {
                                 isDarkMode ? "text-blue-400" : "text-blue-600"
                               }`}
                             >
-                              Rating Calculation
+                              Score Calculation
                             </h4>
                             <p
                               className={`text-[10px] ${
@@ -995,17 +1080,10 @@ const SalesScorecard = () => {
                                   : "text-purple-600"
                               }`}
                             >
-                              Time Period &amp; Date Type
+                              Time Period
                             </h4>
                             <p
                               className={`text-[10px] ${
-                                isDarkMode ? "text-slate-400" : "text-slate-600"
-                              }`}
-                            >
-                              Default: Rolling 13 months (Qlik standard)
-                            </p>
-                            <p
-                              className={`text-[10px] mt-1 ${
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
@@ -1541,8 +1619,8 @@ const SalesScorecard = () => {
                               - TTS Score Ranking
                             </CardTitle>
                             <p className="text-xs text-slate-400 dark:text-slate-500">
-                              Sorted by TTS score (Top 33% / Middle 33% / Bottom
-                              33%)
+                              Sorted by TTS score (Top 20% / Middle 30% / Bottom
+                              50%)
                             </p>
                           </CardHeader>
                           {loading ? (

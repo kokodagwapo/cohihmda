@@ -1416,23 +1416,32 @@ function buildWhereClause(
     params.push(filters.channel);
   }
 
-  // Consolidated Channel filter - matches Qlik's [Consolidated Channels] field
-  // Maps Retail/TPO to specific channel values
+  // Consolidated Channel filter - matches channel groups or individual channel values
+  // Channel grouping logic:
+  // - Retail = Direct origination (channels containing "retail")
+  // - TPO = Third Party Origination (brokers, wholesale, correspondent)
+  // - Individual channel values matched exactly
   if (filters.consolidated_channel) {
     const cc = filters.consolidated_channel.toLowerCase();
     if (cc === "retail") {
-      // Retail channels: Banked - Retail, Brokered
-      clauses.push(
-        `(l.channel ILIKE '%retail%' OR l.channel ILIKE '%brokered%')`
-      );
+      // Retail channels: Direct origination only
+      // NOTE: "Brokered" is NOT Retail - it's TPO
+      clauses.push(`(l.channel ILIKE '%retail%')`);
     } else if (cc === "tpo") {
-      // TPO channels: Banked - Wholesale, Correspondent
+      // TPO channels: Brokers, Wholesale, Correspondent
       clauses.push(
-        `(l.channel ILIKE '%wholesale%' OR l.channel ILIKE '%correspondent%' OR l.channel ILIKE '%tpo%')`
+        `(l.channel ILIKE '%broker%' OR l.channel ILIKE '%brokered%' 
+          OR l.channel ILIKE '%wholesale%' OR l.channel ILIKE '%correspondent%' 
+          OR l.channel ILIKE '%corresp%' OR l.channel ILIKE '%tpo%')`
       );
+    } else if (cc === "99-missing") {
+      // Missing/null channels
+      clauses.push(`(l.channel IS NULL OR TRIM(l.channel) = '')`);
     } else if (cc !== "all" && cc !== "*") {
-      // Specific channel value
-      clauses.push(`l.channel = $${paramOffset + params.length + 1}`);
+      // Specific individual channel value (exact match, case-insensitive)
+      clauses.push(
+        `LOWER(TRIM(l.channel)) = LOWER($${paramOffset + params.length + 1})`
+      );
       params.push(filters.consolidated_channel);
     }
     // 'all' or '*' means no filter
@@ -2752,6 +2761,7 @@ import {
   buildChannelWhereClause,
   buildActorNotMissingClause,
   REVENUE_SQL_EXPRESSION,
+  getTenantRevenueExpression,
   type ActorConfig,
 } from "../../utils/scorecard-utils.js";
 
@@ -2813,6 +2823,9 @@ export async function queryActorMetrics(
     actorMissingMode
   );
 
+  // Get tenant-specific revenue expression (or default if none configured)
+  const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
   // Build params array with user access filter first
   const params: any[] = [];
   let paramIndex = 1;
@@ -2848,7 +2861,7 @@ export async function queryActorMetrics(
       ${actorColumn} as actor_name,
       COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) as units,
       COALESCE(SUM(loan_amount), 0) as volume,
-      COALESCE(SUM(${REVENUE_SQL_EXPRESSION}), 0) as revenue,
+      COALESCE(SUM(${revenueExpression}), 0) as revenue,
       AVG(
         CASE 
           WHEN ${turnTimeEndField} IS NOT NULL AND ${turnTimeStartField} IS NOT NULL 
@@ -2944,6 +2957,9 @@ export async function queryTotalMetrics(
   const { dateRange, channelGroup } = options;
   const channelClause = buildChannelWhereClause(channelGroup);
 
+  // Get tenant-specific revenue expression (or default if none configured)
+  const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
   // Build params array with user access filter first
   const params: any[] = [];
   let paramIndex = 1;
@@ -2978,7 +2994,7 @@ export async function queryTotalMetrics(
     SELECT 
       COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) as total_units,
       COALESCE(SUM(loan_amount), 0) as total_volume,
-      COALESCE(SUM(${REVENUE_SQL_EXPRESSION}), 0) as total_revenue,
+      COALESCE(SUM(${revenueExpression}), 0) as total_revenue,
       AVG(
         CASE 
           WHEN ${turnTimeEndField} IS NOT NULL AND ${turnTimeStartField} IS NOT NULL 

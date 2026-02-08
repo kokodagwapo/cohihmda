@@ -8,7 +8,17 @@ import {
   useDeferredValue,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { BarChart3, TrendingUp, Play } from "lucide-react";
+import {
+  BarChart3,
+  TrendingUp,
+  Play,
+  Table,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Download,
+  ChevronDown,
+} from "lucide-react";
 import { DashboardCard } from "./DashboardCard";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +27,16 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { useMetrics } from "@/hooks/useMetrics";
 import { LoanCardsContainer } from "./LoanCardsContainer";
+import { LoanDrilldownModal } from "./LoanDrilldownModal";
 import { LoanOfficerModal } from "./LoanOfficerModal";
 import { useTheme } from "@/components/theme-provider";
 import { api } from "@/lib/api";
@@ -49,6 +66,8 @@ interface ClosingFalloutForecastProps {
   selectedTenantId?: string | null;
   /** Optional channel filter - filters forecast data to loans in the selected channel */
   selectedChannel?: string | null;
+  openLoanId?: string;
+  onOpenLoanIdHandled?: () => void;
 }
 
 const normalizeRawStatus = (raw: unknown): string =>
@@ -232,8 +251,8 @@ const daysSinceLocal = (
 
 /**
  * Determines if an active loan is likely to close late.
- * Checks if the loan has exceeded its expected closing date by more than 72 hours (3 days).
- * Falls back to checking if loan has been in pipeline > threshold days if no expected close date.
+ * Uses the server-computed closeLateRisk field (from historical on-time analysis + pipeline stage).
+ * Falls back to checking estimated_closing_date if the server field isn't present.
  */
 const isLikelyCloseLateForecast = (
   loan: any,
@@ -243,27 +262,28 @@ const isLikelyCloseLateForecast = (
   const status = mapForecastStatus(loan);
   if (!status || status !== "Active") return false;
 
-  // Primary check: Has the loan exceeded its expected/estimated close date?
+  // Primary: use server-computed close-late risk (from prediction API)
+  if (loan?.closeLateRisk != null) {
+    return loan.closeLateRisk === true;
+  }
+
+  // Fallback: check estimated_closing_date (the actual DB field name)
   const expectedCloseDate =
-    loan?.expected_close_date ||
-    loan?.estimated_completion_date ||
-    loan?.["Expected Close Date"] ||
-    loan?.["Estimated Closing Date"] ||
-    loan?.target_close_date;
+    loan?.estimated_closing_date ||
+    loan?.estimatedClosingDate ||
+    loan?.expected_close_date;
 
   if (expectedCloseDate) {
     const expected = new Date(expectedCloseDate);
     if (!Number.isNaN(expected.getTime())) {
-      // Loan is late if it's more than 3 days past expected close date
       const daysPastExpected = Math.floor(
         (now.getTime() - expected.getTime()) / (1000 * 60 * 60 * 24)
       );
-      return daysPastExpected > 3; // More than 72 hours past expected close
+      return daysPastExpected > 3;
     }
   }
 
-  // Fallback: If no expected close date, check if loan has been in pipeline too long
-  // Average mortgage cycle is 30-45 days, so loans > threshold days are considered at risk
+  // Last resort: loan has been in pipeline too long
   const days = daysSinceLocal(loan?.application_date, now);
   return days !== null && days > thresholdDays;
 };
@@ -578,6 +598,7 @@ function computeMetricsFromLoans(
   closedLoansMTD: number;
   predictedClosing: number;
   likelyCloseLate: number;
+  pastEstClose: number;
   likelyWithdraw: number;
   likelyDecline: number;
   predictedFalloutTotal: number;
@@ -596,12 +617,12 @@ function computeMetricsFromLoans(
   let activeCount = 0;
   let activePipelineValue = 0;
   let likelyCloseLateCount = 0;
+  let pastEstCloseCount = 0; // Active loans past their estimated closing date
   let fundedInPeriodCount = 0;
   let fundedTotalByStatus = 0; // Count funded loans by status (for 'all' period fallback)
   let startedInPeriodCount = 0;
-  let lockedCount = 0;
-  let lockedInPeriodCount = 0;
-  let lockedInRolling90 = 0; // Locks in rolling 90 days for Pipeline Snapshot KPI
+  let lockedCount = 0; // All active loans with lock dates (snapshot)
+  let lockedInPeriodCount = 0; // Active loans with lock dates that pass the period filter
 
   // Single pass through all loans
   for (let i = 0; i < loans.length; i++) {
@@ -618,10 +639,25 @@ function computeMetricsFromLoans(
       strictAppDate != null && String(strictAppDate).trim() !== "";
 
     if (isActiveLoan(loan) && hasStrictAppDate) {
+      // Past est. close is a snapshot metric — count ALL active loans regardless of period filter
+      const estClose = loan?.estimated_closing_date || loan?.estimatedClosingDate;
+      if (estClose) {
+        const estCloseDate = new Date(estClose);
+        if (!Number.isNaN(estCloseDate.getTime()) && estCloseDate < now) {
+          pastEstCloseCount++;
+        }
+      }
+
       // Apply active loans period filter if specified (filters by application date range)
       const passesActivePeriodFilter =
         !activeLoansPeriodFilter ||
         isDateInPeriod(strictAppDate, activeLoansPeriodFilter, now);
+
+      // Check if this active loan has a lock date (regardless of period filter)
+      const hasLockDate = hasAnyValue(getForecastLockDate(loan));
+      if (hasLockDate) {
+        lockedCount++;
+      }
 
       if (passesActivePeriodFilter) {
         activeCount++;
@@ -630,6 +666,11 @@ function computeMetricsFromLoans(
         // Check if likely close late (only for active loans)
         if (isLikelyCloseLateForecast(loan, 30, now)) {
           likelyCloseLateCount++;
+        }
+
+        // Count locked active loans within the period filter
+        if (hasLockDate) {
+          lockedInPeriodCount++;
         }
       }
     }
@@ -647,22 +688,6 @@ function computeMetricsFromLoans(
     // Check if application started in period (for pull-through calculation)
     if (appDate && isDateInPeriod(appDate, period, now)) {
       startedInPeriodCount++;
-    }
-
-    // Check if locked (needs to be active first)
-    if (isLockedForForecast(loan)) {
-      lockedCount++;
-      // Check if locked in period - use getForecastLockDate to get the lock date from multiple possible field names
-      const lockDateValue = getForecastLockDate(loan);
-      if (lockDateValue) {
-        if (isDateInPeriod(String(lockDateValue), period, now)) {
-          lockedInPeriodCount++;
-        }
-        // Also count locks in rolling 90 days for the Pipeline Snapshot KPI
-        if (isDateInPeriod(String(lockDateValue), "rolling_90_days", now)) {
-          lockedInRolling90++;
-        }
-      }
     }
   }
 
@@ -759,13 +784,11 @@ function computeMetricsFromLoans(
       ? Math.round((activeLoansToday * pullThroughRate) / 100)
       : 0;
 
-  // Locked loans - use statsData for 'all', client-side count for filtered periods
+  // Locked loans - active loans with lock dates, filtered by period
+  // For 'all' period: count all active loans with lock dates
+  // For filtered periods: count active loans with lock dates that pass the application date filter
   const lockedLoans =
-    period === "all"
-      ? statsData?.locked ?? lockedCount
-      : lockedInPeriodCount > 0
-      ? lockedInPeriodCount
-      : 0;
+    period === "all" ? lockedCount : lockedInPeriodCount;
 
   // Funded/Closed loans - IMPORTANT: Use statsData?.closed for 'all' period
   // This ensures it matches ExecutiveDashboard's "Closed Loans" metric
@@ -779,18 +802,15 @@ function computeMetricsFromLoans(
   // Average cycle time (from statsData or default)
   const avgCycleTime = statsData?.avgCycleTime ?? 24;
 
-  // For rolling 90-day locks, use client-side calculation if available, otherwise fall back to statsData.locked
-  // This handles cases where lock_date might not be populated or parseable
-  const lockedRolling90Value =
-    lockedInRolling90 > 0
-      ? lockedInRolling90
-      : statsData?.locked ?? lockedCount;
+  // For rolling 90-day locks, just use the total locked active count
+  const lockedRolling90Value = lockedCount;
 
   return {
     activeLoansToday,
     closedLoansMTD,
     predictedClosing,
     likelyCloseLate: likelyCloseLateCount,
+    pastEstClose: pastEstCloseCount,
     likelyWithdraw,
     likelyDecline,
     predictedFalloutTotal,
@@ -823,6 +843,11 @@ const getMetricExplanation = (label: string) => {
         title: "Forecasted Leakage",
         desc: "AI-calculated estimate of loan volume that will fail to fund based on real-time behavior signals and market conditions.",
       };
+    case "High Risk":
+      return {
+        title: "High Risk Loans",
+        desc: "Active pipeline loans with a high risk score based on credit, process, personnel pull-through, and pipeline signals. Threshold is set by the rule-based model (bucket = high).",
+      };
     case "Predicted Closing":
       return {
         title: "Closing Forecast",
@@ -838,10 +863,15 @@ const getMetricExplanation = (label: string) => {
         title: "Lender Says No",
         desc: "Lender decision - loan failing underwriting criteria, credit issues, or documentation requirements.",
       };
+    case "Past Est. Close":
+      return {
+        title: "Past Estimated Closing",
+        desc: "Active loans whose estimated closing date has already passed. These need immediate attention.",
+      };
     case "Likely Close Late":
       return {
         title: "Pipeline Stagnation",
-        desc: "Active loans that have exceeded their expected closing date by more than 72 hours, or have been in pipeline longer than 30 days without an expected close date.",
+        desc: "Active loans predicted to close late based on pipeline stage, estimated closing date, and historical on-time closing rates. Click to see details.",
       };
     default:
       return {
@@ -859,6 +889,8 @@ export const ClosingFalloutForecast = ({
   dateFilter = "mtd",
   selectedTenantId,
   selectedChannel,
+  openLoanId,
+  onOpenLoanIdHandled,
 }: ClosingFalloutForecastProps) => {
   const forecastRef = useRef<HTMLDivElement>(null);
   // ============================================================================
@@ -977,11 +1009,18 @@ export const ClosingFalloutForecast = ({
   const [selectedLoanForDetail, setSelectedLoanForDetail] = useState<
     any | null
   >(null);
+  const [selectedLoanForDrilldown, setSelectedLoanForDrilldown] = useState<
+    any | null
+  >(null);
 
   // Loan officer name -> TTS (Top Tier Score) + tier for display on critical loan cards
   const [officerTtsMap, setOfficerTtsMap] = useState<
     Record<string, { ttsScore: number; tier: string }>
   >({});
+
+  // Table sorting state
+  const [sortColumn, setSortColumn] = useState<string>('riskScore');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
 
   const availableYears = useMemo(() => {
     // Prefer years from loaded loans (if available); otherwise provide a small recent range.
@@ -1018,6 +1057,47 @@ export const ClosingFalloutForecast = ({
   // PERFORMANCE: Uses deferredPeriod to allow UI to remain responsive during rapid period changes
   const metrics = useMemo(() => {
     const now = new Date();
+    // High risk count from bucketed loans (merged into cached/computed result below)
+    const highRiskCount =
+      bucketedLoans?.length > 0
+        ? bucketedLoans.filter((l: any) => l?.bucket === "high").length
+        : 0;
+
+    // Close-late count from server-computed closeLateRisk on bucketed loans.
+    // Only use this if at least one bucketed loan has the closeLateRisk field populated (not null).
+    // If no loans have the field, it means predictions were saved before the close-late feature — fall back to heuristic.
+    const serverCloseLateCount = (() => {
+      if (!bucketedLoans || bucketedLoans.length === 0) return null;
+      const hasCloseLateData = bucketedLoans.some((l: any) => l?.closeLateRisk != null);
+      if (!hasCloseLateData) return null; // Field not saved yet — fall back to heuristic
+      return bucketedLoans.filter((l: any) => l?.closeLateRisk === true).length;
+    })();
+
+    // Locked count from bucketed loans (snapshot metric — active loans with lock dates).
+    // Bucketed loans include lock_date in essentialFields from prediction save.
+    const bucketedLockedCount = (() => {
+      if (!bucketedLoans || bucketedLoans.length === 0) return null;
+      return bucketedLoans.filter((l: any) => {
+        const lockDate = l?.lock_date ?? l?.["Lock Date"] ?? l?.["Trans Details Lock Date"];
+        if (lockDate === null || lockDate === undefined) return false;
+        if (typeof lockDate === "string") return lockDate.trim().length > 0;
+        return true;
+      }).length;
+    })();
+
+    // Past est. close count from bucketed loans (snapshot metric — not filtered by period).
+    // Bucketed loans have estimated_closing_date from the prediction save.
+    const bucketedPastEstCloseCount = (() => {
+      if (!bucketedLoans || bucketedLoans.length === 0) return null;
+      const now = new Date();
+      return bucketedLoans.filter((l: any) => {
+        const estClose = l?.estimated_closing_date || l?.estimatedClosingDate;
+        if (!estClose) return false;
+        const d = new Date(estClose);
+        return !Number.isNaN(d.getTime()) && d < now;
+      }).length;
+    })();
+
     const hasLoans = loansRaw && loansRaw.length > 0 && !loansError;
 
     if (hasLoans) {
@@ -1062,7 +1142,16 @@ export const ClosingFalloutForecast = ({
       }`;
       const cached = cache.cache.get(periodKey);
       if (cached) {
-        return cached;
+        const totalActiveInPanel = bucketedLoans?.length ?? cached.activeLoansToday ?? 0;
+        const highRiskRate = totalActiveInPanel > 0 ? Math.round((highRiskCount / totalActiveInPanel) * 100) : 0;
+        const likelyCloseLate = serverCloseLateCount != null ? serverCloseLateCount : cached.likelyCloseLate;
+        const pastEstClose = bucketedPastEstCloseCount != null
+          ? Math.max(bucketedPastEstCloseCount, cached.pastEstClose)
+          : cached.pastEstClose;
+        const lockedLoans = bucketedLockedCount != null
+          ? Math.max(bucketedLockedCount, cached.lockedLoans)
+          : cached.lockedLoans;
+        return { ...cached, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose, lockedLoans };
       }
 
       // Pass server-side active loans count to computeMetricsFromLoans
@@ -1140,7 +1229,16 @@ export const ClosingFalloutForecast = ({
         );
       }
 
-      return result;
+      const totalActiveInPanel = bucketedLoans?.length ?? result.activeLoansToday ?? 0;
+      const highRiskRate = totalActiveInPanel > 0 ? Math.round((highRiskCount / totalActiveInPanel) * 100) : 0;
+      const likelyCloseLate = serverCloseLateCount != null ? serverCloseLateCount : result.likelyCloseLate;
+      const pastEstClose = bucketedPastEstCloseCount != null
+        ? Math.max(bucketedPastEstCloseCount, result.pastEstClose)
+        : result.pastEstClose;
+      const lockedLoans = bucketedLockedCount != null
+        ? Math.max(bucketedLockedCount, result.lockedLoans)
+        : result.lockedLoans;
+      return { ...result, highRiskCount, totalActiveInPanel, highRiskRate, likelyCloseLate, pastEstClose, lockedLoans };
     }
 
     // Active Loans Today
@@ -1169,12 +1267,10 @@ export const ClosingFalloutForecast = ({
         ? Math.round((activeLoansToday * pullThroughRate) / 100)
         : 0;
 
-    // Likely Close Late - estimate based on cycle time (loans over 30 days old)
-    // This is a simplified calculation - in production, this would come from actual loan data
+    // Likely Close Late - use server-computed count from prediction summary if available
     const likelyCloseLate =
-      activeLoansToday > 0
-        ? Math.round(activeLoansToday * 0.15) // Estimate 15% of active loans will close late
-        : 0;
+      (predictions as any)?.summary?.likelyCloseLateCount ??
+      (activeLoansToday > 0 ? Math.round(activeLoansToday * 0.15) : 0);
 
     // Fallout metrics - use predictions ONLY (not funnel data fallback)
     // These should be populated by AI predictions, not historical funnel data
@@ -1202,6 +1298,14 @@ export const ClosingFalloutForecast = ({
         ? Math.round((predictedFalloutTotal / activeLoansToday) * 100)
         : 0;
 
+    // High risk: use count from top of useMemo; totalActiveInPanel/highRiskRate use activeLoansToday when no bucketed data
+    const totalActiveInPanel =
+      bucketedLoans?.length ?? activeLoansToday;
+    const highRiskRate =
+      totalActiveInPanel > 0
+        ? Math.round((highRiskCount / totalActiveInPanel) * 100)
+        : 0;
+
     // Locked loans
     const lockedLoans = statsData?.locked ?? 0;
 
@@ -1213,6 +1317,7 @@ export const ClosingFalloutForecast = ({
       closedLoansMTD,
       predictedClosing,
       likelyCloseLate,
+      pastEstClose: 0,
       likelyWithdraw,
       likelyDecline,
       predictedFalloutTotal,
@@ -1223,6 +1328,9 @@ export const ClosingFalloutForecast = ({
       lockedRolling90: lockedLoans, // Fallback: use total locks when no loan data available
       avgCycleTime,
       pipelineValue,
+      highRiskCount,
+      totalActiveInPanel,
+      highRiskRate,
     };
   }, [
     statsData,
@@ -1234,6 +1342,7 @@ export const ClosingFalloutForecast = ({
     pullThroughRateFromMetrics,
     activeLoansPeriod,
     serverActiveLoansCount, // Server-side active loans count with date filter
+    bucketedLoans,
   ]);
 
   const getExportData = (): ExportData => ({
@@ -1247,9 +1356,11 @@ export const ClosingFalloutForecast = ({
           ["Closed Loans MTD", metrics.closedLoansMTD],
           ["Predicted Closings", metrics.predictedClosing],
           ["Likely Close Late", metrics.likelyCloseLate],
+          ["Past Est. Close Date", metrics.pastEstClose],
           ["Likely Withdraw", metrics.likelyWithdraw],
           ["Likely Decline", metrics.likelyDecline],
           ["Predicted Fallout Total", metrics.predictedFalloutTotal],
+          ["High Risk (active)", `${metrics.highRiskCount} of ${metrics.totalActiveInPanel}`],
           ["Pipeline Value (M)", metrics.pipelineValueM],
           ["Pull-Through Rate", `${metrics.pullThroughRateDisplay}%`],
           ["Fallout Rate", `${metrics.falloutRate}%`],
@@ -1267,8 +1378,8 @@ export const ClosingFalloutForecast = ({
         ? `$${(metrics.pipelineValue / 1000000).toFixed(1)}M`
         : "$0M";
 
-    // Use locked loans from useMetrics (rolling 90 days) - same approach as ExecutiveDashboard
-    const locksCount = lockedLoansRolling90;
+    // Active locked loans count — how many of the current active loans have a lock date
+    const lockedActiveCount = metrics.lockedLoans;
 
     const pullThrough = `${metrics.pullThroughRateDisplay}%`;
 
@@ -1282,12 +1393,12 @@ export const ClosingFalloutForecast = ({
           "Total Unpaid Principal Balance of active loans. Forward-looking revenue indicator.",
       },
       {
-        label: "Locks (90D)",
-        value: locksCount.toString(),
-        secondaryLabel: "Rolling 90 Days",
-        secondaryValue: locksCount.toString(),
+        label: "Locked Loans",
+        value: lockedActiveCount.toString(),
+        secondaryLabel: "Active w/ Lock",
+        secondaryValue: `${lockedActiveCount} of ${metrics.activeLoansToday}`,
         explanation:
-          "Loans with secured rate locks in the past 90 days. Matches ExecutiveDashboard methodology.",
+          "Active loans that have a rate lock date. Only counts loans currently in the active pipeline.",
       },
       {
         label: "Pull-Through",
@@ -1298,7 +1409,7 @@ export const ClosingFalloutForecast = ({
           "Historical success rate - % of loans that successfully fund. Uses rolling 90-day window for accuracy.",
       },
     ];
-  }, [metrics, lockedLoansRolling90]);
+  }, [metrics]);
 
   // PERFORMANCE: Only trigger animation on initial data load, not on period changes
   // This prevents stutter when switching between periods
@@ -1464,7 +1575,7 @@ export const ClosingFalloutForecast = ({
             };
           }>;
           count: number;
-          summary: { withdraw: number; deny: number; originate: number };
+          summary: { withdraw: number; deny: number; originate: number; likelyCloseLateCount?: number };
           dateFilter?: {
             startDate: string;
             endDate: string;
@@ -1549,8 +1660,8 @@ export const ClosingFalloutForecast = ({
       // Don't send loanIds - let the backend query the full database with proper filters
       // The frontend's 5000-loan sample may not match the backend's "Active Loan" criteria
       const predictUrl = selectedTenantId
-        ? `/api/loans/predict?tenant_id=${selectedTenantId}`
-        : "/api/loans/predict";
+        ? `/api/predictions?tenant_id=${selectedTenantId}`
+        : "/api/predictions";
       const response = await api.request<{
         predictions: Array<{ predictedOutcome: string; loanId: string }>;
         bucketedLoans?: any[];
@@ -1635,7 +1746,7 @@ export const ClosingFalloutForecast = ({
             loanData?: any;
           }>;
           count: number;
-          summary: { withdraw: number; deny: number; originate: number };
+          summary: { withdraw: number; deny: number; originate: number; likelyCloseLateCount?: number };
           dateFilter?: {
             startDate: string;
             endDate: string;
@@ -1762,9 +1873,12 @@ export const ClosingFalloutForecast = ({
         const params = new URLSearchParams();
         params.set("actor", "loan_officer");
         if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+        if (selectedChannel && selectedChannel !== "All")
+          params.set("channel_group", selectedChannel);
+        // Using new consolidated endpoint with channel-aware actor support
         const res = await api.request<{
           actors?: Array<{ name: string; ttsScore: number; tier?: string }>;
-        }>(`/api/loans/sales-scorecard?${params.toString()}`);
+        }>(`/api/scorecard/sales?${params.toString()}`);
         if (cancelled || !res?.actors) return;
         const map: Record<string, { ttsScore: number; tier: string }> = {};
         res.actors.forEach((a) => {
@@ -1821,15 +1935,9 @@ export const ClosingFalloutForecast = ({
 
     const getRaw = (loanId: string) => rawByLoanId.get(String(loanId));
 
-    // Use bucketedLoans (from prediction endpoint) as primary source - they have accurate risk bucketing
-    // Fall back to loansRaw if no bucketed data
+    // Use bucketedLoans (from prediction endpoint) as primary source - show all active loans; user can sort by risk
     if (bucketedLoans && bucketedLoans.length > 0) {
-      // Filter to high-risk loans from bucketed data
-      const highRiskLoans = bucketedLoans.filter(
-        (l: any) => l.bucket === "high"
-      );
-
-      return highRiskLoans.map((l: any) => {
+      return bucketedLoans.map((l: any) => {
         // Use snake_case field names matching database columns
         const loanId = l.loan_id || l.id || l.guid || "";
         const raw = getRaw(loanId);
@@ -1869,41 +1977,10 @@ export const ClosingFalloutForecast = ({
           reason = l.riskSummary;
         }
 
-        // Calculate risk score aligned with backend count-based bucket logic
-        // Same logic as predictionService bucketLoanData: severeCount (>=5), elevatedCount (>=4)
-        const signals = [
-          l.creditMetricsSignalStrength,
-          l.loanCharacteristicsSignalStrength,
-          l.timeInMotionSignalStrength,
-          l.mloAeFalloutProneSignalStrength,
-          l.interestLockVsMarketSignalStrength,
-        ].filter((s): s is number => typeof s === "number" && !isNaN(s));
-
-        let riskScore = 75; // Default for high-risk loans
-        if (signals.length > 0) {
-          const avgSignal =
-            signals.reduce((sum, s) => sum + s, 0) / signals.length;
-          const severeCount = signals.filter((s) => s >= 5).length;
-          const elevatedCount = signals.filter((s) => s >= 4).length;
-          // Same bucket logic as backend (no hasMaxSignal)
-          let bucket: "low" | "medium" | "high";
-          if (severeCount >= 3) bucket = "high";
-          else if (severeCount >= 2 || elevatedCount >= 2 || avgSignal >= 5)
-            bucket = "medium";
-          else if (avgSignal <= 3) bucket = "low";
-          else bucket = "medium";
-          // Map bucket to 40-100, use avgSignal for within-bucket spread
-          if (bucket === "low") {
-            riskScore = Math.round(40 + (avgSignal / 3) * 15);
-          } else if (bucket === "medium") {
-            riskScore = Math.round(55 + (avgSignal / 6) * 20);
-          } else {
-            riskScore = Math.round(75 + (avgSignal / 6) * 25);
-          }
-          riskScore = Math.min(100, Math.max(40, riskScore));
-        } else if (l.riskSummary?.confidence) {
-          riskScore = l.riskSummary.confidence;
-        }
+        // Use backend-computed riskScore (process/credit split, max-based, 1-100 scale)
+        // Falls back to riskSummary.riskScore, then confidence, then 50
+        const riskScore: number =
+          l.riskScore ?? l.riskSummary?.riskScore ?? l.riskSummary?.confidence ?? 50;
 
         // Return in LoanCardsContainer expected format
         // Use snake_case field names matching database columns
@@ -1969,28 +2046,11 @@ export const ClosingFalloutForecast = ({
       });
     }
 
-    // Fallback: use loansRaw if no bucketed data available
+    // Fallback: use loansRaw if no bucketed data available - show all active loans
     if (!loansRaw || loansRaw.length === 0) return [];
 
     const now = new Date();
-    // Filter to only active loans that are predicted to fallout (withdraw or decline)
-    const activeRaw = loansRaw.filter((l) => {
-      // Must be active
-      if (mapForecastStatus(l) !== "Active") return false;
-
-      // Check if this loan is predicted to fallout
-      const loanId = l.loan_id || l.id;
-      if (!loanId) return false;
-
-      const predictedOutcome = loanPredictions[loanId];
-      // Include loans predicted to withdraw or decline (API returns lowercase: 'withdraw', 'deny', 'originate')
-      const outcomeLower = (predictedOutcome || "").toLowerCase();
-      return (
-        outcomeLower === "withdraw" ||
-        outcomeLower === "deny" ||
-        outcomeLower === "decline"
-      );
-    });
+    const activeRaw = loansRaw.filter((l) => mapForecastStatus(l) === "Active");
 
     return activeRaw.map((l) => {
       const base = transformLoanToCard(l);
@@ -2048,6 +2108,393 @@ export const ClosingFalloutForecast = ({
     });
   }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap]);
 
+  // Sorted critical loans for table display
+  const sortedCriticalLoans = useMemo(() => {
+    const loans = [...criticalLoanCards];
+    
+    const getSortValue = (loan: typeof criticalLoanCards[0], column: string): any => {
+      switch (column) {
+        case 'loan_number':
+          return loan.loan_number || '';
+        case 'amount':
+          return loan.amountValue || 0;
+        case 'officer':
+          return loan.officer || '';
+        case 'commission':
+          const amt = loan.amountValue || 0;
+          const COMMISSION_MAX = 6000;
+          return Math.min(amt * 0.01, COMMISSION_MAX);
+        case 'predictedOutcome':
+          return loan.riskSummary?.predictedOutcome || '';
+        case 'riskScore':
+          return loan.riskScore || 0;
+        case 'fico':
+          return loan.ficoScore ?? -1;
+        case 'ltv':
+          return loan.ltvRatio ?? -1;
+        case 'dti':
+          return loan.dtiRatio ?? -1;
+        case 'loPullthrough':
+          return loan.loPullthroughPct ?? -1;
+        case 'timeInMotion':
+          return loan.activeDays ?? -1;
+        case 'loanType':
+          return loan.loanType || '';
+        case 'loanPurpose':
+          return loan.loanPurpose || '';
+        case 'channel':
+          return loan.channel || '';
+        case 'milestone':
+          return loan.currentMilestone || '';
+        case 'estimatedClosingDate':
+          return loan.estimatedClosingDate || '';
+        case 'marketRateAtLock':
+          return (loan as any).lockMarketRate ?? -1;
+        case 'marketRateToday':
+          return loan.marketRate ?? -1;
+        case 'marketDelta':
+          return loan.marketChangeDelta ?? -1;
+        case 'lockStatus':
+          if ((loan as any).lockDate) return 'Locked';
+          return 'Not Locked';
+        case 'creditMetrics':
+          return loan.creditMetricsSignalStrength ?? -1;
+        case 'loanCharacteristics':
+          return loan.loanCharacteristicsSignalStrength ?? -1;
+        case 'timeInMotionSignal':
+          return loan.timeInMotionSignalStrength ?? -1;
+        case 'mloFalloutProne':
+          return loan.mloAeFalloutProneSignalStrength ?? -1;
+        case 'lockVsMarket':
+          return loan.interestLockVsMarketSignalStrength ?? -1;
+        default:
+          return '';
+      }
+    };
+
+    loans.sort((a, b) => {
+      const aVal = getSortValue(a, sortColumn);
+      const bVal = getSortValue(b, sortColumn);
+      
+      // Handle null/undefined values
+      if (aVal === null || aVal === undefined || aVal === '') return 1;
+      if (bVal === null || bVal === undefined || bVal === '') return -1;
+      
+      // String comparison
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const comparison = aVal.localeCompare(bVal);
+        return sortDirection === 'asc' ? comparison : -comparison;
+      }
+      
+      // Number comparison
+      const comparison = (aVal as number) - (bVal as number);
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+    
+    return loans;
+  }, [criticalLoanCards, sortColumn, sortDirection]);
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const formatAmount = (amount: number | null | undefined): string => {
+    if (!amount) return '$0';
+    if (amount >= 1000000) {
+      return `$${(amount / 1000000).toFixed(2)}M`;
+    } else if (amount >= 1000) {
+      return `$${(amount / 1000).toFixed(0)}K`;
+    }
+    return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  const formatCommission = (loan: typeof criticalLoanCards[0]): string => {
+    const amt = loan.amountValue || 0;
+    const COMMISSION_MAX = 6000;
+    const low = Math.round(Math.min(amt * 0.005, COMMISSION_MAX));
+    const high = Math.round(Math.min(amt * 0.01, COMMISSION_MAX));
+    if (low === high && low === COMMISSION_MAX) {
+      return `$${COMMISSION_MAX.toLocaleString()}`;
+    }
+    return `$${low.toLocaleString()} – $${high.toLocaleString()}`;
+  };
+
+  const formatDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (Number.isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const formatPercent = (val: number | null | undefined): string => {
+    if (val === null || val === undefined) return '—';
+    return `${val.toFixed(1)}%`;
+  };
+
+  const formatNumber = (val: number | null | undefined, decimals: number = 0): string => {
+    if (val === null || val === undefined) return '—';
+    return val.toFixed(decimals);
+  };
+
+  const getPredictedOutcomeLabel = (outcome: string | undefined): string => {
+    if (!outcome) return '—';
+    switch (outcome.toLowerCase()) {
+      case 'withdraw': return 'Withdraw';
+      case 'deny': return 'Deny';
+      case 'originate': return 'Originate';
+      case 'at_risk': return 'At Risk';
+      default: return outcome;
+    }
+  };
+
+  const getLockStatus = (loan: typeof criticalLoanCards[0]): string => {
+    const lockDate = (loan as any).lockDate;
+    const lockExpirationDate = (loan as any).lockExpirationDate;
+    if (lockDate) {
+      if (lockExpirationDate) {
+        const exp = new Date(lockExpirationDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        exp.setHours(0, 0, 0, 0);
+        if (exp < today) return 'Expired';
+        return 'Locked';
+      }
+      return 'Locked';
+    }
+    return 'Not Locked';
+  };
+
+  // Color helper functions matching LoanRiskDistribution
+  const getFicoColor = (score: number | null | undefined): string => {
+    if (score == null || score === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (score < 640) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (score < 700) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getLtvColor = (ratio: number | null | undefined): string => {
+    if (ratio == null || ratio === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (ratio > 95) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (ratio > 80) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getDtiColor = (ratio: number | null | undefined): string => {
+    if (ratio == null || ratio === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (ratio > 50) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (ratio > 43) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getPullthroughColor = (pct: number | null | undefined): string => {
+    if (pct == null || pct === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (pct >= 80) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+    if (pct >= 60) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+  };
+
+  const getTimeInMotionColor = (days: number | null | undefined): string => {
+    if (days == null || days === 0) return isDarkMode ? 'text-slate-400' : 'text-slate-500';
+    if (days > 45) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+    if (days >= 30) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+    return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
+  };
+
+  const getPredictedOutcomeColor = (outcome: string | undefined): string => {
+    if (!outcome) return isDarkMode ? 'text-slate-300' : 'text-slate-900';
+    const outcomeLower = outcome.toLowerCase();
+    if (outcomeLower === 'deny') {
+      return isDarkMode ? 'text-red-300 bg-red-600/20' : 'text-red-700 bg-red-100';
+    }
+    if (outcomeLower === 'withdraw') {
+      return isDarkMode ? 'text-orange-300 bg-orange-500/20' : 'text-orange-700 bg-orange-100';
+    }
+    return isDarkMode ? 'text-slate-300' : 'text-slate-900';
+  };
+
+  const getSignalBucketColor = (bucket: number | null | undefined): string => {
+    if (bucket === null || bucket === undefined) {
+      return isDarkMode ? 'text-slate-400 bg-slate-700/50' : 'text-slate-500 bg-slate-100';
+    }
+    if (bucket <= 2) {
+      return isDarkMode ? 'text-emerald-400 bg-emerald-900/30' : 'text-emerald-600 bg-emerald-50';
+    }
+    if (bucket <= 4) {
+      return isDarkMode ? 'text-amber-400 bg-amber-900/30' : 'text-amber-600 bg-amber-50';
+    }
+    return isDarkMode ? 'text-rose-400 bg-rose-900/30' : 'text-rose-600 bg-rose-50';
+  };
+
+  // Helper function to get critical loans table export data (headers + rows for CSV/Excel)
+  const getCriticalLoansExportData = useCallback(() => {
+    const headers = [
+      'Loan Number',
+      'Loan Amount',
+      'MLO/AE',
+      'Est. Commission at Risk',
+      'Predicted Outcome',
+      'Risk Score',
+      'FICO',
+      'LTV',
+      'DTI',
+      'LO Pullthrough',
+      'Time in Motion',
+      'Loan Type',
+      'Loan Purpose',
+      'Channel',
+      'Milestone',
+      'Est. Closing Date',
+      'Market Rate at Lock',
+      'Market Rate Today',
+      'Market Delta',
+      'Lock Status',
+      'Credit Metrics',
+      'Loan Characteristics',
+      'Time in Motion Signal',
+      'MLO Fallout Prone',
+      'Lock vs Market',
+    ];
+
+    const rows = sortedCriticalLoans.map((loan) => {
+      const commission = formatCommission(loan);
+      return [
+        loan.loan_number || '',
+        formatAmount(loan.amountValue),
+        loan.officer || '',
+        commission,
+        getPredictedOutcomeLabel(loan.riskSummary?.predictedOutcome),
+        formatNumber(loan.riskScore),
+        formatNumber(loan.ficoScore),
+        formatPercent(loan.ltvRatio),
+        formatPercent(loan.dtiRatio),
+        formatPercent(loan.loPullthroughPct),
+        loan.activeDays !== null && loan.activeDays !== undefined ? `${loan.activeDays} days` : '',
+        loan.loanType || '',
+        loan.loanPurpose || '',
+        loan.channel || '',
+        loan.currentMilestone || '',
+        formatDate(loan.estimatedClosingDate),
+        ((loan as any).lockMarketRate !== null && (loan as any).lockMarketRate !== undefined) ? `${((loan as any).lockMarketRate).toFixed(2)}%` : '',
+        loan.marketRate !== null && loan.marketRate !== undefined ? `${loan.marketRate.toFixed(2)}%` : '',
+        loan.marketChangeDelta !== null && loan.marketChangeDelta !== undefined ? `${loan.marketChangeDelta > 0 ? '+' : ''}${loan.marketChangeDelta.toFixed(2)}%` : '',
+        getLockStatus(loan),
+        formatNumber(loan.creditMetricsSignalStrength),
+        formatNumber(loan.loanCharacteristicsSignalStrength),
+        formatNumber(loan.timeInMotionSignalStrength),
+        formatNumber(loan.mloAeFalloutProneSignalStrength),
+        formatNumber(loan.interestLockVsMarketSignalStrength),
+      ];
+    });
+
+    return { headers, rows };
+  }, [sortedCriticalLoans]);
+
+  const exportToCSV = useCallback(() => {
+    if (sortedCriticalLoans.length === 0) return;
+
+    const { headers, rows } = getCriticalLoansExportData();
+
+    // Convert to CSV format
+    const escapeCSV = (value: string): string => {
+      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    };
+
+    const csvContent = [
+      headers.map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(','))
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `critical-loans-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [sortedCriticalLoans, getCriticalLoansExportData]);
+
+  const exportToExcel = useCallback(() => {
+    if (sortedCriticalLoans.length === 0) return;
+
+    const { headers, rows } = getCriticalLoansExportData();
+
+    // Escape XML characters
+    const escapeXML = (value: string): string => {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    };
+
+    // Create XML Spreadsheet format (Excel-compatible)
+    let xml = '<?xml version="1.0"?>\n';
+    xml += '<?mso-application progid="Excel.Sheet"?>\n';
+    xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';
+    xml += ' xmlns:o="urn:schemas-microsoft-com:office:office"\n';
+    xml += ' xmlns:x="urn:schemas-microsoft-com:office:excel"\n';
+    xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n';
+    xml += ' xmlns:html="http://www.w3.org/TR/REC-html40">\n';
+    xml += '<Worksheet ss:Name="Critical Loans">\n';
+    xml += '<Table>\n';
+
+    // Add header row
+    xml += '<Row>\n';
+    headers.forEach(header => {
+      xml += `<Cell><Data ss:Type="String">${escapeXML(header)}</Data></Cell>\n`;
+    });
+    xml += '</Row>\n';
+
+    // Add data rows
+    rows.forEach(row => {
+      xml += '<Row>\n';
+      row.forEach(cell => {
+        const cellValue = String(cell || '');
+        // Try to detect if it's a number
+        const numValue = parseFloat(cellValue.replace(/[$,%]/g, ''));
+        if (!isNaN(numValue) && cellValue.trim() !== '') {
+          xml += `<Cell><Data ss:Type="Number">${numValue}</Data></Cell>\n`;
+        } else {
+          xml += `<Cell><Data ss:Type="String">${escapeXML(cellValue)}</Data></Cell>\n`;
+        }
+      });
+      xml += '</Row>\n';
+    });
+
+    xml += '</Table>\n';
+    xml += '</Worksheet>\n';
+    xml += '</Workbook>';
+
+    // Create blob and download
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `critical-loans-${new Date().toISOString().split('T')[0]}.xls`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [sortedCriticalLoans, getCriticalLoansExportData]);
+
   // Animated values for main metrics
   const animatedActiveLoans = useCountUp(
     metrics.activeLoansToday,
@@ -2073,10 +2520,22 @@ export const ClosingFalloutForecast = ({
     600,
     isAnimating
   );
+  const animatedPastEstClose = useCountUp(
+    metrics.pastEstClose,
+    1500,
+    700,
+    isAnimating
+  );
 
   // Animated values for outcome metrics
   const animatedPredictedFallout = useCountUp(
     metrics.predictedFalloutTotal,
+    1500,
+    0,
+    isAnimating
+  );
+  const animatedHighRisk = useCountUp(
+    metrics.highRiskCount,
     1500,
     0,
     isAnimating
@@ -2206,7 +2665,7 @@ export const ClosingFalloutForecast = ({
       <div className="mb-8 md:mb-12">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch">
           {/* Main Forecast Section */}
-          <div className="md:col-span-8 lg:col-span-9 flex flex-col">
+          <div className="md:col-span-12 flex flex-col">
             <div ref={forecastRef}>
               <DashboardCard className="relative flex-1 flex flex-col">
                 <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col">
@@ -2262,8 +2721,8 @@ export const ClosingFalloutForecast = ({
                     </div>
                   </div>
 
-                  {/* Main Metrics Grid - 3 KPIs centered */}
-                  <div className="grid grid-cols-3 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-4xl mx-auto">
+                  {/* Main Metrics Grid - 4 KPIs centered */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 md:gap-8 lg:gap-12 mb-8 md:mb-12 max-w-5xl mx-auto">
                     {/* Active Loans Today */}
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -2334,7 +2793,10 @@ export const ClosingFalloutForecast = ({
                     {/* Likely Close Late */}
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
+                        <div
+                          onClick={() => handleMetricClick("Likely Close Late")}
+                          className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300 cursor-pointer hover:opacity-80"
+                        >
                           <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                             <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
                               Likely Close Late
@@ -2356,6 +2818,44 @@ export const ClosingFalloutForecast = ({
                         </p>
                         <p className="text-xs text-slate-300">
                           {getMetricExplanation("Likely Close Late").desc}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+
+                    {/* Past Est. Close Date */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center space-y-1 sm:space-y-2 md:space-y-3 lg:space-y-4 group/stat transition-all duration-300">
+                          <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
+                            <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                              Past Est. Close
+                            </p>
+                            {metrics.pastEstClose > 0 && (
+                              <span className="px-1 sm:px-1.5 py-0.5 rounded text-[6px] sm:text-[7px] font-bold uppercase tracking-wide bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400">
+                                Alert
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-thin tracking-[-0.04em] ${
+                            metrics.pastEstClose > 0
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "text-slate-900 dark:text-slate-50"
+                          }`}>
+                            {isAnimating
+                              ? animatedPastEstClose.toLocaleString()
+                              : metrics.pastEstClose.toLocaleString()}
+                          </p>
+                          <p className="text-[8px] md:text-[9px] lg:text-xs text-slate-500/60 dark:text-slate-400/70 font-medium">
+                            Units
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                        <p className="font-semibold mb-1 text-white">
+                          {getMetricExplanation("Past Est. Close").title}
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {getMetricExplanation("Past Est. Close").desc}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -2427,32 +2927,32 @@ export const ClosingFalloutForecast = ({
 
                   {/* Outcome Metrics Grid */}
                   <div className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mt-auto">
-                    {/* Predicted Fallout */}
+                    {/* High Risk */}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <div
-                          onClick={() => handleMetricClick("Predicted Fallout")}
+                          onClick={() => handleMetricClick("High Risk")}
                           className="p-3 sm:p-5 md:p-6 lg:p-8 rounded-xl md:rounded-xl lg:rounded-2xl border transition-all duration-300 cursor-pointer group/outcome text-center overflow-hidden bg-white dark:bg-slate-900/30 border-slate-200/60 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10 shadow-[0_1px_4px_rgba(0,0,0,0.04)] dark:hover:bg-slate-800/50 hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
                         >
                           <p className="text-[8px] sm:text-[10px] md:text-[11px] lg:text-xs font-semibold uppercase tracking-wide sm:tracking-widest mb-1.5 sm:mb-2 lg:mb-3 leading-tight text-rose-600 dark:text-rose-400">
-                            Predicted Fallout
+                            High Risk
                           </p>
                           <p className="text-base sm:text-xl md:text-2xl lg:text-3xl font-light tracking-tight text-rose-500 dark:text-rose-400">
                             {isAnimating
-                              ? animatedPredictedFallout.toLocaleString()
-                              : metrics.predictedFalloutTotal.toLocaleString()}
+                              ? animatedHighRisk.toLocaleString()
+                              : metrics.highRiskCount.toLocaleString()}
                           </p>
                           <p className="text-[8px] sm:text-xs md:text-sm text-slate-400 font-normal mt-1 uppercase">
-                            {metrics.falloutRate}%
+                            of {metrics.totalActiveInPanel} active
                           </p>
                         </div>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
                         <p className="font-semibold mb-1 text-white">
-                          {getMetricExplanation("Predicted Fallout").title}
+                          {getMetricExplanation("High Risk").title}
                         </p>
                         <p className="text-xs text-slate-300">
-                          {getMetricExplanation("Predicted Fallout").desc}
+                          {getMetricExplanation("High Risk").desc}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -2522,52 +3022,7 @@ export const ClosingFalloutForecast = ({
             </div>
           </div>
 
-          {/* Pipeline Snapshot Section */}
-          <div className="md:col-span-4 lg:col-span-3 flex flex-col order-first md:order-none">
-            <section className="bg-[#1A56DB] rounded-xl md:rounded-2xl p-6 md:p-10 lg:p-12 text-white shadow-[0_20px_50px_-15px_rgba(26,86,219,0.4)] flex-1 flex flex-col">
-              <h3 className="text-[10px] md:text-[11px] font-semibold uppercase tracking-widest mb-6 opacity-80">
-                Pipeline Snapshot
-              </h3>
-              <div className="space-y-6 md:space-y-8 flex-1 flex flex-col justify-between">
-                {kpis.map((kpi) => (
-                  <Tooltip key={kpi.label}>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="group cursor-pointer hover:bg-white/5 rounded-xl p-3 -mx-3 transition-all duration-200"
-                        onClick={() => handleMetricClick(kpi.label)}
-                      >
-                        <p className="text-[9px] md:text-[10px] font-semibold uppercase tracking-[0.2em] mb-2 opacity-60 group-hover:opacity-90 transition-opacity">
-                          {kpi.label}
-                        </p>
-                        <div className="flex items-baseline justify-between">
-                          <p className="text-2xl md:text-4xl lg:text-5xl font-thin tracking-tight group-hover:scale-[1.02] transition-transform">
-                            {kpi.value}
-                          </p>
-                          <div className="text-right">
-                            <span className="text-[7px] md:text-[8px] font-medium uppercase tracking-wider opacity-50 block">
-                              {kpi.secondaryLabel}
-                            </span>
-                            <span className="text-[10px] md:text-xs font-semibold text-white/90">
-                              {kpi.secondaryValue}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="mt-3 md:mt-4 h-px w-full bg-white/10 group-hover:bg-white/20 transition-colors"></div>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
-                      <p className="font-semibold mb-1 text-white">
-                        {kpi.label}
-                      </p>
-                      <p className="text-xs text-slate-300">
-                        {kpi.explanation}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-            </section>
-          </div>
+          {/* Pipeline Snapshot Section removed — KPIs moved to main panel */}
         </div>
 
         {/* ============================================================================
@@ -2999,25 +3454,13 @@ export const ClosingFalloutForecast = ({
               }`}
             >
               <span className="flex items-center justify-center gap-2">
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                  />
-                </svg>
-                Top Loan Officers
+                <Table className="w-4 h-4" />
+                Critical Loans Table
               </span>
             </button>
           </div>
 
-          <div className="py-4 md:p-8 lg:p-10">
+          <div className="py-2 md:p-3 lg:p-4">
             {insightsTab === "critical" && (
               <div>
                 {loansError ? (
@@ -3042,121 +3485,229 @@ export const ClosingFalloutForecast = ({
                   predictions={fullPredictions}
                   isDarkMode={isDarkMode}
                   selectedTenantId={selectedTenantId}
+                  openLoanId={openLoanId}
+                  onOpenLoanIdHandled={onOpenLoanIdHandled}
                 />
               </div>
             )}
 
-            {insightsTab === "officers" &&
-              (() => {
-                if (loansLoading && !loansRaw) {
-                  return (
-                    <div
-                      className={`text-center py-12 ${
-                        isDarkMode ? "text-slate-400" : "text-slate-500"
-                      }`}
-                    >
-                      Loading loan officer activity...
-                    </div>
-                  );
-                }
-
-                if (loansError) {
-                  return (
-                    <div
-                      className={`text-center py-12 ${
-                        isDarkMode ? "text-rose-400" : "text-rose-600"
-                      }`}
-                    >
-                      {loansError}
-                    </div>
-                  );
-                }
-
-                return loanOfficerData.length === 0 ? (
+            {insightsTab === "officers" && (
+              <div className="w-full">
+                {loansLoading && !loansRaw ? (
                   <div
-                    className={`text-center py-12 ${
-                      isDarkMode ? "text-slate-400" : "text-slate-500"
-                    }`}
+                    className={`text-sm py-6 text-center ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
                   >
-                    <svg
-                      className="w-12 h-12 mx-auto mb-4 opacity-40"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                      />
-                    </svg>
+                    Loading loans…
+                  </div>
+                ) : sortedCriticalLoans.length === 0 ? (
+                  <div
+                    className={`text-center py-12 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                  >
+                    <Table className="w-12 h-12 mx-auto mb-4 opacity-40" />
                     <p className="text-sm font-medium">
-                      No loan officer activity for this period
+                      No critical loans found
                     </p>
                     <p className="text-xs mt-1 opacity-70">
-                      Try selecting a different date range to see loan officers
+                      Run predictions to see critical loans in the table
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-                    {loanOfficerData.slice(0, 16).map((mlo, index) => (
-                      <div
-                        key={mlo.name}
-                        className={`flex items-center justify-between p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl transition-all duration-200 group cursor-pointer active:scale-[0.98] ${
-                          isDarkMode
-                            ? "bg-slate-800/40 hover:bg-slate-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
-                            : "bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
-                        }`}
-                        onClick={() => setSelectedOfficer(mlo.name)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-9 h-9 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-lg flex items-center justify-center text-xs sm:text-sm font-semibold ${
-                              isDarkMode
-                                ? "bg-indigo-500/20 text-indigo-400"
-                                : "bg-indigo-50 text-indigo-600"
-                            }`}
-                          >
-                            {index + 1}
-                          </div>
-                          <div className="min-w-0">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedOfficer(mlo.name);
-                              }}
-                              className={`text-[13px] sm:text-sm font-medium hover:underline text-left truncate block max-w-[140px] sm:max-w-none ${
-                                isDarkMode
-                                  ? "text-slate-100 hover:text-indigo-400"
-                                  : "text-slate-700 hover:text-indigo-600"
-                              }`}
-                            >
-                              {mlo.name}
-                            </button>
-                            <p
-                              className={`text-[10px] sm:text-[11px] ${
-                                isDarkMode ? "text-slate-500" : "text-slate-400"
-                              }`}
-                            >
-                              {mlo.activeLoans || 0} loans · {mlo.pullThrough}
-                            </p>
-                          </div>
-                        </div>
-                        <div
-                          className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md text-[10px] sm:text-[11px] font-medium ${
-                            mlo.risk === "Low"
-                              ? "text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-500/15"
-                              : "text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-500/15"
-                          }`}
+                  <div className="w-full">
+                    <div
+                      className={`overflow-x-auto overflow-y-auto border rounded-lg ${isDarkMode ? "border-white/10" : "border-slate-200"}`}
+                      style={{ maxHeight: "45rem" }}
+                    >
+                      <table className="table-auto divide-y divide-slate-200 dark:divide-white/10">
+                        <thead
+                          className={`sticky top-0 z-10 ${isDarkMode ? "bg-slate-800/90" : "bg-slate-50"}`}
                         >
-                          {mlo.volume}
-                        </div>
+                          <tr>
+                            {[
+                              { key: "loan_number", label: "Loan Number" },
+                              { key: "amount", label: "Loan Amount" },
+                              { key: "officer", label: "MLO/AE" },
+                              { key: "commission", label: "Est. Commission at Risk" },
+                              { key: "predictedOutcome", label: "Predicted Outcome" },
+                              { key: "riskScore", label: "Risk Score" },
+                              { key: "fico", label: "FICO" },
+                              { key: "ltv", label: "LTV" },
+                              { key: "dti", label: "DTI" },
+                              { key: "loPullthrough", label: "LO Pullthrough" },
+                              { key: "timeInMotion", label: "Time in Motion" },
+                              { key: "loanType", label: "Loan Type" },
+                              { key: "loanPurpose", label: "Loan Purpose" },
+                              { key: "channel", label: "Channel" },
+                              { key: "milestone", label: "Milestone" },
+                              { key: "estimatedClosingDate", label: "Est. Closing Date" },
+                              { key: "marketRateAtLock", label: "Market Rate at Lock" },
+                              { key: "marketRateToday", label: "Market Rate Today" },
+                              { key: "marketDelta", label: "Market Delta" },
+                              { key: "lockStatus", label: "Lock Status" },
+                              { key: "creditMetrics", label: "Credit Metrics" },
+                              { key: "loanCharacteristics", label: "Loan Characteristics" },
+                              { key: "timeInMotionSignal", label: "Time in Motion Signal" },
+                              { key: "mloFalloutProne", label: "MLO Fallout Prone" },
+                              { key: "lockVsMarket", label: "Lock vs Market" },
+                            ].map((col) => (
+                              <th
+                                key={col.key}
+                                className={`px-2 py-2 text-left text-xs font-semibold uppercase tracking-wider ${isDarkMode ? "text-slate-300" : "text-slate-700"} whitespace-nowrap`}
+                              >
+                                <button
+                                  onClick={() => handleSort(col.key)}
+                                  className="flex items-center justify-between gap-2 hover:opacity-70 transition-opacity w-full"
+                                >
+                                  <span>{col.label}</span>
+                                  <span className="flex-shrink-0">
+                                    {sortColumn === col.key ? (
+                                      sortDirection === "asc" ? (
+                                        <ArrowUp className="w-3 h-3" />
+                                      ) : (
+                                        <ArrowDown className="w-3 h-3" />
+                                      )
+                                    ) : (
+                                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                                    )}
+                                  </span>
+                                </button>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody
+                          className={`divide-y ${isDarkMode ? "divide-white/5 bg-slate-900/30" : "divide-slate-200 bg-white"}`}
+                        >
+                          {sortedCriticalLoans.map((loan, idx) => (
+                            <tr
+                              key={loan.id || idx}
+                              className={`hover:${isDarkMode ? "bg-slate-800/50" : "bg-slate-50"} transition-colors cursor-pointer`}
+                              onClick={() => setSelectedLoanForDrilldown(loan)}
+                            >
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.loan_number || "—"}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {formatAmount(loan.amountValue)}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.officer || "—"}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {formatCommission(loan)}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs whitespace-nowrap rounded ${getPredictedOutcomeColor(loan.riskSummary?.predictedOutcome)}`}>
+                                {getPredictedOutcomeLabel(loan.riskSummary?.predictedOutcome)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {formatNumber(loan.riskScore)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getFicoColor(loan.ficoScore)}`}>
+                                {formatNumber(loan.ficoScore)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getLtvColor(loan.ltvRatio)}`}>
+                                {formatPercent(loan.ltvRatio)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getDtiColor(loan.dtiRatio)}`}>
+                                {formatPercent(loan.dtiRatio)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getPullthroughColor(loan.loPullthroughPct)}`}>
+                                {formatPercent(loan.loPullthroughPct)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getTimeInMotionColor(loan.activeDays)}`}>
+                                {loan.activeDays !== null && loan.activeDays !== undefined ? `${loan.activeDays} days` : "—"}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.loanType || "—"}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.loanPurpose || "—"}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.channel || "—"}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.currentMilestone || "—"}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {formatDate(loan.estimatedClosingDate)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {(loan as any).lockMarketRate !== null && (loan as any).lockMarketRate !== undefined ? `${(loan as any).lockMarketRate.toFixed(2)}%` : "—"}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.marketRate !== null && loan.marketRate !== undefined ? `${loan.marketRate.toFixed(2)}%` : "—"}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {loan.marketChangeDelta !== null && loan.marketChangeDelta !== undefined ? `${loan.marketChangeDelta > 0 ? "+" : ""}${loan.marketChangeDelta.toFixed(2)}%` : "—"}
+                              </td>
+                              <td className={`px-2 py-1.5 text-xs ${isDarkMode ? "text-slate-300" : "text-slate-900"} whitespace-nowrap`}>
+                                {getLockStatus(loan)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.creditMetricsSignalStrength)}`}>
+                                {formatNumber(loan.creditMetricsSignalStrength)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.loanCharacteristicsSignalStrength)}`}>
+                                {formatNumber(loan.loanCharacteristicsSignalStrength)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.timeInMotionSignalStrength)}`}>
+                                {formatNumber(loan.timeInMotionSignalStrength)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.mloAeFalloutProneSignalStrength)}`}>
+                                {formatNumber(loan.mloAeFalloutProneSignalStrength)}
+                              </td>
+                              <td className={`px-3 py-2 text-xs font-mono text-center whitespace-nowrap ${getSignalBucketColor(loan.interestLockVsMarketSignalStrength)}`}>
+                                {formatNumber(loan.interestLockVsMarketSignalStrength)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {sortedCriticalLoans.length > 0 && (
+                      <div
+                        className={`mt-2 flex items-center justify-center gap-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                      >
+                        <span className="text-xs">
+                          Showing {sortedCriticalLoans.length} critical loan{sortedCriticalLoans.length !== 1 ? "s" : ""}
+                        </span>
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className={`text-xs h-7 px-3 ${isDarkMode ? "border-white/20 hover:bg-slate-800" : "border-slate-300 hover:bg-slate-50"}`}
+                            >
+                              <Download className="w-3 h-3 mr-1.5" />
+                              Export
+                              <ChevronDown className="w-3 h-3 ml-1.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]"
+                          >
+                            <DropdownMenuItem
+                              onClick={exportToCSV}
+                              className="justify-start text-[13px] py-1.5 whitespace-nowrap"
+                            >
+                              <Download className="w-3 h-3 mr-1.5 flex-shrink-0" />
+                              CSV
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={exportToExcel}
+                              className="justify-start text-[13px] py-1.5 whitespace-nowrap"
+                            >
+                              <Download className="w-3 h-3 mr-1.5 flex-shrink-0" />
+                              Excel
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                    ))}
+                    )}
                   </div>
-                );
-              })()}
+                )}
+              </div>
+            )}
           </div>
         </section>
 
@@ -3188,6 +3739,8 @@ export const ClosingFalloutForecast = ({
               ? metrics.predictedClosing
               : metricModalLabel === "Predicted Fallout"
               ? metrics.predictedFalloutTotal
+              : metricModalLabel === "High Risk"
+              ? metrics.highRiskCount
               : undefined
           }
           subLabel={
@@ -3199,6 +3752,8 @@ export const ClosingFalloutForecast = ({
               ? `${metrics.pullThroughRateDisplay}% Pull-Through (Rolling 90D)`
               : metricModalLabel === "Predicted Fallout"
               ? `${metrics.falloutRate}%`
+              : metricModalLabel === "High Risk"
+              ? `${metrics.highRiskRate}% of ${metrics.totalActiveInPanel} active`
               : undefined
           }
           fallbackActiveVolume={metrics.pipelineValue}
@@ -3216,6 +3771,26 @@ export const ClosingFalloutForecast = ({
           loansError={loansError}
           loanPredictions={loanPredictions}
           bucketedLoans={bucketedLoans}
+        />
+
+        {/* Loan Drilldown Modal - shown when clicking a loan in the critical loans table */}
+        <LoanDrilldownModal
+          loan={selectedLoanForDrilldown}
+          isOpen={!!selectedLoanForDrilldown}
+          onClose={() => setSelectedLoanForDrilldown(null)}
+          isDarkMode={isDarkMode}
+          onSelectOfficer={(officer) => {
+            setSelectedLoanForDrilldown(null);
+            setSelectedOfficer(officer);
+          }}
+        />
+
+        {/* Loan Officer Modal */}
+        <LoanOfficerModal
+          officerName={selectedOfficer}
+          isOpen={!!selectedOfficer}
+          onClose={() => setSelectedOfficer(null)}
+          isDarkMode={isDarkMode}
         />
 
         {/* Loan Risk Detail Modal - shown when clicking a loan in the signal buckets table */}

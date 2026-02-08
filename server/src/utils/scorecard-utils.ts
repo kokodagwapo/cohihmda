@@ -104,22 +104,25 @@ export const OPERATIONS_ACTOR_CONFIGS: Record<string, ActorConfig> = {
   processor: {
     actorColumn: "processor",
     outputDateField: "approval_date",
-    // Turn Time: Try processing_date → approval_date (if submitted_to_processing_date is empty)
+    // Turn Time: processing_date → approval_date
     turnTimeStartField: "processing_date",
     turnTimeEndField: "approval_date",
   },
   underwriter: {
     actorColumn: "underwriter",
     outputDateField: "closing_date",
-    // ORIGINAL CONFIG - was working before
+    // Turn Time: approval_date → closing_date
     turnTimeStartField: "approval_date",
     turnTimeEndField: "closing_date",
   },
   closer: {
     actorColumn: "closer",
-    outputDateField: "disbursement_date",
+    // NOTE: Using funding_date instead of disbursement_date since disbursement_date
+    // is not mapped in defaultEncompassFieldMappings (no Encompass field for it)
+    outputDateField: "funding_date",
+    // Turn Time: closing_date → funding_date
     turnTimeStartField: "closing_date",
-    turnTimeEndField: "disbursement_date",
+    turnTimeEndField: "funding_date",
   },
 };
 
@@ -185,23 +188,40 @@ export const filterByChannel = (
  * @returns SQL fragment to add to WHERE clause (includes leading AND)
  */
 export const buildChannelWhereClause = (
-  channelGroup: string | undefined
+  channelGroup: string | undefined,
+  tableAlias: string = ""
 ): string => {
   if (!channelGroup || channelGroup === "All") return "";
 
+  // Prefix with table alias if provided (e.g., "l." for "l.channel")
+  const col = tableAlias ? `${tableAlias}.channel` : "channel";
+
+  // Handle consolidated channel groups
   switch (channelGroup) {
     case "Retail":
-      return `AND (channel ILIKE '%retail%' OR channel ILIKE '%brokered%' OR channel ILIKE '%brok%')`;
+      // Retail = Direct origination (company's own loan officers)
+      // NOTE: "Brokered" is NOT Retail - it's TPO
+      return `AND (${col} ILIKE '%retail%')`;
     case "TPO":
-      return `AND (channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%')`;
+      // TPO = Third Party Origination (brokers, wholesale, correspondent)
+      return `AND (${col} ILIKE '%broker%' OR ${col} ILIKE '%brokered%' 
+              OR ${col} ILIKE '%wholesale%' OR ${col} ILIKE '%correspondent%' 
+              OR ${col} ILIKE '%corresp%' OR ${col} ILIKE '%tpo%')`;
     case "99-Missing":
-      return `AND (channel IS NULL OR TRIM(channel) = '')`;
+      return `AND (${col} IS NULL OR TRIM(${col}) = '')`;
     case "Other":
-      return `AND channel IS NOT NULL AND TRIM(channel) != '' 
-              AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%'
-              AND channel NOT ILIKE '%wholesale%' AND channel NOT ILIKE '%corresp%'`;
+      return `AND ${col} IS NOT NULL AND TRIM(${col}) != '' 
+              AND ${col} NOT ILIKE '%retail%'
+              AND ${col} NOT ILIKE '%broker%' AND ${col} NOT ILIKE '%brokered%'
+              AND ${col} NOT ILIKE '%wholesale%' AND ${col} NOT ILIKE '%corresp%'
+              AND ${col} NOT ILIKE '%tpo%'`;
     default:
-      return "";
+      // Not a known group - treat as an individual channel value (exact match)
+      // This handles when users select individual channels from the dropdown
+      return `AND LOWER(TRIM(${col})) = LOWER('${channelGroup.replace(
+        /'/g,
+        "''"
+      )}')`;
   }
 };
 
@@ -343,8 +363,12 @@ export const calcLoanRevenue = (loan: LoanRevenueData): number => {
 };
 
 /**
- * SQL expression for revenue calculation.
+ * Default SQL expression for revenue calculation.
  * Use in SELECT clauses for database-level computation.
+ *
+ * Note: Tenants can define custom revenue formulas via the admin panel.
+ * Use getTenantRevenueExpression() to get the tenant-specific formula,
+ * falling back to this default if none is configured.
  */
 export const REVENUE_SQL_EXPRESSION = `
   COALESCE(
@@ -357,6 +381,146 @@ export const REVENUE_SQL_EXPRESSION = `
   COALESCE(orig_fees_seller, 0) - 
   COALESCE(cd_lender_credits, 0)
 `;
+
+/**
+ * Cache for tenant revenue expressions to avoid repeated DB queries.
+ * Key must be unique per tenant (tenantDbManager sets pool._connectionKey = tenantId).
+ * Using "default" for all pools would mix formulas across tenants.
+ */
+const tenantRevenueExpressionCache = new Map<
+  string,
+  { expression: string; cachedAt: number }
+>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get the tenant-specific revenue SQL expression.
+ *
+ * Tenants can configure custom revenue formulas through the admin panel.
+ * This function returns the tenant's custom formula if one is configured,
+ * otherwise falls back to the default REVENUE_SQL_EXPRESSION.
+ *
+ * @param pool - Tenant database connection pool
+ * @param tableAlias - Optional table alias to prefix field names (e.g., 'l' for 'l.loan_amount')
+ * @returns SQL expression for revenue calculation
+ */
+export const getTenantRevenueExpression = async (
+  pool: pg.Pool,
+  tableAlias?: string
+): Promise<string> => {
+  try {
+    // Try to get from cache first (must be per-tenant: pool._connectionKey set by tenantDbManager)
+    const poolId = (pool as pg.Pool & { _connectionKey?: string })._connectionKey ?? "default";
+    const cached = tenantRevenueExpressionCache.get(poolId);
+
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+      return applyTableAlias(cached.expression, tableAlias);
+    }
+
+    // Check if tenant_calculations table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'tenant_calculations'
+      ) as exists
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      // Table doesn't exist - use default
+      return applyTableAlias(REVENUE_SQL_EXPRESSION, tableAlias);
+    }
+
+    // Query for the active revenue formula
+    const result = await pool.query(`
+      SELECT sql_expression
+      FROM public.tenant_calculations
+      WHERE calculation_type = 'revenue' AND is_active = TRUE
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `);
+
+    let expression = REVENUE_SQL_EXPRESSION;
+
+    if (result.rows[0]?.sql_expression) {
+      expression = result.rows[0].sql_expression;
+    }
+
+    // Cache the result
+    tenantRevenueExpressionCache.set(poolId, {
+      expression,
+      cachedAt: Date.now(),
+    });
+
+    return applyTableAlias(expression, tableAlias);
+  } catch (error) {
+    // On any error, fall back to default
+    console.warn(
+      "[scorecard-utils] Error fetching tenant revenue expression, using default:",
+      error
+    );
+    return applyTableAlias(REVENUE_SQL_EXPRESSION, tableAlias);
+  }
+};
+
+/**
+ * Apply table alias to field names in a SQL expression.
+ * This allows the expression to work in JOIN queries where field names need to be qualified.
+ *
+ * @param expression - SQL expression with unqualified field names
+ * @param tableAlias - Table alias to prepend (e.g., 'l' becomes 'l.field_name')
+ * @returns SQL expression with qualified field names
+ */
+const applyTableAlias = (expression: string, tableAlias?: string): string => {
+  if (!tableAlias) return expression;
+
+  // List of field names that could appear in revenue expressions
+  const fieldNames = [
+    "rate_lock_buy_side_base_price_rate",
+    "loan_amount",
+    "orig_fee_borr_pd",
+    "orig_fees_seller",
+    "cd_lender_credits",
+    "cd_applied_cure",
+    "origination_points",
+    "pa_sell_amt",
+    "pa_srp_amt",
+    "pa_payout_1",
+    "pa_payout_2",
+    "pa_payout_3",
+    "pa_payout_4",
+    "pa_payout_5",
+    "line_800_borr",
+    "line_800_seller",
+    "warehouse_line_fee",
+    "warehouse_line_interest",
+    "fees_interest_borr",
+    "pa_expected_int_pymt",
+    "fees_appraisal_borr",
+  ];
+
+  let result = expression;
+  for (const field of fieldNames) {
+    // Use word boundary to avoid replacing partial matches
+    // Replace field_name with alias.field_name, but not if it's already aliased
+    const regex = new RegExp(`(?<!\\.)\\b${field}\\b`, "g");
+    result = result.replace(regex, `${tableAlias}.${field}`);
+  }
+
+  return result;
+};
+
+/**
+ * Clear the tenant revenue expression cache.
+ * Call this when a tenant updates their revenue formula.
+ */
+export const clearTenantRevenueExpressionCache = (poolId?: string): void => {
+  if (poolId) {
+    tenantRevenueExpressionCache.delete(poolId);
+  } else {
+    tenantRevenueExpressionCache.clear();
+  }
+};
 
 // ============================================================================
 // Date Range Utilities
@@ -425,7 +589,7 @@ export const formatMonthKey = (date: Date): string => {
 // ============================================================================
 
 /**
- * TTS (Top Tier Score) tier thresholds.
+ * TTS (Top Tier Score) tier thresholds (legacy score-based approach).
  * From Qlik Dimensions.csv "13 Month TVI Score Tiers":
  *   If(Avg(TVI_Score) >= 120, 'Top Tier',
  *   If(Avg(TVI_Score) >= 80, 'Second Tier', 'Bottom Tier'))
@@ -435,10 +599,23 @@ export const TTS_TIER_THRESHOLDS = {
   SECOND: 80,
 } as const;
 
+/**
+ * TTS Tier percentiles for Pareto-based distribution.
+ * Reflects the 20/30/50 rule:
+ * - Top 20% of producers produce ~50% of value
+ * - Middle 30% of producers produce ~30% of value
+ * - Bottom 50% of producers produce ~20% of value
+ */
+export const TTS_TIER_PERCENTILES = {
+  TOP: 20, // Top 20% of actors by count
+  SECOND: 50, // Next 30% (20-50%) of actors by count
+  // Bottom: Remaining 50% (50-100%)
+} as const;
+
 export type TTSTier = "top" | "second" | "bottom";
 
 /**
- * Assign a tier based on TTS score.
+ * Assign a tier based on TTS score (legacy threshold-based).
  *
  * @param ttsScore - The calculated TTS score
  * @returns The tier assignment
@@ -450,8 +627,97 @@ export const assignTTSTier = (ttsScore: number): TTSTier => {
 };
 
 /**
- * Operations Scorecard TTS weights.
- * From Qlik Script.csv lines 2314-2316.
+ * Assign tiers to a sorted array of actors based on percentile distribution.
+ * This implements the Pareto principle: 20/30/50 split by producer count.
+ *
+ * Assumes actors are already sorted by performance (e.g., TTS score descending).
+ *
+ * Special handling for small populations (< 5 actors):
+ * - Strict percentiles don't work well with few people
+ * - Guarantees relative tiering: #1 is always "top", meaningful distribution
+ *
+ * @param totalCount - Total number of actors
+ * @param actorIndex - 0-based index of the actor in the sorted list
+ * @returns The tier assignment based on position in the distribution
+ */
+export const assignTTSTierByPercentile = (
+  totalCount: number,
+  actorIndex: number
+): TTSTier => {
+  if (totalCount === 0) return "bottom";
+
+  // Special case: Very small populations (< 5 actors)
+  // Use relative tiering to ensure meaningful distribution
+  if (totalCount < 5) {
+    // 1 actor: top
+    // 2 actors: top, bottom
+    // 3 actors: top, second, bottom
+    // 4 actors: top, second, bottom, bottom
+    if (actorIndex === 0) return "top";
+    if (totalCount >= 3 && actorIndex === 1) return "second";
+    return "bottom";
+  }
+
+  // Standard percentile-based assignment for larger populations
+  const percentilePosition = ((actorIndex + 1) / totalCount) * 100;
+
+  if (percentilePosition <= TTS_TIER_PERCENTILES.TOP) {
+    return "top";
+  }
+  if (percentilePosition <= TTS_TIER_PERCENTILES.SECOND) {
+    return "second";
+  }
+  return "bottom";
+};
+
+/**
+ * Assign tiers to an array of actors based on percentile distribution.
+ * Mutates the input array by adding/updating the 'tier' property.
+ *
+ * @param actors - Array of actors sorted by performance (descending)
+ * @param tierKey - Property name for the tier (default: 'tier')
+ * @returns The same array with tiers assigned
+ */
+export const assignTiersByPercentile = <T extends { tier?: TTSTier }>(
+  actors: T[]
+): T[] => {
+  const totalCount = actors.length;
+  return actors.map((actor, index) => ({
+    ...actor,
+    tier: assignTTSTierByPercentile(totalCount, index),
+  }));
+};
+
+/**
+ * Assign tiers by CUMULATIVE VALUE (Pareto): top tier ≈ 50% of units, second ≈ 30%, bottom ≈ 20%.
+ * Actors must be sorted by units (value) descending.
+ * getUnits(actor) defaults to actor.units; pass (a) => a.totalUnits for trends-style actors.
+ */
+export const assignTiersByCumulativeValue = <T>(
+  actorsSortedByUnits: T[],
+  totalUnits: number,
+  getUnits: (a: T) => number = (a: T) => (a as { units: number }).units
+): (T & { tier: TTSTier })[] => {
+  if (actorsSortedByUnits.length === 0 || totalUnits <= 0) {
+    return actorsSortedByUnits.map((a) => ({ ...a, tier: "bottom" as TTSTier }));
+  }
+  const topThreshold = totalUnits * 0.5;
+  const secondThreshold = totalUnits * 0.8;
+  let running = 0;
+  return actorsSortedByUnits.map((actor) => {
+    // Assign tier from cumulative BEFORE adding this actor so the person who pushes us over 50% is still "top"
+    let tier: TTSTier;
+    if (running < topThreshold) tier = "top";
+    else if (running < secondThreshold) tier = "second";
+    else tier = "bottom";
+    running += getUnits(actor);
+    return { ...actor, tier };
+  });
+};
+
+/**
+ * Operations Scorecard TTS weights (units / turn time / complexity).
+ * Tier assignment is by value (units) rank so top 20% of people ≈ 50% of value (Pareto).
  */
 export const OPS_TTS_WEIGHTS = {
   units: 0.7,
@@ -490,6 +756,55 @@ export interface LoanComplexityData {
 }
 
 /**
+ * Complexity configuration loaded from database.
+ * Maps component_condition to weight (in points, not decimal).
+ * Example: { "loan_type_government": 10, "fico_poor": 10, "fico_excellent": -5 }
+ */
+export interface ComplexityConfig {
+  loan_type_government?: number;
+  loan_type_conventional?: number;
+  loan_purpose_purchase?: number;
+  loan_purpose_refinance?: number;
+  fico_poor?: number;
+  fico_fair?: number;
+  fico_good?: number;
+  fico_excellent?: number;
+  ltv_high?: number;
+  ltv_standard?: number;
+  dti_high?: number;
+  dti_standard?: number;
+  occupancy_investment?: number;
+  occupancy_second_home?: number;
+  occupancy_primary?: number;
+  employment_self_employed?: number;
+  employment_w2?: number;
+}
+
+/**
+ * Default complexity weights (in points).
+ * These are used when no database configuration exists.
+ */
+export const DEFAULT_COMPLEXITY_WEIGHTS: ComplexityConfig = {
+  loan_type_government: 10,
+  loan_type_conventional: 0,
+  loan_purpose_purchase: 5,
+  loan_purpose_refinance: 0,
+  fico_poor: 10,
+  fico_fair: 0,
+  fico_good: 0,
+  fico_excellent: -5,
+  ltv_high: 5,
+  ltv_standard: 0,
+  dti_high: 5,
+  dti_standard: 0,
+  occupancy_investment: 5,
+  occupancy_second_home: 5,
+  occupancy_primary: 0,
+  employment_self_employed: 5,
+  employment_w2: 0,
+};
+
+/**
  * Calculate loan complexity score.
  * Based on Qlik's Transform.qvs Loan Complexity Score calculation.
  *
@@ -501,53 +816,85 @@ export interface LoanComplexityData {
  * - Self-employed borrower = more complex
  *
  * @param loan - Loan data for complexity calculation
+ * @param config - Optional complexity weights from database (defaults to hardcoded weights)
  * @returns Complexity score (100 = baseline, >100 = higher complexity)
  */
-export const calcLoanComplexity = (loan: LoanComplexityData): number => {
+export const calcLoanComplexity = (
+  loan: LoanComplexityData,
+  config?: ComplexityConfig
+): number => {
+  // Use provided config or fall back to defaults
+  const weights = config || DEFAULT_COMPLEXITY_WEIGHTS;
   let complexity = 100; // Baseline
 
-  // Government loan: +10
+  // Loan Type
   const loanType = (loan.loan_type || "").toUpperCase();
   if (
     ["FHA", "VA", "USDA", "FARMERSHOMEA", "FARMERSHOMEADMINISTRATION"].includes(
       loanType
     )
   ) {
-    complexity += 10;
+    complexity += weights.loan_type_government ?? 10;
+  } else {
+    complexity += weights.loan_type_conventional ?? 0;
   }
 
-  // Purchase: +5
+  // Loan Purpose
   const loanPurpose = (loan.loan_purpose || "").toUpperCase();
   if (loanPurpose === "PURCHASE") {
-    complexity += 5;
+    complexity += weights.loan_purpose_purchase ?? 5;
+  } else {
+    complexity += weights.loan_purpose_refinance ?? 0;
   }
 
-  // Low FICO (< 680): +10
-  if (loan.fico_score && loan.fico_score < 680) {
-    complexity += 10;
+  // FICO Score ranges
+  const fico = loan.fico_score || 0;
+  if (fico > 0) {
+    if (fico >= 760) {
+      complexity += weights.fico_excellent ?? -5;
+    } else if (fico >= 720) {
+      complexity += weights.fico_good ?? 0;
+    } else if (fico >= 680) {
+      complexity += weights.fico_fair ?? 0;
+    } else {
+      complexity += weights.fico_poor ?? 10;
+    }
   }
 
-  // High LTV (> 80): +5
-  if (loan.ltv_ratio && loan.ltv_ratio > 80) {
-    complexity += 5;
+  // LTV Ratio
+  const ltv = loan.ltv_ratio || 0;
+  if (ltv > 80) {
+    complexity += weights.ltv_high ?? 5;
+  } else {
+    complexity += weights.ltv_standard ?? 0;
   }
 
-  // High DTI (> 43): +5
-  if (loan.be_dti_ratio && loan.be_dti_ratio > 43) {
-    complexity += 5;
+  // DTI Ratio
+  const dti = loan.be_dti_ratio || 0;
+  if (dti > 43) {
+    complexity += weights.dti_high ?? 5;
+  } else {
+    complexity += weights.dti_standard ?? 0;
   }
 
-  // Non-owner occupied: +5
+  // Occupancy Type
   const occupancy = (loan.occupancy_type || "").toUpperCase();
-  if (
-    occupancy &&
-    !occupancy.includes("PRIMARY") &&
-    !occupancy.includes("OWNER")
+  if (occupancy.includes("INVEST")) {
+    complexity += weights.occupancy_investment ?? 5;
+  } else if (occupancy.includes("SECOND") || occupancy.includes("2ND")) {
+    complexity += weights.occupancy_second_home ?? 5;
+  } else if (
+    occupancy.includes("PRIMARY") ||
+    occupancy.includes("OWNER") ||
+    !occupancy
   ) {
-    complexity += 5;
+    complexity += weights.occupancy_primary ?? 0;
+  } else {
+    // Unknown occupancy - treat as investment
+    complexity += weights.occupancy_investment ?? 5;
   }
 
-  // Self-employed: +5
+  // Employment Type
   const selfEmployed = loan.borr_self_employed;
   if (
     selfEmployed === true ||
@@ -555,10 +902,38 @@ export const calcLoanComplexity = (loan: LoanComplexityData): number => {
     selfEmployed === "Yes" ||
     selfEmployed === "1"
   ) {
-    complexity += 5;
+    complexity += weights.employment_self_employed ?? 5;
+  } else {
+    complexity += weights.employment_w2 ?? 0;
   }
 
   return complexity;
+};
+
+/**
+ * Convert database complexity_components rows to ComplexityConfig.
+ * Database stores weights as decimals (0.10 = 10%), this converts to points.
+ *
+ * @param rows - Array of complexity_component rows from database
+ * @returns ComplexityConfig object with weights in points
+ */
+export const parseComplexityConfig = (
+  rows: Array<{
+    component_name: string;
+    condition_value: string;
+    weight: number;
+  }>
+): ComplexityConfig => {
+  const config: ComplexityConfig = { ...DEFAULT_COMPLEXITY_WEIGHTS };
+
+  for (const row of rows) {
+    const key =
+      `${row.component_name}_${row.condition_value}` as keyof ComplexityConfig;
+    // Database stores as decimal (0.10), we need points (10)
+    config[key] = Math.round(row.weight * 100);
+  }
+
+  return config;
 };
 
 // ============================================================================

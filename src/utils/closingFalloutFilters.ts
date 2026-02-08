@@ -321,6 +321,29 @@ export function isLikelyCloseLate(
 ): boolean {
   const inferred = inferLoanStatus(loan);
   if (!["Active", "Locked"].includes(inferred)) return false;
+
+  // Primary: server-computed close-late risk (from prediction API)
+  if (loan?.closeLateRisk != null) {
+    return loan.closeLateRisk === true;
+  }
+
+  // Fallback: check estimated_closing_date (the correct DB field name)
+  const estClose =
+    loan?.estimated_closing_date ||
+    loan?.estimatedClosingDate ||
+    loan?.expected_close_date;
+
+  if (estClose) {
+    const d = new Date(estClose);
+    if (!Number.isNaN(d.getTime())) {
+      const daysPast = Math.floor(
+        (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      return daysPast > 3; // More than 3 days past estimated close
+    }
+  }
+
+  // Last resort: loan age exceeds threshold
   const days = daysSince(loan?.application_date, now);
   return days !== null && days > thresholdDays;
 }

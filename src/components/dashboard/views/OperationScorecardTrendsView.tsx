@@ -85,7 +85,8 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
 
   // Calculate totals for top metrics from API data
   const totalUnits = actors.reduce((sum, p) => {
-    return sum + Object.values(p.months).reduce((s: number, m: any) => s + (m.unitsOutput || 0), 0);
+    const months = p.months ?? {};
+    return sum + Object.values(months).reduce((s: number, m: any) => s + (m?.unitsOutput || 0), 0);
   }, 0);
 
   const avgVolumeOutput = kpis?.avgVolumeOutput || 0;
@@ -142,8 +143,9 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
     // Data rows
     actors.forEach(p => {
       csv += `${p.name},${p.tier}`;
+      const actorMonths = p.months ?? {};
       months.forEach(month => {
-        const monthData = p.months[month];
+        const monthData = actorMonths[month];
         csv += `,${monthData?.unitsOutput || 0},${monthData?.outputVsTarget || 0},${monthData?.conversionPercent || 0},${monthData?.loanComplexityScore || 0}`;
       });
       csv += '\n';
@@ -565,17 +567,17 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                   
                   // Find top performer (highest units in latest month)
                   const actorsByLatestUnits = [...actors].sort((a, b) => {
-                    const aUnits = a.months[latestMonth]?.unitsOutput || 0;
-                    const bUnits = b.months[latestMonth]?.unitsOutput || 0;
+                    const aUnits = a.months?.[latestMonth]?.unitsOutput || 0;
+                    const bUnits = b.months?.[latestMonth]?.unitsOutput || 0;
                     return bUnits - aUnits;
                   });
                   const topPerformer = actorsByLatestUnits[0];
-                  const topPerformerUnits = topPerformer?.months[latestMonth]?.unitsOutput || 0;
+                  const topPerformerUnits = topPerformer?.months?.[latestMonth]?.unitsOutput || 0;
                   const topPerformerVsTarget = topPerformerUnits - targetUnitsPerMonth;
                   
                   // Find actors needing support (below target in latest month)
                   const needsSupport = actors
-                    .filter(a => (a.months[latestMonth]?.unitsOutput || 0) < targetUnitsPerMonth)
+                    .filter(a => (a.months?.[latestMonth]?.unitsOutput || 0) < targetUnitsPerMonth)
                     .slice(0, 2)
                     .map(a => a.name);
                   
@@ -698,7 +700,7 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                           Totals
                         </td>
                         {months.map((month) => {
-                          const monthData = actors.map(p => p.months[month]).filter(d => d);
+                          const monthData = actors.map(p => (p.months ?? {})[month]).filter(d => d);
                           const monthTotals = {
                             units: monthData.reduce((sum, d) => sum + (d.unitsOutput || 0), 0),
                             vsTarget: monthData.reduce((sum, d) => sum + (d.outputVsTarget || 0), 0),
@@ -767,8 +769,8 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
 
                         // Check if processor is on target
                         const latestMonth = months[0];
-                        const latestData = processor.months[latestMonth];
-                        const isOnTarget = latestData.unitsOutput >= targetUnitsPerMonth;
+                        const latestData = processor.months?.[latestMonth];
+                        const isOnTarget = (latestData?.unitsOutput ?? 0) >= targetUnitsPerMonth;
                         
                         // Apply distinct background for "On Target" rows
                         const rowBgColor = isOnTarget 
@@ -794,10 +796,11 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                               <span>{processor.name}</span>
                               {(() => {
                                 const latestMonth = months[0];
-                                const latestData = processor.months[latestMonth];
-                                const indicator = getPerformanceIndicator(latestData.unitsOutput, targetUnitsPerMonth);
+                                const latestData = processor.months?.[latestMonth];
+                                const units = latestData?.unitsOutput ?? 0;
+                                const indicator = getPerformanceIndicator(units, targetUnitsPerMonth);
                                 const IndicatorIcon = indicator.icon;
-                                return latestData.unitsOutput > 0 ? (
+                                return units > 0 ? (
                                   <Tooltip>
                                     <TooltipTrigger>
                                       <div className={`p-1 rounded ${indicator.bg}`}>
@@ -807,7 +810,7 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                                     <TooltipContent>
                                       <p className="text-xs font-semibold">{indicator.label}</p>
                                       <p className="text-xs text-slate-400">
-                                        {latestData.unitsOutput} units / {targetUnitsPerMonth} target
+                                        {units} units / {targetUnitsPerMonth} target
                                       </p>
                                     </TooltipContent>
                                   </Tooltip>
@@ -816,30 +819,30 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                             </div>
                           </td>
                           {months.map((month) => {
-                            const data = processor.months[month];
-                            const hasData = data.unitsOutput > 0 || data.outputVsTarget !== 0;
+                            const data = processor.months?.[month];
+                            const hasData = (data?.unitsOutput ?? 0) > 0 || (data?.outputVsTarget ?? 0) !== 0;
 
                             return (
                               <React.Fragment key={month}>
                                 <td className={`py-3 px-2 text-sm text-center font-mono border-l transition-colors hover:bg-opacity-10 ${
-                                  data.unitsOutput >= targetUnitsPerMonth 
+                                  (data?.unitsOutput ?? 0) >= targetUnitsPerMonth 
                                     ? isDarkMode ? 'border-slate-700 text-emerald-300 font-semibold hover:bg-emerald-500' : 'border-slate-300 text-emerald-700 font-semibold hover:bg-emerald-500'
                                     : isDarkMode ? 'border-slate-700 text-slate-200 hover:bg-slate-400' : 'border-slate-300 text-slate-900 hover:bg-slate-400'
                                 }`}>
-                                  {data.unitsOutput > 0 ? (
+                                  {(data?.unitsOutput ?? 0) > 0 ? (
                                     <Tooltip delayDuration={300}>
                                       <TooltipTrigger asChild>
                                         <span className="cursor-help">
-                                          {data.unitsOutput}
+                                          {data?.unitsOutput}
                                         </span>
                                       </TooltipTrigger>
                                       <TooltipContent side="top" align="center" className="z-50">
                                         <div className="text-xs space-y-1">
                                           <p className="font-semibold">{month}</p>
-                                          <p>Units: {data.unitsOutput}</p>
+                                          <p>Units: {data?.unitsOutput ?? 0}</p>
                                           <p>Target: {targetUnitsPerMonth}</p>
-                                          <p className={data.unitsOutput >= targetUnitsPerMonth ? 'text-emerald-400' : 'text-red-400'}>
-                                            {data.unitsOutput >= targetUnitsPerMonth ? '✓ Target achieved' : '⚠ Below target'}
+                                          <p className={(data?.unitsOutput ?? 0) >= targetUnitsPerMonth ? 'text-emerald-400' : 'text-red-400'}>
+                                            {(data?.unitsOutput ?? 0) >= targetUnitsPerMonth ? '✓ Target achieved' : '⚠ Below target'}
                                           </p>
                                         </div>
                                       </TooltipContent>
@@ -849,31 +852,31 @@ export function OperationScorecardTrendsView({ selectedTenantId, selectedChannel
                                   )}
                                 </td>
                                 <td className={`py-3 px-2 text-sm text-center font-mono font-semibold transition-colors ${
-                                  data.outputVsTarget > 0 
+                                  (data?.outputVsTarget ?? 0) > 0 
                                     ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:bg-opacity-10' 
-                                    : data.outputVsTarget < 0 
+                                    : (data?.outputVsTarget ?? 0) < 0 
                                     ? 'text-red-600 dark:text-red-400 hover:bg-red-500 hover:bg-opacity-10' 
                                     : isDarkMode ? 'text-slate-500 hover:bg-slate-400 hover:bg-opacity-10' : 'text-slate-400 hover:bg-slate-400 hover:bg-opacity-10'
                                 }`}>
                                   <div className="flex items-center justify-center gap-1">
-                                    {hasData && data.outputVsTarget !== 0 && (
-                                      data.outputVsTarget > 0 ? (
+                                    {hasData && (data?.outputVsTarget ?? 0) !== 0 && (
+                                      (data?.outputVsTarget ?? 0) > 0 ? (
                                         <ArrowUpRight className="w-3 h-3" />
                                       ) : (
                                         <ArrowDownRight className="w-3 h-3" />
                                       )
                                     )}
-                                    <span>{hasData ? formatFinancialNumber(data.outputVsTarget) : '-'}</span>
+                                    <span>{hasData ? formatFinancialNumber(data?.outputVsTarget ?? 0) : '-'}</span>
                                   </div>
                                 </td>
                                 <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {hasData && data.avgDays > 0 ? data.avgDays.toFixed(1) : '-'}
+                                  {hasData && (data?.avgDays ?? 0) > 0 ? (data?.avgDays ?? 0).toFixed(1) : '-'}
                                 </td>
                                 <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {hasData && data.conversionPercent > 0 ? formatPercent(data.conversionPercent) : '-'}
+                                  {hasData && (data?.conversionPercent ?? 0) > 0 ? formatPercent(data?.conversionPercent ?? 0) : '-'}
                                 </td>
                                 <td className={`py-3 px-2 text-sm text-center font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                                  {hasData && data.loanComplexityScore > 0 ? data.loanComplexityScore.toFixed(1) : '-'}
+                                  {hasData && (data?.loanComplexityScore ?? 0) > 0 ? (data?.loanComplexityScore ?? 0).toFixed(1) : '-'}
                                 </td>
                               </React.Fragment>
                             );

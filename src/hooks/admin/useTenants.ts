@@ -116,10 +116,41 @@ export const useTenants = () => {
     [loadTenants]
   );
 
+  const [duplicating, setDuplicating] = useState(false);
+
+  const duplicateTenant = useCallback(
+    async (tenantId: string, name: string, slug: string) => {
+      try {
+        setDuplicating(true);
+        const result = await api.request(`/api/tenants/${tenantId}/duplicate`, {
+          method: "POST",
+          body: JSON.stringify({ name, slug }),
+        });
+        toastRef.current({
+          title: "Success",
+          description: `Tenant duplicated successfully as "${name}" with anonymized data`,
+        });
+        await loadTenants();
+        return result;
+      } catch (error: any) {
+        console.error("Error duplicating tenant:", error);
+        toastRef.current({
+          title: "Error",
+          description: error.message || "Failed to duplicate tenant",
+          variant: "destructive",
+        });
+        throw error;
+      } finally {
+        setDuplicating(false);
+      }
+    },
+    [loadTenants]
+  );
+
   const deleteTenant = useCallback(
     async (tenantId: string) => {
       try {
-        await api.request(`/api/admin/tenants/${tenantId}`, {
+        await api.request(`/api/tenants/${tenantId}`, {
           method: "DELETE",
         });
         toastRef.current({
@@ -144,9 +175,11 @@ export const useTenants = () => {
     tenants,
     loading,
     error,
+    duplicating,
     loadTenants,
     createTenant,
     updateTenant,
     deleteTenant,
+    duplicateTenant,
   };
 };

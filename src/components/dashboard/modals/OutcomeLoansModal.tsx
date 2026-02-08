@@ -44,7 +44,7 @@ const OUTCOME_UI: Record<OutcomeModalType, { title: string; subtitle: string; de
   delayed: {
     title: 'Likely Close Late',
     subtitle: 'Pipeline Stagnation',
-    description: 'Active/locked loans that appear past an expected closing window (heuristic-based).',
+    description: 'Active loans predicted to close late based on pipeline stage, estimated closing date, and historical on-time closing rates.',
     color: 'orange',
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -185,7 +185,12 @@ export function OutcomeLoansModal({
       return [];
     }
 
-    // For delayed (Likely Close Late), use heuristic on raw loans
+    // For delayed (Likely Close Late), prefer server-computed closeLateRisk from bucketedLoans
+    if (bucketedLoans && bucketedLoans.length > 0) {
+      return bucketedLoans.filter((l) => l.closeLateRisk === true);
+    }
+
+    // Fallback: use heuristic on raw loans
     if (!loansRaw) return [];
     
     const matches = loansRaw.filter((l) => isLikelyCloseLate(l, 30, now));

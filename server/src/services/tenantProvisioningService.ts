@@ -3,17 +3,18 @@
  * Handles creation and management of tenant databases
  */
 
-import pg from 'pg';
-import { pool as managementPool } from '../config/managementDatabase.js';
-import { createTenantDatabaseSchema } from '../config/tenantDatabaseSchema.js';
-import { encryptField } from './encryption.js';
+import pg from "pg";
+import { pool as managementPool } from "../config/managementDatabase.js";
+import { createTenantDatabaseSchema } from "../config/tenantDatabaseSchema.js";
+import { encryptField } from "./encryption.js";
+import { MigrationRunner, getMigrationsDir } from "../migrations/runner.js";
 
 const { Pool } = pg;
 
 export interface CreateTenantOptions {
   name: string;
   slug: string;
-  deployment_type: 'cloud' | 'on_premise' | 'per_lender_aws';
+  deployment_type: "cloud" | "on_premise" | "per_lender_aws";
   // For cloud deployment, these are optional - we use the shared Aurora cluster
   database_host?: string;
   database_port?: number;
@@ -36,14 +37,19 @@ export interface TenantInfo {
 /**
  * Create a new tenant and provision their database
  */
-export async function createTenant(options: CreateTenantOptions): Promise<TenantInfo> {
+export async function createTenant(
+  options: CreateTenantOptions
+): Promise<TenantInfo> {
   const client = await managementPool.connect();
-  
+
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     // Generate database name
-    const databaseName = `coheus_tenant_${options.slug.replace(/[^a-z0-9]/g, '_')}`;
+    const databaseName = `coheus_tenant_${options.slug.replace(
+      /[^a-z0-9]/g,
+      "_"
+    )}`;
 
     // For cloud deployments, use the shared Aurora cluster credentials from environment
     let dbHost = options.database_host;
@@ -51,20 +57,26 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
     let dbUser = options.database_user;
     let dbPassword = options.database_password;
 
-    if (options.deployment_type === 'cloud') {
+    if (options.deployment_type === "cloud") {
       // Use the same Aurora cluster as the management database
       dbHost = process.env.DB_HOST;
-      dbPort = parseInt(process.env.DB_PORT || '5432');
+      dbPort = parseInt(process.env.DB_PORT || "5432");
       dbUser = process.env.DB_USER;
       dbPassword = process.env.DB_PASSWORD;
 
       if (!dbHost || !dbUser || !dbPassword) {
-        throw new Error('Cloud deployment requires DB_HOST, DB_USER, and DB_PASSWORD environment variables');
+        throw new Error(
+          "Cloud deployment requires DB_HOST, DB_USER, and DB_PASSWORD environment variables"
+        );
       }
 
-      console.log(`[TenantProvisioning] Using shared Aurora cluster: ${dbHost}`);
+      console.log(
+        `[TenantProvisioning] Using shared Aurora cluster: ${dbHost}`
+      );
     } else if (!dbHost || !dbUser || !dbPassword) {
-      throw new Error('Non-cloud deployments require database_host, database_user, and database_password');
+      throw new Error(
+        "Non-cloud deployments require database_host, database_user, and database_password"
+      );
     }
 
     // Encrypt database password for storage
@@ -105,7 +117,7 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
 
     // Create tenant database schema
     // Use SSL for non-local hosts (Aurora requires SSL)
-    const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1';
+    const isLocalHost = dbHost === "localhost" || dbHost === "127.0.0.1";
     const tenantPool = new Pool({
       host: dbHost,
       port: dbPort,
@@ -116,7 +128,39 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
     });
 
     try {
+      // Step 1: Create base schema
       await createTenantDatabaseSchema(tenantPool);
+
+      // Step 2: Run tenant migrations to apply any additional schema changes
+      console.log(
+        `[TenantProvisioning] Running tenant migrations for ${databaseName}...`
+      );
+      const runner = new MigrationRunner(
+        tenantPool,
+        "tenant",
+        databaseName,
+        false
+      );
+      const migrationsDir = getMigrationsDir("tenant");
+
+      const { applied, errors } = await runner.runPendingMigrations(
+        migrationsDir,
+        {
+          dryRun: false,
+          force: false,
+        }
+      );
+
+      if (errors.length > 0) {
+        console.error(`[TenantProvisioning] Migration errors:`, errors);
+        throw new Error(
+          `Tenant migrations failed: ${errors.map((e) => e.error).join(", ")}`
+        );
+      }
+
+      console.log(
+        `[TenantProvisioning] Applied ${applied.length} migration(s) to ${databaseName}`
+      );
     } finally {
       await tenantPool.end();
     }
@@ -127,20 +171,20 @@ export async function createTenant(options: CreateTenantOptions): Promise<Tenant
       [tenant.id]
     );
 
-    await client.query('COMMIT');
+    await client.query("COMMIT");
 
     return {
       id: tenant.id,
       name: tenant.name,
       slug: tenant.slug,
       database_name: tenant.database_name,
-      status: 'active',
+      status: "active",
       deployment_type: tenant.deployment_type,
       created_at: tenant.created_at,
     };
   } catch (error: any) {
-    await client.query('ROLLBACK');
-    console.error('[TenantProvisioning] Error creating tenant:', error);
+    await client.query("ROLLBACK");
+    console.error("[TenantProvisioning] Error creating tenant:", error);
     throw new Error(`Failed to create tenant: ${error.message}`);
   } finally {
     client.release();
@@ -158,14 +202,16 @@ async function createTenantDatabase(
   dbPort: number
 ): Promise<void> {
   // Connect to postgres database to create new database
-  const isLocalHost = dbHost === 'localhost' || dbHost === '127.0.0.1';
-  
-  console.log(`[TenantProvisioning] Creating database ${databaseName} on ${dbHost}:${dbPort}`);
-  
+  const isLocalHost = dbHost === "localhost" || dbHost === "127.0.0.1";
+
+  console.log(
+    `[TenantProvisioning] Creating database ${databaseName} on ${dbHost}:${dbPort}`
+  );
+
   const adminPool = new Pool({
     host: dbHost,
     port: dbPort,
-    database: 'postgres',
+    database: "postgres",
     user: dbUser,
     password: dbPassword,
     ssl: isLocalHost ? false : { rejectUnauthorized: false },
@@ -184,7 +230,9 @@ async function createTenantDatabase(
       await adminPool.query(`CREATE DATABASE "${databaseName}"`);
       console.log(`[TenantProvisioning] Created database: ${databaseName}`);
     } else {
-      console.log(`[TenantProvisioning] Database already exists: ${databaseName}`);
+      console.log(
+        `[TenantProvisioning] Database already exists: ${databaseName}`
+      );
     }
   } finally {
     await adminPool.end();
@@ -221,7 +269,9 @@ export async function getTenant(tenantId: string): Promise<TenantInfo | null> {
 /**
  * Get tenant by slug
  */
-export async function getTenantBySlug(slug: string): Promise<TenantInfo | null> {
+export async function getTenantBySlug(
+  slug: string
+): Promise<TenantInfo | null> {
   const result = await managementPool.query(
     `SELECT id, name, slug, database_name, status, deployment_type, created_at
      FROM coheus_tenants
@@ -272,7 +322,7 @@ export async function listTenants(): Promise<TenantInfo[]> {
  */
 export async function updateTenantStatus(
   tenantId: string,
-  status: 'active' | 'suspended' | 'deleted' | 'provisioning'
+  status: "active" | "suspended" | "deleted" | "provisioning"
 ): Promise<void> {
   await managementPool.query(
     `UPDATE coheus_tenants SET status = $1, updated_at = NOW() WHERE id = $2`,
@@ -284,5 +334,5 @@ export async function updateTenantStatus(
  * Delete tenant (soft delete)
  */
 export async function deleteTenant(tenantId: string): Promise<void> {
-  await updateTenantStatus(tenantId, 'deleted');
+  await updateTenantStatus(tenantId, "deleted");
 }

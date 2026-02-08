@@ -81,7 +81,11 @@ export const useLeaderboardData = (
           params.append("branch", additionalFilters.branch);
         if (additionalFilters?.scope)
           params.append("scope", additionalFilters.scope);
-        if (additionalFilters?.channelGroup)
+        // Don't send filter when "All" channels selected
+        if (
+          additionalFilters?.channelGroup &&
+          additionalFilters.channelGroup !== "All"
+        )
           params.append("channel_group", additionalFilters.channelGroup);
 
         // Add custom date range if provided

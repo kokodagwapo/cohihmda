@@ -28,6 +28,8 @@ import {
   formatDateForSQL,
   getActorColumnForChannel,
   getActorLabelForChannel,
+  getTenantRevenueExpression,
+  REVENUE_SQL_EXPRESSION,
   type ActorMissingMode,
 } from "../../utils/scorecard-utils.js";
 
@@ -62,6 +64,9 @@ router.get(
     try {
       const tenantPool = getTenantContext(req).tenantPool;
 
+      // Get tenant-specific revenue expression (or default if none configured)
+      const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
       // Get user's loan access context
       const accessCtx = await getLoanAccessContext(req, tenantPool);
 
@@ -89,11 +94,9 @@ router.get(
 
       // Validate actor type
       if (!["branch", "loan_officer"].includes(actor)) {
-        return res
-          .status(400)
-          .json({
-            error: 'Invalid actor type. Must be "branch" or "loan_officer"',
-          });
+        return res.status(400).json({
+          error: 'Invalid actor type. Must be "branch" or "loan_officer"',
+        });
       }
 
       // For TPO channels, use account_executive instead of loan_officer
@@ -132,7 +135,7 @@ router.get(
         ? `AND guid IN (SELECT loan_guid FROM user_loan_access WHERE user_id = $3)`
         : "";
 
-      // Fetch FUNDED loans with aggregation
+      // Fetch FUNDED loans with tenant-specific revenue calculation
       const fundedLoansResult = await retryQuery(
         () =>
           tenantPool.query(
@@ -141,7 +144,8 @@ router.get(
           funding_date, closing_date, application_date, started_date,
           branch, loan_officer, fico_score, ltv_ratio, be_dti_ratio,
           origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
-          rate_lock_buy_side_base_price_rate
+          rate_lock_buy_side_base_price_rate,
+          (${revenueExpression}) AS revenue
          FROM public.loans 
          WHERE COALESCE(funding_date, closing_date) >= $1
            AND COALESCE(funding_date, closing_date) <= $2
@@ -154,7 +158,7 @@ router.get(
       );
       const fundedLoans = fundedLoansResult.rows;
 
-      // Fetch LOST OPPORTUNITY loans (with access filter)
+      // Fetch LOST OPPORTUNITY loans (with access filter) and tenant-specific revenue
       const lostOpportunityResult = await retryQuery(
         () =>
           tenantPool.query(
@@ -162,7 +166,8 @@ router.get(
           loan_id, loan_amount, current_loan_status, channel,
           application_date, branch, loan_officer,
           origination_points, orig_fee_borr_pd, orig_fees_seller, cd_lender_credits,
-          rate_lock_buy_side_base_price_rate
+          rate_lock_buy_side_base_price_rate,
+          (${revenueExpression}) AS revenue
          FROM public.loans 
          WHERE application_date >= $1
            AND application_date <= $2
@@ -266,7 +271,7 @@ router.get(
 
         const actor = actorMap.get(actorName)!;
         const loanAmount = parseFloat(l.loan_amount) || 0;
-        const revenue = calcLoanRevenue(l);
+        const revenue = parseFloat(l.revenue) || 0; // Uses tenant-specific formula from SQL
         const turnTime = calcTurnTime(l);
 
         actor.loans.push(l);
@@ -367,7 +372,7 @@ router.get(
         }
         const lo = lostOpportunityByActor.get(actorName)!;
         lo.units += 1;
-        lo.revenue += calcLoanRevenue(l);
+        lo.revenue += parseFloat(l.revenue) || 0; // Uses tenant-specific formula from SQL
       });
 
       deniedLoans.forEach((l: any) => {
@@ -455,10 +460,10 @@ router.get(
         bottomTier: calcTierSummary(bottomTierActors),
       };
 
-      // Overall totals
+      // Overall totals - uses tenant-specific revenue from SQL
       const totalLostOpportunityUnits = lostOpportunityLoans.length;
       const totalLostOpportunityRevenue = lostOpportunityLoans.reduce(
-        (sum: number, l: any) => sum + calcLoanRevenue(l),
+        (sum: number, l: any) => sum + (parseFloat(l.revenue) || 0),
         0
       );
       const totalDeniedUnits = deniedLoans.length;
@@ -554,6 +559,9 @@ router.get(
     try {
       const tenantPool = getTenantContext(req).tenantPool;
 
+      // Get tenant-specific revenue expression (or default if none configured)
+      const revenueExpression = await getTenantRevenueExpression(tenantPool);
+
       const actorType = (req.query.actor_type as string) || "loan-officer";
       const dateRange = (req.query.date_range as string) || "last-year";
       const startDateParam = req.query.start_date as string | undefined;
@@ -562,11 +570,9 @@ router.get(
 
       // Validate actor type
       if (!["branch", "loan-officer"].includes(actorType)) {
-        return res
-          .status(400)
-          .json({
-            error: 'Invalid actor_type. Must be "branch" or "loan-officer"',
-          });
+        return res.status(400).json({
+          error: 'Invalid actor_type. Must be "branch" or "loan-officer"',
+        });
       }
 
       // For TPO channels, use account_executive instead of loan_officer
@@ -658,10 +664,20 @@ router.get(
             effectiveEndDate = new Date(vMaxDate);
             dateRangeLabel = "Month to Date";
             break;
+          case "trailing-12":
+            // Trailing 12 months from vMaxDate (most useful for performance analysis)
+            effectiveStartDate = new Date(vMaxDate);
+            effectiveStartDate.setFullYear(
+              effectiveStartDate.getFullYear() - 1
+            );
+            effectiveEndDate = new Date(vMaxDate);
+            dateRangeLabel = "Trailing 12 Months";
+            break;
           default:
-            effectiveStartDate = new Date(vMaxDate.getFullYear() - 1, 0, 1);
-            effectiveEndDate = new Date(vMaxDate.getFullYear() - 1, 11, 31);
-            dateRangeLabel = "Last Year";
+            // Default to YTD instead of Last Year for better UX
+            effectiveStartDate = new Date(vMaxDate.getFullYear(), 0, 1);
+            effectiveEndDate = new Date(vMaxDate);
+            dateRangeLabel = "Year to Date";
         }
       }
 
@@ -673,25 +689,14 @@ router.get(
         endDate: effectiveEndDate.toISOString(),
       });
 
-      // Build channel filter
-      let channelCondition = "";
+      // Build channel filter using shared utility (correctly handles Retail vs TPO grouping)
+      const channelCondition = buildChannelWhereClause(channelGroup);
       const queryParams: any[] = [
         effectiveStartDate.toISOString().split("T")[0],
         effectiveEndDate.toISOString().split("T")[0],
       ];
 
-      if (channelGroup) {
-        if (channelGroup === "Retail") {
-          channelCondition = `AND (channel ILIKE '%retail%' OR channel ILIKE '%brok%')`;
-        } else if (channelGroup === "TPO") {
-          channelCondition = `AND (channel ILIKE '%whole%' OR channel ILIKE '%corresp%')`;
-        } else {
-          channelCondition = `AND channel = $3`;
-          queryParams.push(channelGroup);
-        }
-      }
-
-      // Aggregate data by actor with revenue calculation
+      // Aggregate data by actor with tenant-specific revenue calculation
       const actorDataQuery = `
       WITH funded_loans AS (
         SELECT 
@@ -701,15 +706,11 @@ router.get(
           COALESCE(loan_number, loan_id::text) AS loan_number,
           loan_amount,
           funding_date,
-          ((COALESCE(rate_lock_buy_side_base_price_rate, 0) - 100) / 100.0) * COALESCE(loan_amount, 0) +
-          COALESCE(orig_fee_borr_pd, 0) +
-          COALESCE(orig_fees_seller, 0) -
-          COALESCE(cd_lender_credits, 0) AS revenue
+          (${revenueExpression}) AS revenue
         FROM public.loans
         WHERE funding_date IS NOT NULL
           AND funding_date >= $1
           AND funding_date <= $2
-          AND rate_lock_buy_side_base_price_rate > 0
           ${channelCondition}
       ),
       actor_aggregates AS (
@@ -861,17 +862,11 @@ router.get(
         lastYearEnd.setFullYear(lastYearEnd.getFullYear() - 1);
 
         const lastYearQuery = `
-        SELECT SUM(
-          ((COALESCE(rate_lock_buy_side_base_price_rate, 0) - 100) / 100.0) * COALESCE(loan_amount, 0) +
-          COALESCE(orig_fee_borr_pd, 0) +
-          COALESCE(orig_fees_seller, 0) -
-          COALESCE(cd_lender_credits, 0)
-        ) AS last_year_revenue
+        SELECT SUM(${revenueExpression}) AS last_year_revenue
         FROM public.loans
         WHERE funding_date IS NOT NULL
           AND funding_date >= $1
           AND funding_date <= $2
-          AND rate_lock_buy_side_base_price_rate > 0
           ${channelCondition}
       `;
 
@@ -942,11 +937,9 @@ router.get(
       logError("Error fetching toptiering comparison data", error, {
         userId: req.userId,
       });
-      res
-        .status(500)
-        .json({
-          error: error.message || "Failed to fetch toptiering comparison data",
-        });
+      res.status(500).json({
+        error: error.message || "Failed to fetch toptiering comparison data",
+      });
     }
   }
 );

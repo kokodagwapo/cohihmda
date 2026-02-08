@@ -4,6 +4,8 @@ import { LoanCardContent } from "./LoanCardContent";
 import { LoanRiskDistribution } from "./LoanRiskDistribution";
 import { LoanOfficerModal } from "./LoanOfficerModal";
 import { LoanDrilldownModal } from "./LoanDrilldownModal";
+import { useToast } from "@/hooks/use-toast";
+import { useLoanFavorites } from "@/hooks/useLoanFavorites";
 
 interface RiskSummary {
   risks: string[];
@@ -78,14 +80,14 @@ interface LoanCardsContainerProps {
   predictions?: LoanPrediction[]; // Optional predictions map
   isDarkMode?: boolean;
   selectedTenantId?: string | null;
+  openLoanId?: string;
+  onOpenLoanIdHandled?: () => void;
 }
 
-type TabType = "all" | "likely-withdraw" | "likely-decline";
+type TabType = "all" | "likely-withdraw" | "likely-decline" | "favorites";
 type SortType = "risk" | "amount" | "loan" | "officer";
 
-const ITEMS_PER_PAGE = 6;
-// PERFORMANCE: Threshold for switching to virtualized rendering
-const VIRTUALIZATION_THRESHOLD = 20;
+const ITEMS_PER_PAGE_OPTIONS = [6, 10, 20, 50, 100] as const;
 
 function formatLockExpirationDate(value: string | null | undefined): string {
   if (value == null || value === "") return "";
@@ -129,6 +131,9 @@ function getExpirationDateColorClass(
   }
 }
 
+const ITEMS_PER_PAGE_DEFAULT = 6;
+const VIRTUALIZATION_THRESHOLD = 50;
+
 // PERFORMANCE: Memoized loan card component to prevent unnecessary re-renders
 const LoanCardItem = memo(
   ({
@@ -137,12 +142,18 @@ const LoanCardItem = memo(
     onSelectLoan,
     onSelectOfficer,
     selectedTenantId,
+    isFavorited,
+    onToggleFavorite,
+    showFavoriteButton = false,
   }: {
     loan: LoanCard;
     isDarkMode: boolean;
     onSelectLoan: (loan: LoanCard) => void;
     onSelectOfficer: (officer: string) => void;
     selectedTenantId?: string | null;
+    isFavorited?: boolean;
+    onToggleFavorite?: () => void;
+    showFavoriteButton?: boolean;
   }) => (
     <div
       onClick={() => onSelectLoan(loan)}
@@ -159,6 +170,9 @@ const LoanCardItem = memo(
         showTapForDetails={true}
         compact={true}
         selectedTenantId={selectedTenantId}
+        isFavorited={isFavorited}
+        onToggleFavorite={onToggleFavorite}
+        showFavoriteButton={showFavoriteButton}
       />
     </div>
   )
@@ -167,7 +181,14 @@ const LoanCardItem = memo(
 LoanCardItem.displayName = "LoanCardItem";
 
 export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
-  ({ loans, predictions = [], isDarkMode = false, selectedTenantId }) => {
+  ({
+    loans,
+    predictions = [],
+    isDarkMode = false,
+    selectedTenantId,
+    openLoanId,
+    onOpenLoanIdHandled,
+  }) => {
     const [activeTab, setActiveTab] = useState<TabType>("all");
     const [searchTerm, setSearchTerm] = useState("");
     const [sortBy, setSortBy] = useState<SortType>("risk");
@@ -175,15 +196,43 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
     const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
     const [selectedLoan, setSelectedLoan] = useState<LoanCard | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(ITEMS_PER_PAGE_DEFAULT);
     const [showAll, setShowAll] = useState(false);
-
-    // PERFORMANCE: Ref for virtualized scrolling container
+    const { toast } = useToast();
+    const { favoriteIds, toggleFavorite, isFavorited } = useLoanFavorites();
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
       setCurrentPage(1);
-      setShowAll(false); // Reset to paginated view when filters change
-    }, [activeTab, searchTerm, sortBy, sortOrder]);
+      setShowAll(false);
+    }, [activeTab, searchTerm, sortBy, sortOrder, itemsPerPage]);
+
+    useEffect(() => {
+      if (!openLoanId || loans.length === 0) return;
+      const foundLoan = loans.find((loan) => {
+        const loanNum = (loan.loan_number || "").toString().trim();
+        if (
+          loanNum &&
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            loanNum
+          )
+        ) {
+          return loanNum === openLoanId;
+        }
+        return loan.id === openLoanId;
+      });
+      if (foundLoan) {
+        setSelectedLoan(foundLoan);
+        onOpenLoanIdHandled?.();
+      } else {
+        toast({
+          title: "Loan not found",
+          description: `The loan "${openLoanId}" is not in the current critical loans list.`,
+          variant: "destructive",
+        });
+        onOpenLoanIdHandled?.();
+      }
+    }, [openLoanId, loans, onOpenLoanIdHandled, toast]);
 
     // Create prediction map for filtering
     const predictionMap = useMemo(() => {
@@ -199,24 +248,15 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
         result = result.filter((loan) => {
           switch (activeTab) {
             case "likely-withdraw":
-              // Check riskSummary first (from bucketed data)
-              if (loan.riskSummary?.predictedOutcome === "withdraw")
-                return true;
-              // Fall back to predictions array
+              if (loan.riskSummary?.predictedOutcome === "withdraw") return true;
               return (
                 predictionMap.get(loan.id)?.predictedOutcome === "withdraw"
               );
             case "likely-decline":
-              // Check riskSummary first (from bucketed data)
               if (loan.riskSummary?.predictedOutcome === "deny") return true;
-              // Fall back to predictions array
               return predictionMap.get(loan.id)?.predictedOutcome === "deny";
-            case "critical":
-              return loan.riskLevel === "Very High";
-            case "at-risk":
-              return loan.riskLevel === "Medium";
-            case "low":
-              return loan.riskLevel === "Low";
+            case "favorites":
+              return isFavorited(loan.id);
             default:
               return true;
           }
@@ -265,14 +305,16 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
       });
 
       return result;
-    }, [loans, activeTab, searchTerm, sortBy, sortOrder]);
+    }, [loans, activeTab, searchTerm, sortBy, sortOrder, predictionMap, isFavorited]);
 
-    const totalPages = Math.ceil(filteredLoans.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(
+      filteredLoans.length / (showAll ? filteredLoans.length || 1 : itemsPerPage)
+    );
     const paginatedLoans = useMemo(() => {
-      if (showAll) return filteredLoans; // Return all when showing all
-      const start = (currentPage - 1) * ITEMS_PER_PAGE;
-      return filteredLoans.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredLoans, currentPage, showAll]);
+      if (showAll) return filteredLoans;
+      const start = (currentPage - 1) * itemsPerPage;
+      return filteredLoans.slice(start, start + itemsPerPage);
+    }, [filteredLoans, currentPage, showAll, itemsPerPage]);
 
     // PERFORMANCE: Use virtualization when showing all items and count exceeds threshold
     const useVirtualization =
@@ -292,31 +334,23 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
     });
 
     const tabCounts = useMemo(() => {
-      // Use riskSummary.predictedOutcome on each loan (primary source)
-      // Fall back to predictions array if riskSummary is not available
       const predictionMapForCounts = new Map<string, LoanPrediction>();
       predictions.forEach((pred) => {
         predictionMapForCounts.set(pred.loanId, pred);
       });
-
       return {
         all: loans.length,
         "likely-withdraw": loans.filter((l) => {
-          // Check riskSummary first (from bucketed data)
           if (l.riskSummary?.predictedOutcome === "withdraw") return true;
-          // Fall back to predictions array
-          const pred = predictionMapForCounts.get(l.id);
-          return pred?.predictedOutcome === "withdraw";
+          return predictionMapForCounts.get(l.id)?.predictedOutcome === "withdraw";
         }).length,
         "likely-decline": loans.filter((l) => {
-          // Check riskSummary first (from bucketed data)
           if (l.riskSummary?.predictedOutcome === "deny") return true;
-          // Fall back to predictions array
-          const pred = predictionMapForCounts.get(l.id);
-          return pred?.predictedOutcome === "deny";
+          return predictionMapForCounts.get(l.id)?.predictedOutcome === "deny";
         }).length,
+        favorites: loans.filter((l) => favoriteIds.has(l.id)).length,
       };
-    }, [loans, predictions]);
+    }, [loans, predictions, favoriteIds]);
 
     const tabs: {
       id: TabType;
@@ -337,6 +371,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
         shortLabel: "Decline",
         color: "lightred",
       },
+      { id: "favorites", label: "Favorites", shortLabel: "Favorites", color: "blue" },
     ];
 
     const getTabStyle = (tab: (typeof tabs)[0]) => {
@@ -373,6 +408,14 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
           active: isDarkMode
             ? "bg-rose-300 text-rose-900"
             : "bg-rose-200 text-rose-800",
+          inactive: isDarkMode
+            ? `${baseStyle} text-slate-400`
+            : `${baseStyle} text-slate-600`,
+        },
+        blue: {
+          active: isDarkMode
+            ? "bg-blue-600 text-white"
+            : "bg-blue-600 text-white",
           inactive: isDarkMode
             ? `${baseStyle} text-slate-400`
             : `${baseStyle} text-slate-600`,
@@ -555,7 +598,11 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                   d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                 />
               </svg>
-              <p className="text-sm font-medium">No loans found</p>
+              <p className="text-sm font-medium">
+                {activeTab === "favorites"
+                  ? "No favorites added"
+                  : "No loans found"}
+              </p>
             </div>
           ) : useVirtualization ? (
             // PERFORMANCE: Virtualized rendering for large lists
@@ -596,6 +643,9 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                           onSelectLoan={setSelectedLoan}
                           onSelectOfficer={setSelectedOfficer}
                           selectedTenantId={selectedTenantId}
+                          isFavorited={isFavorited(loan1.id)}
+                          onToggleFavorite={() => toggleFavorite(loan1.id)}
+                          showFavoriteButton={true}
                         />
                       )}
                       {loan2 && (
@@ -605,6 +655,9 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                           onSelectLoan={setSelectedLoan}
                           onSelectOfficer={setSelectedOfficer}
                           selectedTenantId={selectedTenantId}
+                          isFavorited={isFavorited(loan2.id)}
+                          onToggleFavorite={() => toggleFavorite(loan2.id)}
+                          showFavoriteButton={true}
                         />
                       )}
                     </div>
@@ -623,28 +676,47 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
                   onSelectLoan={setSelectedLoan}
                   onSelectOfficer={setSelectedOfficer}
                   selectedTenantId={selectedTenantId}
+                  isFavorited={isFavorited(loan.id)}
+                  onToggleFavorite={() => toggleFavorite(loan.id)}
+                  showFavoriteButton={true}
                 />
               ))}
             </div>
           )}
         </div>
 
-        {/* Pagination controls - only show when not showing all */}
-        {!showAll && totalPages > 1 && (
+        {!showAll && (totalPages > 1 || filteredLoans.length > 0) && (
           <div
             className={`flex items-center justify-between py-3 md:px-4 md:border-t ${
               isDarkMode ? "border-white/5" : "border-slate-100"
             }`}
           >
-            <p
-              className={`text-[10px] sm:text-xs ${
-                isDarkMode ? "text-slate-500" : "text-slate-400"
-              }`}
-            >
-              {(currentPage - 1) * ITEMS_PER_PAGE + 1}-
-              {Math.min(currentPage * ITEMS_PER_PAGE, filteredLoans.length)} of{" "}
-              {filteredLoans.length}
-            </p>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <p
+                className={`text-[10px] sm:text-xs ${
+                  isDarkMode ? "text-slate-500" : "text-slate-400"
+                }`}
+              >
+                {(currentPage - 1) * itemsPerPage + 1}-
+                {Math.min(currentPage * itemsPerPage, filteredLoans.length)} of{" "}
+                {filteredLoans.length}
+              </p>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className={`text-[10px] sm:text-xs px-2 py-1 rounded-md font-medium border ${
+                  isDarkMode
+                    ? "bg-slate-800/80 text-slate-300 border-slate-600"
+                    : "bg-slate-100 text-slate-600 border-slate-200"
+                }`}
+              >
+                {ITEMS_PER_PAGE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n} per page
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div className="flex items-center gap-0.5 sm:gap-1">
               <button
@@ -709,7 +781,7 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
               </button>
 
               {/* Show All toggle - only show when there are more items than one page */}
-              {filteredLoans.length > ITEMS_PER_PAGE && (
+              {filteredLoans.length > itemsPerPage && (
                 <button
                   onClick={() => setShowAll(true)}
                   className={`ml-2 px-2 py-1 text-[10px] sm:text-xs rounded-md transition-colors ${

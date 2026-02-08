@@ -13,11 +13,13 @@ import {
 import type { GeneratedInsight } from "../insights/index.js";
 import {
   REVENUE_SQL_EXPRESSION,
+  getTenantRevenueExpression,
   getActorColumnForChannel,
   getActorSqlExpression,
   getActorLabelForChannel,
   buildChannelWhereClause,
 } from "../../utils/scorecard-utils.js";
+import { getStaffingUnitTargets, type StaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 
 /**
  * Analytics Service
@@ -449,6 +451,9 @@ export async function getLeaderboardData(
     const actorColumn = getActorColumnForChannel(filters?.channelGroup);
     const actorExpression = getActorSqlExpression(filters?.channelGroup, "l");
 
+    // Get tenant-specific revenue expression (or default if none configured)
+    const revenueExpression = await getTenantRevenueExpression(tenantPool, "l");
+
     // Build WHERE clause for filters
     const conditions: string[] = [];
     const params: any[] = [startDate, endDate];
@@ -494,8 +499,8 @@ export async function getLeaderboardData(
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
         ), 0) as total_volume,
-        -- Total revenue: Using shared REVENUE_SQL_EXPRESSION from scorecard-utils.ts
-        COALESCE(SUM(${REVENUE_SQL_EXPRESSION}) FILTER (
+        -- Total revenue: Using tenant-specific revenue expression (or default)
+        COALESCE(SUM(${revenueExpression}) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
@@ -2388,6 +2393,343 @@ export async function getDashboardOverview(
           predictedFalloutTotal: 0,
         },
       };
+    }
+    throw dbError;
+  }
+}
+
+// =============================================================================
+// Financial Modeling Baseline
+// =============================================================================
+
+export type FinancialModelingPeriod =
+  | "all"
+  | "mtd"
+  | "ytd"
+  | "last_month"
+  | "last_year"
+  | "trailing_12"; // Rolling 12 months (MonthStart(now - 12 months) to today)
+
+export interface FinancialModelingBaseline {
+  totalRevenue: number;
+  totalVolume: number;
+  fundedUnits: number;
+  marginBps: number;
+  pullThroughRate: number;
+  mloCount: number;
+  /** Avg funded units per MLO per month (for date-bounded periods); matches Qlik. */
+  avgUnitsPerMlo: number;
+  /** Avg units per person (simple average across people). Kept for compatibility. */
+  avgUnitsPerProcessor: number;
+  avgUnitsPerUnderwriter: number;
+  avgUnitsPerCloser: number;
+  /**
+   * Qlik-style actual units per month per FTE: total output units / (avg distinct role per month * num months).
+   * Matches Qlik-style: total output units / (avg distinct role per month * num months).
+   */
+  actualUnitsPerProcessorPerMonthFTE: number;
+  actualUnitsPerUnderwriterPerMonthFTE: number;
+  actualUnitsPerCloserPerMonthFTE: number;
+  /** Unit targets per role (from tenant staffing_unit_targets). */
+  targetUnits: StaffingUnitTargets;
+  dateRange: { start: string | null; end: string | null };
+}
+
+/**
+ * Get baseline metrics for the Financial Modeling Sandbox.
+ * Returns tenant actuals: revenue, volume, margin BPS, pull-through, units by role.
+ *
+ * @param tenantPool - Tenant database connection pool
+ * @param period - 'all' | 'mtd' | 'ytd' | 'last_month' | 'last_year'
+ * @param options - Optional user access filter for loan-level security
+ */
+export async function getFinancialModelingBaseline(
+  tenantPool: pg.Pool,
+  period: FinancialModelingPeriod = "trailing_12",
+  options: { userAccessFilter?: LoanAccessFilter } = {}
+): Promise<FinancialModelingBaseline> {
+  const targetUnits = await getStaffingUnitTargets(tenantPool);
+  const now = new Date();
+  let startDate: Date | null = null;
+  let endDate: Date | null = null;
+
+  switch (period) {
+    case "mtd":
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date();
+      break;
+    case "ytd":
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date();
+      break;
+    case "trailing_12":
+      // Rolling 12 months: start of month 12 months ago to today
+      startDate = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      endDate = new Date();
+      break;
+    case "last_month":
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+      break;
+    case "last_year":
+      startDate = new Date(now.getFullYear() - 1, 0, 1);
+      endDate = new Date(now.getFullYear() - 1, 11, 31);
+      break;
+    default:
+      // 'all' - no date filter
+      break;
+  }
+
+  const revenueExpression = await getTenantRevenueExpression(tenantPool, "l");
+  const accessFilter = options.userAccessFilter;
+  const emptyResult = (): FinancialModelingBaseline => ({
+    totalRevenue: 0,
+    totalVolume: 0,
+    fundedUnits: 0,
+    marginBps: 0,
+    pullThroughRate: 0,
+    mloCount: 0,
+    avgUnitsPerMlo: 0,
+    avgUnitsPerProcessor: 0,
+    avgUnitsPerUnderwriter: 0,
+    avgUnitsPerCloser: 0,
+    actualUnitsPerProcessorPerMonthFTE: 0,
+    actualUnitsPerUnderwriterPerMonthFTE: 0,
+    actualUnitsPerCloserPerMonthFTE: 0,
+    targetUnits,
+    dateRange: {
+      start: startDate?.toISOString().slice(0, 10) ?? null,
+      end: endDate?.toISOString().slice(0, 10) ?? null,
+    },
+  });
+
+  try {
+    const dateCondition =
+      startDate && endDate
+        ? "AND l.funding_date >= $1 AND l.funding_date <= $2"
+        : "";
+    let paramIndex = 1;
+    const params: unknown[] = [];
+    if (startDate && endDate) {
+      params.push(startDate, endDate);
+      paramIndex = 3;
+    }
+
+    let filterClause = "";
+    if (accessFilter?.sql) {
+      const filterParamStart = paramIndex;
+      const filterSql = accessFilter.sql.replace(
+        /\$(\d+)/g,
+        (_, n) => `$${filterParamStart + parseInt(n, 10) - accessFilter.paramOffset}`
+      );
+      filterClause = ` AND (${filterSql})`;
+      params.push(...accessFilter.params);
+    }
+
+    // Query 1: Revenue, volume, funded units (funded in period)
+    const mainQuery = `
+      SELECT
+        COALESCE(SUM(${revenueExpression}), 0)::float as total_revenue,
+        COALESCE(SUM(l.loan_amount), 0)::float as total_volume,
+        COUNT(*)::int as funded_units
+      FROM public.loans l
+      WHERE l.funding_date IS NOT NULL
+        ${dateCondition}
+        ${filterClause}
+    `;
+    const mainResult = await tenantPool.query(mainQuery, params);
+    const main = mainResult.rows[0];
+    const totalRevenue = parseFloat(main?.total_revenue) || 0;
+    const totalVolume = parseFloat(main?.total_volume) || 0;
+    const fundedUnits = parseInt(main?.funded_units, 10) || 0;
+    const marginBps =
+      totalVolume > 0 ? Math.round((totalRevenue / totalVolume) * 10000) : 0;
+
+    // Query 2: Pull-through = % of applications (in period) that funded. Denominator = all applications with application_date in range (not just terminal), so we don't get 100% when only funded loans are synced.
+    const ptParams = startDate && endDate ? [startDate, endDate, ...(accessFilter?.params ?? [])] : [...(accessFilter?.params ?? [])];
+    const ptFilterClause = accessFilter?.sql
+      ? ` AND (${accessFilter.sql.replace(/\$(\d+)/g, (_, n) => `$${3 + parseInt(n, 10) - accessFilter.paramOffset}`)})`
+      : "";
+    const pullThroughQuery = startDate && endDate
+      ? `
+      SELECT
+        COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END)::float
+          / NULLIF(COUNT(*), 0) * 100 as pull_through_rate
+      FROM public.loans l
+      WHERE l.application_date >= $1 AND l.application_date <= $2
+        ${ptFilterClause}
+      `
+      : `
+      SELECT 0 as pull_through_rate
+      FROM public.loans l
+      LIMIT 1
+      `;
+    const ptResult = await tenantPool.query(
+      pullThroughQuery,
+      startDate && endDate ? ptParams : []
+    );
+    const pullThroughRate =
+      parseFloat(ptResult.rows[0]?.pull_through_rate) || 0;
+
+    // Query 3: MLO count (distinct loan officers with funded in period)
+    const mloParams = startDate && endDate
+      ? [startDate, endDate, ...(accessFilter?.params ?? [])]
+      : [...(accessFilter?.params ?? [])];
+    const mloFilterParamStart = startDate && endDate ? 3 : 1;
+    const mloFilterClause = accessFilter?.sql
+      ? ` AND (${accessFilter.sql.replace(/\$(\d+)/g, (_, n) => `$${mloFilterParamStart + parseInt(n, 10) - accessFilter.paramOffset}`)})`
+      : "";
+    const mloQuery = `
+      SELECT COUNT(DISTINCT l.loan_officer)::int as mlo_count
+      FROM public.loans l
+      WHERE l.funding_date IS NOT NULL
+        AND l.loan_officer IS NOT NULL AND TRIM(l.loan_officer) != ''
+        ${startDate && endDate ? "AND l.funding_date >= $1 AND l.funding_date <= $2" : ""}
+        ${mloFilterClause}
+    `;
+    const mloResult = await tenantPool.query(
+      mloQuery,
+      startDate && endDate ? mloParams : (accessFilter?.params ?? [])
+    );
+    const mloCount = parseInt(mloResult.rows[0]?.mlo_count, 10) || 0;
+    // Match Qlik: show units per MLO per month (not total in period). For date-bounded periods, divide by numMonths.
+    const numMonthsForPeriod =
+      startDate && endDate
+        ? period === "trailing_12"
+          ? 12
+          : Math.max(
+              1,
+              (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+                (endDate.getMonth() - startDate.getMonth()) +
+                1
+            )
+        : 1;
+    const avgUnitsPerMlo =
+      mloCount > 0 && numMonthsForPeriod >= 1
+        ? fundedUnits / mloCount / numMonthsForPeriod
+        : mloCount > 0
+          ? fundedUnits / mloCount
+          : 0;
+
+    // Query 4: Avg units per processor, underwriter, closer (funded in period, per-person average)
+    // Note: Role aggregates do not apply user access filter to avoid complex param indexing across subqueries.
+    const roleQuery = `
+      SELECT
+        (SELECT COALESCE(AVG(unit_count), 0) FROM (
+          SELECT l.processor, COUNT(*)::float as unit_count FROM public.loans l
+          WHERE l.funding_date IS NOT NULL AND l.processor IS NOT NULL AND TRIM(l.processor) != ''
+            ${startDate && endDate ? "AND l.funding_date >= $1 AND l.funding_date <= $2" : ""}
+          GROUP BY l.processor
+        ) t) as avg_processor,
+        (SELECT COALESCE(AVG(unit_count), 0) FROM (
+          SELECT l.underwriter, COUNT(*)::float as unit_count FROM public.loans l
+          WHERE l.funding_date IS NOT NULL AND l.underwriter IS NOT NULL AND TRIM(l.underwriter) != ''
+            ${startDate && endDate ? "AND l.funding_date >= $3 AND l.funding_date <= $4" : ""}
+          GROUP BY l.underwriter
+        ) t) as avg_underwriter,
+        (SELECT COALESCE(AVG(unit_count), 0) FROM (
+          SELECT l.closer, COUNT(*)::float as unit_count FROM public.loans l
+          WHERE l.funding_date IS NOT NULL AND l.closer IS NOT NULL AND TRIM(l.closer) != ''
+            ${startDate && endDate ? "AND l.funding_date >= $5 AND l.funding_date <= $6" : ""}
+          GROUP BY l.closer
+        ) t) as avg_closer
+    `;
+    let avgProcessor = 0,
+      avgUnderwriter = 0,
+      avgCloser = 0;
+    try {
+      const roleResult = await tenantPool.query(
+        roleQuery,
+        startDate && endDate
+          ? [startDate, endDate, startDate, endDate, startDate, endDate]
+          : []
+      );
+      const r = roleResult.rows[0];
+      avgProcessor = parseFloat(r?.avg_processor) || 0;
+      avgUnderwriter = parseFloat(r?.avg_underwriter) || 0;
+      avgCloser = parseFloat(r?.avg_closer) || 0;
+    } catch {
+      // Columns might not exist in older tenant schema
+    }
+
+    // Actual units per month per FTE: total output / (avg distinct role per month * num months)
+    let actualProcessorFTE = 0,
+      actualUnderwriterFTE = 0,
+      actualCloserFTE = 0;
+    if (startDate && endDate && fundedUnits > 0) {
+      const numMonths =
+        period === "trailing_12"
+          ? 12
+          : Math.max(
+              1,
+              (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+                (endDate.getMonth() - startDate.getMonth()) +
+                1
+            ) || 1;
+      const fteQuery = `
+        SELECT
+          (SELECT COUNT(*)::float FROM public.loans l WHERE l.funding_date IS NOT NULL AND l.processor IS NOT NULL AND TRIM(l.processor) != '' AND l.funding_date >= $1 AND l.funding_date <= $2) as proc_units,
+          (SELECT COALESCE(AVG(cnt), 0) FROM (SELECT COUNT(DISTINCT l.processor)::float as cnt FROM public.loans l WHERE l.funding_date IS NOT NULL AND l.processor IS NOT NULL AND TRIM(l.processor) != '' AND l.funding_date >= $1 AND l.funding_date <= $2 GROUP BY DATE_TRUNC('month', l.funding_date)) t) as proc_avg_distinct,
+          (SELECT COUNT(*)::float FROM public.loans l WHERE l.funding_date IS NOT NULL AND l.underwriter IS NOT NULL AND TRIM(l.underwriter) != '' AND l.funding_date >= $3 AND l.funding_date <= $4) as uw_units,
+          (SELECT COALESCE(AVG(cnt), 0) FROM (SELECT COUNT(DISTINCT l.underwriter)::float as cnt FROM public.loans l WHERE l.funding_date IS NOT NULL AND l.underwriter IS NOT NULL AND TRIM(l.underwriter) != '' AND l.funding_date >= $3 AND l.funding_date <= $4 GROUP BY DATE_TRUNC('month', l.funding_date)) t) as uw_avg_distinct,
+          (SELECT COUNT(*)::float FROM public.loans l WHERE l.funding_date IS NOT NULL AND l.closer IS NOT NULL AND TRIM(l.closer) != '' AND l.funding_date >= $5 AND l.funding_date <= $6) as closer_units,
+          (SELECT COALESCE(AVG(cnt), 0) FROM (SELECT COUNT(DISTINCT l.closer)::float as cnt FROM public.loans l WHERE l.funding_date IS NOT NULL AND l.closer IS NOT NULL AND TRIM(l.closer) != '' AND l.funding_date >= $5 AND l.funding_date <= $6 GROUP BY DATE_TRUNC('month', l.funding_date)) t) as closer_avg_distinct
+      `;
+      try {
+        const fteResult = await tenantPool.query(fteQuery, [
+          startDate,
+          endDate,
+          startDate,
+          endDate,
+          startDate,
+          endDate,
+        ]);
+        const f = fteResult.rows[0];
+        const procUnits = parseFloat(f?.proc_units) || 0;
+        const procAvg = parseFloat(f?.proc_avg_distinct) || 0;
+        const uwUnits = parseFloat(f?.uw_units) || 0;
+        const uwAvg = parseFloat(f?.uw_avg_distinct) || 0;
+        const closerUnits = parseFloat(f?.closer_units) || 0;
+        const closerAvg = parseFloat(f?.closer_avg_distinct) || 0;
+        const denomProc = procAvg * numMonths;
+        const denomUw = uwAvg * numMonths;
+        const denomCloser = closerAvg * numMonths;
+        actualProcessorFTE =
+          denomProc > 0 ? Math.round((procUnits / denomProc) * 10) / 10 : 0;
+        actualUnderwriterFTE =
+          denomUw > 0 ? Math.round((uwUnits / denomUw) * 10) / 10 : 0;
+        actualCloserFTE =
+          denomCloser > 0
+            ? Math.round((closerUnits / denomCloser) * 10) / 10
+            : 0;
+      } catch {
+        // Ignore if columns missing
+      }
+    }
+
+    return {
+      totalRevenue,
+      totalVolume,
+      fundedUnits,
+      marginBps,
+      pullThroughRate: Math.round(pullThroughRate * 100) / 100,
+      mloCount,
+      avgUnitsPerMlo: Math.round(avgUnitsPerMlo * 10) / 10,
+      avgUnitsPerProcessor: Math.round(avgProcessor * 10) / 10,
+      avgUnitsPerUnderwriter: Math.round(avgUnderwriter * 10) / 10,
+      avgUnitsPerCloser: Math.round(avgCloser * 10) / 10,
+      actualUnitsPerProcessorPerMonthFTE: actualProcessorFTE,
+      actualUnitsPerUnderwriterPerMonthFTE: actualUnderwriterFTE,
+      actualUnitsPerCloserPerMonthFTE: actualCloserFTE,
+      targetUnits,
+      dateRange: {
+        start: startDate?.toISOString().slice(0, 10) ?? null,
+        end: endDate?.toISOString().slice(0, 10) ?? null,
+      },
+    };
+  } catch (dbError: any) {
+    if (dbError.code === "42P01") {
+      return emptyResult();
     }
     throw dbError;
   }

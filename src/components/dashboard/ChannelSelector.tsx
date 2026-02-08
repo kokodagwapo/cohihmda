@@ -7,8 +7,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Radio, Loader2 } from "lucide-react";
+import { Radio, Loader2, Layers, List } from "lucide-react";
 import { api } from "@/lib/api";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ChannelData {
   channel: string;
@@ -27,7 +33,10 @@ interface ChannelSelectorProps {
   selectedTenantId?: string | null;
   compact?: boolean;
   // If true, use consolidated channel groups (Retail, TPO, etc.) instead of individual channels
+  // Can be overridden by user toggle
   useChannelGroups?: boolean;
+  // If true, show toggle to switch between grouped and individual views
+  allowViewToggle?: boolean;
 }
 
 export const ChannelSelector = ({
@@ -35,12 +44,15 @@ export const ChannelSelector = ({
   onChannelChange,
   selectedTenantId,
   compact = true,
-  useChannelGroups = true,
+  useChannelGroups: initialUseChannelGroups = true,
+  allowViewToggle = true,
 }: ChannelSelectorProps) => {
   const [channels, setChannels] = useState<ChannelData[]>([]);
   const [channelGroups, setChannelGroups] = useState<ChannelGroupData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Local state for grouped vs individual view toggle
+  const [useGroupedView, setUseGroupedView] = useState(initialUseChannelGroups);
 
   // Fetch channels when component mounts or tenant changes
   useEffect(() => {
@@ -71,28 +83,49 @@ export const ChannelSelector = ({
         setChannels(validChannels);
         setChannelGroups(validChannelGroups);
 
-        // Auto-select the most populated channel group as default if no channel is selected
-        if (
-          !selectedChannel &&
-          useChannelGroups &&
-          data.channelGroups &&
-          data.channelGroups.length > 0
-        ) {
-          // Find the channel group with the most loans
-          const mostPopulated = data.channelGroups.reduce(
-            (max, group) => (group.loanCount > max.loanCount ? group : max),
-            data.channelGroups[0]
-          );
-
-          if (mostPopulated && mostPopulated.loanCount > 0) {
-            console.log(
-              "[ChannelSelector] Auto-selecting most populated channel:",
-              mostPopulated.group,
-              "with",
-              mostPopulated.loanCount,
-              "loans"
+        // Auto-select only on first visit (when selectedChannel is null and not "All")
+        // If user has explicitly selected "All", don't override it
+        // Note: selectedChannel === "All" means user chose "All Channels"
+        //       selectedChannel === null means never selected (first visit)
+        if (selectedChannel === null) {
+          if (
+            useGroupedView &&
+            data.channelGroups &&
+            data.channelGroups.length > 0
+          ) {
+            // Find the channel group with the most loans
+            const mostPopulated = data.channelGroups.reduce(
+              (max, group) => (group.loanCount > max.loanCount ? group : max),
+              data.channelGroups[0]
             );
-            onChannelChange(mostPopulated.group);
+
+            if (mostPopulated && mostPopulated.loanCount > 0) {
+              console.log(
+                "[ChannelSelector] Auto-selecting most populated channel group:",
+                mostPopulated.group,
+                "with",
+                mostPopulated.loanCount,
+                "loans"
+              );
+              onChannelChange(mostPopulated.group);
+            }
+          } else if (!useGroupedView && validChannels.length > 0) {
+            // Find the individual channel with the most loans
+            const mostPopulated = validChannels.reduce(
+              (max, ch) => (ch.loanCount > max.loanCount ? ch : max),
+              validChannels[0]
+            );
+
+            if (mostPopulated && mostPopulated.loanCount > 0) {
+              console.log(
+                "[ChannelSelector] Auto-selecting most populated channel:",
+                mostPopulated.channel,
+                "with",
+                mostPopulated.loanCount,
+                "loans"
+              );
+              onChannelChange(mostPopulated.channel);
+            }
           }
         }
       } catch (err: any) {
@@ -118,7 +151,7 @@ export const ChannelSelector = ({
   const getSelectedLabel = () => {
     if (!selectedChannel || selectedChannel === "All") return "All Channels";
 
-    if (useChannelGroups) {
+    if (useGroupedView) {
       const group = channelGroups.find((g) => g.group === selectedChannel);
       if (group) {
         return `${formatChannelName(
@@ -137,6 +170,13 @@ export const ChannelSelector = ({
     return formatChannelName(selectedChannel);
   };
 
+  // Handle view mode toggle
+  const handleViewToggle = () => {
+    setUseGroupedView(!useGroupedView);
+    // Reset selection to "All" when switching views to avoid mismatched values
+    onChannelChange("All");
+  };
+
   // Total loan count across all channels
   const totalLoans = channelGroups.reduce((sum, g) => sum + g.loanCount, 0);
 
@@ -147,11 +187,9 @@ export const ChannelSelector = ({
         <Select
           value={selectedChannel || "All"}
           onValueChange={(value) => {
-            if (value === "All") {
-              onChannelChange(null);
-            } else {
-              onChannelChange(value);
-            }
+            // Keep "All" as the actual value (don't convert to null)
+            // This allows us to distinguish "user selected All" from "never selected"
+            onChannelChange(value);
           }}
           disabled={loading}
         >
@@ -171,7 +209,7 @@ export const ChannelSelector = ({
               {totalLoans > 0 && `(${totalLoans.toLocaleString()})`}
             </SelectItem>
 
-            {useChannelGroups
+            {useGroupedView
               ? // Show consolidated channel groups
                 channelGroups.map((group) => (
                   <SelectItem key={group.group} value={group.group}>
@@ -197,6 +235,37 @@ export const ChannelSelector = ({
           </SelectContent>
         </Select>
 
+        {/* View toggle button */}
+        {allowViewToggle &&
+          !loading &&
+          (channels.length > 1 || channelGroups.length > 1) && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleViewToggle}
+                    className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  >
+                    {useGroupedView ? (
+                      <List className="h-4 w-4" />
+                    ) : (
+                      <Layers className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">
+                    {useGroupedView
+                      ? "Show individual channels"
+                      : "Show grouped channels"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+
         {error && <span className="text-xs text-red-500">{error}</span>}
       </div>
     );
@@ -205,21 +274,57 @@ export const ChannelSelector = ({
   // Full mode (not compact) - could be used in a card
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Radio className="h-5 w-5 text-slate-600 dark:text-slate-400" />
-        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-          Filter by Channel
-        </span>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Radio className="h-5 w-5 text-slate-600 dark:text-slate-400" />
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            Filter by Channel
+          </span>
+        </div>
+
+        {/* View toggle button */}
+        {allowViewToggle &&
+          !loading &&
+          (channels.length > 1 || channelGroups.length > 1) && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleViewToggle}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    {useGroupedView ? (
+                      <>
+                        <List className="h-3.5 w-3.5" />
+                        <span>Show Individual</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="h-3.5 w-3.5" />
+                        <span>Show Grouped</span>
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p className="text-xs">
+                    {useGroupedView
+                      ? "Switch to individual channel values from your data"
+                      : "Switch to consolidated channel groups (Retail, TPO, etc.)"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
       </div>
 
       <Select
         value={selectedChannel || "All"}
         onValueChange={(value) => {
-          if (value === "All") {
-            onChannelChange(null);
-          } else {
-            onChannelChange(value);
-          }
+          // Keep "All" as the actual value (don't convert to null)
+          onChannelChange(value);
         }}
         disabled={loading}
       >
@@ -239,7 +344,7 @@ export const ChannelSelector = ({
             {totalLoans > 0 && `(${totalLoans.toLocaleString()} loans)`}
           </SelectItem>
 
-          {useChannelGroups
+          {useGroupedView
             ? channelGroups.map((group) => (
                 <SelectItem key={group.group} value={group.group}>
                   {formatChannelName(group.group)} (
@@ -263,7 +368,7 @@ export const ChannelSelector = ({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onChannelChange(null)}
+            onClick={() => onChannelChange("All")}
             className="h-7 text-xs"
           >
             Clear Filter
