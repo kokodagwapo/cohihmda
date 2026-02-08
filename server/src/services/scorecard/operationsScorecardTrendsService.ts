@@ -15,6 +15,7 @@ import {
   OPERATIONS_ACTOR_CONFIGS,
   assignTiersByCumulativeValue,
   type ActorConfig,
+  type TTSTier,
 } from "../../utils/scorecard-utils.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 
@@ -345,7 +346,7 @@ export async function getOperationsScorecardTrends(
       name: a.name,
       totalUnits: a.totalUnits,
       ttsScore: Math.round(ttsScore * 10) / 10,
-      tier: "bottom" as const, // Placeholder; assigned by percentile after sort (match Operations Scorecard)
+      tier: "bottom" as TTSTier, // Placeholder; assigned by percentile after sort (match Operations Scorecard)
       months: monthsData,
     };
   });
