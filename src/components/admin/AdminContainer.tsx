@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { ReactNode, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 interface AdminContainerProps {
   isAdmin: boolean;
@@ -11,7 +11,6 @@ export const AdminContainer = ({ isAdmin, children }: AdminContainerProps) => {
   const [adminCheckComplete, setAdminCheckComplete] = useState(false);
 
   // Theme is now controlled by user preference via ThemeProvider
-  // No longer forcing light theme - respects user's choice
 
   // Monitor when isAdmin changes from initial false state
   useEffect(() => {
@@ -20,10 +19,10 @@ export const AdminContainer = ({ isAdmin, children }: AdminContainerProps) => {
       const timer = setTimeout(() => setAdminCheckComplete(true), 0);
       return () => clearTimeout(timer);
     }
-    
+
     // Only redirect after admin check is complete
     if (adminCheckComplete && !isAdmin) {
-      navigate('/');
+      navigate("/");
     }
   }, [isAdmin, adminCheckComplete, navigate]);
 
@@ -34,4 +33,3 @@ export const AdminContainer = ({ isAdmin, children }: AdminContainerProps) => {
 
   return <>{children}</>;
 };
-
