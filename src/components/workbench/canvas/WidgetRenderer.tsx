@@ -8,11 +8,11 @@ import { EnhancedVisualization } from "@/components/visualizations/EnhancedVisua
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
-import { LoanFunnelView } from "@/components/dashboard/views/LoanFunnelView";
-import { TopTieringComparisonView } from "@/components/dashboard/views/TopTieringComparisonView";
-import { OperationsScorecardView } from "@/components/dashboard/views/OperationsScorecardView";
-import { OperationScorecardTrendsView } from "@/components/dashboard/views/OperationScorecardTrendsView";
-import { FinancialModelingSandboxView } from "@/components/dashboard/views/FinancialModelingSandboxView";
+import { LoanFunnelView } from "@/components/views/LoanFunnelView";
+import { TopTieringComparisonView } from "@/components/views/TopTieringComparisonView";
+import { OperationsScorecardView } from "@/components/views/OperationsScorecardView";
+import { OperationScorecardTrendsView } from "@/components/views/OperationScorecardTrendsView";
+import { FinancialModelingSandboxView } from "@/components/views/FinancialModelingSandboxView";
 import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { useTenantStore } from "@/stores/tenantStore";

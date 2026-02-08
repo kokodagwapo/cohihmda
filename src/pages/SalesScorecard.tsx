@@ -37,8 +37,8 @@ import {
 } from "@/components/ui/DatePeriodPicker";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
-import { TopTieringSidebar } from "@/components/toptiering/TopTieringSidebar";
-import { TopTieringTopBar } from "@/components/toptiering/TopTieringTopBar";
+import { TopTieringSidebar } from "@/components/layout/TopTieringSidebar";
+import { TopTieringTopBar } from "@/components/layout/TopTieringTopBar";
 
 type ScorecardActor = "branch" | "loan-officer";
 type ActiveTab = "summary" | "detail";

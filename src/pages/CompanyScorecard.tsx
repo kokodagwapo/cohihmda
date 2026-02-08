@@ -14,8 +14,8 @@ import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { ExportShareMenu } from '@/components/common/ExportShareMenu';
 import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';

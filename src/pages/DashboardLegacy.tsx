@@ -153,7 +153,7 @@ import { DataTable } from "@/components/dashboard/DataTable";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
-import { LoanFunnelViewLegacy } from "@/components/dashboard/views/LoanFunnelViewLegacy";
+import { LoanFunnelViewLegacy } from "@/components/views/LoanFunnelViewLegacy";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
 import { TopTieringModal } from "@/components/dashboard/modals/TopTieringModal";
 import { TrendsModal } from "@/components/dashboard/modals/TrendsModal";
