@@ -1024,11 +1024,10 @@ router.post(
         );
         const encompassService = new EncompassApiService(
           tenantPool,
-          data.losConnectionId,
           apiServer
         );
-        const rdbResult = await encompassService.getRdbFields();
-        rdbFields = rdbResult.fields || [];
+        const rdbResult = await encompassService.getRdbFields(tenantId, data.losConnectionId);
+        rdbFields = (rdbResult.data || []).map((f) => ({ id: f.fieldID, description: f.description }));
         logInfo(`Fetched ${rdbFields.length} RDB fields from Encompass`);
       } catch (rdbError: any) {
         logError("Failed to fetch RDB fields from Encompass", rdbError);
