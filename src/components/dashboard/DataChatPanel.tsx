@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { Rnd } from "react-rnd";
 import {
   MessageSquare,
@@ -803,6 +804,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   className,
 }) => {
   const { toast } = useToast();
+  const { pathname } = useLocation();
   const [input, setInput] = useState("");
   const [isExpanded, setIsExpanded] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -1987,8 +1989,12 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     toast({ title: "Downloaded", description: "Chart saved as PNG." });
   };
 
+  const isMyDashboard = pathname === "/my-dashboard";
+
   if (!isOpen) {
     if (!onOpen) return null;
+    // Hide the floating Cohi button on /my-dashboard (it has its own Cohi integration)
+    if (isMyDashboard) return null;
 
     return (
       <motion.button

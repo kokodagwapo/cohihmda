@@ -3,6 +3,7 @@
  */
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
+import type { SectionType } from '@/stores/widgetSectionStore';
 
 /** Single upload record for canvas (file analyzed via /api/data-chat/analyze-file) */
 export interface CanvasUpload {
@@ -43,6 +44,9 @@ export type CanvasWidgetType =
   | 'kpi'
   | 'table'
   | 'dashboard_section'
+  | 'registry_widget'
+  | 'section_header'
+  | 'widget_group'
   | 'pinned_insight'
   | 'news_card'
   | 'text_block'
@@ -66,6 +70,25 @@ export type CanvasWidgetPayload =
   | { type: 'kpi'; label: string; value: number | string; format?: 'number' | 'currency' | 'percent' }
   | { type: 'table'; columns: { key: string; label: string }[]; data: any[] }
   | { type: 'dashboard_section'; sectionId: string; title: string; hiddenSections?: string[]; displayMode?: 'full' | 'compact' | 'hidden' }
+  | { type: 'registry_widget'; definitionId: string; sectionId?: string; config?: Record<string, unknown> }
+  | { type: 'section_header'; sectionId: string; title: string; sectionType: SectionType }
+  | {
+      type: 'widget_group';
+      /** Unique group identifier – keys into widgetSectionStore for filters */
+      groupId: string;
+      /** Display title for the group header */
+      title: string;
+      /** Data source type – controls which data hooks respond to this group's filters */
+      sectionType: SectionType;
+      /** Widget definition IDs to render inside the group */
+      widgetIds: string[];
+      /** Per-widget grid layout overrides (react-grid-layout format, grid-unit coords) */
+      widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+      /** Grid config version – stale layouts from older configs are auto-discarded */
+      layoutVersion?: number;
+      /** Whether the group body is collapsed */
+      collapsed?: boolean;
+    }
   | { type: 'pinned_insight'; title: string; content: string; visualization?: VisualizationConfig }
   | { type: 'news_card'; title: string; summary: string; link?: string }
   | { type: 'text_block'; content: string; title?: string }

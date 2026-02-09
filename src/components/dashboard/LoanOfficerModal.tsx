@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog';
+import { X } from 'lucide-react';
 import { LoanRiskDistribution } from './LoanRiskDistribution';
+import { LoanDrilldownModal } from './LoanDrilldownModal';
 import { ExportShareMenu } from '@/components/common/ExportShareMenu';
 import type { ExportData } from '@/utils/exportUtils';
 
@@ -41,13 +43,15 @@ interface LoanOfficerModalProps {
   isOpen: boolean;
   onClose: () => void;
   isDarkMode?: boolean;
+  selectedTenantId?: string | null;
 }
 
 export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
   officerName,
   isOpen,
   onClose,
-  isDarkMode = false
+  isDarkMode = false,
+  selectedTenantId,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
   const [officer, setOfficer] = useState<OfficerData | null>(null);
@@ -57,6 +61,7 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
   const [insights, setInsights] = useState<string>('');
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [sortBy, setSortBy] = useState<'risk' | 'amount' | 'borrower'>('risk');
+  const [drilldownLoan, setDrilldownLoan] = useState<LoanDetail | null>(null);
 
   const getExportData = (): ExportData => ({
     title: `${officerName} Loans`,
@@ -192,6 +197,26 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
     }
   });
 
+  const loanToDrilldownData = (loan: LoanDetail) => ({
+    id: loan.id,
+    guid: loan.guid,
+    officer: officerName,
+    amount: loan.amount,
+    amountValue: loan.amountValue,
+    riskLevel: loan.riskLevel,
+    riskScore: loan.riskScore,
+    reason: loan.reason,
+    loanType: loan.loanType,
+    status: loan.status,
+    ficoScore: loan.ficoScore,
+    ltvRatio: loan.ltvRatio,
+    dtiRatio: loan.dtiRatio,
+  });
+
+  const predictedFalloutCount = loans.filter(
+    l => l.riskLevel === 'Very High' || l.predictedOutcome === 'withdraw' || l.predictedOutcome === 'deny'
+  ).length;
+
   const parseStructuredInsights = (text: string) => {
     const sections: { title: string; items: string[] }[] = [];
     let currentSection = '';
@@ -275,6 +300,7 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         ref={modalRef}
+        hideCloseButton
         className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
       >
         <DialogHeader className="flex flex-row items-start justify-between gap-3">
@@ -282,12 +308,18 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
             <DialogTitle>{officerName}</DialogTitle>
             <DialogDescription>Portfolio Analysis</DialogDescription>
           </div>
-          <ExportShareMenu
-            title={`${officerName} Loans`}
-            targetRef={modalRef}
-            getExportData={getExportData}
-            shareTarget={{ type: "loan-officer-detail", id: officerName, label: officerName }}
-          />
+          <div className="flex items-center gap-2 shrink-0">
+            <ExportShareMenu
+              title={`${officerName} Loans`}
+              targetRef={modalRef}
+              getExportData={getExportData}
+              shareTarget={{ type: "loan-officer-detail", id: officerName, label: officerName }}
+            />
+            <DialogClose className="rounded-lg p-2 bg-slate-50/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border-0 shadow-sm opacity-70 ring-offset-background transition-all hover:opacity-100 hover:bg-slate-100 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2">
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </DialogClose>
+          </div>
         </DialogHeader>
         
         {loading ? (
@@ -297,23 +329,28 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
         ) : officer ? (
           <div className="space-y-4 sm:space-y-6">
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className={`p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700`}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
                 <p className="text-[12px] uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400">Pipeline</p>
-                <p className={`text-[22px] font-light mt-2 tracking-tight truncate text-slate-900 dark:text-slate-100`}>{officer.activeVolume}</p>
+                <p className="text-[22px] font-light mt-2 tracking-tight truncate text-slate-900 dark:text-slate-100">{officer.activeVolume}</p>
                 <p className="text-[12px] mt-1.5 font-light text-slate-400 dark:text-slate-500">{officer.activeLoans} loans</p>
               </div>
-              <div className={`p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700`}>
+              <div className="p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <p className="text-[12px] uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400">Predicted Fallout</p>
+                <p className={`text-[22px] font-light mt-2 tracking-tight truncate ${predictedFalloutCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{predictedFalloutCount}</p>
+                <p className="text-[12px] mt-1.5 font-light text-slate-400 dark:text-slate-500">of {officer.activeLoans} active</p>
+              </div>
+              <div className="p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
                 <p className="text-[12px] uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400">Pull-Through</p>
                 <p className={`text-[22px] font-light mt-2 tracking-tight truncate ${parseFloat(officer.pullThrough) >= 70 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{officer.pullThrough}</p>
                 <p className="text-[12px] mt-1.5 font-light text-slate-400 dark:text-slate-500">{officer.closedLoans} closed</p>
               </div>
-              <div className={`p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700`}>
+              <div className="p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
                 <p className="text-[12px] uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400">At-Risk</p>
                 <p className="text-[22px] font-light mt-2 tracking-tight truncate text-rose-600 dark:text-rose-400">{officer.atRiskVolume}</p>
                 <p className="text-[12px] mt-1.5 font-light text-slate-400 dark:text-slate-500">{riskBreakdown?.veryHigh || 0} critical</p>
               </div>
-              <div className={`p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700`}>
+              <div className="col-span-2 p-5 rounded-xl text-center overflow-hidden border bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
                 <p className="text-[12px] uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400">Risk Mix</p>
                 <div className="flex items-center justify-center gap-3 mt-2">
                   <span className="text-rose-600 dark:text-rose-400 text-[20px] font-light tracking-tight">{riskBreakdown?.veryHigh || 0}</span>
@@ -370,7 +407,8 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
                   {sortedLoans.map((loan) => (
                     <div
                       key={loan.id}
-                      className={`p-5 rounded-xl border overflow-hidden cursor-pointer transition-all bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md`}
+                      onClick={() => setDrilldownLoan(loan)}
+                      className="p-5 rounded-xl border overflow-hidden cursor-pointer transition-all bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md"
                     >
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -420,6 +458,16 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
           </p>
         )}
       </DialogContent>
+
+      {drilldownLoan && (
+        <LoanDrilldownModal
+          loan={loanToDrilldownData(drilldownLoan)}
+          isOpen={!!drilldownLoan}
+          onClose={() => setDrilldownLoan(null)}
+          isDarkMode={isDarkMode}
+          selectedTenantId={selectedTenantId}
+        />
+      )}
     </Dialog>
   );
 };

@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -82,7 +82,8 @@ const App = () => (
               <ScrollToTop />
               <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Index />} />
+              <Route path="/" element={<Navigate to="/insights" replace />} />
+              <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
               <Route path="/share/:token" element={<ShareLink />} />

@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Folder, Share2, Library, Copy, Loader2, LayoutDashboard, Star, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { LayoutGrid, Folder, Share2, Library, Copy, Loader2, LayoutDashboard, Star, PanelLeftClose, PanelLeftOpen, Blocks } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { CohortManagement } from '@/components/workbench/CohortManagement';
+import { WidgetCatalog } from '@/components/widgets/catalog';
+import type { WidgetDefinition } from '@/components/widgets/registry';
+
 
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
   { path: '/workbench/shared', label: 'Shared With Me', icon: Share2, variant: 'rose' as const },
   { path: '/workbench/team-folders', label: 'Team Folders', icon: Folder, variant: 'slate' as const },
-  { path: '/workbench/favorites', label: 'Favorites', icon: Star, variant: 'amber' as const },
+  { path: '/workbench/favorites', label: 'Bookmarks', icon: Star, variant: 'amber' as const },
   { label: 'Cohi Dashboard Library', icon: Library, variant: 'sky' as const, scrollTarget: 'cohi-dashboard-library' },
 ];
 
@@ -34,6 +36,7 @@ function SidebarContent({
   templates,
   onCopyTemplate,
   copyingId,
+  onAddWidget,
 }: {
   onItemClick?: () => void;
   onToggleCollapse?: () => void;
@@ -41,6 +44,7 @@ function SidebarContent({
   templates: TemplateRow[];
   onCopyTemplate: (id: string) => void;
   copyingId: string | null;
+  onAddWidget: (def: WidgetDefinition) => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -94,9 +98,6 @@ function SidebarContent({
         </nav>
       </div>
 
-      {/* Cohorts */}
-      <CohortManagement />
-
       {/* Cohi Dashboard Library */}
       <div id="cohi-dashboard-library" className="flex-1 min-h-0 p-3 border-t border-slate-200/70 dark:border-slate-700/50">
         <h3 className="px-2 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -140,6 +141,20 @@ function SidebarContent({
           </div>
         )}
       </div>
+
+      {/* Widget Library */}
+      <div className="p-3 border-t border-slate-200/70 dark:border-slate-700/50">
+        <h3 className="px-2 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
+          <IconBadge icon={Blocks} variant="violet" size="sm" rounded="lg" />
+          Widget Library
+        </h3>
+        <p className="mt-2 px-2 text-[13px] text-slate-500 dark:text-slate-400 leading-snug">
+          Add individual KPIs, charts, and tables to your canvas.
+        </p>
+        <div className="mt-2.5">
+          <WidgetCatalog onAddWidget={onAddWidget} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -177,6 +192,18 @@ export function WorkbenchSidebar({ sidebarOpen, onSidebarOpenChange, sidebarColl
   const collapsed = sidebarCollapsed ?? false;
   const onCollapsed = onSidebarCollapsedChange ?? (() => {});
 
+  const handleAddWidget = useCallback((def: WidgetDefinition) => {
+    window.dispatchEvent(
+      new CustomEvent('add-registry-widget', {
+        detail: {
+          definitionId: def.id,
+          name: def.name,
+          defaultSize: def.defaultSize,
+        },
+      }),
+    );
+  }, []);
+
   const sidebarBody = (
     <SidebarContent
       onItemClick={closeSheet}
@@ -185,6 +212,7 @@ export function WorkbenchSidebar({ sidebarOpen, onSidebarOpenChange, sidebarColl
       templates={templates}
       onCopyTemplate={onCopyTemplate}
       copyingId={copyingId}
+      onAddWidget={handleAddWidget}
     />
   );
 

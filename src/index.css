@@ -360,4 +360,63 @@ All colors MUST be HSL.
       height: 100dvh;
     }
   }
+
+  /* ─── react-grid-layout overrides for WidgetGroup ─── */
+  .react-grid-item.react-grid-placeholder {
+    background: rgba(59, 130, 246, 0.15) !important;
+    border: 2px dashed rgba(59, 130, 246, 0.4) !important;
+    border-radius: 0.5rem;
+    opacity: 1 !important;
+  }
+
+  /* Resize handle: only bottom-right corner, hidden until widget hovered */
+  .react-grid-item > .react-resizable-handle {
+    background-image: none !important;
+    width: 14px !important;
+    height: 14px !important;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .react-grid-item:hover > .react-resizable-handle {
+    opacity: 1;
+  }
+
+  .react-grid-item > .react-resizable-handle::after {
+    content: '';
+    position: absolute;
+    border-right: 2px solid rgba(100, 116, 139, 0.4);
+    border-bottom: 2px solid rgba(100, 116, 139, 0.4);
+    width: 7px;
+    height: 7px;
+    right: 3px;
+    bottom: 3px;
+    border-radius: 0 0 2px 0;
+  }
+
+  .react-grid-item > .react-resizable-handle:hover::after {
+    border-color: rgba(59, 130, 246, 0.7);
+  }
+
+  .react-grid-item > .react-resizable-handle-se {
+    right: 0 !important;
+    bottom: 0 !important;
+    cursor: se-resize;
+  }
+
+  /* Smooth drag animation */
+  .react-grid-item.cssTransforms {
+    transition-property: transform;
+  }
+
+  .react-grid-item.react-draggable-dragging {
+    z-index: 100;
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.15), 0 4px 12px -2px rgba(0, 0, 0, 0.08) !important;
+    opacity: 0.95;
+  }
+
+  .react-grid-item.resizing {
+    z-index: 100;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4) !important;
+  }
 }

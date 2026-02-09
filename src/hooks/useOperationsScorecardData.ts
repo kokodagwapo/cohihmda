@@ -105,11 +105,18 @@ export interface OperationsScorecardData {
  * @param selectedTenantId - Optional tenant ID for multi-tenant support
  * @param selectedChannel - Optional channel filter
  */
+/** Optional explicit date range override (from DatePeriodPicker custom selection) */
+export interface OpsCustomDateRange {
+  start: string; // YYYY-MM-DD
+  end: string;   // YYYY-MM-DD
+}
+
 export const useOperationsScorecardData = (
   actorType: OperationsActorType = "underwriter",
   dateRange: DateRangeType = "3-months",
   selectedTenantId?: string | null,
-  selectedChannel?: string | null
+  selectedChannel?: string | null,
+  customDateRange?: OpsCustomDateRange
 ) => {
   const [data, setData] = useState<OperationsScorecardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,6 +140,12 @@ export const useOperationsScorecardData = (
         const params = new URLSearchParams();
         params.append("actor_type", actorType);
         params.append("date_range", dateRange);
+        // When a custom date range is provided (e.g. from DatePeriodPicker),
+        // send start_date / end_date so the API can use them instead of the preset string.
+        if (customDateRange) {
+          params.append("start_date", customDateRange.start);
+          params.append("end_date", customDateRange.end);
+        }
         if (selectedTenantId) params.append("tenant_id", selectedTenantId);
         if (selectedChannel && selectedChannel !== "All")
           params.append("channel_group", selectedChannel);
@@ -190,7 +203,7 @@ export const useOperationsScorecardData = (
     };
 
     fetchOperationsScorecardData();
-  }, [actorType, dateRange, selectedTenantId, selectedChannel]);
+  }, [actorType, dateRange, selectedTenantId, selectedChannel, customDateRange?.start, customDateRange?.end]);
 
   return { data, loading, error };
 };

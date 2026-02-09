@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import type { SectionType } from '@/stores/widgetSectionStore';
 import { Rnd } from 'react-rnd';
 import * as XLSX from 'xlsx';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ import {
   Trash2,
   Copy,
   Eraser,
+  MessageSquare,
   StickyNote,
   Zap,
   Newspaper,
@@ -87,6 +89,8 @@ import {
   type CanvasBackground,
   type CanvasAnnotation,
 } from '@/components/workbench/canvas/types';
+import { getWidgetDefinition } from '@/components/widgets/registry';
+import { WidgetDataProvider } from '@/components/widgets/data';
 
 const UPLOAD_ALLOWED_TYPES = [
   'text/csv',
@@ -279,15 +283,15 @@ const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionItem[] }
   {
     label: 'Sales',
     items: [
-      { id: 'salesScorecard', title: 'Scorecard', icon: Target, iconClass: 'text-violet-500' },
-      { id: 'salesTrends', title: 'Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
+      { id: 'salesScorecard', title: 'Sales Scorecard', icon: Target, iconClass: 'text-violet-500' },
+      { id: 'salesTrends', title: 'Sales Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { id: 'operationsScorecard', title: 'Scorecard', icon: Target, iconClass: 'text-indigo-500' },
-      { id: 'operationsTrends', title: 'Trends', icon: LineChart, iconClass: 'text-blue-500' },
+      { id: 'operationsScorecard', title: 'Operations Scorecard', icon: Target, iconClass: 'text-indigo-500' },
+      { id: 'operationsTrends', title: 'Operations Trends', icon: LineChart, iconClass: 'text-blue-500' },
     ],
   },
   {
@@ -299,6 +303,133 @@ const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionItem[] }
 ];
 
 const DASHBOARD_SECTION_ITEMS = DASHBOARD_SECTION_GROUPS.flatMap((group) => group.items);
+
+/**
+ * Maps dashboard sectionIds to a section definition with:
+ * - sectionType: drives which filter controls appear in the header
+ * - widgetIds: registry widget definition IDs to place as individual widgets
+ *
+ * When a user adds one of these sections, we place:
+ *   1. A SectionHeader (title bar + filter dropdowns)
+ *   2. Individual widget cards (KPIs, charts, tables)
+ * All sharing a unique sectionId so filters are linked.
+ */
+const SECTION_TO_WIDGETS: Record<string, {
+  sectionType: SectionType;
+  widgetIds: string[];
+}> = {
+  companyScorecard: {
+    sectionType: 'company-scorecard',
+    widgetIds: [
+      'company-scorecard-units',
+      'company-scorecard-volume',
+      'company-scorecard-avg-loan-size',
+      'company-scorecard-wac',
+      'company-scorecard-wa-fico',
+      'company-scorecard-wa-ltv',
+      'company-scorecard-wa-dti',
+      'company-scorecard-volume-by-branch',
+      'company-scorecard-pullthrough-by-branch',
+      'company-scorecard-tabbed-table',
+    ],
+  },
+  creditRiskManagement: {
+    sectionType: 'credit-risk',
+    widgetIds: [
+      'credit-risk-units',
+      'credit-risk-volume',
+      'credit-risk-wac',
+      'credit-risk-wa-fico',
+      'credit-risk-wa-ltv',
+      'credit-risk-wa-dti',
+      'credit-risk-fico-distribution',
+      'credit-risk-ltv-distribution',
+      'credit-risk-dti-distribution',
+      'credit-risk-loan-mix-table',
+    ],
+  },
+  salesScorecard: {
+    sectionType: 'sales-scorecard',
+    widgetIds: [
+      'sales-scorecard-units',
+      'sales-scorecard-volume',
+      'sales-scorecard-revenue',
+      'sales-scorecard-revenue-bps',
+      'sales-scorecard-pull-through',
+      'sales-scorecard-avg-turn-time',
+      'sales-scorecard-avg-tts',
+      'sales-scorecard-tabbed-table',
+    ],
+  },
+  operationsScorecard: {
+    sectionType: 'operations-scorecard',
+    widgetIds: [
+      'ops-scorecard-actor-count',
+      'ops-scorecard-units-output',
+      'ops-scorecard-avg-days',
+      'ops-scorecard-approved-pct',
+      'ops-scorecard-cost-per-file',
+      'ops-scorecard-wa-fico',
+      'ops-scorecard-wa-ltv',
+      'ops-scorecard-tabbed-table',
+    ],
+  },
+  operationsTrends: {
+    sectionType: 'operations-trends',
+    widgetIds: [
+      'ops-trends-target-units',
+      'ops-trends-avg-output',
+      'ops-trends-avg-volume',
+      'ops-trends-complexity',
+      'ops-trends-avg-days',
+      'ops-trends-table',
+    ],
+  },
+  salesTrends: {
+    sectionType: 'sales-trends',
+    widgetIds: [
+      'sales-trends-total-units',
+      'sales-trends-total-volume',
+      'sales-trends-active-los',
+      'sales-trends-avg-turn-time',
+      'sales-trends-monthly-performance',
+      'sales-trends-fund-type',
+      'sales-trends-lo-table',
+    ],
+  },
+  loanFunnel: {
+    sectionType: 'funnel',
+    widgetIds: [
+      'funnel-loans-started',
+      'funnel-respa-apps',
+      'funnel-originated',
+      'funnel-withdrawn',
+      'funnel-denied',
+      'funnel-still-active',
+      'funnel-volume',
+      'funnel-waterfall-table',
+    ],
+  },
+  topTieringComparison: {
+    sectionType: 'top-tiering-comparison',
+    widgetIds: [
+      'ttc-total-revenue',
+      'ttc-total-units',
+      'ttc-total-volume',
+      'ttc-avg-bps',
+      'ttc-revenue-chart',
+      'ttc-units-chart',
+      'ttc-bps-chart',
+      'ttc-detail-table',
+    ],
+  },
+  leaderboard: {
+    sectionType: 'leaderboard',
+    widgetIds: [
+      'leaderboard-table',
+    ],
+  },
+};
 
 /** Hideable sub-sections per dashboard_section (for "Hide sections" menu). */
 const DASHBOARD_HIDEABLE_SECTIONS: Record<string, { id: string; label: string }[]> = {
@@ -341,9 +472,10 @@ function convertLayoutToPixels(
 export interface WorkbenchCanvasProps {
   loadCanvasId?: string | null;
   onLoaded?: () => void;
+  tenantId?: string | null;
 }
 
-export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps) {
+export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchCanvasProps) {
   const {
     items,
     annotations,
@@ -377,6 +509,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
   const [activeAddGroup, setActiveAddGroup] = useState(() => DASHBOARD_SECTION_GROUPS[0]?.label ?? 'Insights');
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
+  const [showCohiChat, setShowCohiChat] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -599,6 +732,57 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
 
   const addDashboardSection = useCallback(
     (sectionId: string, title: string) => {
+      // Check if this section has a widget-based layout
+      const widgetLayout = SECTION_TO_WIDGETS[sectionId];
+      if (widgetLayout) {
+        // Create a single widget_group container that holds everything
+        const groupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const { x, y: startY } = getNextPosition(items);
+
+        // Calculate group size – fill available canvas width
+        const groupW = canvasWidth || 1200;
+        // Estimate height: header ~90px + content
+        // 36-col grid, 16px rows: KPIs ~60px tall (3 rows), ~12 per row (3 cols each)
+        // Charts/distributions: ~170px tall, ~4 per row
+        // Tables: ~220px tall, wide
+        const kpiCount = widgetLayout.widgetIds.filter((id) => {
+          const def = getWidgetDefinition(id);
+          return def?.category === 'kpi';
+        }).length;
+        const otherCount = widgetLayout.widgetIds.length - kpiCount;
+        // 36-col grid, 16px rows.  KPIs: w=5 → 7 per row, h=4 → 64px.
+        // Charts: w=18 → 2 per row, h=12 → 192px.  Tables: w=36, h=16 → 256px.
+        const kpiRows = Math.ceil(kpiCount / 7);
+        const chartCount = widgetLayout.widgetIds.filter((id) => {
+          const d = getWidgetDefinition(id);
+          return d?.category === 'chart' || d?.category === 'distribution';
+        }).length;
+        const tableCount = widgetLayout.widgetIds.filter((id) => {
+          const d = getWidgetDefinition(id);
+          return d?.category === 'table';
+        }).length;
+        const chartRows = Math.ceil(chartCount / 2);
+        const contentH = kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
+        const groupH = Math.max(350, 110 + contentH);
+
+        const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const newItem = createLayoutItem(id, 'widget_group', {
+          type: 'widget_group' as const,
+          groupId,
+          title,
+          sectionType: widgetLayout.sectionType,
+          widgetIds: widgetLayout.widgetIds,
+        }, { x: 0, y: startY, w: groupW, h: groupH });
+
+        setItemsWithHistory((prev) => [...prev, newItem]);
+        toast({
+          title: `${title} added`,
+          description: `Group with ${widgetLayout.widgetIds.length} widgets and date controls.`,
+        });
+        return;
+      }
+
+      // Fallback: legacy dashboard_section embed (for sections without widget mappings)
       const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const payload = { type: 'dashboard_section' as const, sectionId, title };
       const { x, y } = getNextPosition(items);
@@ -613,7 +797,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
       });
       toast({ title: 'Dashboard added', description: 'Drag to arrange. Use ⋮ → Bring to front / Send to back for layers.' });
     },
-    [items, setItemsWithHistory, toast]
+    [items, setItemsWithHistory, toast, canvasWidth]
   );
 
   const applyTemplate = useCallback(
@@ -649,6 +833,37 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
       toast({ title: 'Added to canvas', description: `${pins.length} item(s) pinned. Open Canvas tab to see them.` });
     }
   }, [pendingPins, consumePendingPins, toast]);
+
+  // Listen for registry widget additions from the sidebar catalog
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.definitionId) {
+        const size = detail.defaultSize ?? { w: 300, h: 200 };
+        addWidget(
+          'registry_widget',
+          { type: 'registry_widget' as const, definitionId: detail.definitionId, config: detail.config },
+          size,
+        );
+        toast({ title: 'Widget added', description: detail.name ?? 'Added to canvas' });
+      }
+    };
+    window.addEventListener('add-registry-widget', handler);
+    return () => window.removeEventListener('add-registry-widget', handler);
+  }, [addWidget, toast]);
+
+  // Listen for generic canvas widget additions (from Cohi Chat "Add to Workbench")
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.type && detail?.payload) {
+        addWidget(detail.type, detail.payload, detail.size ?? { w: 360, h: 240 });
+        toast({ title: 'Added to workbench', description: 'Widget from Cohi Chat' });
+      }
+    };
+    window.addEventListener('add-canvas-widget', handler);
+    return () => window.removeEventListener('add-canvas-widget', handler);
+  }, [addWidget, toast]);
 
   const handleUploadClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -1220,11 +1435,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
       if (!res.ok) throw new Error('Failed to update favorite');
       setShareFavorited(next);
       toast({
-        title: next ? 'Added to favorites' : 'Removed from favorites',
-        description: next ? 'Canvas saved to your favorites.' : 'Canvas removed from favorites.',
+        title: next ? 'Added to bookmarks' : 'Removed from bookmarks',
+        description: next ? 'Canvas saved to your bookmarks.' : 'Canvas removed from bookmarks.',
       });
     } catch {
-      toast({ title: 'Update failed', description: 'Could not update favorites.', variant: 'destructive' });
+      toast({ title: 'Update failed', description: 'Could not update bookmarks.', variant: 'destructive' });
     } finally {
       setFavoriteLoading(false);
     }
@@ -1325,6 +1540,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
   }, []);
 
   return (
+    <WidgetDataProvider>
     <div ref={containerRef} className="w-full">
       <div
         id="workbench-canvas-root"
@@ -1608,6 +1824,22 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
               </TooltipTrigger>
               <TooltipContent side="bottom">Clear canvas</TooltipContent>
             </Tooltip>
+            {!hasItems && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={`h-8 shrink-0 gap-1.5 text-xs font-medium ${showCohiChat ? 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-700' : ''}`}
+                    onClick={() => setShowCohiChat(!showCohiChat)}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    Cohi Chat
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Toggle Cohi Chat</TooltipContent>
+              </Tooltip>
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <DropdownMenu>
@@ -1748,7 +1980,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
                         height={item.h}
                         width={item.w}
                         onUpdatePayload={
-                          item.type === 'text_block' || item.type === 'rich_text'
+                          item.type === 'text_block' || item.type === 'rich_text' || item.type === 'widget_group'
                             ? (p) => updateWidgetPayload(item.i, p)
                             : undefined
                         }
@@ -1974,7 +2206,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
                 className="w-full"
                 disabled={favoriteLoading}
               >
-                {shareFavorited ? 'Remove from favorites' : 'Add to favorites'}
+                {shareFavorited ? 'Remove from bookmarks' : 'Add to bookmarks'}
               </Button>
             </div>
             <div className="h-px bg-slate-200 dark:bg-slate-700" />
@@ -2056,5 +2288,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded }: WorkbenchCanvasProps
         </DialogContent>
       </Dialog>
     </div>
+    </WidgetDataProvider>
   );
 }

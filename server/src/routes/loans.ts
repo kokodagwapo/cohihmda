@@ -5951,6 +5951,8 @@ router.get(
       const dateRange = (req.query.date_range as string) || "3-months";
       const channelGroup = (req.query.channel_group as string) || "Retail";
       const monthsBack = dateRange === "6-months" ? 6 : 3;
+      const customStartDate = req.query.start_date as string | undefined;
+      const customEndDate = req.query.end_date as string | undefined;
 
       // Calculate date ranges
       // Get vMaxDate equivalent (max last_modified_date in database)
@@ -5962,18 +5964,36 @@ router.get(
         ? new Date(maxDateResult.rows[0].max_date)
         : new Date();
 
-      // Current period: last N months from vMaxDate
-      const currentEndDate = new Date(vMaxDate);
-      const currentStartDate = new Date(vMaxDate);
-      currentStartDate.setMonth(currentStartDate.getMonth() - monthsBack);
-      currentStartDate.setDate(1); // First day of month
+      let currentStartDate: Date;
+      let currentEndDate: Date;
 
-      // Previous period: N months before current period (for trend calculation)
+      // Use client-supplied custom date range when provided (from DatePeriodPicker custom selection)
+      if (customStartDate && customEndDate) {
+        const parsedStart = new Date(customStartDate);
+        const parsedEnd = new Date(customEndDate);
+        if (!isNaN(parsedStart.getTime()) && !isNaN(parsedEnd.getTime())) {
+          currentStartDate = parsedStart;
+          currentEndDate = parsedEnd;
+        } else {
+          logWarn("[SalesTrends] Invalid start_date/end_date params, falling back to default", { customStartDate, customEndDate });
+          currentEndDate = new Date(vMaxDate);
+          currentStartDate = new Date(vMaxDate);
+          currentStartDate.setMonth(currentStartDate.getMonth() - monthsBack);
+          currentStartDate.setDate(1);
+        }
+      } else {
+        // Default: Current period = last N months from vMaxDate
+        currentEndDate = new Date(vMaxDate);
+        currentStartDate = new Date(vMaxDate);
+        currentStartDate.setMonth(currentStartDate.getMonth() - monthsBack);
+        currentStartDate.setDate(1); // First day of month
+      }
+
+      // Previous period: same duration before current period (for trend calculation)
+      const periodDurationMs = currentEndDate.getTime() - currentStartDate.getTime();
       const previousEndDate = new Date(currentStartDate);
       previousEndDate.setDate(previousEndDate.getDate() - 1); // Last day before current period
-      const previousStartDate = new Date(previousEndDate);
-      previousStartDate.setMonth(previousStartDate.getMonth() - monthsBack + 1);
-      previousStartDate.setDate(1);
+      const previousStartDate = new Date(previousEndDate.getTime() - periodDurationMs);
 
       logInfo("[SalesTrends] Date ranges calculated", {
         dateRange,

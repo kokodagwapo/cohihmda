@@ -17,6 +17,11 @@ import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard"
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
+import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
+import { getWidgetDefinition } from "@/components/widgets/registry";
+import { useWidgetData } from "@/components/widgets/data";
+import { SectionHeader } from "@/components/widgets/components/SectionHeader";
+import { WidgetGroup } from "@/components/widgets/components/WidgetGroup";
 import type { CanvasLayoutItem, CanvasWidgetPayload } from "./types";
 import {
   LayoutGrid,
@@ -204,9 +209,6 @@ function DashboardSectionEmbed({
   const scrollStyle = fixedSize
     ? { width: refWidth, height, minHeight: height, maxHeight: height }
     : { minHeight: height ?? 200, maxHeight: height ?? "100%" };
-  const iframeStyle = fixedSize
-    ? { width: refWidth, height, minHeight: height, maxHeight: height }
-    : { minHeight: height ?? 200, maxHeight: height ?? "100%" };
 
   switch (payload.sectionId) {
     case "leaderboard":
@@ -300,59 +302,20 @@ function DashboardSectionEmbed({
         </div>
       );
     case "creditRiskManagement":
-      return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Credit Risk Management"
-            src="/credit-risk-management"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
-        </div>
-      );
     case "companyScorecard":
-      return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Company Scorecard"
-            src="/company-scorecard"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
-        </div>
-      );
     case "salesScorecard":
-      return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Sales Scorecard"
-            src="/sales-scorecard"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
-        </div>
-      );
     case "salesTrends":
+      // These sections are now decomposed into individual registry widgets.
+      // If a legacy saved canvas still has this type, show a migration hint.
       return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Sales Trends"
-            src="/sales-trends"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
+        <div className="h-full w-full p-4 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-600">
+          <LayoutGrid className="w-8 h-8 text-slate-400 dark:text-slate-500 mb-2" />
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            {payload.title || payload.sectionId}
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center max-w-[260px]">
+            This section now uses individual widgets. Remove this block and re-add from the Add menu to get drag-and-drop KPIs and charts.
+          </p>
         </div>
       );
     case "aletheiaInsights":
@@ -749,6 +712,63 @@ function RichTextWidget({
   );
 }
 
+// Section-type to accent color for the left border on grouped widgets
+const SECTION_ACCENT: Record<string, string> = {
+  'company-scorecard': 'border-l-indigo-500',
+  'credit-risk': 'border-l-emerald-500',
+  'sales-scorecard': 'border-l-violet-500',
+};
+
+/** Renders a registry-based widget using the widget architecture.
+ *  Data is provided by the WidgetDataProvider context wrapping the canvas. */
+function RegistryWidgetEmbed({
+  payload,
+  width,
+  height,
+}: {
+  payload: Extract<CanvasWidgetPayload, { type: "registry_widget" }>;
+  width?: number;
+  height?: number;
+}) {
+  const definition = getWidgetDefinition(payload.definitionId);
+
+  // Determine accent class for section grouping
+  const sectionType = payload.sectionId
+    ? useWidgetSectionStore.getState().sections[payload.sectionId]?.sectionType
+    : undefined;
+  const accentClass = sectionType ? SECTION_ACCENT[sectionType] ?? '' : '';
+
+  if (!definition) {
+    return (
+      <div className="h-full w-full flex items-center justify-center text-sm text-slate-400 dark:text-slate-500 p-4">
+        Widget not found: {payload.definitionId}
+      </div>
+    );
+  }
+
+  // Read data from the shared WidgetDataProvider context, scoped to this section
+  const { data: selectedData, loading, error } = useWidgetData(
+    definition.dataSource,
+    definition.dataSelector,
+    payload.sectionId,
+  );
+
+  const Component = definition.component;
+
+  return (
+    <div className={accentClass ? `h-full w-full border-l-[3px] ${accentClass} rounded-l-sm` : 'h-full w-full'}>
+      <Component
+        data={selectedData}
+        loading={loading}
+        error={error}
+        width={width ?? definition.defaultSize.w}
+        height={height ?? definition.defaultSize.h}
+        config={payload.config}
+      />
+    </div>
+  );
+}
+
 export function WidgetRenderer({
   item,
   height = 200,
@@ -840,6 +860,46 @@ export function WidgetRenderer({
         />
       </div>
     );
+  if (type === "registry_widget" && payload.type === "registry_widget") {
+    return (
+      <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
+        <RegistryWidgetEmbed payload={payload} width={width} height={height} />
+      </div>
+    );
+  }
+  if (type === "section_header" && payload.type === "section_header") {
+    return (
+      <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
+        <SectionHeader
+          sectionId={payload.sectionId}
+          title={payload.title}
+          sectionType={payload.sectionType}
+        />
+      </div>
+    );
+  }
+  if (type === "widget_group" && payload.type === "widget_group") {
+    return (
+      <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
+        <WidgetGroup
+          groupId={payload.groupId}
+          title={payload.title}
+          sectionType={payload.sectionType}
+          widgetIds={payload.widgetIds}
+          widgetLayouts={payload.widgetLayouts}
+          layoutVersion={payload.layoutVersion}
+          collapsed={payload.collapsed}
+          width={width ?? 800}
+          height={height}
+          onUpdatePayload={
+            onUpdatePayload
+              ? (patch) => onUpdatePayload({ ...payload, ...patch })
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
   if (type === "image" && payload.type === "image") {
     return (
       <div style={style} className="h-full w-full p-3">

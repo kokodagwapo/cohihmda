@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import {
   BarChart3,
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
+import { DatePeriodPicker, type PeriodSelection, type DateRange as DPDateRange } from "@/components/ui/DatePeriodPicker";
 
 interface LoanFunnelViewProps {
   view: "funnel" | "bar" | "revenue" | "units" | "volume" | "detail";
@@ -70,6 +71,21 @@ export const LoanFunnelView = ({
     start: Date | null;
     end: Date | null;
   }>({ start: null, end: null });
+
+  // Handle DatePeriodPicker changes (replaces manual year buttons + custom date logic)
+  const handleFunnelPeriodChange = useCallback((selection: PeriodSelection) => {
+    if (selection.type === 'year' && selection.year) {
+      setDateFilterType("year");
+      setCustomDateRange({ start: null, end: null });
+      onYearChange(selection.year);
+    } else {
+      // preset or custom – treat both as custom date range
+      setDateFilterType("custom");
+      const s = new Date(selection.dateRange.start + 'T00:00:00');
+      const e = new Date(selection.dateRange.end + 'T00:00:00');
+      setCustomDateRange({ start: s, end: e });
+    }
+  }, [onYearChange]);
 
   // Build the date filter for the hook
   // For current year, use YTD (Jan 1 to today); for past years, use full year (Jan 1 to Dec 31)
@@ -554,90 +570,14 @@ export const LoanFunnelView = ({
               ))}
             </div>
 
-            {/* Year/Date Selection - Mobile First */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 flex-wrap">
-              <span className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                Period:
-              </span>
-              <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg overflow-x-auto">
-                {availableYears.map((y) => (
-                  <button
-                    key={y}
-                    onClick={() => {
-                      setDateFilterType("year");
-                      onYearChange(y);
-                    }}
-                    className={`px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm font-medium rounded-md transition-all whitespace-nowrap touch-manipulation ${
-                      dateFilterType === "year" && year === y
-                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                        : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                    }`}
-                  >
-                    {y === currentYear ? `${y} YTD` : y}
-                  </button>
-                ))}
-                {/* Custom Date Picker */}
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      className={`px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm font-medium rounded-md transition-all whitespace-nowrap touch-manipulation flex items-center gap-1 ${
-                        dateFilterType === "custom"
-                          ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
-                          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                      }`}
-                    >
-                      <CalendarIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                      {dateFilterType === "custom" &&
-                      customDateRange.start &&
-                      customDateRange.end ? (
-                        <span className="hidden sm:inline">
-                          {format(customDateRange.start, "MMM d")} -{" "}
-                          {format(customDateRange.end, "MMM d, yyyy")}
-                        </span>
-                      ) : (
-                        <span className="hidden sm:inline">Custom</span>
-                      )}
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="end">
-                    <Calendar
-                      initialFocus
-                      mode="range"
-                      defaultMonth={customDateRange.start || new Date()}
-                      selected={{
-                        from: customDateRange.start || undefined,
-                        to: customDateRange.end || undefined,
-                      }}
-                      onSelect={(range) => {
-                        setCustomDateRange({
-                          start: range?.from || null,
-                          end: range?.to || null,
-                        });
-                        if (range?.from && range?.to) {
-                          setDateFilterType("custom");
-                        }
-                      }}
-                      numberOfMonths={2}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-              {/* Clear custom date button */}
-              {dateFilterType === "custom" &&
-                (customDateRange.start || customDateRange.end) && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      setCustomDateRange({ start: null, end: null });
-                      setDateFilterType("year");
-                    }}
-                    className="h-6 w-6 sm:h-7 sm:w-7 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                  >
-                    <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                  </Button>
-                )}
-            </div>
+            {/* Year/Date Selection - Using standardized DatePeriodPicker */}
+            <DatePeriodPicker
+              year={year}
+              onYearChange={onYearChange}
+              onPeriodChange={handleFunnelPeriodChange}
+              yearsToShow={currentYear - 2021}
+              size="default"
+            />
           </div>
 
           {/* TopTiering Daily Story Section */}
