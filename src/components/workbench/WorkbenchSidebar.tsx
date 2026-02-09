@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Folder, Share2, Library, Copy, Loader2, LayoutDashboard, Star, PanelLeftClose, PanelLeftOpen, Blocks } from 'lucide-react';
+import { LayoutGrid, Folder, Share2, Library, Copy, Loader2, LayoutDashboard, Star, PanelLeftClose, PanelLeftOpen, Blocks, Search, Plus, Trash2, Heart, FolderOpen } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { api } from '@/lib/api';
@@ -10,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { WidgetCatalog } from '@/components/widgets/catalog';
 import type { WidgetDefinition } from '@/components/widgets/registry';
 
+export type CanvasListItem = { id: string; title: string; content: any; created_at: string; updated_at: string; favorited: boolean };
 
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
@@ -25,6 +27,14 @@ export interface WorkbenchSidebarProps {
   sidebarCollapsed?: boolean;
   onSidebarCollapsedChange?: (collapsed: boolean) => void;
   className?: string;
+  /** Canvas list management (passed from MyDashboard) */
+  canvasList?: CanvasListItem[];
+  canvasSearch?: string;
+  onCanvasSearchChange?: (search: string) => void;
+  activeCanvasId?: string | null;
+  onSelectCanvas?: (id: string) => void;
+  onNewCanvas?: () => void;
+  onDeleteCanvas?: (id: string, title: string) => void;
 }
 
 type TemplateRow = { id: string; name: string; category: string; description: string | null };
@@ -37,6 +47,13 @@ function SidebarContent({
   onCopyTemplate,
   copyingId,
   onAddWidget,
+  canvasList,
+  canvasSearch,
+  onCanvasSearchChange,
+  activeCanvasId,
+  onSelectCanvas,
+  onNewCanvas,
+  onDeleteCanvas,
 }: {
   onItemClick?: () => void;
   onToggleCollapse?: () => void;
@@ -45,14 +62,25 @@ function SidebarContent({
   onCopyTemplate: (id: string) => void;
   copyingId: string | null;
   onAddWidget: (def: WidgetDefinition) => void;
+  canvasList?: CanvasListItem[];
+  canvasSearch?: string;
+  onCanvasSearchChange?: (search: string) => void;
+  activeCanvasId?: string | null;
+  onSelectCanvas?: (id: string) => void;
+  onNewCanvas?: () => void;
+  onDeleteCanvas?: (id: string, title: string) => void;
 }) {
+  const filteredCanvases = canvasSearch?.trim()
+    ? (canvasList ?? []).filter((c) => c.title.toLowerCase().includes(canvasSearch.trim().toLowerCase()))
+    : (canvasList ?? []);
+
   return (
     <div className="flex flex-col h-full">
-      {/* App / Top navigation menu */}
+      {/* Header with collapse toggle */}
       <div className="p-3 border-b border-slate-200/70 dark:border-slate-700/50">
         <div className="flex items-center justify-between gap-2 px-2 py-1.5">
           <h3 className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Left Panel
+            Workbench
           </h3>
           {onToggleCollapse && (
             <Button
@@ -69,7 +97,7 @@ function SidebarContent({
         <nav className="mt-1.5 space-y-0.5">
           {appNavLinks.map(({ path, label, icon: Icon, variant, scrollTarget }) => {
             const active = path ? pathname === path || pathname.startsWith(path) : false;
-            const className = cn(
+            const cls = cn(
               'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
               active
                 ? 'bg-violet-100/90 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 shadow-sm'
@@ -84,12 +112,12 @@ function SidebarContent({
             };
 
             return path ? (
-              <Link key={label} to={path} onClick={handleClick} className={className}>
+              <Link key={label} to={path} onClick={handleClick} className={cls}>
                 <IconBadge icon={Icon} variant={variant} size="sm" rounded="lg" />
                 <span className="truncate">{label}</span>
               </Link>
             ) : (
-              <button key={label} type="button" onClick={handleClick} className={className}>
+              <button key={label} type="button" onClick={handleClick} className={cls}>
                 <IconBadge icon={Icon} variant={variant} size="sm" rounded="lg" />
                 <span className="truncate">{label}</span>
               </button>
@@ -97,6 +125,78 @@ function SidebarContent({
           })}
         </nav>
       </div>
+
+      {/* Canvas list */}
+      {canvasList !== undefined && (
+        <div className="p-3 border-b border-slate-200/70 dark:border-slate-700/50">
+          <div className="flex items-center justify-between gap-2 px-1 mb-2">
+            <h3 className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <FolderOpen className="h-3.5 w-3.5" />
+              Canvases
+              <span className="text-slate-400 dark:text-slate-500 font-normal">({canvasList.length})</span>
+            </h3>
+            {onNewCanvas && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 rounded-md text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30"
+                onClick={onNewCanvas}
+                title="New canvas"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+
+          {canvasList.length > 3 && onCanvasSearchChange && (
+            <div className="flex items-center gap-1.5 mb-2 px-1">
+              <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <Input
+                placeholder="Search…"
+                value={canvasSearch ?? ''}
+                onChange={(e) => onCanvasSearchChange(e.target.value)}
+                className="h-7 text-xs bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+              />
+            </div>
+          )}
+
+          <div className="space-y-0.5 max-h-[240px] overflow-y-auto">
+            {filteredCanvases.length > 0 ? filteredCanvases.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={cn(
+                  'group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+                  activeCanvasId === c.id
+                    ? 'bg-violet-100/90 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-medium'
+                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
+                )}
+                onClick={() => onSelectCanvas?.(c.id)}
+              >
+                {c.favorited && <Heart className="h-3 w-3 fill-rose-500 text-rose-500 shrink-0" />}
+                <span className="truncate flex-1">{c.title}</span>
+                {onDeleteCanvas && (
+                  <Trash2
+                    className="h-3 w-3 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteCanvas(c.id, c.title);
+                    }}
+                  />
+                )}
+              </button>
+            )) : canvasList.length === 0 ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-3">
+                No canvases yet
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-2">
+                No matches
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Cohi Dashboard Library */}
       <div id="cohi-dashboard-library" className="flex-1 min-h-0 p-3 border-t border-slate-200/70 dark:border-slate-700/50">
@@ -159,7 +259,20 @@ function SidebarContent({
   );
 }
 
-export function WorkbenchSidebar({ sidebarOpen, onSidebarOpenChange, sidebarCollapsed, onSidebarCollapsedChange, className }: WorkbenchSidebarProps) {
+export function WorkbenchSidebar({
+  sidebarOpen,
+  onSidebarOpenChange,
+  sidebarCollapsed,
+  onSidebarCollapsedChange,
+  className,
+  canvasList,
+  canvasSearch,
+  onCanvasSearchChange,
+  activeCanvasId,
+  onSelectCanvas,
+  onNewCanvas,
+  onDeleteCanvas,
+}: WorkbenchSidebarProps) {
   const isMobile = useIsMobile();
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -213,6 +326,13 @@ export function WorkbenchSidebar({ sidebarOpen, onSidebarOpenChange, sidebarColl
       onCopyTemplate={onCopyTemplate}
       copyingId={copyingId}
       onAddWidget={handleAddWidget}
+      canvasList={canvasList}
+      canvasSearch={canvasSearch}
+      onCanvasSearchChange={onCanvasSearchChange}
+      activeCanvasId={activeCanvasId}
+      onSelectCanvas={onSelectCanvas}
+      onNewCanvas={onNewCanvas}
+      onDeleteCanvas={onDeleteCanvas}
     />
   );
 

@@ -5,7 +5,8 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { api } from "@/lib/api";
 import { Rnd } from "react-rnd";
 import {
   MessageSquare,
@@ -64,8 +65,8 @@ import {
   ClipboardList,
   LineChart,
   Calculator,
-  Pin,
   Code,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,7 +86,7 @@ import {
   CohiInsight,
 } from "@/components/visualizations/EnhancedVisualization";
 import { useToast } from "@/components/ui/use-toast";
-import { useCanvasPinStore } from "@/stores/canvasPinStore";
+import { convertChatToCanvasItems } from "@/utils/chatToCanvas";
 import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
 import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
 import {
@@ -93,16 +94,6 @@ import {
   type CanvasLayoutItem,
 } from "@/components/workbench/canvas/types";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -237,11 +228,6 @@ interface DataChatPanelProps {
   className?: string;
 }
 
-interface SaveDialogState {
-  isOpen: boolean;
-  visualization: VisualizationConfig | null;
-  question: string;
-}
 
 /** Optional override for quick export from message bubble (no dialog) */
 type ExportOverride = {
@@ -806,6 +792,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
 }) => {
   const { toast } = useToast();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [input, setInput] = useState("");
   const [isExpanded, setIsExpanded] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -820,13 +807,6 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   const [vizTypeOverrides, setVizTypeOverrides] = useState<
     Record<string, VisualizationConfig["type"]>
   >({});
-  const [saveDialog, setSaveDialog] = useState<SaveDialogState>({
-    isOpen: false,
-    visualization: null,
-    question: "",
-  });
-  const [saveTitle, setSaveTitle] = useState("");
-  const [saveDescription, setSaveDescription] = useState("");
   const [chatCanvasItems, setChatCanvasItems] = useState<CanvasLayoutItem[]>(
     []
   );
@@ -920,30 +900,6 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     [chatCanvasWidth, getNextCanvasPosition]
   );
 
-  const addVisualizationToCanvas = useCallback(
-    (payload: { visualization?: VisualizationConfig }) => {
-      if (!payload.visualization) return;
-      const id = `cohi-viz-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      const { x, y } = getNextCanvasPosition();
-      const baseWidth = Math.max(
-        220,
-        Math.min(chatCanvasWidth - 16, isMobile ? 320 : 420)
-      );
-      const baseHeight = Math.max(220, Math.round(baseWidth * 0.6));
-      const newItem = createLayoutItem(
-        id,
-        "chart",
-        { type: "chart", config: payload.visualization },
-        { x, y, w: baseWidth, h: baseHeight }
-      );
-      setChatCanvasItems((prev) => [...prev, newItem]);
-      setSelectedCanvasId(id);
-    },
-    [chatCanvasWidth, getNextCanvasPosition]
-  );
-
   const duplicateCanvasItem = useCallback(
     (id: string) => {
       const item = chatCanvasItems.find((i) => i.i === id);
@@ -973,7 +929,6 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     suggestedQuestions,
     sendMessage,
     addConversationTurn,
-    saveVisualization,
     clearMessages,
     newSession,
   } = useCohiChat({ tenantId });
@@ -982,6 +937,45 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // --- "Open in Workbench" handler ---
+  const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
+
+  const hasVisualizationMessages = messages.some(
+    (m) => m.role === "assistant" && m.visualization && !m.error
+  );
+
+  const handleOpenInWorkbench = useCallback(async () => {
+    const canvasItems = convertChatToCanvasItems(messages, vizTypeOverrides);
+    if (canvasItems.length === 0) {
+      toast({ title: "No visualizations to export", description: "Chat with Cohi to generate some charts first.", variant: "destructive" });
+      return;
+    }
+
+    setIsCreatingCanvas(true);
+    try {
+      const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+      const data = await api.request<{ id: string }>(`/api/workbench/canvases${qs}`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: `Chat Export – ${new Date().toLocaleDateString()}`,
+          layoutVersion: "freeform-v1",
+          layout: canvasItems,
+          annotations: [],
+          background: { type: "color", value: "#ffffff" },
+          uploadsMeta: [],
+        }),
+      });
+
+      toast({ title: "Workbench created", description: `${canvasItems.length} visualization(s) exported.` });
+      onClose();
+      navigate(`/my-dashboard?canvas=${data.id}`);
+    } catch (err) {
+      toast({ title: "Export failed", description: err instanceof Error ? err.message : "Try again", variant: "destructive" });
+    } finally {
+      setIsCreatingCanvas(false);
+    }
+  }, [messages, vizTypeOverrides, toast, onClose, navigate, tenantId]);
 
   // Focus input when panel opens
   useEffect(() => {
@@ -1319,53 +1313,75 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   };
 
   /**
-   * Open save dialog
+   * Save a single visualization to workbench as a new canvas
    */
-  const handleOpenSaveDialog = (
+  const handleSaveToWorkbench = useCallback(async (
     visualization: VisualizationConfig,
-    question: string
+    question: string,
+    sqlQuery?: string,
   ) => {
-    setSaveTitle(visualization.title || "My Visualization");
-    setSaveDescription("");
-    setSaveDialog({ isOpen: true, visualization, question });
-  };
-
-  /**
-   * Handle save visualization
-   */
-  const handleSave = async () => {
-    if (!saveDialog.visualization) return;
-
     try {
-      await saveVisualization(
-        saveDialog.visualization,
-        saveDialog.question,
-        saveTitle,
-        saveDescription
-      );
+      const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+      // Build a single canvas item from the visualization
+      const itemId = `chat-save-${Date.now()}`;
+      let layout: CanvasLayoutItem[];
 
-      toast({
-        title: "Saved!",
-        description: "Visualization saved to your dashboard.",
+      if (sqlQuery) {
+        // Wrap SQL-backed viz in a WidgetGroup so it gets timeframe controls
+        const groupId = `chat-save-group-${Date.now()}`;
+        layout = [createLayoutItem(groupId, 'widget_group', {
+          type: 'widget_group',
+          groupId,
+          title: visualization.title || 'Chat Visualization',
+          sectionType: 'company-scorecard',
+          widgetIds: [],
+          items: [{
+            kind: 'cohi' as const,
+            id: itemId,
+            sql: sqlQuery,
+            title: visualization.title || 'Chat Visualization',
+            vizConfig: visualization,
+            explanation: question.slice(0, 200),
+          }],
+        }, { x: 20, y: 20, w: 700, h: 500 })];
+      } else {
+        layout = [createLayoutItem(itemId, 'chart', {
+          type: 'chart',
+          config: visualization,
+        }, { x: 20, y: 20, w: 420, h: 280 })];
+      }
+
+      const data = await api.request<{ id: string }>(`/api/workbench/canvases${qs}`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: visualization.title || 'Chat Visualization',
+          layoutVersion: "freeform-v1",
+          layout,
+          annotations: [],
+          background: { type: "color", value: "#ffffff" },
+          uploadsMeta: [],
+        }),
       });
 
-      setSaveDialog({ isOpen: false, visualization: null, question: "" });
+      toast({ title: "Saved to Workbench", description: "Visualization saved as a new canvas." });
+      navigate(`/my-dashboard?canvas=${data.id}`);
+      onClose();
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to save visualization",
+        description: error.message || "Failed to save to workbench",
         variant: "destructive",
       });
     }
-  };
+  }, [tenantId, toast, navigate, onClose]);
 
   /**
    * Export visualization as PDF (optional override for quick export from bubble)
    */
   const handleDownloadPDF = async (override?: ExportOverride) => {
-    const viz = override?.visualization ?? saveDialog.visualization;
-    const title = override?.title ?? saveTitle;
-    const desc = override?.description ?? saveDescription;
+    const viz = override?.visualization;
+    const title = override?.title;
+    const desc = override?.description;
     if (!viz) return;
 
     try {
@@ -1482,8 +1498,8 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
    * Export visualization to PowerPoint (optional override for quick export)
    */
   const handleAddToPowerPoint = async (override?: ExportOverride) => {
-    const viz = override?.visualization ?? saveDialog.visualization;
-    const title = override?.title ?? saveTitle;
+    const viz = override?.visualization;
+    const title = override?.title;
     if (!viz) return;
 
     try {
@@ -1514,7 +1530,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
         }
       );
 
-      const desc = override?.description ?? saveDescription;
+      const desc = override?.description;
       let tableY = 1.3;
       if (desc) {
         slide.addText(desc, {
@@ -1775,7 +1791,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   );
 
   const handleCopyLink = async (override?: ExportOverride) => {
-    const title = override?.title ?? saveTitle;
+    const title = override?.title;
     try {
       const shareUrl = `${
         window.location.origin
@@ -1799,8 +1815,8 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   };
 
   const handleShareViaEmail = (override?: ExportOverride) => {
-    const title = override?.title ?? saveTitle;
-    const desc = override?.description ?? saveDescription;
+    const title = override?.title;
+    const desc = override?.description;
     const subject = encodeURIComponent(
       title || override?.visualization?.title || "Visualization from Coheus"
     );
@@ -1842,7 +1858,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     messageId?: string
   ) => {
     const title =
-      override?.title ?? saveTitle ?? override?.visualization?.title ?? "Chart";
+      override?.title ?? override?.visualization?.title ?? "Chart";
     if (!messageId) {
       toast({
         title: "Use from chart",
@@ -1892,7 +1908,6 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
   const handleEmailWithLink = (override?: ExportOverride) => {
     const title =
       override?.title ??
-      saveTitle ??
       override?.visualization?.title ??
       "Visualization";
     const shareUrl = `${
@@ -1911,7 +1926,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
 
   /** Export visualization data as Excel (CSV) */
   const handleExportExcel = (override?: ExportOverride) => {
-    const viz = override?.visualization ?? saveDialog.visualization;
+    const viz = override?.visualization;
     if (!viz?.data?.length) {
       toast({
         title: "No data",
@@ -1961,7 +1976,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     override?: ExportOverride,
     messageId?: string
   ) => {
-    const viz = override?.visualization ?? saveDialog.visualization;
+    const viz = override?.visualization;
     if (!viz) return;
     if (!messageId) {
       toast({
@@ -2143,6 +2158,22 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
             >
               <Trash2 className="w-4 h-4" />
             </Button>
+            {hasVisualizationMessages && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+                onClick={handleOpenInWorkbench}
+                disabled={isCreatingCanvas}
+                title="Open in Workbench"
+              >
+                {isCreatingCanvas ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ExternalLink className="w-4 h-4" />
+                )}
+              </Button>
+            )}
             {!isFullscreen && (
               <Button
                 variant="ghost"
@@ -2399,10 +2430,11 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
               >
                 <EnhancedChatMessageBubble
                   message={message}
-                  onSave={(viz, q) => handleOpenSaveDialog(viz, q)}
+                  onSave={(viz, q, sql) => handleSaveToWorkbench(viz, q, sql)}
                   onSpeak={speakResponse}
                   onDrilldown={handleDrilldown}
                   isExpanded={isExpanded}
+                  isFullscreen={isFullscreen}
                   voiceEnabled={voiceEnabled}
                   vizTypeOverride={vizTypeOverrides[message.id]}
                   onDesignOptionClick={(id, type) =>
@@ -2440,12 +2472,6 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
                       visualization: viz,
                       title: viz.title,
                     })
-                  }
-                  onPinToCanvas={(payload) =>
-                    useCanvasPinStore.getState().addPinnedInsight(payload)
-                  }
-                  onAddToChatCanvas={(payload) =>
-                    addVisualizationToCanvas(payload)
                   }
                 />
               </motion.div>
@@ -2558,124 +2584,6 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
           </div>
         </div>
       </motion.div>
-
-      {/* Save Dialog */}
-      <Dialog
-        open={saveDialog.isOpen}
-        onOpenChange={(open) =>
-          !open &&
-          setSaveDialog({ isOpen: false, visualization: null, question: "" })
-        }
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Save & Share</DialogTitle>
-            <DialogDescription>
-              Save this visualization or share it with your team.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="title">Title</Label>
-              <Input
-                id="title"
-                value={saveTitle}
-                onChange={(e) => setSaveTitle(e.target.value)}
-                placeholder="My Visualization"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Description (optional)</Label>
-              <Textarea
-                id="description"
-                value={saveDescription}
-                onChange={(e) => setSaveDescription(e.target.value)}
-                placeholder="What does this visualization show?"
-                rows={2}
-              />
-            </div>
-
-            {/* Export Options */}
-            <div className="space-y-3 pt-2">
-              <Label className="text-sm text-slate-500">Export Options</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleDownloadPDF}
-                  className="flex items-center gap-2 h-11 justify-start"
-                >
-                  <Download className="w-4 h-4 text-red-500" />
-                  <span className="text-sm">Download PDF</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleAddToPowerPoint}
-                  className="flex items-center gap-2 h-11 justify-start"
-                >
-                  <Presentation className="w-4 h-4 text-orange-500" />
-                  <span className="text-sm">Add to PowerPoint</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Share Options */}
-            <div className="space-y-3 pt-2">
-              <Label className="text-sm text-slate-500">Share</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleCopyLink}
-                  className="flex items-center gap-2 h-11 justify-start"
-                >
-                  {linkCopied ? (
-                    <Check className="w-4 h-4 text-green-500" />
-                  ) : (
-                    <Link className="w-4 h-4 text-blue-500" />
-                  )}
-                  <span className="text-sm">
-                    {linkCopied ? "Copied!" : "Copy Link"}
-                  </span>
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    handleEmailWithLink({
-                      visualization: saveDialog.visualization!,
-                      title: saveTitle,
-                    })
-                  }
-                  className="flex items-center gap-2 h-11 justify-start"
-                >
-                  <Mail className="w-4 h-4 text-purple-500" />
-                  <span className="text-sm">Email (link to chart)</span>
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() =>
-                setSaveDialog({
-                  isOpen: false,
-                  visualization: null,
-                  question: "",
-                })
-              }
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={!saveTitle.trim()}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              <Save className="w-4 h-4 mr-2" />
-              Save to Dashboard
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Drilldown Sheet – appears in front of chat overlay (z-[110] above chat z-[100]) */}
       <Sheet open={drilldownOpen} onOpenChange={setDrilldownOpen}>
@@ -2948,10 +2856,11 @@ const VIZ_DESIGN_OPTIONS: {
 
 interface EnhancedChatMessageBubbleProps {
   message: ChatMessage;
-  onSave: (visualization: VisualizationConfig, question: string) => void;
+  onSave: (visualization: VisualizationConfig, question: string, sqlQuery?: string) => void;
   onSpeak: (text: string) => void;
   onDrilldown: (item: any, level: string) => void;
   isExpanded: boolean;
+  isFullscreen: boolean;
   voiceEnabled: boolean;
   vizTypeOverride?: VisualizationConfig["type"];
   onDesignOptionClick?: (
@@ -2965,16 +2874,6 @@ interface EnhancedChatMessageBubbleProps {
   onCopyLink?: (viz: VisualizationConfig) => void;
   onEmailWithScreenshot?: (viz: VisualizationConfig, messageId: string) => void;
   onEmailWithLink?: (viz: VisualizationConfig) => void;
-  onPinToCanvas?: (payload: {
-    title: string;
-    content: string;
-    visualization?: VisualizationConfig;
-  }) => void;
-  onAddToChatCanvas?: (payload: {
-    title: string;
-    content: string;
-    visualization?: VisualizationConfig;
-  }) => void;
 }
 
 const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
@@ -2983,6 +2882,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onSpeak,
   onDrilldown,
   isExpanded,
+  isFullscreen,
   voiceEnabled,
   vizTypeOverride,
   onDesignOptionClick,
@@ -2993,8 +2893,6 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   onCopyLink,
   onEmailWithScreenshot,
   onEmailWithLink,
-  onPinToCanvas,
-  onAddToChatCanvas,
 }) => {
   const isUser = message.role === "user";
   const styling = !isUser ? getMessageStyling(message.content) : null;
@@ -3127,6 +3025,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                       height={isExpanded ? 300 : 220}
                       showInsights={true}
                       onDrilldown={onDrilldown}
+                      compact={!isFullscreen}
                     />
 
                     {/* Design options – click to change chart type */}
@@ -3203,42 +3102,12 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                             Save
                           </DropdownMenuLabel>
                           <DropdownMenuItem
-                            onClick={() => onSave(vizConfig, message.content)}
+                            onClick={() => onSave(vizConfig, message.content, message.sqlQuery)}
                             className="gap-2 py-2"
                           >
                             <Save className="w-4 h-4 text-slate-500 shrink-0" />
-                            <span>Save to Dashboard</span>
+                            <span>Save to Workbench</span>
                           </DropdownMenuItem>
-                          {onAddToChatCanvas && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onAddToChatCanvas({
-                                  title: vizConfig.title ?? "Insight",
-                                  content: message.content,
-                                  visualization: vizConfig,
-                                })
-                              }
-                              className="gap-2 py-2"
-                            >
-                              <LayoutGrid className="w-4 h-4 text-indigo-500 shrink-0" />
-                              <span>Add to chat canvas</span>
-                            </DropdownMenuItem>
-                          )}
-                          {onPinToCanvas && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onPinToCanvas({
-                                  title: vizConfig.title ?? "Insight",
-                                  content: message.content,
-                                  visualization: vizConfig,
-                                })
-                              }
-                              className="gap-2 py-2"
-                            >
-                              <Pin className="w-4 h-4 text-amber-500 shrink-0" />
-                              <span>Pin to canvas</span>
-                            </DropdownMenuItem>
-                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
                             Export

@@ -1748,6 +1748,46 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .catch(() => {});
 
     // =========================================================================
+    // Workbench Canvases
+    // =========================================================================
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.workbench_canvases (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT 'Untitled Canvas',
+        layout_version TEXT NOT NULL DEFAULT 'freeform-v1',
+        content JSONB NOT NULL DEFAULT '{}'::jsonb,
+        favorited BOOLEAN DEFAULT false,
+        shared BOOLEAN DEFAULT false,
+        share_pin TEXT,
+        share_scope TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE INDEX IF NOT EXISTS idx_workbench_canvases_user_id ON public.workbench_canvases(user_id)
+    `
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE INDEX IF NOT EXISTS idx_workbench_canvases_updated ON public.workbench_canvases(updated_at DESC)
+    `
+      )
+      .catch(() => {});
+
+    // =========================================================================
     // Role-Based Access Control Tables (RLS)
     // =========================================================================
 

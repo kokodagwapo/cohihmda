@@ -3,9 +3,10 @@
  * Full-width white canvas with drag-and-drop grid, toolbar, Add-from-dashboard palette, and uploads.
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { SectionType } from '@/stores/widgetSectionStore';
 import { Rnd } from 'react-rnd';
+import { api } from '@/lib/api';
 import * as XLSX from 'xlsx';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -514,7 +515,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const [activeAddGroup, setActiveAddGroup] = useState(() => DASHBOARD_SECTION_GROUPS[0]?.label ?? 'Insights');
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
-  const [showCohiChat, setShowCohiChat] = useState(false);
   const [showCohiPanel, setShowCohiPanel] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
@@ -599,20 +599,60 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           break;
         }
         case 'create_widget': {
-          const cohiItem = createLayoutItem(
-            `canvas-${Date.now()}`,
-            'cohi_widget',
-            {
-              type: 'cohi_widget',
+          // Check if there's an existing widget_group on the canvas we can add to
+          const existingGroup = items.find(
+            (it) => it.type === 'widget_group' && it.payload.type === 'widget_group'
+          );
+
+          if (existingGroup && existingGroup.payload.type === 'widget_group') {
+            // Add to existing group
+            const groupPayload = existingGroup.payload;
+            const currentItems = groupPayload.items || groupPayload.widgetIds.map((id: string) => ({ kind: 'registry' as const, defId: id }));
+            const newCohiItem = {
+              kind: 'cohi' as const,
+              id: `cohi-${Date.now()}`,
               sql: action.sql,
               title: action.title,
               vizConfig: action.config,
               explanation: action.explanation,
-            },
-            { x: 20, y: 20, w: 500, h: 350 }
-          );
-          setItemsWithHistory([...items, cohiItem]);
-          toast({ title: 'Widget created', description: action.title });
+            };
+            const updatedItems = [...currentItems, newCohiItem];
+            const updatedPayload = {
+              ...groupPayload,
+              items: updatedItems,
+              widgetIds: updatedItems.filter((i: any) => i.kind === 'registry').map((i: any) => i.defId),
+            };
+            const targetGroupId = existingGroup.i;
+            setItemsWithHistory((prev) =>
+              prev.map((it) => it.i === targetGroupId ? { ...it, payload: updatedPayload } : it)
+            );
+            toast({ title: 'Widget added to group', description: action.title });
+          } else {
+            // Create a new widget_group containing this single cohi widget
+            const groupId = `canvas-group-${Date.now()}`;
+            const cohiGroupItem = createLayoutItem(
+              groupId,
+              'widget_group',
+              {
+                type: 'widget_group',
+                groupId,
+                title: action.title,
+                sectionType: 'company-scorecard',
+                widgetIds: [],
+                items: [{
+                  kind: 'cohi' as const,
+                  id: `cohi-${Date.now()}`,
+                  sql: action.sql,
+                  title: action.title,
+                  vizConfig: action.config,
+                  explanation: action.explanation,
+                }],
+              },
+              { x: 20, y: 20, w: 700, h: 500 }
+            );
+            setItemsWithHistory((prev) => [...prev, cohiGroupItem]);
+            toast({ title: 'Widget group created', description: action.title });
+          }
           break;
         }
         case 'delete_widget': {
@@ -628,14 +668,16 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     [items, setItemsWithHistory, toast]
   );
 
+  // Build tenant query param once for all canvas API calls
+  const tenantQs = useMemo(() => (tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''), [tenantId]);
+
   useEffect(() => {
     if (!loadCanvasId) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/workbench/canvases/${loadCanvasId}`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
+        const data = await api.request<any>(`/api/workbench/canvases/${loadCanvasId}${tenantQs}`);
+        if (cancelled || !data) return;
         const content = data.content ?? {};
         if (Array.isArray(content.layout)) {
           const containerWidth = Math.max(width - 32, 480);
@@ -658,7 +700,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
       }
     })();
     return () => { cancelled = true; };
-  }, [loadCanvasId, onLoaded, toast, width]);
+  }, [loadCanvasId, onLoaded, toast, width, tenantQs]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1534,12 +1576,10 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     setFavoriteLoading(true);
     const next = !shareFavorited;
     try {
-      const res = await fetch(`/api/workbench/canvases/${canvasId}/favorite`, {
+      await api.request(`/api/workbench/canvases/${canvasId}/favorite${tenantQs}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ favorited: next }),
       });
-      if (!res.ok) throw new Error('Failed to update favorite');
       setShareFavorited(next);
       toast({
         title: next ? 'Added to bookmarks' : 'Removed from bookmarks',
@@ -1550,7 +1590,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     } finally {
       setFavoriteLoading(false);
     }
-  }, [canvasId, favoriteLoading, shareFavorited, toast]);
+  }, [canvasId, favoriteLoading, shareFavorited, toast, tenantQs]);
 
   const handleCopyEmbedCode = useCallback(async () => {
     if (!canvasId) return;
@@ -1597,17 +1637,14 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     setIsSaving(true);
     try {
       if (canvasId) {
-        const res = await fetch(`/api/workbench/canvases/${canvasId}`, {
+        await api.request(`/api/workbench/canvases/${canvasId}${tenantQs}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title, content }),
         });
-        if (!res.ok) throw new Error('Failed to update');
         toast({ title: 'Canvas saved', description: title });
       } else {
-        const res = await fetch('/api/workbench/canvases', {
+        const data = await api.request<{ id: string }>(`/api/workbench/canvases${tenantQs}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title,
             layoutVersion: 'freeform-v1',
@@ -1617,8 +1654,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
             uploadsMeta: uploads,
           }),
         });
-        if (!res.ok) throw new Error('Failed to save');
-        const data = await res.json();
         setCanvasId(data.id);
         toast({ title: 'Canvas saved', description: title });
       }
@@ -1628,7 +1663,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     } finally {
       setIsSaving(false);
     }
-  }, [canvasId, items, annotations, canvasBackground, uploads, saveTitle, toast]);
+  }, [canvasId, items, annotations, canvasBackground, uploads, saveTitle, toast, tenantQs]);
 
   const hasItems = items.length > 0;
 
@@ -1674,6 +1709,22 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
               </TooltipTrigger>
               <TooltipContent side="bottom">Redo (Ctrl+Shift+Z)</TooltipContent>
             </Tooltip>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
+            {/* Inline editable canvas name */}
+            <input
+              type="text"
+              value={saveTitle}
+              onChange={(e) => setSaveTitle(e.target.value)}
+              onBlur={() => {
+                if (!saveTitle.trim()) setSaveTitle('Untitled canvas');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              className="h-8 min-w-[120px] max-w-[260px] px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 bg-transparent border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-blue-400 dark:focus:border-blue-500 focus:ring-1 focus:ring-blue-400/30 rounded-md outline-none transition-colors truncate"
+              placeholder="Canvas name…"
+              title="Click to rename this canvas"
+            />
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1932,26 +1983,25 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
               </TooltipTrigger>
               <TooltipContent side="bottom">Clear canvas</TooltipContent>
             </Tooltip>
-            {!hasItems && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`h-8 shrink-0 gap-1.5 text-xs font-medium ${showCohiChat ? 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-700' : ''}`}
-                    onClick={() => setShowCohiPanel(!showCohiPanel)}
-                    className={cn(
-                      'h-8 gap-1 text-xs px-2',
-                      showCohiPanel && 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
-                    )}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Cohi
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Toggle Cohi Assistant</TooltipContent>
-              </Tooltip>
-            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    'h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0',
+                    showCohiPanel
+                      ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700'
+                      : ''
+                  )}
+                  onClick={() => setShowCohiPanel(!showCohiPanel)}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Cohi
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Toggle Cohi Assistant</TooltipContent>
+            </Tooltip>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <DropdownMenu>
@@ -2033,6 +2083,83 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                       updateWidgetPayload(item.i, { ...payload, hiddenSections: next });
                     }
                   : undefined;
+
+                // ─── Group actions for standalone cohi_widget items ───
+                const isStandaloneCohiWidget = item.type === 'cohi_widget' && payload.type === 'cohi_widget';
+                const availableGroups = isStandaloneCohiWidget
+                  ? items
+                      .filter((it) => it.type === 'widget_group' && it.payload.type === 'widget_group' && it.i !== item.i)
+                      .map((it) => ({
+                        id: it.i,
+                        title: (it.payload as any).title || 'Untitled Group',
+                      }))
+                  : [];
+
+                const handleMoveToGroup = isStandaloneCohiWidget
+                  ? (groupId: string) => {
+                      const groupItem = items.find((it) => it.i === groupId);
+                      if (!groupItem || groupItem.payload.type !== 'widget_group') return;
+                      const gp = groupItem.payload;
+                      const currentItems = gp.items || gp.widgetIds.map((id: string) => ({ kind: 'registry' as const, defId: id }));
+                      const cohiPayload = payload as { sql: string; title: string; vizConfig: any; explanation?: string };
+                      const newItem = {
+                        kind: 'cohi' as const,
+                        id: `moved-${Date.now()}`,
+                        sql: cohiPayload.sql,
+                        title: cohiPayload.title,
+                        vizConfig: cohiPayload.vizConfig,
+                        explanation: cohiPayload.explanation,
+                      };
+                      const updatedGP = {
+                        ...gp,
+                        items: [...currentItems, newItem],
+                        widgetIds: [...currentItems, newItem].filter((i: any) => i.kind === 'registry').map((i: any) => i.defId),
+                      };
+                      // Remove standalone item and update the target group
+                      const sourceId = item.i;
+                      const targetId = groupId;
+                      setItemsWithHistory((prev) =>
+                        prev
+                          .filter((it) => it.i !== sourceId)
+                          .map((it) => it.i === targetId ? { ...it, payload: updatedGP } : it)
+                      );
+                      toast({ title: 'Moved to group', description: (gp as any).title });
+                    }
+                  : undefined;
+
+                const handleWrapInGroup = isStandaloneCohiWidget
+                  ? () => {
+                      const cohiPayload = payload as { sql: string; title: string; vizConfig: any; explanation?: string };
+                      const groupId = `wrap-group-${Date.now()}`;
+                      const newGroupItem = createLayoutItem(
+                        groupId,
+                        'widget_group',
+                        {
+                          type: 'widget_group',
+                          groupId,
+                          title: cohiPayload.title || 'New Group',
+                          sectionType: 'company-scorecard',
+                          widgetIds: [],
+                          items: [{
+                            kind: 'cohi' as const,
+                            id: `wrapped-${Date.now()}`,
+                            sql: cohiPayload.sql,
+                            title: cohiPayload.title,
+                            vizConfig: cohiPayload.vizConfig,
+                            explanation: cohiPayload.explanation,
+                          }],
+                        },
+                        { x: item.x, y: item.y, w: 700, h: 500 },
+                      );
+                      // Replace standalone item with the new group
+                      const replaceId = item.i;
+                      setItemsWithHistory((prev) =>
+                        prev.map((it) => it.i === replaceId ? newGroupItem : it)
+                      );
+                      toast({ title: 'Wrapped in new group' });
+                    }
+                  : undefined;
+
                 return (
                     <Rnd
                     key={item.i}
@@ -2086,6 +2213,9 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                           ? (mode) => updateWidgetPayload(item.i, { ...payload, displayMode: mode })
                           : undefined
                       }
+                      availableGroups={availableGroups}
+                      onMoveToGroup={handleMoveToGroup}
+                      onWrapInGroup={handleWrapInGroup}
                     >
                       <WidgetRenderer
                         item={item}
@@ -2094,6 +2224,37 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                         onUpdatePayload={
                           item.type === 'text_block' || item.type === 'rich_text' || item.type === 'widget_group'
                             ? (p) => updateWidgetPayload(item.i, p)
+                            : undefined
+                        }
+                        otherGroups={
+                          item.type === 'widget_group'
+                            ? items
+                                .filter((it) => it.type === 'widget_group' && it.payload.type === 'widget_group' && it.i !== item.i)
+                                .map((it) => ({ id: it.i, title: (it.payload as any).title || 'Untitled Group' }))
+                            : undefined
+                        }
+                        onMoveItemOut={
+                          item.type === 'widget_group'
+                            ? (movedItem, targetGroupId) => {
+                                // Add the moved item to the target group's items array
+                                setItemsWithHistory((prev) =>
+                                  prev.map((it) => {
+                                    if (it.i !== targetGroupId || it.payload.type !== 'widget_group') return it;
+                                    const gp = it.payload;
+                                    const currentItems = gp.items || gp.widgetIds.map((id: string) => ({ kind: 'registry' as const, defId: id }));
+                                    const updatedItems = [...currentItems, movedItem];
+                                    return {
+                                      ...it,
+                                      payload: {
+                                        ...gp,
+                                        items: updatedItems,
+                                        widgetIds: updatedItems.filter((i: any) => i.kind === 'registry').map((i: any) => i.defId),
+                                      },
+                                    };
+                                  }),
+                                );
+                                toast({ title: 'Moved to group', description: `Widget moved successfully` });
+                              }
                             : undefined
                         }
                       />

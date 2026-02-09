@@ -10,6 +10,7 @@
  *  • "Add widget" picker filtered to the group's data source
  *  • DatePeriodPicker + section-specific filter controls
  *  • Layout persistence via payload (stored as grid-unit coords)
+ *  • Polymorphic items: supports both registry widgets AND Cohi SQL widgets
  *
  * Patterns borrowed from Grafana, Notion, Retool, and Datadog.
  */
@@ -28,6 +29,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  FolderInput,
   GripVertical,
   Maximize2,
   Minimize2,
@@ -36,9 +38,11 @@ import {
   X,
   Pencil,
   Check,
+  Sparkles,
+  Calendar,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
 import {
   Dialog,
   DialogContent,
@@ -56,6 +60,10 @@ import {
   type WidgetDefinition,
 } from '@/components/widgets/registry';
 import { useWidgetData } from '@/components/widgets/data';
+import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRenderer';
+import { useTenantStore } from '@/stores/tenantStore';
+import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
+import type { DateFilter } from '@/hooks/useCohiWidgetData';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,7 +73,10 @@ export interface WidgetGroupProps {
   groupId: string;
   title: string;
   sectionType: SectionType;
+  /** @deprecated Use `items` instead – kept for backward compat */
   widgetIds: string[];
+  /** Mixed items: registry + cohi_widget.  Takes precedence over widgetIds. */
+  items?: GroupWidgetItem[];
   /** Persisted grid layouts (grid-unit coords, keyed by sortable id) */
   widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
   /** Layout version – stale layouts from older grid configs are auto-discarded */
@@ -74,8 +85,14 @@ export interface WidgetGroupProps {
   collapsed?: boolean;
   width: number;
   height: number;
-  /** Full payload update callback (handles widgetIds, layouts, title, collapsed) */
+  /** Full payload update callback (handles widgetIds, items, layouts, title, collapsed) */
   onUpdatePayload?: (patch: Record<string, unknown>) => void;
+  /** Other widget groups on the canvas that items can be moved to */
+  otherGroups?: { id: string; title: string }[];
+  /** Called when a user moves an item out of this group into another group */
+  onMoveItemOut?: (item: GroupWidgetItem, targetGroupId: string) => void;
+  /** Persisted filter state restored from saved canvas */
+  savedFilters?: Partial<import('@/stores/widgetSectionStore').SectionFilters>;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +111,7 @@ const HEADER_HEIGHT = 90; // approx header+filters height
  */
 const MIN_GRID_WIDTH = 400;
 /** Bump this any time you change GRID_COLS / ROW_HEIGHT so stale saved layouts get discarded */
-const LAYOUT_VERSION = 6;
+const LAYOUT_VERSION = 7; // bumped from 6 → 7 for items migration
 
 // ---------------------------------------------------------------------------
 // Section-specific filter options
@@ -146,18 +163,22 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers – convert legacy widgetIds to GroupWidgetItem[]
 // ---------------------------------------------------------------------------
+
+function normalizeItems(widgetIds: string[], items?: GroupWidgetItem[]): GroupWidgetItem[] {
+  if (items && items.length > 0) return items;
+  return widgetIds.map((defId) => ({ kind: 'registry' as const, defId }));
+}
+
+/** Stable key for a GroupWidgetItem at a given index */
+function itemKey(item: GroupWidgetItem, idx: number): string {
+  if (item.kind === 'registry') return `${item.defId}__${idx}`;
+  return `cohi__${item.id}__${idx}`;
+}
 
 // ---------------------------------------------------------------------------
 // Direct grid-unit sizing per widget category.
-// Tuned to match actual dashboard page layouts.
-// At 36 cols / 16px rows on a ~1000px container:
-//   1 col ≈ 27px,  1 row = 16px
-//   KPI  : 5×4  – 7 KPIs fill one row (5×7=35 cols), ~135×64px
-//   chart: 18×12 – 2 charts side by side (18×2=36), ~486×192px
-//   distribution: 12×10 – 3 per row, ~324×160px
-//   table: 36×16 – full width, ~972×256px
 // ---------------------------------------------------------------------------
 
 interface GridSize { w: number; h: number; minW: number; minH: number }
@@ -167,39 +188,57 @@ const GRID_SIZES: Record<string, GridSize> = {
   chart:        { w: 18, h: 12, minW: 8,  minH: 6 },
   distribution: { w: 12, h: 10, minW: 6,  minH: 5 },
   table:        { w: 36, h: 16, minW: 18, minH: 8 },
+  cohi:         { w: 18, h: 14, minW: 8,  minH: 8 },
 };
 const DEFAULT_GRID: GridSize = { w: 9, h: 8, minW: 4, minH: 4 };
 
-function getGridSize(def: ReturnType<typeof getWidgetDefinition>): GridSize {
+function getGridSizeForItem(item: GroupWidgetItem): GridSize {
+  if (item.kind === 'cohi') return GRID_SIZES.cohi;
+  const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
 }
 
-/** Build react-grid-layout Layout from widget IDs.
+/** Build react-grid-layout Layout from items.
  *  Saved layouts are only used when `layoutVersion` matches `LAYOUT_VERSION`.
+ *  Items without a saved layout are placed AFTER (below) all saved items so
+ *  that newly added / moved widgets appear at the end of the group.
  */
 function buildDefaultLayout(
-  widgetIds: string[],
+  items: GroupWidgetItem[],
   savedLayouts?: Record<string, { x: number; y: number; w: number; h: number }>,
   layoutVersion?: number,
 ): Layout[] {
   const validSaved =
     savedLayouts && layoutVersion === LAYOUT_VERSION ? savedLayouts : undefined;
 
+  // First pass: place items that have saved positions and track the max Y extent
   const layout: Layout[] = [];
-  let cx = 0;
-  let cy = 0;
-  let rowMaxH = 0;
+  let maxYBottom = 0; // bottom-most Y + H of any saved item
 
-  widgetIds.forEach((defId, idx) => {
-    const key = `${defId}__${idx}`;
-    const def = getWidgetDefinition(defId);
-    const gs = getGridSize(def);
+  const unsavedIndices: number[] = [];
+
+  items.forEach((item, idx) => {
+    const key = itemKey(item, idx);
+    const gs = getGridSizeForItem(item);
 
     if (validSaved?.[key]) {
       const s = validSaved[key];
       layout.push({ i: key, x: s.x, y: s.y, w: s.w, h: s.h, minW: gs.minW, minH: gs.minH });
-      return;
+      maxYBottom = Math.max(maxYBottom, s.y + s.h);
+    } else {
+      unsavedIndices.push(idx);
     }
+  });
+
+  // Second pass: place unsaved items starting after all saved items
+  let cx = 0;
+  let cy = maxYBottom;
+  let rowMaxH = 0;
+
+  unsavedIndices.forEach((idx) => {
+    const item = items[idx];
+    const key = itemKey(item, idx);
+    const gs = getGridSizeForItem(item);
 
     if (cx + gs.w > GRID_COLS) {
       cx = 0;
@@ -218,38 +257,50 @@ function buildDefaultLayout(
 /** Extract grid-unit layout map for persistence */
 function layoutToMap(layout: Layout[]): Record<string, { x: number; y: number; w: number; h: number }> {
   const map: Record<string, { x: number; y: number; w: number; h: number }> = {};
-  for (const item of layout) {
-    map[item.i] = { x: item.x, y: item.y, w: item.w, h: item.h };
+  for (const l of layout) {
+    map[l.i] = { x: l.x, y: l.y, w: l.w, h: l.h };
   }
   return map;
 }
 
 // ---------------------------------------------------------------------------
-// Grid cell widget wrapper (the content inside each grid cell)
+// Grid cell widget wrapper – renders a single item inside the grid
 // ---------------------------------------------------------------------------
 
 function GridCellWidget({
-  definitionId,
+  item,
   width,
   height,
+  dateFilter,
   onDelete,
   onDuplicate,
   onMaximize,
+  otherGroups,
+  onMoveToGroup,
+  onVizTypeChange,
 }: {
-  definitionId: string;
+  item: GroupWidgetItem;
   width: number;
   height: number;
+  dateFilter: DateFilter | null;
   onDelete: () => void;
   onDuplicate: () => void;
   onMaximize: () => void;
+  otherGroups?: { id: string; title: string }[];
+  onMoveToGroup?: (targetGroupId: string) => void;
+  onVizTypeChange?: (type: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const definition = getWidgetDefinition(definitionId);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
 
-  if (!definition) {
+  const isValid =
+    item.kind === 'cohi' ||
+    (item.kind === 'registry' && !!getWidgetDefinition(item.defId));
+
+  if (!isValid) {
     return (
       <div className="h-full w-full flex items-center justify-center text-xs text-slate-400 dark:text-slate-500 p-3 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg relative">
-        Widget not found: {definitionId}
+        Widget not found: {item.kind === 'registry' ? item.defId : item.id}
         <button
           type="button"
           onClick={onDelete}
@@ -263,25 +314,71 @@ function GridCellWidget({
     );
   }
 
+  const hasOtherGroups = otherGroups && otherGroups.length > 0 && onMoveToGroup;
+
   return (
     <div
       className="h-full w-full relative rounded-lg overflow-hidden flex flex-col group/widget"
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => { setHovered(false); setMoveMenuOpen(false); }}
     >
-      {/* Always-visible drag handle strip – spans the full top of the widget */}
+      {/* Always-visible drag handle strip */}
       <div
         className="widget-drag-handle flex items-center justify-between h-5 min-h-[20px] px-1.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-700/40 cursor-grab active:cursor-grabbing select-none transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
         title="Drag to reorder"
         aria-label="Drag to reorder"
       >
-        <GripVertical className="h-3 w-3 text-slate-300 dark:text-slate-600" />
+        <div className="flex items-center gap-1">
+          <GripVertical className="h-3 w-3 text-slate-300 dark:text-slate-600" />
+          {item.kind === 'cohi' && (
+            <Sparkles className="h-2.5 w-2.5 text-indigo-400" />
+          )}
+        </div>
 
-        {/* Action buttons appear on hover (inside the drag bar so they stay accessible) */}
+        {/* Action buttons on hover */}
         <div className={cn(
           'flex items-center gap-0.5 transition-opacity',
           hovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
+          {/* Move to group popover */}
+          {hasOtherGroups && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setMoveMenuOpen((v) => !v); }}
+                className="p-0.5 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:text-amber-400 dark:hover:bg-amber-900/30 canvas-interactive transition-colors"
+                title="Move to another group"
+                aria-label="Move to another group"
+              >
+                <FolderInput className="h-3 w-3" />
+              </button>
+              {moveMenuOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="px-2 py-1 text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Move to group
+                  </div>
+                  {otherGroups!.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className="w-full text-left px-2 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors canvas-interactive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMoveToGroup!(g.id);
+                        setMoveMenuOpen(false);
+                      }}
+                    >
+                      {g.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
@@ -312,23 +409,30 @@ function GridCellWidget({
         </div>
       </div>
 
-      {/* Widget content – fills the remaining space below the drag bar */}
+      {/* Widget content */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <GridCellWidgetData definition={definition} width={width} height={height - 20} />
+        {item.kind === 'registry' ? (
+          <GridCellRegistryWidget defId={item.defId} width={width} height={height - 20} />
+        ) : (
+          <GridCellCohiWidget item={item} width={width} height={height - 20} dateFilter={dateFilter} onVizTypeChange={onVizTypeChange} />
+        )}
       </div>
     </div>
   );
 }
 
-function GridCellWidgetData({
-  definition,
+function GridCellRegistryWidget({
+  defId,
   width,
   height,
 }: {
-  definition: NonNullable<ReturnType<typeof getWidgetDefinition>>;
+  defId: string;
   width: number;
   height: number;
 }) {
+  const definition = getWidgetDefinition(defId);
+  if (!definition) return null;
+
   const { data, loading, error } = useWidgetData(
     definition.dataSource,
     definition.dataSelector,
@@ -349,22 +453,66 @@ function GridCellWidgetData({
   );
 }
 
+function GridCellCohiWidget({
+  item,
+  width,
+  height,
+  dateFilter,
+  onVizTypeChange,
+}: {
+  item: Extract<GroupWidgetItem, { kind: 'cohi' }>;
+  width: number;
+  height: number;
+  dateFilter: DateFilter | null;
+  onVizTypeChange?: (type: string) => void;
+}) {
+  const { selectedTenantId } = useTenantStore();
+  return (
+    <div className="h-full w-full">
+      <CohiWidgetRenderer
+        sql={item.sql}
+        vizConfig={item.vizConfig}
+        title={item.title}
+        explanation={item.explanation}
+        tenantId={selectedTenantId}
+        width={width}
+        height={height}
+        groupDateFilter={dateFilter}
+        onVizTypeChange={onVizTypeChange}
+      />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Maximize Dialog – renders a single widget at full screen
+// Maximize Dialog
 // ---------------------------------------------------------------------------
 
 function MaximizeDialog({
-  definitionId,
+  item,
   open,
   onClose,
+  dateFilter,
 }: {
-  definitionId: string | null;
+  item: GroupWidgetItem | null;
   open: boolean;
   onClose: () => void;
+  dateFilter: DateFilter | null;
 }) {
-  const definition = definitionId ? getWidgetDefinition(definitionId) : null;
+  if (!item) return null;
 
-  if (!definition) return null;
+  const title =
+    item.kind === 'registry'
+      ? (getWidgetDefinition(item.defId)?.name || item.defId)
+      : item.title;
+
+  const subtitle =
+    item.kind === 'registry'
+      ? (() => {
+          const def = getWidgetDefinition(item.defId);
+          return def ? `${def.group} \u00b7 ${def.category}` : '';
+        })()
+      : 'Cohi SQL Widget';
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -372,39 +520,55 @@ function MaximizeDialog({
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Minimize2 className="h-4 w-4 text-slate-400" />
-            {definition.name}
+            {title}
             <span className="text-xs font-normal text-slate-400 ml-2">
-              {definition.group} &middot; {definition.category}
+              {subtitle}
             </span>
           </DialogTitle>
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-auto p-6">
-          <MaximizeDialogContent definition={definition} />
+          {item.kind === 'registry' ? (
+            <MaximizeRegistryWidget defId={item.defId} />
+          ) : (
+            <MaximizeCohiWidget item={item} dateFilter={dateFilter} />
+          )}
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function MaximizeDialogContent({
-  definition,
-}: {
-  definition: NonNullable<ReturnType<typeof getWidgetDefinition>>;
-}) {
+function MaximizeRegistryWidget({ defId }: { defId: string }) {
+  const definition = getWidgetDefinition(defId);
+  if (!definition) return null;
+
   const { data, loading, error } = useWidgetData(
     definition.dataSource,
     definition.dataSelector,
   );
 
   const Component = definition.component;
+  return <Component data={data} loading={loading} error={error} width={1200} height={700} />;
+}
 
+function MaximizeCohiWidget({
+  item,
+  dateFilter,
+}: {
+  item: Extract<GroupWidgetItem, { kind: 'cohi' }>;
+  dateFilter: DateFilter | null;
+}) {
+  const { selectedTenantId } = useTenantStore();
   return (
-    <Component
-      data={data}
-      loading={loading}
-      error={error}
+    <CohiWidgetRenderer
+      sql={item.sql}
+      vizConfig={item.vizConfig}
+      title={item.title}
+      explanation={item.explanation}
+      tenantId={selectedTenantId}
       width={1200}
       height={700}
+      groupDateFilter={dateFilter}
     />
   );
 }
@@ -415,18 +579,23 @@ function MaximizeDialogContent({
 
 function AddWidgetPicker({
   sectionType,
-  existingIds,
-  onAdd,
+  existingItems,
+  onAddRegistry,
   onClose,
 }: {
   sectionType: SectionType;
-  existingIds: string[];
-  onAdd: (defId: string) => void;
+  existingItems: GroupWidgetItem[];
+  onAddRegistry: (defId: string) => void;
   onClose: () => void;
 }) {
   const sourceId = SECTION_TO_SOURCE[sectionType];
   const available = useMemo(() => getWidgetsBySource(sourceId), [sourceId]);
   const [search, setSearch] = useState('');
+
+  const existingRegistryIds = useMemo(
+    () => existingItems.filter((i) => i.kind === 'registry').map((i) => (i as any).defId as string),
+    [existingItems],
+  );
 
   const filtered = useMemo(() => {
     if (!search.trim()) return available;
@@ -472,12 +641,12 @@ function AddWidgetPicker({
               {category}
             </div>
             {widgets.map((w) => {
-              const alreadyIn = existingIds.includes(w.id);
+              const alreadyIn = existingRegistryIds.includes(w.id);
               return (
                 <button
                   key={w.id}
                   type="button"
-                  onClick={() => { onAdd(w.id); onClose(); }}
+                  onClick={() => { onAddRegistry(w.id); onClose(); }}
                   className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 text-xs transition-colors"
                 >
                   <span className="flex-1 font-medium text-slate-700 dark:text-slate-200 truncate">
@@ -512,34 +681,47 @@ export function WidgetGroup({
   title,
   sectionType,
   widgetIds,
+  items: itemsProp,
   widgetLayouts,
   layoutVersion: layoutVersionProp,
   collapsed: collapsedProp,
   width,
   height,
   onUpdatePayload,
+  otherGroups,
+  onMoveItemOut,
+  savedFilters: savedFiltersProp,
 }: WidgetGroupProps) {
   const registerSection = useWidgetSectionStore((s) => s.registerSection);
   const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
   const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
 
+  // Normalize legacy widgetIds to items
+  const items = useMemo(() => normalizeItems(widgetIds, itemsProp), [widgetIds, itemsProp]);
+
   // Local state
   const [collapsed, setCollapsed] = useState(collapsedProp ?? false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [localTitle, setLocalTitle] = useState(title);
-  const [maximizedWidget, setMaximizedWidget] = useState<string | null>(null);
+  const [maximizedItem, setMaximizedItem] = useState<GroupWidgetItem | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const addPickerRef = useRef<HTMLDivElement>(null);
+  const filtersRestoredRef = useRef(false);
 
   // Sync collapsed with prop
   useEffect(() => {
     if (collapsedProp !== undefined) setCollapsed(collapsedProp);
   }, [collapsedProp]);
 
-  // Register this group as a section on mount
+  // Register this group as a section on mount, then restore saved filters
   useEffect(() => {
     registerSection(groupId, sectionType);
+    if (savedFiltersProp && !filtersRestoredRef.current) {
+      filtersRestoredRef.current = true;
+      updateFilters(groupId, savedFiltersProp);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, sectionType, registerSection]);
 
   // Auto-focus title input when renaming
@@ -559,6 +741,34 @@ export function WidgetGroup({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showAddPicker]);
 
+  // ─── Build the group's dateFilter for cohi_widget children ───
+  const groupDateFilter = useMemo<DateFilter | null>(() => {
+    const dateField = filters.dateField || 'application_date';
+    if (filters.periodSelection?.dateRange) {
+      return {
+        column: dateField,
+        start: filters.periodSelection.dateRange.start,
+        end: filters.periodSelection.dateRange.end,
+      };
+    }
+    if (filters.dateRange) {
+      return {
+        column: dateField,
+        start: filters.dateRange.start,
+        end: filters.dateRange.end,
+      };
+    }
+    // Year-only selection
+    if (filters.year) {
+      return {
+        column: dateField,
+        start: `${filters.year}-01-01`,
+        end: `${filters.year}-12-31`,
+      };
+    }
+    return null;
+  }, [filters.dateField, filters.periodSelection, filters.dateRange, filters.year]);
+
   // ─── Payload updater (merges into existing payload) ───
   const patchPayload = useCallback(
     (patch: Record<string, unknown>) => {
@@ -567,17 +777,32 @@ export function WidgetGroup({
     [onUpdatePayload],
   );
 
+  // ─── Persist filter state into the payload so it survives save/reload ───
+  const filterSerialRef = useRef(0);
+  useEffect(() => {
+    // Skip the first render (mount) to avoid immediately overwriting
+    filterSerialRef.current += 1;
+    if (filterSerialRef.current <= 1) return;
+    // Pick just the serialisable filter fields we care about
+    const toSave: Record<string, unknown> = {};
+    if (filters.year) toSave.year = filters.year;
+    if (filters.dateRange) toSave.dateRange = filters.dateRange;
+    if (filters.periodSelection) toSave.periodSelection = filters.periodSelection;
+    if (filters.dateField && filters.dateField !== 'application_date') toSave.dateField = filters.dateField;
+    if (filters.applicationType && filters.applicationType !== 'Applications Taken') toSave.applicationType = filters.applicationType;
+    if (filters.actorType && filters.actorType !== 'loan_officer') toSave.actorType = filters.actorType;
+    patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType]);
+
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
 
   const gridLayout = useMemo(
-    () => buildDefaultLayout(widgetIds, widgetLayouts, layoutVersionProp),
-    [widgetIds, widgetLayouts, layoutVersionProp],
+    () => buildDefaultLayout(items, widgetLayouts, layoutVersionProp),
+    [items, widgetLayouts, layoutVersionProp],
   );
 
-  // Only persist layout on EXPLICIT user interaction (drag / resize end).
-  // We deliberately do NOT use onLayoutChange because it fires on mount and
-  // can corrupt the layout before the container dimensions are settled.
   const saveLayout = useCallback(
     (newLayout: Layout[]) => {
       patchPayload({ widgetLayouts: layoutToMap(newLayout), layoutVersion: LAYOUT_VERSION });
@@ -585,36 +810,85 @@ export function WidgetGroup({
     [patchPayload],
   );
 
-  // ─── Widget management ───
+  // ─── Item management ───
+  const persistItems = useCallback(
+    (nextItems: GroupWidgetItem[], extraPatch?: Record<string, unknown>) => {
+      // Persist both formats for backward compat
+      const nextWidgetIds = nextItems
+        .filter((i) => i.kind === 'registry')
+        .map((i) => (i as Extract<GroupWidgetItem, { kind: 'registry' }>).defId);
+      patchPayload({
+        items: nextItems,
+        widgetIds: nextWidgetIds,
+        ...extraPatch,
+      });
+    },
+    [patchPayload],
+  );
+
   const handleDelete = useCallback(
     (index: number) => {
-      const next = widgetIds.filter((_, i) => i !== index);
-      // Also clean up saved layout
-      const key = `${widgetIds[index]}__${index}`;
+      const next = items.filter((_, i) => i !== index);
+      // Clean up saved layout
+      const key = itemKey(items[index], index);
       const nextLayouts = { ...widgetLayouts };
       delete nextLayouts[key];
-      patchPayload({ widgetIds: next, widgetLayouts: nextLayouts, layoutVersion: LAYOUT_VERSION });
+      persistItems(next, { widgetLayouts: nextLayouts, layoutVersion: LAYOUT_VERSION });
     },
-    [widgetIds, widgetLayouts, patchPayload],
+    [items, widgetLayouts, persistItems],
   );
 
   const handleDuplicate = useCallback(
     (index: number) => {
-      const defId = widgetIds[index];
-      const next = [...widgetIds];
-      next.splice(index + 1, 0, defId);
-      // Don't copy layout – let auto-layout handle the new instance
-      patchPayload({ widgetIds: next });
+      const dup = { ...items[index] };
+      // Give cohi items a new id
+      if (dup.kind === 'cohi') {
+        (dup as any).id = `${dup.id}-dup-${Date.now()}`;
+      }
+      const next = [...items];
+      next.splice(index + 1, 0, dup);
+      persistItems(next);
     },
-    [widgetIds, patchPayload],
+    [items, persistItems],
   );
 
-  const handleAddWidget = useCallback(
-    (defId: string) => {
-      const next = [...widgetIds, defId];
-      patchPayload({ widgetIds: next });
+  const handleMoveItemToGroup = useCallback(
+    (index: number, targetGroupId: string) => {
+      if (!onMoveItemOut) return;
+      const movedItem = items[index];
+      // Remove item from this group
+      const next = items.filter((_, i) => i !== index);
+      const key = itemKey(items[index], index);
+      const nextLayouts = { ...widgetLayouts };
+      delete nextLayouts[key];
+      persistItems(next, { widgetLayouts: nextLayouts, layoutVersion: LAYOUT_VERSION });
+      // Tell the canvas to add the item to the target group
+      onMoveItemOut(movedItem, targetGroupId);
     },
-    [widgetIds, patchPayload],
+    [items, widgetLayouts, persistItems, onMoveItemOut],
+  );
+
+  /** Persist a viz type change for a cohi item back into the items array */
+  const handleVizTypeChange = useCallback(
+    (index: number, newType: string) => {
+      const item = items[index];
+      if (item.kind !== 'cohi') return;
+      const updated: GroupWidgetItem = {
+        ...item,
+        vizConfig: { ...item.vizConfig, type: newType as any },
+      };
+      const next = items.map((it, i) => (i === index ? updated : it));
+      persistItems(next);
+    },
+    [items, persistItems],
+  );
+
+  const handleAddRegistryWidget = useCallback(
+    (defId: string) => {
+      const next = [...items, { kind: 'registry' as const, defId }];
+      persistItems(next);
+    },
+    [items, persistItems],
   );
 
   // ─── Title management ───
@@ -680,7 +954,6 @@ export function WidgetGroup({
   // ─── Keyboard shortcuts ───
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Escape closes add picker
       if (e.key === 'Escape' && showAddPicker) {
         setShowAddPicker(false);
         e.stopPropagation();
@@ -690,6 +963,11 @@ export function WidgetGroup({
   );
 
   const colors = SECTION_COLORS[sectionType];
+
+  // Count items by kind
+  const registryCount = items.filter((i) => i.kind === 'registry').length;
+  const cohiCount = items.filter((i) => i.kind === 'cohi').length;
+  const itemLabel = `${items.length} widget${items.length !== 1 ? 's' : ''}${cohiCount > 0 ? ` (${cohiCount} Cohi)` : ''}`;
 
   return (
     <div
@@ -770,7 +1048,7 @@ export function WidgetGroup({
 
           {/* Widget count */}
           <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider shrink-0">
-            {widgetIds.length} widget{widgetIds.length !== 1 ? 's' : ''}
+            {itemLabel}
           </span>
 
           {/* Add widget */}
@@ -793,8 +1071,8 @@ export function WidgetGroup({
             {showAddPicker && (
               <AddWidgetPicker
                 sectionType={sectionType}
-                existingIds={widgetIds}
-                onAdd={handleAddWidget}
+                existingItems={items}
+                onAddRegistry={handleAddRegistryWidget}
                 onClose={() => setShowAddPicker(false)}
               />
             )}
@@ -874,8 +1152,8 @@ export function WidgetGroup({
             onDragStop={saveLayout}
             onResizeStop={saveLayout}
           >
-            {widgetIds.map((defId, idx) => {
-              const key = `${defId}__${idx}`;
+            {items.map((item, idx) => {
+              const key = itemKey(item, idx);
               const layoutItem = gridLayout.find((l) => l.i === key);
               const cellW = layoutItem
                 ? layoutItem.w * (contentWidth / GRID_COLS) - GRID_MARGIN[0]
@@ -887,19 +1165,23 @@ export function WidgetGroup({
               return (
                 <div key={key} className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden transition-shadow hover:shadow-md">
                   <GridCellWidget
-                    definitionId={defId}
+                    item={item}
                     width={cellW}
                     height={cellH}
+                    dateFilter={groupDateFilter}
                     onDelete={() => handleDelete(idx)}
                     onDuplicate={() => handleDuplicate(idx)}
-                    onMaximize={() => setMaximizedWidget(defId)}
+                    onMaximize={() => setMaximizedItem(item)}
+                    otherGroups={otherGroups}
+                    onMoveToGroup={(targetId) => handleMoveItemToGroup(idx, targetId)}
+                    onVizTypeChange={item.kind === 'cohi' ? (type) => handleVizTypeChange(idx, type) : undefined}
                   />
                 </div>
               );
             })}
           </GridLayout>
 
-          {widgetIds.length === 0 && (
+          {items.length === 0 && (
             <div className="w-full py-12 text-center text-sm text-slate-400 dark:text-slate-500">
               <Plus className="w-8 h-8 mx-auto mb-2 opacity-40" />
               No widgets yet. Click <strong>+ Add</strong> above to get started.
@@ -911,15 +1193,16 @@ export function WidgetGroup({
       {/* Collapsed placeholder */}
       {collapsed && (
         <div className="px-4 py-2 text-xs text-slate-400 dark:text-slate-500 italic">
-          {widgetIds.length} widget{widgetIds.length !== 1 ? 's' : ''} &middot; click the arrow to expand
+          {itemLabel} &middot; click the arrow to expand
         </div>
       )}
 
       {/* ═══════ Maximize dialog ═══════ */}
       <MaximizeDialog
-        definitionId={maximizedWidget}
-        open={maximizedWidget !== null}
-        onClose={() => setMaximizedWidget(null)}
+        item={maximizedItem}
+        open={maximizedItem !== null}
+        onClose={() => setMaximizedItem(null)}
+        dateFilter={groupDateFilter}
       />
     </div>
   );

@@ -1,47 +1,131 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Navigation } from '@/components/layout/Navigation';
-import { TopTieringSelectionAnalysis } from '@/components/performance/TopTieringSelectionAnalysis';
 import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
-import { MultiCohortComparison } from '@/components/workbench/MultiCohortComparison';
-import { IconBadge } from '@/components/workbench/IconBadge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { CanvasListItem } from '@/components/workbench/WorkbenchSidebar';
 import { api } from '@/lib/api';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { WorkbenchCanvas } from '@/components/workbench/WorkbenchCanvas';
-import { LayoutGrid, BarChart3, Users, Palette, FolderOpen, Heart, Search, MessageSquare } from 'lucide-react';
+import { Plus, X, Palette } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-
-type CanvasListItem = { id: string; title: string; content: any; created_at: string; updated_at: string; favorited: boolean };
+import { cn } from '@/lib/utils';
 
 export default function MyDashboard() {
   const { user } = useAuth();
   const { selectedTenantId } = useTenantStore();
   const effectiveTenantId = selectedTenantId || user?.tenant_id;
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [activeTab, setActiveTab] = useState('canvas');
   const [canvasList, setCanvasList] = useState<CanvasListItem[]>([]);
   const [loadCanvasId, setLoadCanvasId] = useState<string | null>(null);
+  const [canvasKey, setCanvasKey] = useState(0);
   const [canvasSearch, setCanvasSearch] = useState('');
+
+  // Track which canvases the user has "open" as tabs
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+
+  // Load canvas from URL parameter (e.g., /my-dashboard?canvas=abc123)
+  useEffect(() => {
+    const canvasParam = searchParams.get('canvas');
+    if (canvasParam) {
+      setLoadCanvasId(canvasParam);
+      // Ensure it shows up in open tabs
+      setOpenTabs((prev) => prev.includes(canvasParam) ? prev : [...prev, canvasParam]);
+      setActiveTabId(canvasParam);
+      searchParams.delete('canvas');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const fetchCanvases = useCallback(async () => {
     try {
-      const res = await api.request<{ canvases: CanvasListItem[] }>('/api/workbench/canvases');
+      const qs = effectiveTenantId ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}` : '';
+      const res = await api.request<{ canvases: CanvasListItem[] }>(`/api/workbench/canvases${qs}`);
       setCanvasList(res?.canvases ?? []);
     } catch {
       setCanvasList([]);
     }
-  }, []);
+  }, [effectiveTenantId]);
 
   useEffect(() => {
-    if (activeTab === 'canvas') fetchCanvases();
-  }, [activeTab, fetchCanvases]);
+    fetchCanvases();
+  }, [fetchCanvases]);
 
-  const filteredCanvases = canvasSearch.trim()
-    ? canvasList.filter((c) => c.title.toLowerCase().includes(canvasSearch.trim().toLowerCase()))
-    : canvasList;
+  // Open a canvas tab (from sidebar click)
+  const handleSelectCanvas = useCallback((id: string) => {
+    setOpenTabs((prev) => prev.includes(id) ? prev : [...prev, id]);
+    setActiveTabId(id);
+    setLoadCanvasId(id);
+  }, []);
+
+  // Create a new blank canvas tab
+  const handleNewCanvas = useCallback(() => {
+    const newTabId = `new-${Date.now()}`;
+    setOpenTabs((prev) => [...prev, newTabId]);
+    setActiveTabId(newTabId);
+    setLoadCanvasId(null);
+    setCanvasKey((k) => k + 1);
+  }, []);
+
+  // Close a tab
+  const handleCloseTab = useCallback((tabId: string) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((t) => t !== tabId);
+      // If closing the active tab, switch to the last remaining tab
+      if (activeTabId === tabId) {
+        const newActive = next.length > 0 ? next[next.length - 1] : null;
+        setActiveTabId(newActive);
+        if (newActive && !newActive.startsWith('new-')) {
+          setLoadCanvasId(newActive);
+        } else {
+          setLoadCanvasId(null);
+          setCanvasKey((k) => k + 1);
+        }
+      }
+      return next;
+    });
+  }, [activeTabId]);
+
+  // Switch to a tab
+  const handleSwitchTab = useCallback((tabId: string) => {
+    setActiveTabId(tabId);
+    if (!tabId.startsWith('new-')) {
+      setLoadCanvasId(tabId);
+    } else {
+      setLoadCanvasId(null);
+      setCanvasKey((k) => k + 1);
+    }
+  }, []);
+
+  // Delete canvas (from sidebar)
+  const handleDeleteCanvas = useCallback(async (id: string, title: string) => {
+    if (!confirm(`Delete "${title}"?`)) return;
+    try {
+      const qs = effectiveTenantId ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}` : '';
+      await api.request(`/api/workbench/canvases/${id}${qs}`, { method: 'DELETE' });
+      // Remove from tabs if open
+      setOpenTabs((prev) => prev.filter((t) => t !== id));
+      if (activeTabId === id) {
+        setActiveTabId(null);
+        setLoadCanvasId(null);
+        setCanvasKey((k) => k + 1);
+      }
+      fetchCanvases();
+    } catch { /* silently fail */ }
+  }, [effectiveTenantId, activeTabId, fetchCanvases]);
+
+  // Get tab title from canvas list
+  const getTabTitle = (tabId: string) => {
+    if (tabId.startsWith('new-')) return 'New Canvas';
+    const canvas = canvasList.find((c) => c.id === tabId);
+    return canvas?.title || 'Untitled';
+  };
+
+  // If no tabs are open and no URL canvas, show an empty state
+  const showEmptyState = openTabs.length === 0 && !loadCanvasId;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80">
@@ -52,130 +136,87 @@ export default function MyDashboard() {
           onSidebarOpenChange={setSidebarOpen}
           sidebarCollapsed={sidebarCollapsed}
           onSidebarCollapsedChange={setSidebarCollapsed}
+          canvasList={canvasList}
+          canvasSearch={canvasSearch}
+          onCanvasSearchChange={setCanvasSearch}
+          activeCanvasId={activeTabId}
+          onSelectCanvas={handleSelectCanvas}
+          onNewCanvas={handleNewCanvas}
+          onDeleteCanvas={handleDeleteCanvas}
         />
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex flex-1 min-w-0">
-            <div className="relative flex-1 px-4 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-auto">
-              <div className={activeTab === 'canvas' ? 'w-full mx-auto' : 'mx-auto max-w-[1600px]'}>
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                  <div className="mb-8 sm:mb-10">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div className="flex items-start gap-4">
-                        <IconBadge icon={LayoutGrid} variant="violet" size="xl" rounded="2xl" />
-                        <div>
-                          <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
-                            My Workbench
-                          </h1>
-                        </div>
-                      </div>
-                      <div className="hidden flex items-center gap-3 shrink-0">
-                        <TabsList>
-                          <TabsTrigger value="canvas" className="gap-2">
-                            <Palette className="h-4 w-4" />
-                            Canvas
-                          </TabsTrigger>
-                          <TabsTrigger value="selection" className="gap-2">
-                            <BarChart3 className="h-4 w-4" />
-                            Current Selection
-                          </TabsTrigger>
-                          <TabsTrigger value="comparison" className="gap-2">
-                            <Users className="h-4 w-4" />
-                            Cohort Comparison
-                          </TabsTrigger>
-                        </TabsList>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-2 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                          onClick={() => window.dispatchEvent(new Event('cohi-chat-open'))}
-                          title="Open Cohi Chat to ask questions and add insights to this canvas"
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                          Cohi Chat
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                  {activeTab === 'canvas' && canvasList.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                      <div className="flex items-center gap-2 min-w-0 max-w-xs sm:max-w-sm">
-                        <Search className="h-4 w-4 text-slate-400 shrink-0" />
-                        <Input
-                          placeholder="Search canvases…"
-                          value={canvasSearch}
-                          onChange={(e) => setCanvasSearch(e.target.value)}
-                          className="h-9 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
-                        />
-                      </div>
-                      <span className="text-sm text-slate-500 dark:text-slate-400 shrink-0">
-                        <FolderOpen className="h-4 w-4 inline mr-1 align-middle" />
-                        {filteredCanvases.length} canvas{filteredCanvases.length !== 1 ? 'es' : ''}
-                      </span>
-                    </div>
+          {/* Tab bar */}
+          <div className="flex items-center border-b border-slate-200/70 dark:border-slate-700/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-1 shrink-0 min-h-[37px]">
+            <div className="flex items-center gap-0 overflow-x-auto flex-1 min-w-0 scrollbar-none">
+              {openTabs.map((tabId) => (
+                <div
+                  key={tabId}
+                  className={cn(
+                    'group flex items-center gap-1.5 px-3 py-2 text-[13px] border-b-2 cursor-pointer transition-colors shrink-0 max-w-[180px]',
+                    activeTabId === tabId
+                      ? 'border-violet-500 text-violet-700 dark:text-violet-300 bg-violet-50/50 dark:bg-violet-900/20 font-medium'
+                      : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
                   )}
-                  {activeTab === 'canvas' && filteredCanvases.length > 0 && (
-                    <div className="mb-4 flex flex-wrap gap-2">
-                      {filteredCanvases.map((c) => (
-                        <Button
-                          key={c.id}
-                          variant="outline"
-                          size="sm"
-                          className="gap-2"
-                          onClick={() => {
-                            setLoadCanvasId(c.id);
-                            setActiveTab('canvas');
-                          }}
-                        >
-                          {c.favorited && <Heart className="h-4 w-4 fill-rose-500 text-rose-500" />}
-                          <span className="truncate max-w-[140px]">{c.title}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-
-                  <TabsContent value="canvas" className="mt-0">
-                    <WorkbenchCanvas
-                      loadCanvasId={loadCanvasId}
-                      onLoaded={() => {
-                        setLoadCanvasId(null);
-                        fetchCanvases();
-                      }}
-                      tenantId={effectiveTenantId}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="selection" className="mt-0">
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-                      {/* Main: Selection Overview */}
-                      <div className="lg:col-span-8">
-                        <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/70 bg-white/95 dark:bg-slate-900/80 shadow-md shadow-slate-200/40 dark:shadow-none backdrop-blur-sm overflow-hidden">
-                          <div className="px-5 pt-5 pb-4 border-b border-slate-100 dark:border-slate-800">
-                            <div className="flex items-center gap-3.5">
-                              <IconBadge icon={BarChart3} variant="sky" size="md" rounded="xl" />
-                              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Selection Overview</h2>
-                            </div>
-                          </div>
-                          <div className="p-5">
-                            <TopTieringSelectionAnalysis variant="inline" />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Sidebar: Compact summary */}
-                      <div className="lg:col-span-4">
-                        <div className="sticky top-24">
-                          <TopTieringSelectionAnalysis variant="compact" hideWhenEmpty />
-                        </div>
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="comparison" className="mt-0">
-                    <MultiCohortComparison />
-                  </TabsContent>
-                </Tabs>
-              </div>
+                  onClick={() => handleSwitchTab(tabId)}
+                >
+                  <span className="truncate">{getTabTitle(tabId)}</span>
+                  <button
+                    type="button"
+                    className="ml-0.5 p-0.5 rounded hover:bg-slate-200/80 dark:hover:bg-slate-700/80 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCloseTab(tabId);
+                    }}
+                    title="Close tab"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 ml-1 shrink-0 rounded-md text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30"
+              onClick={handleNewCanvas}
+              title="New canvas"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* Canvas content */}
+          <div className="flex-1 min-w-0 overflow-auto">
+            {showEmptyState ? (
+              <div className="flex flex-col items-center justify-center h-full text-center px-6 py-20">
+                <Palette className="h-12 w-12 text-slate-300 dark:text-slate-600 mb-4" />
+                <h2 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  No canvas open
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 max-w-sm">
+                  Select a canvas from the sidebar or create a new one to get started.
+                </p>
+                <Button
+                  className="gap-2 bg-violet-600 hover:bg-violet-700 text-white"
+                  onClick={handleNewCanvas}
+                >
+                  <Plus className="h-4 w-4" />
+                  New Canvas
+                </Button>
+              </div>
+            ) : (
+              <div className="relative flex-1 px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+                <WorkbenchCanvas
+                  key={canvasKey}
+                  loadCanvasId={loadCanvasId}
+                  onLoaded={() => {
+                    setLoadCanvasId(null);
+                    fetchCanvases();
+                  }}
+                  tenantId={effectiveTenantId}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

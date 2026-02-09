@@ -23,7 +23,7 @@ import { useWidgetData } from "@/components/widgets/data";
 import { SectionHeader } from "@/components/widgets/components/SectionHeader";
 import { WidgetGroup } from "@/components/widgets/components/WidgetGroup";
 import { CohiWidgetRenderer } from "./CohiWidgetRenderer";
-import type { CanvasLayoutItem, CanvasWidgetPayload } from "./types";
+import type { CanvasLayoutItem, CanvasWidgetPayload, GroupWidgetItem } from "./types";
 import {
   LayoutGrid,
   Lightbulb,
@@ -37,6 +37,9 @@ import {
   Image as ImageIcon,
   Table as TableIcon,
   GripVertical,
+  BarChart3,
+  Activity,
+  PieChart as PieChartIcon,
 } from "lucide-react";
 
 interface WidgetRendererProps {
@@ -45,26 +48,69 @@ interface WidgetRendererProps {
   width?: number;
   /** Called when a widget updates its payload (e.g. text block content). Omit to make widget read-only. */
   onUpdatePayload?: (payload: CanvasWidgetPayload) => void;
+  /** Other widget groups on the canvas (for moving items between groups) */
+  otherGroups?: { id: string; title: string }[];
+  /** Called when an item inside a widget_group is moved out to another group */
+  onMoveItemOut?: (item: GroupWidgetItem, targetGroupId: string) => void;
 }
+
+const CHART_TYPE_OPTIONS: {
+  type: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { type: 'bar', label: 'Bar', Icon: BarChart3 },
+  { type: 'line', label: 'Line', Icon: Activity },
+  { type: 'pie', label: 'Pie', Icon: PieChartIcon },
+  { type: 'area', label: 'Area', Icon: BarChart3 },
+  { type: 'donut', label: 'Donut', Icon: PieChartIcon },
+  { type: 'horizontal_bar', label: 'H-Bar', Icon: BarChart3 },
+  { type: 'table', label: 'Table', Icon: LayoutGrid },
+];
 
 function ChartWidget({
   payload,
 }: {
   payload: Extract<CanvasWidgetPayload, { type: "chart" }>;
 }) {
+  const [chartType, setChartType] = useState<string | null>(null);
+
   if (payload.type !== "chart" || !payload.config) return null;
   const config = payload.config as any;
+  const effectiveConfig = chartType ? { ...config, type: chartType } : config;
+
   return (
-    <div className="h-full w-full p-2 overflow-auto">
-      <EnhancedVisualization
-        config={{
-          ...config,
-          animated: true,
-          drilldownEnabled: false,
-        }}
-        height={200}
-        showInsights={false}
-      />
+    <div className="h-full w-full flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 p-2 overflow-auto">
+        <EnhancedVisualization
+          config={{
+            ...effectiveConfig,
+            animated: true,
+            drilldownEnabled: false,
+          }}
+          height={200}
+          showInsights={false}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 shrink-0">
+        <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-0.5">
+          Type:
+        </span>
+        {CHART_TYPE_OPTIONS.map(({ type, label, Icon }) => (
+          <button
+            key={type}
+            className={`h-6 px-1.5 text-[10px] rounded-md canvas-interactive inline-flex items-center ${
+              (chartType ?? config.type) === type
+                ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
+            }`}
+            onClick={() => setChartType(type)}
+          >
+            <Icon className="w-3 h-3 mr-0.5" />
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -806,6 +852,8 @@ export function WidgetRenderer({
   height = 200,
   width,
   onUpdatePayload,
+  otherGroups,
+  onMoveItemOut,
 }: WidgetRendererProps) {
   const { type, payload } = item;
   const style = { minHeight: height };
@@ -918,6 +966,7 @@ export function WidgetRenderer({
           title={payload.title}
           sectionType={payload.sectionType}
           widgetIds={payload.widgetIds}
+          items={payload.items}
           widgetLayouts={payload.widgetLayouts}
           layoutVersion={payload.layoutVersion}
           collapsed={payload.collapsed}
@@ -928,6 +977,9 @@ export function WidgetRenderer({
               ? (patch) => onUpdatePayload({ ...payload, ...patch })
               : undefined
           }
+          otherGroups={otherGroups}
+          onMoveItemOut={onMoveItemOut}
+          savedFilters={payload.savedFilters}
         />
       </div>
     );

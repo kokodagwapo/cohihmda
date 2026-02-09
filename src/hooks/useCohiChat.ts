@@ -432,41 +432,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
   );
 
   /**
-   * Save a visualization to custom dashboard
-   */
-  const saveVisualization = useCallback(
-    async (
-      visualization: VisualizationConfig,
-      question: string,
-      title?: string,
-      description?: string
-    ) => {
-      try {
-        const effectiveTenantId = await getEffectiveTenantId();
-        const endpoint = effectiveTenantId
-          ? `/api/cohi-chat/save-visualization?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "/api/cohi-chat/save-visualization";
-        
-        const response = await api.request(endpoint, {
-          method: "POST",
-          body: JSON.stringify({
-            title: title || visualization.title,
-            description,
-            question,
-            visualization,
-            queryConfig: {},
-          }),
-        });
-        return response;
-      } catch (error: any) {
-        console.error("[CohiChat] Error saving visualization:", error);
-        throw error;
-      }
-    },
-    [getEffectiveTenantId]
-  );
-
-  /**
    * Clear chat history
    */
   const clearMessages = useCallback(() => {
@@ -505,7 +470,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     sendMessage,
     addConversationTurn,
     refineQuery,
-    saveVisualization,
     clearMessages,
     newSession,
   };

@@ -2,3 +2,6 @@
 server/Procfile text eol=lf
 server/**/*.sh text eol=lf
 
+## SQL migration files must use LF to keep checksums consistent across platforms
+server/migrations/**/*.sql text eol=lf
+

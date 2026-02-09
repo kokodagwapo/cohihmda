@@ -1318,4 +1318,4 @@ export type DataChatMessage = CohiChatMessage;
 export type DataChatResponse = CohiChatResponse;
 
 // Export main functions
-export { generateQuery, executeQuery, buildVisualizationConfig };
+export { generateQuery, executeQuery, buildVisualizationConfig, formatDataRows };
