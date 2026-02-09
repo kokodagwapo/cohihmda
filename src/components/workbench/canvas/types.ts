@@ -51,7 +51,8 @@ export type CanvasWidgetType =
   | 'news_card'
   | 'text_block'
   | 'rich_text'
-  | 'image';
+  | 'image'
+  | 'cohi_widget';
 
 export interface CanvasLayoutItem {
   i: string;
@@ -93,7 +94,8 @@ export type CanvasWidgetPayload =
   | { type: 'news_card'; title: string; summary: string; link?: string }
   | { type: 'text_block'; content: string; title?: string }
   | { type: 'rich_text'; html: string }
-  | { type: 'image'; src: string; alt?: string };
+  | { type: 'image'; src: string; alt?: string }
+  | { type: 'cohi_widget'; sql: string; title: string; vizConfig: VisualizationConfig; explanation?: string };
 
 export const DEFAULT_LAYOUT_ITEM: Partial<CanvasLayoutItem> = {
   w: 360,

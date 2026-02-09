@@ -55,6 +55,8 @@ export interface ChatMessage {
   timestamp: Date;
   isLoading?: boolean;
   error?: string;
+  /** The SQL query that was generated (for "Show SQL" feature) */
+  sqlQuery?: string;
   sources?: {
     dataQuery?: boolean;
     knowledgeBase?: string[];
@@ -67,6 +69,7 @@ export interface CohiChatResponse {
   data?: any[];
   suggestedQuestions?: string[];
   error?: string;
+  sqlQuery?: string;
   sources?: {
     dataQuery?: boolean;
     knowledgeBase?: string[];
@@ -257,6 +260,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           data: response.data,
           timestamp: new Date(),
           error: response.error,
+          sqlQuery: response.sqlQuery,
           sources: response.sources,
         };
 
@@ -391,6 +395,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           data: response.data,
           timestamp: new Date(),
           error: response.error,
+          sqlQuery: response.sqlQuery,
           sources: response.sources,
         };
 

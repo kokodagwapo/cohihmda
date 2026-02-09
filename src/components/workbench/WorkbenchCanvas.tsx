@@ -7,6 +7,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { SectionType } from '@/stores/widgetSectionStore';
 import { Rnd } from 'react-rnd';
 import * as XLSX from 'xlsx';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
   Save,
@@ -91,6 +92,10 @@ import {
 } from '@/components/workbench/canvas/types';
 import { getWidgetDefinition } from '@/components/widgets/registry';
 import { WidgetDataProvider } from '@/components/widgets/data';
+import { WorkbenchCohiPanel } from '@/components/workbench/WorkbenchCohiPanel';
+import { useWorkbenchCohi } from '@/hooks/useWorkbenchCohi';
+import { serializeWidgetCatalog } from '@/utils/widgetCatalogSerializer';
+import type { WidgetAction } from '@/types/widgetActions';
 
 const UPLOAD_ALLOWED_TYPES = [
   'text/csv',
@@ -510,6 +515,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
   const [showCohiChat, setShowCohiChat] = useState(false);
+  const [showCohiPanel, setShowCohiPanel] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -520,6 +526,107 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const { toast } = useToast();
   const pendingPins = useCanvasPinStore((s) => s.pendingPins);
   const consumePendingPins = useCanvasPinStore((s) => s.consumePendingPins);
+
+  // --- Cohi Workbench Intelligence ---
+  const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
+  const {
+    messages: cohiMessages,
+    isLoading: cohiLoading,
+    suggestedQuestions: cohiSuggestions,
+    sendMessage: cohiSendMessage,
+    clearMessages: cohiClearMessages,
+  } = useWorkbenchCohi({
+    tenantId,
+    canvasItems: items,
+    widgetCatalog,
+  });
+
+  const handleCohiAction = useCallback(
+    (action: WidgetAction) => {
+      switch (action.type) {
+        case 'add_existing_widget': {
+          const def = getWidgetDefinition(action.widgetId);
+          if (!def) {
+            toast({ title: 'Widget not found', description: `Unknown widget: ${action.widgetId}`, variant: 'destructive' });
+            return;
+          }
+          // Find the correct section type from SECTION_TO_WIDGETS
+          let sectionType: SectionType = 'company-scorecard';
+          for (const [, cfg] of Object.entries(SECTION_TO_WIDGETS)) {
+            if (cfg.widgetIds.includes(action.widgetId)) {
+              sectionType = cfg.sectionType as SectionType;
+              break;
+            }
+          }
+          const groupId = `cohi-group-${Date.now()}`;
+          const newItem = createLayoutItem(
+            `canvas-${Date.now()}`,
+            'widget_group',
+            {
+              type: 'widget_group',
+              groupId,
+              title: def.group,
+              sectionType,
+              widgetIds: [action.widgetId],
+            },
+            { x: 20, y: 20, w: 500, h: 400 }
+          );
+          setItemsWithHistory([...items, newItem]);
+          toast({ title: 'Widget added', description: `Added "${def.name}" to canvas` });
+          break;
+        }
+        case 'suggest_dashboard': {
+          const section = SECTION_TO_WIDGETS[action.sectionKey as keyof typeof SECTION_TO_WIDGETS];
+          if (!section) {
+            toast({ title: 'Dashboard not found', description: `Unknown section: ${action.sectionKey}`, variant: 'destructive' });
+            return;
+          }
+          const gId = `cohi-dash-${Date.now()}`;
+          const dashItem = createLayoutItem(
+            `canvas-${Date.now()}`,
+            'widget_group',
+            {
+              type: 'widget_group',
+              groupId: gId,
+              title: action.sectionKey.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim(),
+              sectionType: section.sectionType as SectionType,
+              widgetIds: section.widgetIds,
+            },
+            { x: 20, y: 20, w: 1000, h: 800 }
+          );
+          setItemsWithHistory([...items, dashItem]);
+          toast({ title: 'Dashboard added', description: `Added ${section.widgetIds.length} widgets to canvas` });
+          break;
+        }
+        case 'create_widget': {
+          const cohiItem = createLayoutItem(
+            `canvas-${Date.now()}`,
+            'cohi_widget',
+            {
+              type: 'cohi_widget',
+              sql: action.sql,
+              title: action.title,
+              vizConfig: action.config,
+              explanation: action.explanation,
+            },
+            { x: 20, y: 20, w: 500, h: 350 }
+          );
+          setItemsWithHistory([...items, cohiItem]);
+          toast({ title: 'Widget created', description: action.title });
+          break;
+        }
+        case 'delete_widget': {
+          setItemsWithHistory(items.filter((it) => it.i !== action.instanceId));
+          toast({ title: 'Widget removed' });
+          break;
+        }
+        default:
+          // explain_widget, explain_schema, modify_widget – handled in chat only
+          break;
+      }
+    },
+    [items, setItemsWithHistory, toast]
+  );
 
   useEffect(() => {
     if (!loadCanvasId) return;
@@ -1542,9 +1649,10 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   return (
     <WidgetDataProvider>
     <div ref={containerRef} className="w-full">
+      <div className="flex min-h-[calc(100vh-12rem)]">
       <div
         id="workbench-canvas-root"
-        className="w-full min-h-[calc(100vh-12rem)] rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm flex flex-col overflow-hidden"
+        className="flex-1 min-w-0 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm flex flex-col overflow-hidden"
         style={canvasContainerStyle}
       >
         {/* Toolbar — single row, icon-first, compact */}
@@ -1831,13 +1939,17 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                     variant="outline"
                     size="sm"
                     className={`h-8 shrink-0 gap-1.5 text-xs font-medium ${showCohiChat ? 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-700' : ''}`}
-                    onClick={() => setShowCohiChat(!showCohiChat)}
+                    onClick={() => setShowCohiPanel(!showCohiPanel)}
+                    className={cn(
+                      'h-8 gap-1 text-xs px-2',
+                      showCohiPanel && 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                    )}
                   >
-                    <MessageSquare className="h-3.5 w-3.5" />
-                    Cohi Chat
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Cohi
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Toggle Cohi Chat</TooltipContent>
+                <TooltipContent side="bottom">Toggle Cohi Assistant</TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -2126,6 +2238,19 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           </div>
         </div>
       </div>
+
+      {/* Cohi Assistant Panel (docks right) */}
+      <WorkbenchCohiPanel
+        open={showCohiPanel}
+        onClose={() => setShowCohiPanel(false)}
+        messages={cohiMessages}
+        isLoading={cohiLoading}
+        suggestedQuestions={cohiSuggestions}
+        onSendMessage={cohiSendMessage}
+        onClearMessages={cohiClearMessages}
+        onExecuteAction={handleCohiAction}
+      />
+      </div>{/* end flex wrapper */}
 
       <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
         <AlertDialogContent>

@@ -22,6 +22,7 @@ import { getWidgetDefinition } from "@/components/widgets/registry";
 import { useWidgetData } from "@/components/widgets/data";
 import { SectionHeader } from "@/components/widgets/components/SectionHeader";
 import { WidgetGroup } from "@/components/widgets/components/WidgetGroup";
+import { CohiWidgetRenderer } from "./CohiWidgetRenderer";
 import type { CanvasLayoutItem, CanvasWidgetPayload } from "./types";
 import {
   LayoutGrid,
@@ -769,6 +770,37 @@ function RegistryWidgetEmbed({
   );
 }
 
+/**
+ * Wrapper that reads selectedTenantId from the store so CohiWidgetRenderer
+ * can pass it as a query parameter to the data-fetch endpoint.
+ */
+function CohiWidgetRendererWithTenant({
+  payload,
+  style,
+  width,
+  height,
+}: {
+  payload: Extract<CanvasWidgetPayload, { type: 'cohi_widget' }>;
+  style: React.CSSProperties;
+  width?: number;
+  height?: number;
+}) {
+  const { selectedTenantId } = useTenantStore();
+  return (
+    <div style={style} className="h-full w-full">
+      <CohiWidgetRenderer
+        sql={payload.sql}
+        vizConfig={payload.vizConfig}
+        title={payload.title}
+        explanation={payload.explanation}
+        tenantId={selectedTenantId}
+        width={width}
+        height={height}
+      />
+    </div>
+  );
+}
+
 export function WidgetRenderer({
   item,
   height = 200,
@@ -911,6 +943,16 @@ export function WidgetRenderer({
           />
         </div>
       </div>
+    );
+  }
+  if (type === "cohi_widget" && payload.type === "cohi_widget") {
+    return (
+      <CohiWidgetRendererWithTenant
+        payload={payload}
+        style={style}
+        width={width}
+        height={height}
+      />
     );
   }
   return (

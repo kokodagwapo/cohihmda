@@ -60,11 +60,17 @@ export const DEFAULT_PROMPT_CONFIGS: PromptConfig[] = [
 - Current Month: {{currentMonth}}
 - Current Quarter: Q{{currentQuarter}}
 
-## Handling Ambiguous Questions
-- "How are we doing?" → Show monthly loan volume trend to indicate business health
-- "Any issues?" → Show loans stuck in processing or with high LTV
-- "Performance update" → Show key metrics like total volume, count, average amount
-- When in doubt, provide aggregate metrics that give a high-level view
+## Handling Ambiguous / Open-Ended Questions (CRITICAL TIME SCOPING)
+When users ask broad questions, ALWAYS scope data to a RECENT time window. Never return all-time totals for "today"-style questions.
+
+- "What's important to know today?" / "What should I know?" →
+  Query RECENT activity (last 7-30 days): new applications, recent closings, pipeline changes, any anomalies.
+  Example SQL: recent app count, funding this week, pipeline by status WHERE application_date >= CURRENT_DATE - INTERVAL '90 days'
+- "How are we doing?" → Show monthly loan volume trend for the LAST 6 MONTHS, not all time
+- "Any issues?" → Show loans stuck in processing (active > 60 days old) or with high LTV, scoped to current pipeline only
+- "Performance update" → Show key metrics for THIS MONTH or THIS QUARTER vs. prior period
+- When in doubt, default to the LAST 90 DAYS as the time window, never all-time totals
+- For "top performers" / "leaderboard" questions, scope to recent activity (last 30-90 days)
 
 ## PostgreSQL Syntax Rules (IMPORTANT)
 1. ALWAYS use table alias "l" for the loans table: FROM public.loans l
@@ -90,7 +96,13 @@ export const DEFAULT_PROMPT_CONFIGS: PromptConfig[] = [
 7. For counts, use COUNT(*) or COUNT(DISTINCT field)
 8. Group by all non-aggregated columns
 9. Limit results to 100 rows unless specifically asked for more
-10. Order results meaningfully (by count DESC, by date, etc.)
+10. ORDER BY rules (CRITICAL — violations cause PostgreSQL errors):
+   - ALWAYS use column aliases or positional references (1, 2, 3) in ORDER BY
+   - NEVER re-derive expressions in ORDER BY that already appear in SELECT with an alias
+   - Good: SELECT TO_CHAR(DATE_TRUNC('month', l.app_date), 'Mon YYYY') AS period ... GROUP BY DATE_TRUNC('month', l.app_date) ORDER BY DATE_TRUNC('month', l.app_date)
+   - Better: SELECT DATE_TRUNC('month', l.app_date) AS sort_period, TO_CHAR(DATE_TRUNC('month', l.app_date), 'Mon YYYY') AS period ... GROUP BY sort_period, period ORDER BY sort_period
+   - Best for time series: include a hidden sortable column: SELECT DATE_TRUNC('month', l.application_date) AS sort_period, TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period, SUM(l.loan_amount) AS total ... GROUP BY sort_period, period ORDER BY sort_period
+   - For non-date ordering: ORDER BY 2 DESC (positional reference to the aggregated column)
 11. Use COALESCE for null handling when needed
 
 ## Visualization Selection & Data Aggregation Rules (CRITICAL)
@@ -105,13 +117,14 @@ export const DEFAULT_PROMPT_CONFIGS: PromptConfig[] = [
 2. When user asks for "by date" or "by month" or time-based charts:
    - Use DATE_TRUNC to group AND TO_CHAR to format for display
    - Aggregate values: SUM(loan_amount), COUNT(*), AVG(interest_rate), etc.
-3. DATE FORMATTING IS CRITICAL - always format dates for human readability:
-   - Daily: TO_CHAR(DATE_TRUNC('day', date_col), 'Mon DD') AS period  → "Jan 15"
-   - Weekly: TO_CHAR(DATE_TRUNC('week', date_col), '"Week of" Mon DD') AS period  → "Week of Jan 12"
-   - Monthly: TO_CHAR(DATE_TRUNC('month', date_col), 'Mon YYYY') AS period  → "Jan 2026"
-   - Quarterly: 'Q' || EXTRACT(QUARTER FROM date_col) || ' ' || EXTRACT(YEAR FROM date_col) AS period  → "Q1 2026"
-   - Yearly: EXTRACT(YEAR FROM date_col)::TEXT AS period  → "2026"
+3. DATE FORMATTING IS CRITICAL - always include a sortable column AND a display column:
+   - Daily: DATE_TRUNC('day', date_col) AS sort_period, TO_CHAR(DATE_TRUNC('day', date_col), 'Mon DD') AS period ... GROUP BY sort_period, period ORDER BY sort_period
+   - Weekly: DATE_TRUNC('week', date_col) AS sort_period, TO_CHAR(DATE_TRUNC('week', date_col), '"Week of" Mon DD') AS period ... GROUP BY sort_period, period ORDER BY sort_period
+   - Monthly: DATE_TRUNC('month', date_col) AS sort_period, TO_CHAR(DATE_TRUNC('month', date_col), 'Mon YYYY') AS period ... GROUP BY sort_period, period ORDER BY sort_period
+   - Quarterly: DATE_TRUNC('quarter', date_col) AS sort_period, 'Q' || EXTRACT(QUARTER FROM date_col) || ' ' || EXTRACT(YEAR FROM date_col) AS period ... GROUP BY sort_period, period ORDER BY sort_period
+   - Yearly: EXTRACT(YEAR FROM date_col)::TEXT AS period ... ORDER BY period
    NEVER return raw timestamps like "2026-01-19T00:00:00.000Z" - always use TO_CHAR!
+   The xKey in chartConfig should be "period" (the formatted display column), NOT "sort_period".
 4. When user asks for "by branch" or "by loan_officer" or category-based charts:
    - Group by the category field
    - Aggregate the metric (usually COUNT or SUM)
@@ -160,6 +173,15 @@ You have access to both a knowledge base (regulations, guidelines, policies) and
 
 Use the following context to provide a comprehensive answer that combines regulatory knowledge 
 with insights from their actual data where relevant.
+
+## Response Style Rules
+- Be SPECIFIC and ACTIONABLE. Instead of "monitor these closely", say exactly what to look for and why.
+- Use ACTUAL NUMBERS from the data. Never say "strong performance" without citing the figure.
+- When mentioning people, double-check that names and numbers are paired correctly. Never attribute numbers to the wrong person.
+- Time-scope your response: say "this month", "in the last 30 days", "this quarter" — never present data without indicating the time period.
+- Keep responses concise: 3-5 key bullet points, not 6+ paragraphs of padding.
+- Highlight changes and trends (up/down from prior period) rather than just static numbers.
+- If the data query failed or returned no results, say so honestly rather than making up numbers.
 
 {{combinedContext}}`,
     model: "gpt-4o-mini",

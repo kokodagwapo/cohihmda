@@ -65,6 +65,7 @@ import {
   LineChart,
   Calculator,
   Pin,
+  Code,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2997,6 +2998,7 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
 }) => {
   const isUser = message.role === "user";
   const styling = !isUser ? getMessageStyling(message.content) : null;
+  const [showSql, setShowSql] = useState(false);
 
   // Don't parse content - render as markdown to preserve structure
   const messageContent = message.content;
@@ -3152,6 +3154,24 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
                         </Button>
                       ))}
                     </div>
+
+                    {/* Show SQL toggle */}
+                    {message.sqlQuery && (
+                      <div className="border-t border-slate-200/50 dark:border-slate-700/50">
+                        <button
+                          onClick={() => setShowSql((prev) => !prev)}
+                          className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors w-full text-left"
+                        >
+                          <Code className="w-3 h-3" />
+                          {showSql ? "Hide SQL" : "Show SQL"}
+                        </button>
+                        {showSql && (
+                          <pre className="px-4 pb-3 text-[11px] font-mono text-slate-600 dark:text-slate-300 bg-slate-100/80 dark:bg-slate-900/60 overflow-x-auto whitespace-pre-wrap break-words leading-relaxed">
+                            {message.sqlQuery}
+                          </pre>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-3 bg-slate-100/60 dark:bg-slate-800/30">
                       <div className="flex items-center gap-2">
