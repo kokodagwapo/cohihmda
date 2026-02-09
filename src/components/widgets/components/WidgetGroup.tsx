@@ -61,6 +61,7 @@ import {
 } from '@/components/widgets/registry';
 import { useWidgetData } from '@/components/widgets/data';
 import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRenderer';
+import { WidgetDataProvider } from '@/components/widgets/data';
 import { useTenantStore } from '@/stores/tenantStore';
 import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
 import type { DateFilter } from '@/hooks/useCohiWidgetData';
@@ -1126,6 +1127,7 @@ export function WidgetGroup({
 
       {/* ═══════ Widget grid (collapsible) ═══════ */}
       {!collapsed && (
+        <WidgetDataProvider sectionId={groupId}>
         <div className="flex-1 min-h-0 overflow-auto px-3 py-2 canvas-interactive">
           <GridLayout
             className="layout"
@@ -1188,6 +1190,7 @@ export function WidgetGroup({
             </div>
           )}
         </div>
+        </WidgetDataProvider>
       )}
 
       {/* Collapsed placeholder */}

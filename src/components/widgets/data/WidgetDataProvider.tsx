@@ -45,6 +45,12 @@ interface WidgetDataContextValue {
 
 export interface WidgetDataProviderProps {
   children: React.ReactNode;
+  /**
+   * When provided, ALL data-source filter lookups use this specific section's
+   * filters instead of the default "find first by sectionType" strategy.
+   * Used by WidgetGroup to scope data fetches to the group's own filters.
+   */
+  sectionId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,23 +168,28 @@ function findSectionFilters(
 // Provider
 // ---------------------------------------------------------------------------
 
-export function WidgetDataProvider({ children }: WidgetDataProviderProps) {
+export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderProps) {
   const { selectedTenantId } = useTenantStore();
   const { selectedChannel } = useChannelStore();
 
   // Subscribe to the full section map – any filter change triggers re-render
   const sections = useWidgetSectionStore((s) => s.sections);
 
+  // When sectionId is provided (scoped provider inside a WidgetGroup),
+  // use that section's filters for ALL data sources so the group's date
+  // filter controls actually drive the data hooks.
+  const scopedFilters = sectionId ? (sections[sectionId] ?? DEFAULT_SECTION_FILTERS) : null;
+
   // Find filters for each source type
-  const csFilters = useMemo(() => findSectionFilters(sections, 'company-scorecard'), [sections]);
-  const crFilters = useMemo(() => findSectionFilters(sections, 'credit-risk'), [sections]);
-  const ssFilters = useMemo(() => findSectionFilters(sections, 'sales-scorecard'), [sections]);
-  const osFilters = useMemo(() => findSectionFilters(sections, 'operations-scorecard'), [sections]);
-  const otFilters = useMemo(() => findSectionFilters(sections, 'operations-trends'), [sections]);
-  const stFilters = useMemo(() => findSectionFilters(sections, 'sales-trends'), [sections]);
-  const fnFilters = useMemo(() => findSectionFilters(sections, 'funnel'), [sections]);
-  const ttcFilters = useMemo(() => findSectionFilters(sections, 'top-tiering-comparison'), [sections]);
-  const lbFilters = useMemo(() => findSectionFilters(sections, 'leaderboard'), [sections]);
+  const csFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'company-scorecard'), [sections, scopedFilters]);
+  const crFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'credit-risk'), [sections, scopedFilters]);
+  const ssFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'sales-scorecard'), [sections, scopedFilters]);
+  const osFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'operations-scorecard'), [sections, scopedFilters]);
+  const otFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'operations-trends'), [sections, scopedFilters]);
+  const stFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'sales-trends'), [sections, scopedFilters]);
+  const fnFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'funnel'), [sections, scopedFilters]);
+  const ttcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'top-tiering-comparison'), [sections, scopedFilters]);
+  const lbFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'leaderboard'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
