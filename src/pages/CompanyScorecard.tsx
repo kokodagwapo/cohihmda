@@ -14,11 +14,14 @@ import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { ExportShareMenu } from '@/components/common/ExportShareMenu';
 import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';
+import { KPICard, formatKPIValue } from '@/components/widgets/components/KPICard';
+import { ChartCard } from '@/components/widgets/components/ChartCard';
+import type { KPIData, ChartData, WidgetRenderProps } from '@/components/widgets/registry/types';
 
 const CompanyScorecard = () => {
   const pageRef = useRef<HTMLDivElement>(null);
@@ -758,161 +761,96 @@ const CompanyScorecard = () => {
             </div>
           </div>
 
-          {/* KPI Cards */}
+          {/* KPI Cards – shared widget components */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-4">
-            <Card
-              role="button"
-              tabIndex={0}
+            <KPICard
+              data={{ value: kpiData.totalLoansWithRespa, label: 'Units', format: 'number', subtitle: `of ${kpiData.loansStarted.toLocaleString('en-US')} started` }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('Units (Applications Taken)', 'applicationsTaken')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">UNITS</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(kpiData.totalLoansWithRespa)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
+              config={{ color: 'blue' }}
+            />
+            <KPICard
+              data={{ value: kpiData.totalVolume, label: 'Volume', format: 'currency' }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('Volume (Applications Taken $)', 'applicationsTakenDollar')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">VOLUME</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(kpiData.totalVolume)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
+              config={{ color: 'emerald' }}
+            />
+            <KPICard
+              data={{ value: averageLoanSize, label: 'Avg Loan Size', format: 'currency' }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('Average Loan Size', 'avgLoanSize')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">AVERAGE LOAN SIZE</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatNumber(Math.round(averageLoanSize))}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
+              config={{ color: 'sky' }}
+            />
+            <KPICard
+              data={{ value: kpiData.wac, label: 'WAC', format: 'ratio' }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('WAC', 'wac')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WAC</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{kpiData.wac.toFixed(3)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
+              config={{ color: 'indigo' }}
+            />
+            <KPICard
+              data={{ value: kpiData.waFico, label: 'WA FICO', format: 'number' }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('WA FICO', 'waFico')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA FICO</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{Math.round(kpiData.waFico || 0)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
+              config={{ color: 'amber' }}
+            />
+            <KPICard
+              data={{ value: kpiData.waLtv, label: 'WA LTV', format: 'percent' }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('WA LTV', 'waLtv')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA LTV</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waLtv || 0).toFixed(1)}</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              role="button"
-              tabIndex={0}
+              config={{ color: 'violet' }}
+            />
+            <KPICard
+              data={{ value: kpiData.waDti, label: 'WA DTI', format: 'percent' }}
+              loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('WA DTI', 'waDti')}
-              className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
-            >
-              <CardContent className="pt-6">
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">WA DTI</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{(kpiData.waDti || 0).toFixed(1)}</p>
-              </CardContent>
-            </Card>
+              config={{ color: 'rose' }}
+            />
           </div>
         </div>
 
-        {/* Charts Section */}
+        {/* Charts Section – shared widget components */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          <Card
+          <div
             role="button"
             tabIndex={0}
             onClick={() => openDrilldown('Volume by Branch', 'applicationsTakenDollar', 'branch')}
-            className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            className="cursor-pointer transition hover:-translate-y-0.5"
           >
-            <CardHeader>
-              <CardTitle className="text-lg">Volume by Branch ($M)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {branchVolumeData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={branchVolumeData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
-                    <XAxis dataKey="name" stroke={isDarkMode ? '#cbd5e1' : '#64748b'} />
-                    <YAxis stroke={isDarkMode ? '#cbd5e1' : '#64748b'} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
-                        border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                      }}
-                      formatter={(value: any, name: any, props: any) => [`$${value}M`, props.payload.fullName]}
-                    />
-                    <Bar dataKey="volume" fill="#3b82f6" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-[300px] text-slate-500">No branch data available</div>
-              )}
-            </CardContent>
-          </Card>
+            <ChartCard
+              data={branchVolumeData.length > 0 ? {
+                title: 'Volume by Branch ($M)',
+                chartType: 'bar',
+                data: branchVolumeData,
+                series: [{ dataKey: 'volume', name: 'Volume ($M)', color: '#3b82f6' }],
+                xAxisKey: 'name',
+              } : null}
+              loading={false}
+              error={branchVolumeData.length === 0 ? 'No branch data available' : null}
+              width={500}
+              height={380}
+            />
+          </div>
 
-          <Card
+          <div
             role="button"
             tabIndex={0}
             onClick={() => openDrilldown('Pull-Through by Branch', 'originatedUnitsPct', 'branch')}
-            className={`cursor-pointer rounded-xl backdrop-blur-sm transition hover:-translate-y-0.5 ${isDarkMode ? 'border-slate-700/50 bg-slate-800/70 shadow-[0_8px_24px_rgba(0,0,0,0.3)]' : 'border-blue-200/40 bg-white shadow-[0_8px_24px_rgba(59,130,246,0.08)]'}`}
+            className="cursor-pointer transition hover:-translate-y-0.5"
           >
-            <CardHeader>
-              <CardTitle className="text-lg">Pull-Through by Branch (%)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {branchPullThroughData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={branchPullThroughData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#475569' : '#e2e8f0'} />
-                    <XAxis dataKey="name" stroke={isDarkMode ? '#cbd5e1' : '#64748b'} />
-                    <YAxis stroke={isDarkMode ? '#cbd5e1' : '#64748b'} domain={[0, 100]} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: isDarkMode ? '#1e293b' : '#ffffff',
-                        border: isDarkMode ? '1px solid #475569' : '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                      }}
-                      formatter={(value: any, name: any, props: any) => [`${value.toFixed(1)}%`, props.payload.fullName]}
-                    />
-                    <Bar dataKey="pullThrough" fill="#10b981" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-[300px] text-slate-500">No branch data available</div>
-              )}
-            </CardContent>
-          </Card>
+            <ChartCard
+              data={branchPullThroughData.length > 0 ? {
+                title: 'Pull-Through by Branch (%)',
+                chartType: 'bar',
+                data: branchPullThroughData,
+                series: [{ dataKey: 'pullThrough', name: 'Pull-Through %', color: '#10b981' }],
+                xAxisKey: 'name',
+              } : null}
+              loading={false}
+              error={branchPullThroughData.length === 0 ? 'No branch data available' : null}
+              width={500}
+              height={380}
+            />
+          </div>
         </div>
 
         {/* Tabular Data Section */}

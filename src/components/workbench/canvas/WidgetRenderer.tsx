@@ -8,16 +8,22 @@ import { EnhancedVisualization } from "@/components/visualizations/EnhancedVisua
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
 import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
-import { LoanFunnelView } from "@/components/dashboard/views/LoanFunnelView";
-import { TopTieringComparisonView } from "@/components/dashboard/views/TopTieringComparisonView";
-import { OperationsScorecardView } from "@/components/dashboard/views/OperationsScorecardView";
-import { OperationScorecardTrendsView } from "@/components/dashboard/views/OperationScorecardTrendsView";
-import { FinancialModelingSandboxView } from "@/components/dashboard/views/FinancialModelingSandboxView";
+import { LoanFunnelView } from "@/components/views/LoanFunnelView";
+import { TopTieringComparisonView } from "@/components/views/TopTieringComparisonView";
+import { OperationsScorecardView } from "@/components/views/OperationsScorecardView";
+import { OperationScorecardTrendsView } from "@/components/views/OperationScorecardTrendsView";
+import { FinancialModelingSandboxView } from "@/components/views/FinancialModelingSandboxView";
 import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
-import type { CanvasLayoutItem, CanvasWidgetPayload } from "./types";
+import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
+import { getWidgetDefinition } from "@/components/widgets/registry";
+import { useWidgetData } from "@/components/widgets/data";
+import { SectionHeader } from "@/components/widgets/components/SectionHeader";
+import { WidgetGroup } from "@/components/widgets/components/WidgetGroup";
+import { CohiWidgetRenderer } from "./CohiWidgetRenderer";
+import type { CanvasLayoutItem, CanvasWidgetPayload, GroupWidgetItem } from "./types";
 import {
   LayoutGrid,
   Lightbulb,
@@ -31,6 +37,9 @@ import {
   Image as ImageIcon,
   Table as TableIcon,
   GripVertical,
+  BarChart3,
+  Activity,
+  PieChart as PieChartIcon,
 } from "lucide-react";
 
 interface WidgetRendererProps {
@@ -39,26 +48,69 @@ interface WidgetRendererProps {
   width?: number;
   /** Called when a widget updates its payload (e.g. text block content). Omit to make widget read-only. */
   onUpdatePayload?: (payload: CanvasWidgetPayload) => void;
+  /** Other widget groups on the canvas (for moving items between groups) */
+  otherGroups?: { id: string; title: string }[];
+  /** Called when an item inside a widget_group is moved out to another group */
+  onMoveItemOut?: (item: GroupWidgetItem, targetGroupId: string) => void;
 }
+
+const CHART_TYPE_OPTIONS: {
+  type: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { type: 'bar', label: 'Bar', Icon: BarChart3 },
+  { type: 'line', label: 'Line', Icon: Activity },
+  { type: 'pie', label: 'Pie', Icon: PieChartIcon },
+  { type: 'area', label: 'Area', Icon: BarChart3 },
+  { type: 'donut', label: 'Donut', Icon: PieChartIcon },
+  { type: 'horizontal_bar', label: 'H-Bar', Icon: BarChart3 },
+  { type: 'table', label: 'Table', Icon: LayoutGrid },
+];
 
 function ChartWidget({
   payload,
 }: {
   payload: Extract<CanvasWidgetPayload, { type: "chart" }>;
 }) {
+  const [chartType, setChartType] = useState<string | null>(null);
+
   if (payload.type !== "chart" || !payload.config) return null;
   const config = payload.config as any;
+  const effectiveConfig = chartType ? { ...config, type: chartType } : config;
+
   return (
-    <div className="h-full w-full p-2 overflow-auto">
-      <EnhancedVisualization
-        config={{
-          ...config,
-          animated: true,
-          drilldownEnabled: false,
-        }}
-        height={200}
-        showInsights={false}
-      />
+    <div className="h-full w-full flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 p-2 overflow-auto">
+        <EnhancedVisualization
+          config={{
+            ...effectiveConfig,
+            animated: true,
+            drilldownEnabled: false,
+          }}
+          height={200}
+          showInsights={false}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 border-t border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/40 shrink-0">
+        <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-0.5">
+          Type:
+        </span>
+        {CHART_TYPE_OPTIONS.map(({ type, label, Icon }) => (
+          <button
+            key={type}
+            className={`h-6 px-1.5 text-[10px] rounded-md canvas-interactive inline-flex items-center ${
+              (chartType ?? config.type) === type
+                ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
+            }`}
+            onClick={() => setChartType(type)}
+          >
+            <Icon className="w-3 h-3 mr-0.5" />
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -204,9 +256,6 @@ function DashboardSectionEmbed({
   const scrollStyle = fixedSize
     ? { width: refWidth, height, minHeight: height, maxHeight: height }
     : { minHeight: height ?? 200, maxHeight: height ?? "100%" };
-  const iframeStyle = fixedSize
-    ? { width: refWidth, height, minHeight: height, maxHeight: height }
-    : { minHeight: height ?? 200, maxHeight: height ?? "100%" };
 
   switch (payload.sectionId) {
     case "leaderboard":
@@ -300,59 +349,20 @@ function DashboardSectionEmbed({
         </div>
       );
     case "creditRiskManagement":
-      return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Credit Risk Management"
-            src="/credit-risk-management"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
-        </div>
-      );
     case "companyScorecard":
-      return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Company Scorecard"
-            src="/company-scorecard"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
-        </div>
-      );
     case "salesScorecard":
-      return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Sales Scorecard"
-            src="/sales-scorecard"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
-        </div>
-      );
     case "salesTrends":
+      // These sections are now decomposed into individual registry widgets.
+      // If a legacy saved canvas still has this type, show a migration hint.
       return (
-        <div
-          className="h-full w-full overflow-hidden rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={iframeStyle}
-        >
-          <iframe
-            title="Sales Trends"
-            src="/sales-trends"
-            className="h-full w-full border-0"
-            loading="lazy"
-          />
+        <div className="h-full w-full p-4 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-600">
+          <LayoutGrid className="w-8 h-8 text-slate-400 dark:text-slate-500 mb-2" />
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            {payload.title || payload.sectionId}
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center max-w-[260px]">
+            This section now uses individual widgets. Remove this block and re-add from the Add menu to get drag-and-drop KPIs and charts.
+          </p>
         </div>
       );
     case "aletheiaInsights":
@@ -749,11 +759,101 @@ function RichTextWidget({
   );
 }
 
+// Section-type to accent color for the left border on grouped widgets
+const SECTION_ACCENT: Record<string, string> = {
+  'company-scorecard': 'border-l-indigo-500',
+  'credit-risk': 'border-l-emerald-500',
+  'sales-scorecard': 'border-l-violet-500',
+};
+
+/** Renders a registry-based widget using the widget architecture.
+ *  Data is provided by the WidgetDataProvider context wrapping the canvas. */
+function RegistryWidgetEmbed({
+  payload,
+  width,
+  height,
+}: {
+  payload: Extract<CanvasWidgetPayload, { type: "registry_widget" }>;
+  width?: number;
+  height?: number;
+}) {
+  const definition = getWidgetDefinition(payload.definitionId);
+
+  // Determine accent class for section grouping
+  const sectionType = payload.sectionId
+    ? useWidgetSectionStore.getState().sections[payload.sectionId]?.sectionType
+    : undefined;
+  const accentClass = sectionType ? SECTION_ACCENT[sectionType] ?? '' : '';
+
+  if (!definition) {
+    return (
+      <div className="h-full w-full flex items-center justify-center text-sm text-slate-400 dark:text-slate-500 p-4">
+        Widget not found: {payload.definitionId}
+      </div>
+    );
+  }
+
+  // Read data from the shared WidgetDataProvider context, scoped to this section
+  const { data: selectedData, loading, error } = useWidgetData(
+    definition.dataSource,
+    definition.dataSelector,
+    payload.sectionId,
+  );
+
+  const Component = definition.component;
+
+  return (
+    <div className={accentClass ? `h-full w-full border-l-[3px] ${accentClass} rounded-l-sm` : 'h-full w-full'}>
+      <Component
+        data={selectedData}
+        loading={loading}
+        error={error}
+        width={width ?? definition.defaultSize.w}
+        height={height ?? definition.defaultSize.h}
+        config={payload.config}
+      />
+    </div>
+  );
+}
+
+/**
+ * Wrapper that reads selectedTenantId from the store so CohiWidgetRenderer
+ * can pass it as a query parameter to the data-fetch endpoint.
+ */
+function CohiWidgetRendererWithTenant({
+  payload,
+  style,
+  width,
+  height,
+}: {
+  payload: Extract<CanvasWidgetPayload, { type: 'cohi_widget' }>;
+  style: React.CSSProperties;
+  width?: number;
+  height?: number;
+}) {
+  const { selectedTenantId } = useTenantStore();
+  return (
+    <div style={style} className="h-full w-full">
+      <CohiWidgetRenderer
+        sql={payload.sql}
+        vizConfig={payload.vizConfig}
+        title={payload.title}
+        explanation={payload.explanation}
+        tenantId={selectedTenantId}
+        width={width}
+        height={height}
+      />
+    </div>
+  );
+}
+
 export function WidgetRenderer({
   item,
   height = 200,
   width,
   onUpdatePayload,
+  otherGroups,
+  onMoveItemOut,
 }: WidgetRendererProps) {
   const { type, payload } = item;
   const style = { minHeight: height };
@@ -840,6 +940,50 @@ export function WidgetRenderer({
         />
       </div>
     );
+  if (type === "registry_widget" && payload.type === "registry_widget") {
+    return (
+      <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
+        <RegistryWidgetEmbed payload={payload} width={width} height={height} />
+      </div>
+    );
+  }
+  if (type === "section_header" && payload.type === "section_header") {
+    return (
+      <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
+        <SectionHeader
+          sectionId={payload.sectionId}
+          title={payload.title}
+          sectionType={payload.sectionType}
+        />
+      </div>
+    );
+  }
+  if (type === "widget_group" && payload.type === "widget_group") {
+    return (
+      <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
+        <WidgetGroup
+          groupId={payload.groupId}
+          title={payload.title}
+          sectionType={payload.sectionType}
+          widgetIds={payload.widgetIds}
+          items={payload.items}
+          widgetLayouts={payload.widgetLayouts}
+          layoutVersion={payload.layoutVersion}
+          collapsed={payload.collapsed}
+          width={width ?? 800}
+          height={height}
+          onUpdatePayload={
+            onUpdatePayload
+              ? (patch) => onUpdatePayload({ ...payload, ...patch })
+              : undefined
+          }
+          otherGroups={otherGroups}
+          onMoveItemOut={onMoveItemOut}
+          savedFilters={payload.savedFilters}
+        />
+      </div>
+    );
+  }
   if (type === "image" && payload.type === "image") {
     return (
       <div style={style} className="h-full w-full p-3">
@@ -851,6 +995,16 @@ export function WidgetRenderer({
           />
         </div>
       </div>
+    );
+  }
+  if (type === "cohi_widget" && payload.type === "cohi_widget") {
+    return (
+      <CohiWidgetRendererWithTenant
+        payload={payload}
+        style={style}
+        width={width}
+        height={height}
+      />
     );
   }
   return (

@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { X, ChevronRight, ArrowDown, Users, AlertTriangle, DollarSign, FileCheck, Target } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { LoanFunnelView } from '@/components/dashboard/views/LoanFunnelView';
+import { LoanFunnelView } from '@/components/views/LoanFunnelView';
 
 interface BranchLO {
   name: string;

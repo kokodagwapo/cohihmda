@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Filter, X, Calendar, ShieldCheck, TrendingUp, TrendingDown, BarChart3, PieChart, AlertCircle, CheckCircle2, User, Building2, Maximize2, Minimize2, Plus, CheckSquare, Square } from 'lucide-react';
+import { KPICard } from '@/components/widgets/components/KPICard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { Navigation } from '@/components/layout/Navigation';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import {
   Dialog,
   DialogContent,
@@ -719,31 +720,30 @@ export default function CreditRiskManagement() {
               </div>
             </div>
 
-            {/* KPI Cards - Enhanced Spacing and Design */}
+            {/* KPI Cards – shared widget components */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-              {kpiCards.map((card, idx) => {
-                const Icon = card.icon;
-                return (
-                  <div 
-                    key={idx} 
-                    className={cn(
-                      "relative bg-gradient-to-br", card.color,
-                      "rounded-xl p-5 text-white shadow-lg overflow-hidden group hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
-                    )}
-                  >
-                    <div className="absolute top-0 right-0 w-28 h-28 bg-white/10 rounded-full blur-2xl" />
-                    <div className="absolute bottom-0 left-0 w-20 h-20 bg-white/5 rounded-full blur-xl" />
-                    
-                    <div className="relative z-10">
-                      <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mb-3 shadow-md group-hover:bg-white/30 transition-colors">
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div className="text-2xl sm:text-3xl font-bold mb-1 tracking-tight">{card.value}</div>
-                      <div className="text-white/90 text-xs font-medium uppercase tracking-wider">{card.label}</div>
-                    </div>
-                  </div>
-                );
-              })}
+              {(() => {
+                const kpis = data?.kpis || { units: 0, volume: 0, wac: 0, waFico: 0, waLtv: 0, waDti: 0 };
+                const kpiItems: Array<{ value: number; label: string; format: 'number' | 'currency' | 'ratio' | 'percent'; color: string }> = [
+                  { value: kpis.units, label: 'Units', format: 'number', color: 'blue' },
+                  { value: kpis.volume, label: 'Volume', format: 'currency', color: 'emerald' },
+                  { value: kpis.wac, label: 'WAC', format: 'ratio', color: 'violet' },
+                  { value: kpis.waFico, label: 'WA FICO', format: 'number', color: 'amber' },
+                  { value: kpis.waLtv, label: 'WA LTV', format: 'percent', color: 'sky' },
+                  { value: kpis.waDti, label: 'WA DTI', format: 'percent', color: 'rose' },
+                ];
+                return kpiItems.map((item, idx) => (
+                  <KPICard
+                    key={idx}
+                    data={{ value: item.value, label: item.label, format: item.format }}
+                    loading={false}
+                    error={null}
+                    width={180}
+                    height={120}
+                    config={{ color: item.color }}
+                  />
+                ));
+              })()}
             </div>
 
             {/* Charts and Table Section */}

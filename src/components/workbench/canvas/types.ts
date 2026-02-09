@@ -3,6 +3,7 @@
  */
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
+import type { SectionType, SectionFilters } from '@/stores/widgetSectionStore';
 
 /** Single upload record for canvas (file analyzed via /api/data-chat/analyze-file) */
 export interface CanvasUpload {
@@ -43,11 +44,15 @@ export type CanvasWidgetType =
   | 'kpi'
   | 'table'
   | 'dashboard_section'
+  | 'registry_widget'
+  | 'section_header'
+  | 'widget_group'
   | 'pinned_insight'
   | 'news_card'
   | 'text_block'
   | 'rich_text'
-  | 'image';
+  | 'image'
+  | 'cohi_widget';
 
 export interface CanvasLayoutItem {
   i: string;
@@ -61,16 +66,64 @@ export interface CanvasLayoutItem {
   payload: CanvasWidgetPayload;
 }
 
+// ---------------------------------------------------------------------------
+// GroupWidgetItem – polymorphic items that live inside a WidgetGroup
+// ---------------------------------------------------------------------------
+
+/** An item inside a WidgetGroup – either a registry widget or a SQL-backed Cohi widget */
+export type GroupWidgetItem =
+  | { kind: 'registry'; defId: string }
+  | {
+      kind: 'cohi';
+      /** Stable id for this item within the group */
+      id: string;
+      sql: string;
+      title: string;
+      vizConfig: VisualizationConfig;
+      explanation?: string;
+    };
+
+// ---------------------------------------------------------------------------
+// Canvas widget payloads
+// ---------------------------------------------------------------------------
+
 export type CanvasWidgetPayload =
   | { type: 'chart'; config: VisualizationConfig }
   | { type: 'kpi'; label: string; value: number | string; format?: 'number' | 'currency' | 'percent' }
   | { type: 'table'; columns: { key: string; label: string }[]; data: any[] }
   | { type: 'dashboard_section'; sectionId: string; title: string; hiddenSections?: string[]; displayMode?: 'full' | 'compact' | 'hidden' }
+  | { type: 'registry_widget'; definitionId: string; sectionId?: string; config?: Record<string, unknown> }
+  | { type: 'section_header'; sectionId: string; title: string; sectionType: SectionType }
+  | {
+      type: 'widget_group';
+      /** Unique group identifier – keys into widgetSectionStore for filters */
+      groupId: string;
+      /** Display title for the group header */
+      title: string;
+      /** Data source type – controls which data hooks respond to this group's filters */
+      sectionType: SectionType;
+      /**
+       * @deprecated Use `items` instead.  Kept for backward compatibility –
+       * if present and `items` is absent, each entry is treated as a registry defId.
+       */
+      widgetIds: string[];
+      /** Mixed items: registry widgets and/or SQL-backed Cohi widgets */
+      items?: GroupWidgetItem[];
+      /** Per-widget grid layout overrides (react-grid-layout format, grid-unit coords) */
+      widgetLayouts?: Record<string, { x: number; y: number; w: number; h: number }>;
+      /** Grid config version – stale layouts from older configs are auto-discarded */
+      layoutVersion?: number;
+      /** Whether the group body is collapsed */
+      collapsed?: boolean;
+      /** Persisted filter state (year, dateRange, periodSelection, dateField, etc.) */
+      savedFilters?: Partial<SectionFilters>;
+    }
   | { type: 'pinned_insight'; title: string; content: string; visualization?: VisualizationConfig }
   | { type: 'news_card'; title: string; summary: string; link?: string }
   | { type: 'text_block'; content: string; title?: string }
   | { type: 'rich_text'; html: string }
-  | { type: 'image'; src: string; alt?: string };
+  | { type: 'image'; src: string; alt?: string }
+  | { type: 'cohi_widget'; sql: string; title: string; vizConfig: VisualizationConfig; explanation?: string };
 
 export const DEFAULT_LAYOUT_ITEM: Partial<CanvasLayoutItem> = {
   w: 360,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -26,9 +26,17 @@ import {
   getTierColorClass,
   getTierDisplayName
 } from '@/hooks/useOperationsScorecardData';
+import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
 
 type ScorecardActor = OperationsActorType;
 type DateRange = DateRangeType;
+
+/** Map a PeriodPreset to Operations Scorecard DateRangeType */
+const mapPresetToOpsDateRange = (preset?: PeriodPreset): DateRangeType => {
+  if (preset === 'rolling-6') return '6-months';
+  if (preset === 'rolling-12') return '12-months';
+  return '3-months';
+};
 
 interface OperationsScorecardViewProps {
   selectedTenantId?: string | null;
@@ -317,6 +325,18 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     const saved = localStorage.getItem('op-scorecard-dateRange');
     return (saved as DateRange) || '3-months';
   });
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
+  const [opsCustomDateRange, setOpsCustomDateRange] = useState<{ start: string; end: string } | undefined>(undefined);
+  const handleOpsPeriodChange = useCallback((selection: PeriodSelection) => {
+    const mapped = mapPresetToOpsDateRange(selection.preset);
+    setDateRange(mapped);
+    // Forward custom calendar range if the user picked one
+    if (selection.type === 'custom' && selection.dateRange) {
+      setOpsCustomDateRange({ start: selection.dateRange.start, end: selection.dateRange.end });
+    } else {
+      setOpsCustomDateRange(undefined);
+    }
+  }, []);
   const [scorecardView, setScorecardView] = useState<'summary' | 'detail' | 'charts'>(() => {
     const saved = localStorage.getItem('op-scorecard-view');
     return (saved as 'summary' | 'detail' | 'charts') || 'summary';
@@ -345,7 +365,8 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     selectedActor,
     dateRange,
     selectedTenantId,
-    selectedChannel
+    selectedChannel,
+    opsCustomDateRange,
   );
 
   // Convert API data to view format, with fallback to empty structure
@@ -880,28 +901,15 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                     <label className={`text-sm font-medium mb-3 block ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                       Choose Short Term Comparison Date Range
                     </label>
-                    <Tabs value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
-                      <TabsList className={`grid w-full grid-cols-3 rounded-lg ${isDarkMode ? 'bg-slate-800/60 border border-slate-700/50' : 'bg-blue-50/50 border border-blue-200/30'}`}>
-                        <TabsTrigger 
-                          value="3-months"
-                          className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                        >
-                          3 Months
-                        </TabsTrigger>
-                        <TabsTrigger 
-                          value="6-months"
-                          className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                        >
-                          6 Months
-                        </TabsTrigger>
-                        <TabsTrigger 
-                          value="12-months"
-                          className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-blue-500/25"
-                        >
-                          12 Months
-                        </TabsTrigger>
-                      </TabsList>
-                    </Tabs>
+                    <DatePeriodPicker
+                      year={pickerYear}
+                      onYearChange={setPickerYear}
+                      presets={['rolling-3', 'rolling-6', 'rolling-12']}
+                      showYears={false}
+                      onPeriodChange={handleOpsPeriodChange}
+                      defaultPreset="rolling-3"
+                      showLabel={false}
+                    />
                   </div>
                 </div>
               </CardContent>

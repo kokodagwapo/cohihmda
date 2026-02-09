@@ -10,6 +10,8 @@ import { attachTenantContext, getTenantContext } from '../middleware/tenantConte
 import { 
   processCohiQuestion, 
   refineCohiQuery, 
+  executeQuery,
+  formatDataRows,
   CohiChatMessage, 
   CohiChatResponse,
   VisualizationConfig,
@@ -271,61 +273,82 @@ router.get('/history', authenticateToken, attachTenantContext, async (req: AuthR
 });
 
 /**
- * POST /api/cohi-chat/save-visualization
- * Save a visualization to the custom dashboard
+ * POST /api/cohi-chat/execute-sql
+ * Execute a previously-generated SQL query directly without going through the LLM.
+ * Used by workbench canvas widgets to refresh data for saved visualizations.
  */
-router.post('/save-visualization', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    const { 
-      title, 
-      description, 
-      question, 
-      visualization, 
-      queryConfig,
-      position = 0
-    } = req.body;
+    const { sql, dateFilter } = req.body;
 
-    if (!title || !question || !visualization) {
-      return res.status(400).json({ 
-        error: 'Title, question, and visualization are required' 
-      });
+    if (!sql || typeof sql !== 'string') {
+      return res.status(400).json({ error: 'sql is required' });
     }
 
-    const tenantPool = getTenantContext(req).tenantPool;
+    // Optionally inject a date-range filter into the SQL.
+    // dateFilter: { column: string, start: string (YYYY-MM-DD), end: string (YYYY-MM-DD) }
+    //
+    // Strategy: inject the condition into the SQL's own WHERE clause so that
+    // it references the original table columns (not an outer subquery which
+    // may have aggregated or renamed them).
+    let effectiveSql = sql;
+    if (dateFilter && dateFilter.column && dateFilter.start && dateFilter.end) {
+      const col = dateFilter.column.replace(/[^a-zA-Z0-9_.]/g, ''); // sanitise column name
+      const cond = `${col} >= '${dateFilter.start}'::date AND ${col} <= '${dateFilter.end}'::date`;
 
-    const result = await tenantPool.query(`
-      INSERT INTO public.saved_visualizations 
-        (user_id, title, description, question, visualization_type, visualization_config, query_config, data_snapshot, position)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, created_at
-    `, [
-      req.userId,
-      title,
-      description || null,
-      question,
-      visualization.type,
-      JSON.stringify(visualization),
-      JSON.stringify(queryConfig || {}),
-      visualization.data ? JSON.stringify(visualization.data) : null,
-      position
-    ]);
+      // 1. Try to append to the last WHERE clause (before GROUP BY / ORDER BY / LIMIT / HAVING)
+      //    Works for the vast majority of LLM-generated queries.
+      const whereRegex = /\bWHERE\b/gi;
+      let lastWhereIdx = -1;
+      let m: RegExpExecArray | null;
+      while ((m = whereRegex.exec(sql)) !== null) {
+        lastWhereIdx = m.index;
+      }
+
+      if (lastWhereIdx >= 0) {
+        const afterWhere = sql.substring(lastWhereIdx + 5);
+        const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
+        if (boundary) {
+          const insertAt = lastWhereIdx + 5 + boundary.index;
+          effectiveSql = sql.substring(0, insertAt) + ` AND ${cond} ` + sql.substring(insertAt);
+        } else {
+          effectiveSql = sql + ` AND ${cond}`;
+        }
+      } else {
+        // 2. No WHERE clause – insert one before the first GROUP BY / ORDER BY / LIMIT
+        const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(sql);
+        if (boundary) {
+          const insertAt = boundary.index;
+          effectiveSql = sql.substring(0, insertAt) + `WHERE ${cond} ` + sql.substring(insertAt);
+        } else {
+          effectiveSql = sql + ` WHERE ${cond}`;
+        }
+      }
+    }
+
+    const tenantContext = getTenantContext(req);
+    const context: ChatContext = {
+      tenantId: tenantContext.tenantId,
+      userId: req.userId!,
+      userRole: 'user',
+    };
+
+    const result = await executeQuery(effectiveSql, [], context);
+
+    // Apply the same formatting as the chat pipeline so data matches
+    // the vizConfig expectations (dates formatted, numerics parsed, etc.)
+    const formattedRows = formatDataRows(result.rows);
 
     res.json({
-      success: true,
-      visualization: {
-        id: result.rows[0].id,
-        title,
-        description,
-        question,
-        type: visualization.type,
-        createdAt: result.rows[0].created_at
-      }
+      data: formattedRows,
+      rowCount: result.rowCount,
+      fields: result.fields,
     });
   } catch (error: any) {
-    console.error('[CohiChat] Error saving visualization:', error);
-    res.status(500).json({ 
-      error: 'Failed to save visualization',
-      message: error.message 
+    console.error('[CohiChat] Error executing SQL:', error.message);
+    res.status(500).json({
+      error: 'Failed to execute query',
+      message: error.message,
     });
   }
 });

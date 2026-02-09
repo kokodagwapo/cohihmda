@@ -8,18 +8,21 @@
  * - This eliminates classification errors and provides richer responses
  *
  * Prompts are loaded from the database via promptConfigService (admin-configurable)
- * Schema context is dynamically generated from METRICS_CATALOG
+ * Schema context is dynamically generated via SchemaContextService (per-tenant introspection)
  */
 
 import pg from "pg";
 import {
   METRICS_CATALOG,
-  MetricDefinition,
 } from "../metrics/metricsService.js";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { decryptAPIKeys } from "../encryption.js";
 import { generateEmbeddings } from "../embeddingService.js";
 import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
+import {
+  getSchemaForTenant,
+  getFallbackSchemaContext,
+} from "./schemaContextService.js";
 
 // ============================================================================
 // Types
@@ -105,6 +108,8 @@ export interface CohiChatResponse {
   error?: string;
   /** Metric IDs from METRICS_CATALOG that were used in this query */
   metricsUsed?: string[];
+  /** The SQL query that was generated and executed (for "Show SQL" feature) */
+  sqlQuery?: string;
   /** Sources used to generate the response */
   sources?: {
     dataQuery?: boolean;
@@ -119,237 +124,15 @@ export interface QueryResult {
 }
 
 // ============================================================================
-// Dynamic Schema Context Builder
+// Schema Context (delegated to SchemaContextService)
 // ============================================================================
 
 /**
- * Static loan field definitions (these are actual database columns)
- * This could also be loaded from a config or database in the future
+ * Synchronous fallback for callers that don't have a tenant ID.
+ * Prefer getSchemaForTenant(tenantId) whenever possible.
  */
-const LOAN_FIELD_SCHEMA = {
-  core: [
-    { name: "loan_id", type: "TEXT", description: "Unique loan identifier" },
-    { name: "loan_number", type: "TEXT", description: "Loan number" },
-    { name: "loan_amount", type: "DECIMAL", description: "Total loan amount" },
-    {
-      name: "loan_type",
-      type: "TEXT",
-      description: "Type of loan (Conventional, FHA, VA, USDA, etc.)",
-    },
-    {
-      name: "loan_purpose",
-      type: "TEXT",
-      description: "Purpose (Purchase, Refinance, Cash-Out Refinance)",
-    },
-    { name: "loan_program", type: "TEXT", description: "Loan program name" },
-    {
-      name: "current_loan_status",
-      type: "TEXT",
-      description:
-        "Current status (Active Loan, Originated, Withdrawn, Denied)",
-    },
-    {
-      name: "current_milestone",
-      type: "TEXT",
-      description: "Current milestone in pipeline",
-    },
-    {
-      name: "channel",
-      type: "TEXT",
-      description: "Channel (Retail, Wholesale, Correspondent, TPO)",
-    },
-  ],
-  personnel: [
-    { name: "loan_officer", type: "TEXT", description: "Loan officer name" },
-    { name: "loan_officer_id", type: "TEXT", description: "Loan officer ID" },
-    { name: "processor", type: "TEXT", description: "Processor name" },
-    { name: "underwriter", type: "TEXT", description: "Underwriter name" },
-    { name: "closer", type: "TEXT", description: "Closer name" },
-    { name: "branch", type: "TEXT", description: "Branch name/code" },
-  ],
-  property: [
-    { name: "property_city", type: "TEXT", description: "Property city" },
-    {
-      name: "property_state",
-      type: "TEXT",
-      description: "Property state (2-letter code)",
-    },
-    { name: "property_county", type: "TEXT", description: "Property county" },
-    {
-      name: "property_type",
-      type: "TEXT",
-      description: "Property type (Single Family, Condo, etc.)",
-    },
-    {
-      name: "occupancy_type",
-      type: "TEXT",
-      description: "Occupancy type (Primary, Investment, Second Home)",
-    },
-  ],
-  financial: [
-    {
-      name: "interest_rate",
-      type: "DECIMAL",
-      description: "Interest rate percentage",
-    },
-    {
-      name: "cltv",
-      type: "DECIMAL",
-      description: "Combined loan-to-value ratio",
-    },
-    { name: "ltv_ratio", type: "DECIMAL", description: "Loan-to-value ratio" },
-    {
-      name: "be_dti_ratio",
-      type: "DECIMAL",
-      description: "Back-end debt-to-income ratio",
-    },
-    { name: "fico_score", type: "INTEGER", description: "Credit score" },
-    {
-      name: "rate_lock_buy_side_base_price_rate",
-      type: "DECIMAL",
-      description: "Base buy rate (for revenue calc)",
-    },
-    {
-      name: "orig_fee_borr_pd",
-      type: "DECIMAL",
-      description: "Origination fee paid by borrower",
-    },
-    {
-      name: "orig_fees_seller",
-      type: "DECIMAL",
-      description: "Origination fees from seller",
-    },
-    {
-      name: "cd_lender_credits",
-      type: "DECIMAL",
-      description: "Lender credits on closing disclosure",
-    },
-  ],
-  dates: [
-    { name: "application_date", type: "DATE", description: "Application date" },
-    { name: "started_date", type: "DATE", description: "Started date" },
-    { name: "lock_date", type: "DATE", description: "Rate lock date" },
-    { name: "closing_date", type: "DATE", description: "Closing date" },
-    { name: "funding_date", type: "DATE", description: "Funding date" },
-    {
-      name: "investor_purchase_date",
-      type: "DATE",
-      description: "Investor purchase date",
-    },
-    { name: "credit_pull_date", type: "DATE", description: "Credit pull date" },
-  ],
-};
-
-/**
- * Build the schema context dynamically from LOAN_FIELD_SCHEMA and METRICS_CATALOG
- * This ensures the LLM always has accurate, up-to-date information about available fields and metrics
- */
-function buildDynamicSchemaContext(): string {
-  const sections: string[] = [];
-
-  // Build field schema sections
-  sections.push("## Available Loan Fields (Columns in loans table)\n");
-
-  const fieldCategories: Record<
-    string,
-    { title: string; fields: typeof LOAN_FIELD_SCHEMA.core }
-  > = {
-    core: { title: "Core Fields", fields: LOAN_FIELD_SCHEMA.core },
-    personnel: {
-      title: "Personnel Fields",
-      fields: LOAN_FIELD_SCHEMA.personnel,
-    },
-    property: { title: "Property Fields", fields: LOAN_FIELD_SCHEMA.property },
-    financial: {
-      title: "Financial Fields",
-      fields: LOAN_FIELD_SCHEMA.financial,
-    },
-    dates: { title: "Key Dates", fields: LOAN_FIELD_SCHEMA.dates },
-  };
-
-  for (const [, category] of Object.entries(fieldCategories)) {
-    sections.push(`### ${category.title}`);
-    for (const field of category.fields) {
-      sections.push(`- ${field.name} (${field.type}): ${field.description}`);
-    }
-    sections.push("");
-  }
-
-  // Build metrics context from METRICS_CATALOG
-  sections.push("## CALCULATED METRICS (from METRICS_CATALOG)\n");
-  sections.push(
-    "IMPORTANT: These are NOT columns. You must use the SQL formulas below to calculate them.\n"
-  );
-
-  // Group metrics by category
-  const metricsByCategory: Record<string, MetricDefinition[]> = {};
-  for (const metric of Object.values(METRICS_CATALOG)) {
-    if (!metricsByCategory[metric.category]) {
-      metricsByCategory[metric.category] = [];
-    }
-    metricsByCategory[metric.category].push(metric);
-  }
-
-  const categoryTitles: Record<string, string> = {
-    status: "Status Metrics",
-    turn_time: "Turn Time Metrics",
-    revenue: "Revenue Metrics",
-    pull_through: "Pull-Through Metrics",
-    volume: "Volume Metrics",
-    count: "Count Metrics",
-  };
-
-  for (const [categoryId, metrics] of Object.entries(metricsByCategory)) {
-    sections.push(`### ${categoryTitles[categoryId] || categoryId}`);
-    for (const metric of metrics) {
-      sections.push(`**${metric.name}** (${metric.id})`);
-      sections.push(`- Description: ${metric.description}`);
-      sections.push(`- Formula: ${metric.formula}`);
-      if (metric.defaultDateField) {
-        sections.push(`- Default date field: ${metric.defaultDateField}`);
-      }
-      if (metric.ignoreDateFilter) {
-        sections.push(
-          `- Note: This is a current state metric - do NOT filter by date range`
-        );
-      }
-      if (metric.sqlQuery) {
-        // Clean up the SQL for display
-        const cleanSql = metric.sqlQuery.replace(/\s+/g, " ").trim();
-        sections.push(
-          `- SQL: \`${cleanSql.substring(0, 300)}${
-            cleanSql.length > 300 ? "..." : ""
-          }\``
-        );
-      }
-      if (metric.notes) {
-        sections.push(`- Notes: ${metric.notes}`);
-      }
-      sections.push("");
-    }
-  }
-
-  // Add quick reference
-  sections.push("## Quick Reference - Status Indicators");
-  sections.push("- Funded: funding_date IS NOT NULL");
-  sections.push("- Active: current_loan_status = 'Active Loan'");
-  sections.push("- Locked: lock_date IS NOT NULL");
-  sections.push(
-    "- Originated: current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'"
-  );
-
-  return sections.join("\n");
-}
-
-// Cache the schema context (it only changes if METRICS_CATALOG changes, which requires a redeploy)
-let cachedSchemaContext: string | null = null;
-
 function getSchemaContext(): string {
-  if (!cachedSchemaContext) {
-    cachedSchemaContext = buildDynamicSchemaContext();
-    console.log("[CohiChat] Built dynamic schema context from METRICS_CATALOG");
-  }
-  return cachedSchemaContext;
+  return getFallbackSchemaContext();
 }
 
 // ============================================================================
@@ -654,8 +437,10 @@ async function generateQuery(
   try {
     const apiKey = await getOpenAIKey(context.tenantId);
 
-    // Get the dynamic schema context from METRICS_CATALOG
-    const schemaContext = getSchemaContext();
+    // Get tenant-specific schema context (dynamic introspection with fallback)
+    const schemaContext = context.tenantId
+      ? await getSchemaForTenant(context.tenantId)
+      : getSchemaContext();
 
     // Get current date context
     const now = new Date();
@@ -721,6 +506,73 @@ async function generateQuery(
         error.message || error
       );
     }
+    return null;
+  }
+}
+
+// ============================================================================
+// Query Auto-Retry (send error back to LLM for correction)
+// ============================================================================
+
+async function retryQueryWithError(
+  originalQuestion: string,
+  failedSql: string,
+  errorMessage: string,
+  context: ChatContext
+): Promise<GeneratedQuery | null> {
+  try {
+    const apiKey = await getOpenAIKey(context.tenantId);
+
+    const fixPrompt = `The following PostgreSQL query was generated for the user's question but FAILED with an error.
+
+## User's Question
+${originalQuestion}
+
+## Failed SQL
+${failedSql}
+
+## PostgreSQL Error
+${errorMessage}
+
+## Your Task
+Fix the SQL query so it executes correctly. Common issues:
+- ORDER BY must use column aliases or positional references (1, 2, 3) when GROUP BY uses aliases
+- All non-aggregated columns must appear in GROUP BY
+- DATE_TRUNC expressions in ORDER BY must match GROUP BY exactly, or use positional refs
+- Column names are case-sensitive and must match the schema exactly
+
+Respond with the same JSON format:
+{
+  "sql": "CORRECTED SELECT ...",
+  "params": [],
+  "explanation": "Brief explanation of the fix",
+  "visualizationType": "bar|line|pie|area|table|kpi|donut|horizontal_bar",
+  "chartConfig": { "title": "...", "xKey": "...", "yKey": "..." }
+}`;
+
+    const messages: OpenAIChatMessage[] = [
+      { role: "system", content: fixPrompt },
+    ];
+
+    const response = await callOpenAI(messages, apiKey, {
+      temperature: 0.1,
+      jsonMode: true,
+      maxTokens: 1500,
+    });
+
+    const parsed = JSON.parse(response);
+    if (!parsed.sql) return null;
+
+    console.log(`[CohiChat] Retry: LLM corrected SQL`);
+    return {
+      sql: parsed.sql,
+      params: parsed.params || [],
+      explanation: parsed.explanation || "",
+      visualizationType: parsed.visualizationType || "table",
+      chartConfig: parsed.chartConfig || {},
+    };
+  } catch (err: any) {
+    console.log(`[CohiChat] Retry: LLM fix attempt failed: ${err.message}`);
     return null;
   }
 }
@@ -1032,24 +884,59 @@ async function gatherAllContext(
 
   let dataQueryResult: GatheredContext["dataQueryResult"] = undefined;
 
-  // If we got a valid query, try to execute it
+  // If we got a valid query, try to execute it (with one auto-retry on failure)
   if (queryConfig?.sql) {
+    const effectiveConfig = queryConfig;
     try {
       const result = await executeQuery(
-        queryConfig.sql,
-        queryConfig.params,
+        effectiveConfig.sql,
+        effectiveConfig.params,
         context
       );
       if (result.rowCount > 0) {
         const formattedData = formatDataRows(result.rows);
         dataQueryResult = {
-          query: queryConfig,
+          query: effectiveConfig,
           result,
           formattedData,
         };
       }
-    } catch (error: any) {
-      console.log(`[CohiChat] Data query failed: ${error.message}`);
+    } catch (firstError: any) {
+      console.log(
+        `[CohiChat] Data query failed: ${firstError.message} — attempting auto-retry`
+      );
+
+      // Auto-retry: ask the LLM to fix the SQL based on the error
+      try {
+        const fixedConfig = await retryQueryWithError(
+          question,
+          effectiveConfig.sql,
+          firstError.message,
+          context
+        );
+        if (fixedConfig?.sql && fixedConfig.sql !== effectiveConfig.sql) {
+          console.log(
+            `[CohiChat] Retry: executing corrected SQL`
+          );
+          const retryResult = await executeQuery(
+            fixedConfig.sql,
+            fixedConfig.params,
+            context
+          );
+          if (retryResult.rowCount > 0) {
+            const formattedData = formatDataRows(retryResult.rows);
+            dataQueryResult = {
+              query: fixedConfig,
+              result: retryResult,
+              formattedData,
+            };
+          }
+        }
+      } catch (retryError: any) {
+        console.log(
+          `[CohiChat] Retry also failed: ${retryError.message}`
+        );
+      }
     }
   }
 
@@ -1191,6 +1078,7 @@ async function generateUnifiedResponse(
     message,
     visualization,
     data,
+    sqlQuery: gathered.dataQueryResult?.query?.sql || undefined,
     suggestedQuestions: generateSuggestedQuestions(
       question,
       gathered.ragContext.totalChunks > 0
@@ -1430,4 +1318,4 @@ export type DataChatMessage = CohiChatMessage;
 export type DataChatResponse = CohiChatResponse;
 
 // Export main functions
-export { generateQuery, executeQuery, buildVisualizationConfig };
+export { generateQuery, executeQuery, buildVisualizationConfig, formatDataRows };

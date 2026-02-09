@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
-import { LoanFunnelView } from '@/components/dashboard/views/LoanFunnelView';
+import { LoanFunnelView } from '@/components/views/LoanFunnelView';
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 
 const LoanFunnel = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

@@ -270,13 +270,25 @@ router.get(
       // Get vMaxDate from data (matching Qlik's Max("Last Modified Date"))
       const vMaxDate = await getVMaxDate(tenantPool);
 
-      // Calculate Rolling 13 Month date range
-      const effectiveEndDate = vMaxDate;
-      const effectiveStartDate = new Date(
-        vMaxDate.getFullYear(),
-        vMaxDate.getMonth() - 12,
-        1
-      );
+      // Use client-supplied date range when provided, otherwise default to
+      // rolling 13-month window from vMaxDate (Qlik standard for TTS)
+      let effectiveStartDate: Date;
+      let effectiveEndDate: Date;
+
+      if (startDate && endDate) {
+        effectiveStartDate = new Date(startDate);
+        effectiveEndDate = new Date(endDate);
+        // Sanity-check: if parsed dates are invalid, fall back to defaults
+        if (isNaN(effectiveStartDate.getTime()) || isNaN(effectiveEndDate.getTime())) {
+          logWarn("[Scorecard/Sales] Invalid startDate/endDate params, falling back to default 13-month window", { startDate, endDate });
+          effectiveEndDate = vMaxDate;
+          effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - 12, 1);
+        }
+      } else {
+        // Default: Rolling 13 months from vMaxDate
+        effectiveEndDate = vMaxDate;
+        effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - 12, 1);
+      }
 
       logInfo("[Scorecard/Sales] Start", {
         actor,
@@ -844,6 +856,8 @@ router.get(
       const actorType = (req.query.actor_type as string) || "underwriter";
       const dateRange = (req.query.date_range as string) || "3-months";
       const channelGroup = req.query.channel_group as string | undefined;
+      const customStartDate = req.query.start_date as string | undefined;
+      const customEndDate = req.query.end_date as string | undefined;
 
       // Validate actor type
       if (!["processor", "underwriter", "closer"].includes(actorType)) {
@@ -867,13 +881,24 @@ router.get(
       // Get vMaxDate
       const vMaxDate = await getVMaxDate(tenantPool);
 
-      // Calculate date range
-      const effectiveEndDate = new Date(vMaxDate);
-      const effectiveStartDate = new Date(
-        vMaxDate.getFullYear(),
-        vMaxDate.getMonth() - monthsBack,
-        1
-      );
+      // Use client-supplied custom date range when provided, otherwise
+      // fall back to rolling N-month window from vMaxDate
+      let effectiveStartDate: Date;
+      let effectiveEndDate: Date;
+
+      if (customStartDate && customEndDate) {
+        effectiveStartDate = new Date(customStartDate);
+        effectiveEndDate = new Date(customEndDate);
+        // Sanity-check: if parsed dates are invalid, fall back to defaults
+        if (isNaN(effectiveStartDate.getTime()) || isNaN(effectiveEndDate.getTime())) {
+          logWarn("[Scorecard/Operations] Invalid start_date/end_date params, falling back to default", { customStartDate, customEndDate });
+          effectiveEndDate = new Date(vMaxDate);
+          effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - monthsBack, 1);
+        }
+      } else {
+        effectiveEndDate = new Date(vMaxDate);
+        effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - monthsBack, 1);
+      }
 
       logInfo("[Scorecard/Operations] Start", {
         actorType,

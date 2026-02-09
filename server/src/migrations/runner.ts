@@ -61,10 +61,13 @@ export interface MigrationRunnerOptions {
 }
 
 /**
- * Calculate SHA256 checksum of migration content
+ * Calculate SHA256 checksum of migration content.
+ * Normalizes line endings (CRLF -> LF) before hashing so checksums
+ * are consistent across Windows (CRLF) and Linux/Mac (LF).
  */
 function calculateChecksum(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex').substring(0, 16);
+  const normalized = content.replace(/\r\n/g, '\n');
+  return crypto.createHash('sha256').update(normalized).digest('hex').substring(0, 16);
 }
 
 /**

@@ -55,6 +55,8 @@ export interface ChatMessage {
   timestamp: Date;
   isLoading?: boolean;
   error?: string;
+  /** The SQL query that was generated (for "Show SQL" feature) */
+  sqlQuery?: string;
   sources?: {
     dataQuery?: boolean;
     knowledgeBase?: string[];
@@ -67,6 +69,7 @@ export interface CohiChatResponse {
   data?: any[];
   suggestedQuestions?: string[];
   error?: string;
+  sqlQuery?: string;
   sources?: {
     dataQuery?: boolean;
     knowledgeBase?: string[];
@@ -257,6 +260,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           data: response.data,
           timestamp: new Date(),
           error: response.error,
+          sqlQuery: response.sqlQuery,
           sources: response.sources,
         };
 
@@ -391,6 +395,7 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           data: response.data,
           timestamp: new Date(),
           error: response.error,
+          sqlQuery: response.sqlQuery,
           sources: response.sources,
         };
 
@@ -424,41 +429,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       }
     },
     [generateMessageId, getEffectiveTenantId, messages, onError, sessionId]
-  );
-
-  /**
-   * Save a visualization to custom dashboard
-   */
-  const saveVisualization = useCallback(
-    async (
-      visualization: VisualizationConfig,
-      question: string,
-      title?: string,
-      description?: string
-    ) => {
-      try {
-        const effectiveTenantId = await getEffectiveTenantId();
-        const endpoint = effectiveTenantId
-          ? `/api/cohi-chat/save-visualization?tenant_id=${encodeURIComponent(effectiveTenantId)}`
-          : "/api/cohi-chat/save-visualization";
-        
-        const response = await api.request(endpoint, {
-          method: "POST",
-          body: JSON.stringify({
-            title: title || visualization.title,
-            description,
-            question,
-            visualization,
-            queryConfig: {},
-          }),
-        });
-        return response;
-      } catch (error: any) {
-        console.error("[CohiChat] Error saving visualization:", error);
-        throw error;
-      }
-    },
-    [getEffectiveTenantId]
   );
 
   /**
@@ -500,7 +470,6 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     sendMessage,
     addConversationTurn,
     refineQuery,
-    saveVisualization,
     clearMessages,
     newSession,
   };

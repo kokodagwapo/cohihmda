@@ -23,6 +23,7 @@ import tenantRoutes from "./tenants.js";
 import tenantConfigRoutes from "./tenantConfig.js";
 import dataChatRoutes from "./dataChat.js";
 import cohiChatRoutes from "./cohiChat.js";
+import cohiWorkbenchRoutes from "./cohiWorkbench.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
 import newsRoutes from "./news.js";
@@ -31,6 +32,7 @@ import aiPromptsRoutes from "./admin/aiPrompts.js";
 import platformSettingsRoutes from "./admin/platformSettings.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import shareLinksRoutes from "./shareLinks.js";
+import workbenchRoutes from "./workbench.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -74,6 +76,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/tenant-config", tenantConfigRoutes);
   app.use("/api/data-chat", dataChatRoutes); // Legacy route - kept for backwards compatibility
   app.use("/api/cohi-chat", cohiChatRoutes); // New hybrid chat service
+  app.use("/api/cohi-chat/workbench", cohiWorkbenchRoutes); // Workbench AI assistant
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);
   app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
@@ -81,6 +84,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/platform-settings", platformSettingsRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
   app.use("/api/share-links", shareLinksRoutes);
+  app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

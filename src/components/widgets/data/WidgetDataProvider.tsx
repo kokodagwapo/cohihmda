@@ -1,0 +1,418 @@
+/**
+ * WidgetDataProvider – React context that provides data to canvas widgets.
+ *
+ * Reads per-section filter state (including PeriodSelection) from
+ * widgetSectionStore so that DatePeriodPicker changes drive data hooks.
+ *
+ * Each data source hook is called once with the filters from its
+ * corresponding section (or defaults if no section is registered).
+ */
+
+import React, { createContext, useContext, useMemo } from 'react';
+import { useTenantStore } from '@/stores/tenantStore';
+import { useChannelStore } from '@/stores/channelStore';
+import {
+  useWidgetSectionStore,
+  DEFAULT_SECTION_FILTERS,
+} from '@/stores/widgetSectionStore';
+import type { SectionFilters } from '@/stores/widgetSectionStore';
+import type { PeriodPreset } from '@/components/ui/DatePeriodPicker';
+import { computePresetDateRange } from '@/components/ui/DatePeriodPicker';
+import { useCompanyScorecardData } from '@/hooks/useCompanyScorecardData';
+import { useCreditRiskData } from '@/hooks/useCreditRiskData';
+import { useSalesScorecardData } from '@/hooks/useSalesScorecardData';
+import { useOperationsScorecardData } from '@/hooks/useOperationsScorecardData';
+import { useOperationsScorecardTrendsData } from '@/hooks/useOperationsScorecardTrendsData';
+import { useSalesTrendsData } from '@/hooks/useSalesTrendsData';
+import { useFunnelData } from '@/hooks/useFunnelData';
+import { useTopTieringComparisonData } from '@/hooks/useTopTieringComparisonData';
+import { useLeaderboardData } from '@/hooks/useLeaderboardData';
+import type { DataSourceId } from '../registry/types';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface SourceResult {
+  data: unknown;
+  loading: boolean;
+  error: string | null;
+}
+
+interface WidgetDataContextValue {
+  getSourceData: (sourceId: DataSourceId) => SourceResult;
+}
+
+export interface WidgetDataProviderProps {
+  children: React.ReactNode;
+  /**
+   * When provided, ALL data-source filter lookups use this specific section's
+   * filters instead of the default "find first by sectionType" strategy.
+   * Used by WidgetGroup to scope data fetches to the group's own filters.
+   */
+  sectionId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Preset → Hook-param mapping helpers
+// ---------------------------------------------------------------------------
+
+/** Map PeriodPreset to Operations Scorecard DateRangeType ('3-months'|'6-months'|'12-months') */
+function mapToOpsDateRange(filters: SectionFilters): '3-months' | '6-months' | '12-months' {
+  const preset = filters.periodSelection?.preset;
+  if (preset === 'rolling-6') return '6-months';
+  if (preset === 'rolling-12') return '12-months';
+  return '3-months'; // default
+}
+
+/** Map PeriodPreset to Sales Trends DateRangeOption ('3-months'|'6-months') */
+function mapToSalesTrendsDateRange(filters: SectionFilters): '3-months' | '6-months' {
+  const preset = filters.periodSelection?.preset;
+  if (preset === 'rolling-6') return '6-months';
+  return '3-months'; // default
+}
+
+/** Map PeriodPreset to TopTiering TimeFilterType */
+type TimeFilterType = 'last-year' | 'last-quarter' | 'last-month' | 'ytd' | 'qtd' | 'mtd' | 'trailing-12' | 'custom';
+function mapToTopTieringTimeFilter(filters: SectionFilters): {
+  timeFilter: TimeFilterType;
+  customDateRange?: { start: string; end: string };
+} {
+  const ps = filters.periodSelection;
+  if (!ps) return { timeFilter: 'last-year' };
+
+  if (ps.type === 'custom') {
+    return { timeFilter: 'custom', customDateRange: ps.dateRange };
+  }
+
+  // Direct preset mapping – these presets match the hook's TimeFilterType exactly
+  const directMap: Record<string, TimeFilterType> = {
+    'mtd': 'mtd',
+    'qtd': 'qtd',
+    'ytd': 'ytd',
+    'last-month': 'last-month',
+    'last-quarter': 'last-quarter',
+    'last-year': 'last-year',
+    'trailing-12': 'trailing-12',
+  };
+  const preset = ps.preset;
+  if (preset && directMap[preset]) {
+    return { timeFilter: directMap[preset] };
+  }
+
+  // For rolling presets that don't map, fall back to custom with the computed range
+  if (ps.dateRange) {
+    return { timeFilter: 'custom', customDateRange: ps.dateRange };
+  }
+
+  return { timeFilter: 'last-year' };
+}
+
+/** Map PeriodPreset to LeaderboardTimeframe */
+type LeaderboardTimeframe = 'wtd' | 'mtd' | 'qtd' | 'lm' | 'lq' | 'ly' | 'custom';
+function mapToLeaderboardTimeframe(filters: SectionFilters): {
+  timeframe: LeaderboardTimeframe;
+  startDate?: string;
+  endDate?: string;
+} {
+  const ps = filters.periodSelection;
+  if (!ps) return { timeframe: 'mtd' };
+
+  if (ps.type === 'custom') {
+    return { timeframe: 'custom', startDate: ps.dateRange.start, endDate: ps.dateRange.end };
+  }
+
+  const presetMap: Record<string, LeaderboardTimeframe> = {
+    'mtd': 'mtd',
+    'qtd': 'qtd',
+    'last-month': 'lm',
+    'last-quarter': 'lq',
+    'last-year': 'ly',
+  };
+  const preset = ps.preset;
+  if (preset && presetMap[preset]) {
+    return { timeframe: presetMap[preset] };
+  }
+
+  // For presets like 'ytd' or rolling that don't map directly, use custom with computed range
+  if (ps.dateRange) {
+    return { timeframe: 'custom', startDate: ps.dateRange.start, endDate: ps.dateRange.end };
+  }
+
+  return { timeframe: 'mtd' };
+}
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+const WidgetDataContext = createContext<WidgetDataContextValue | null>(null);
+
+const EMPTY_RESULT: SourceResult = { data: null, loading: false, error: null };
+
+// ---------------------------------------------------------------------------
+// Helper – find the first section of a given type
+// ---------------------------------------------------------------------------
+
+function findSectionFilters(
+  sections: Record<string, SectionFilters>,
+  type: string,
+): SectionFilters {
+  for (const f of Object.values(sections)) {
+    if (f.sectionType === type) return f;
+  }
+  return DEFAULT_SECTION_FILTERS;
+}
+
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderProps) {
+  const { selectedTenantId } = useTenantStore();
+  const { selectedChannel } = useChannelStore();
+
+  // Subscribe to the full section map – any filter change triggers re-render
+  const sections = useWidgetSectionStore((s) => s.sections);
+
+  // When sectionId is provided (scoped provider inside a WidgetGroup),
+  // use that section's filters for ALL data sources so the group's date
+  // filter controls actually drive the data hooks.
+  const scopedFilters = sectionId ? (sections[sectionId] ?? DEFAULT_SECTION_FILTERS) : null;
+
+  // Find filters for each source type
+  const csFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'company-scorecard'), [sections, scopedFilters]);
+  const crFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'credit-risk'), [sections, scopedFilters]);
+  const ssFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'sales-scorecard'), [sections, scopedFilters]);
+  const osFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'operations-scorecard'), [sections, scopedFilters]);
+  const otFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'operations-trends'), [sections, scopedFilters]);
+  const stFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'sales-trends'), [sections, scopedFilters]);
+  const fnFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'funnel'), [sections, scopedFilters]);
+  const ttcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'top-tiering-comparison'), [sections, scopedFilters]);
+  const lbFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'leaderboard'), [sections, scopedFilters]);
+
+  // ---- Hook calls with dynamic filter values ----
+
+  const companyScorecard = useCompanyScorecardData({
+    year: csFilters.year,
+    branch: csFilters.branch,
+    loanOfficer: csFilters.loanOfficer,
+    application: csFilters.application,
+    channel: selectedChannel,
+    dateField: csFilters.dateField,
+    dateRange: csFilters.periodSelection?.dateRange ?? csFilters.dateRange,
+    tenantId: selectedTenantId,
+  });
+
+  const creditRisk = useCreditRiskData({
+    applicationType: crFilters.applicationType as any,
+    channel: selectedChannel,
+    year: crFilters.year,
+    dateRange: crFilters.periodSelection?.dateRange ?? crFilters.dateRange,
+    tenantId: selectedTenantId,
+  });
+
+  // Debug: trace Sales Scorecard filter values reaching the provider
+  const ssDateRange = ssFilters.periodSelection?.dateRange ?? ssFilters.dateRange;
+  console.log('[WidgetDataProvider] Sales Scorecard filters:', {
+    actorType: ssFilters.actorType,
+    dateRange: ssDateRange,
+    periodSelection: ssFilters.periodSelection ? {
+      type: ssFilters.periodSelection.type,
+      preset: ssFilters.periodSelection.preset,
+      year: ssFilters.periodSelection.year,
+      dateRange: ssFilters.periodSelection.dateRange,
+    } : undefined,
+    rawDateRange: ssFilters.dateRange,
+    sectionType: ssFilters.sectionType,
+  });
+
+  const salesScorecard = useSalesScorecardData(
+    ssFilters.actorType,
+    ssDateRange,
+    selectedTenantId,
+    selectedChannel,
+  );
+
+  // Operations Scorecard: map preset → DateRangeType, forward custom range if set
+  const osDR = useMemo(() => mapToOpsDateRange(osFilters), [osFilters]);
+  const osCustomDR = useMemo(() => {
+    const ps = osFilters.periodSelection;
+    if (ps?.type === 'custom' && ps.dateRange) {
+      return { start: ps.dateRange.start, end: ps.dateRange.end };
+    }
+    return undefined;
+  }, [osFilters.periodSelection]);
+  const operationsScorecard = useOperationsScorecardData(
+    'underwriter',
+    osDR,
+    selectedTenantId,
+    selectedChannel,
+    osCustomDR,
+  );
+
+  // Operations Trends: actor type from filters, fixed 13-month window
+  const operationsTrends = useOperationsScorecardTrendsData(
+    otFilters.actorType === 'branch' ? 'underwriter' : 'underwriter',
+    'vs-target',
+    selectedTenantId,
+    selectedChannel,
+  );
+
+  // Sales Trends: map preset → DateRangeOption, forward custom range if set
+  const stDR = useMemo(() => mapToSalesTrendsDateRange(stFilters), [stFilters]);
+  const stCustomDR = useMemo(() => {
+    const ps = stFilters.periodSelection;
+    if (ps?.type === 'custom' && ps.dateRange) {
+      return { start: ps.dateRange.start, end: ps.dateRange.end };
+    }
+    return undefined;
+  }, [stFilters.periodSelection]);
+  const salesTrends = useSalesTrendsData(
+    stDR,
+    selectedChannel ?? 'Retail',
+    selectedTenantId,
+    stCustomDR,
+  );
+
+  // Funnel: uses year-based or custom date filter
+  const currentYear = new Date().getFullYear();
+  const funnelDateFilter = useMemo(() => {
+    const ps = fnFilters.periodSelection;
+    if (ps?.type === 'custom' || (ps?.type === 'preset' && ps.dateRange)) {
+      return { type: 'custom' as const, startDate: ps.dateRange.start, endDate: ps.dateRange.end };
+    }
+    return { type: 'year' as const, year: fnFilters.year ?? currentYear };
+  }, [fnFilters, currentYear]);
+
+  const { funnelData, loading: funnelLoading } = useFunnelData(
+    funnelDateFilter,
+    selectedTenantId,
+    { channelGroup: selectedChannel },
+  );
+
+  // Top Tiering: map preset → TimeFilterType + optional customDateRange
+  const ttcMapping = useMemo(() => mapToTopTieringTimeFilter(ttcFilters), [ttcFilters]);
+  const topTieringComparison = useTopTieringComparisonData(
+    ttcFilters.actorType === 'branch' ? 'branch' : 'loan-officer',
+    ttcMapping.timeFilter,
+    selectedTenantId,
+    selectedChannel,
+    ttcMapping.customDateRange,
+  );
+
+  // Leaderboard: map preset → LeaderboardTimeframe
+  const lbMapping = useMemo(() => mapToLeaderboardTimeframe(lbFilters), [lbFilters]);
+  const { leaderboardData, loading: leaderboardLoading } = useLeaderboardData(
+    lbMapping.timeframe,
+    selectedTenantId,
+    {
+      channelGroup: selectedChannel,
+      ...(lbMapping.startDate ? { startDate: lbMapping.startDate, endDate: lbMapping.endDate } : {}),
+    },
+  );
+
+  // Build lookup
+  const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
+    'company-scorecard': {
+      data: companyScorecard.data,
+      loading: companyScorecard.loading,
+      error: companyScorecard.error,
+    },
+    'credit-risk': {
+      data: creditRisk.data,
+      loading: creditRisk.loading,
+      error: creditRisk.error,
+    },
+    'sales-scorecard': {
+      data: salesScorecard.data,
+      loading: salesScorecard.loading,
+      error: salesScorecard.error,
+    },
+    'operations-scorecard': {
+      data: operationsScorecard.data,
+      loading: operationsScorecard.loading,
+      error: operationsScorecard.error,
+    },
+    'operations-trends': {
+      data: operationsTrends.data,
+      loading: operationsTrends.loading,
+      error: operationsTrends.error,
+    },
+    'sales-trends': {
+      data: salesTrends.data,
+      loading: salesTrends.loading,
+      error: salesTrends.error,
+    },
+    'funnel': {
+      data: funnelData,
+      loading: funnelLoading,
+      error: null,
+    },
+    'top-tiering-comparison': {
+      data: topTieringComparison.data,
+      loading: topTieringComparison.loading,
+      error: topTieringComparison.error,
+    },
+    'dashboard-metrics': {
+      data: leaderboardData,
+      loading: leaderboardLoading,
+      error: null,
+    },
+  }), [
+    companyScorecard.data, companyScorecard.loading, companyScorecard.error,
+    creditRisk.data, creditRisk.loading, creditRisk.error,
+    salesScorecard.data, salesScorecard.loading, salesScorecard.error,
+    operationsScorecard.data, operationsScorecard.loading, operationsScorecard.error,
+    operationsTrends.data, operationsTrends.loading, operationsTrends.error,
+    salesTrends.data, salesTrends.loading, salesTrends.error,
+    funnelData, funnelLoading,
+    topTieringComparison.data, topTieringComparison.loading, topTieringComparison.error,
+    leaderboardData, leaderboardLoading,
+  ]);
+
+  const contextValue = useMemo<WidgetDataContextValue>(
+    () => ({
+      getSourceData: (sourceId: DataSourceId) => {
+        return sourceMap[sourceId] ?? EMPTY_RESULT;
+      },
+    }),
+    [sourceMap],
+  );
+
+  return (
+    <WidgetDataContext.Provider value={contextValue}>
+      {children}
+    </WidgetDataContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Consumer hook
+// ---------------------------------------------------------------------------
+
+/**
+ * useWidgetData – used by widget components to access their data source.
+ */
+export function useWidgetData<T>(
+  sourceId: DataSourceId,
+  selector: (sourceData: unknown) => T,
+  _sectionId?: string,
+): { data: T | null; loading: boolean; error: string | null } {
+  const ctx = useContext(WidgetDataContext);
+
+  if (!ctx) {
+    return { data: null, loading: false, error: 'No WidgetDataProvider found' };
+  }
+
+  const source = ctx.getSourceData(sourceId);
+
+  return useMemo(
+    () => ({
+      data: source.data ? selector(source.data) : null,
+      loading: source.loading,
+      error: source.error,
+    }),
+    [source.data, source.loading, source.error, selector],
+  );
+}

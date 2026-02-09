@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -13,10 +13,17 @@ import { Button } from '@/components/ui/button';
 import { useSalesTrendsData, type LoanOfficer as APILoanOfficer, type DrilldownData as APIDrilldownData, type DateRangeOption } from '@/hooks/useSalesTrendsData';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuth } from '@/contexts/AuthContext';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
+import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from '@/components/ui/DatePeriodPicker';
 
 type DateRange = '3-months' | '6-months';
+
+/** Map a PeriodPreset to Sales Trends DateRangeOption */
+const mapPresetToSalesDateRange = (preset?: PeriodPreset): DateRange => {
+  if (preset === 'rolling-6') return '6-months';
+  return '3-months';
+};
 type ViewMode = 'cards' | 'tabular';
 
 interface TrendDataPoint {
@@ -199,6 +206,18 @@ const SalesTrends = () => {
     const saved = localStorage.getItem('sales-trends-dateRange');
     return (saved as DateRange) || '3-months';
   });
+  const [stPickerYear, setStPickerYear] = useState(new Date().getFullYear());
+  const [stCustomDateRange, setStCustomDateRange] = useState<{ start: string; end: string } | undefined>(undefined);
+  const handleSalesTrendsPeriodChange = useCallback((selection: PeriodSelection) => {
+    const mapped = mapPresetToSalesDateRange(selection.preset);
+    setDateRange(mapped);
+    // Forward custom calendar range if the user picked one
+    if (selection.type === 'custom' && selection.dateRange) {
+      setStCustomDateRange({ start: selection.dateRange.start, end: selection.dateRange.end });
+    } else {
+      setStCustomDateRange(undefined);
+    }
+  }, []);
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('sales-trends-viewMode');
@@ -214,7 +233,7 @@ const SalesTrends = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch data from API with tenant context
-  const { data: apiData, loading, error, refetch, fetchDrilldown } = useSalesTrendsData(dateRange as DateRangeOption, 'Retail', tenantId);
+  const { data: apiData, loading, error, refetch, fetchDrilldown } = useSalesTrendsData(dateRange as DateRangeOption, 'Retail', tenantId, stCustomDateRange);
 
   useEffect(() => {
     localStorage.setItem('sales-trends-dateRange', dateRange);
@@ -448,12 +467,16 @@ const SalesTrends = () => {
               <CardContent className="pt-4 sm:pt-6">
                 <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
                   <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center">
-                    <Tabs value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)} className="w-full sm:w-auto">
-                      <TabsList className={`grid w-full sm:w-auto grid-cols-2 h-9 sm:h-10 ${isDarkMode ? 'bg-slate-900/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>
-                        <TabsTrigger value="3-months" className="text-xs sm:text-sm touch-manipulation data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-teal-500/25">3 Months</TabsTrigger>
-                        <TabsTrigger value="6-months" className="text-xs sm:text-sm touch-manipulation data-[state=active]:bg-gradient-to-r data-[state=active]:from-teal-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-teal-500/25">6 Months</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
+                    <DatePeriodPicker
+                      year={stPickerYear}
+                      onYearChange={setStPickerYear}
+                      presets={['rolling-3', 'rolling-6']}
+                      showYears={false}
+                      onPeriodChange={handleSalesTrendsPeriodChange}
+                      defaultPreset="rolling-3"
+                      showLabel={false}
+                      size="sm"
+                    />
 
                     <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full sm:w-auto">
                       <TabsList className={`grid w-full sm:w-auto grid-cols-2 h-9 sm:h-10 ${isDarkMode ? 'bg-slate-900/60 border border-slate-700/50' : 'bg-slate-100/80 border border-slate-300/40'}`}>

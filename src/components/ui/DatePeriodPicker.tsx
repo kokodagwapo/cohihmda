@@ -1,41 +1,118 @@
 /**
  * DatePeriodPicker - Reusable date period selector component
  * 
- * Provides year selection (YTD for current year, full year for past years),
- * rolling period selection, and custom date range selection.
- * 
- * Matches the date filter logic from the legacy Qlik apps:
- * - Current year: YTD (Jan 1 to today)
- * - Past years: Full year (Jan 1 to Dec 31)
- * - Rolling 12/13 months: From first of month N months ago to today
- * - Custom: User-selected date range
+ * Provides configurable period presets:
+ * - Year selection (YTD for current year, full year for past years)
+ * - Rolling periods (3/6/12/13 months)
+ * - Standard presets (MTD, QTD, YTD, last-month, last-quarter, last-year)
+ * - Custom date range via calendar popover
+ *
+ * All presets compute a concrete DateRange { start, end } so downstream
+ * consumers always receive YYYY-MM-DD strings.
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { format, subMonths, startOfMonth } from 'date-fns';
+import {
+  format,
+  subMonths,
+  subQuarters,
+  subYears,
+  startOfMonth,
+  startOfQuarter,
+  startOfYear,
+  endOfMonth,
+  endOfQuarter,
+  endOfYear,
+} from 'date-fns';
 import { Calendar as CalendarIcon, X } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-// Rolling period types matching Qlik flags
+// ---------------------------------------------------------------------------
+// Shared types – importable by other modules
+// ---------------------------------------------------------------------------
+
+/** Legacy rolling period type (kept for backward compat) */
 export type RollingPeriod = 'rolling12' | 'rolling13';
 
-// Types
 export interface DateRange {
-  start: string; // YYYY-MM-DD format
-  end: string;   // YYYY-MM-DD format
+  start: string; // YYYY-MM-DD
+  end: string;   // YYYY-MM-DD
 }
 
+/** All supported period presets */
+export type PeriodPreset =
+  | 'rolling-3'
+  | 'rolling-6'
+  | 'rolling-12'
+  | 'rolling-13'
+  | 'mtd'
+  | 'qtd'
+  | 'ytd'
+  | 'last-month'
+  | 'last-quarter'
+  | 'last-year'
+  | 'trailing-12';
+
+/** Structured output that carries both the semantic selection and the computed range */
+export interface PeriodSelection {
+  type: 'year' | 'preset' | 'custom';
+  preset?: PeriodPreset;
+  year?: number;
+  dateRange: DateRange;
+}
+
+// ---------------------------------------------------------------------------
+// Preset metadata (label + date-fns calculation)
+// ---------------------------------------------------------------------------
+
+interface PresetMeta {
+  label: string;
+  title: string;
+  computeRange: () => DateRange;
+}
+
+const fmtDate = (d: Date) => format(d, 'yyyy-MM-dd');
+
+const PRESET_META: Record<PeriodPreset, PresetMeta> = {
+  'rolling-3':  { label: '3 Mo',  title: 'Rolling 3 months',  computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 3))),  end: fmtDate(new Date()) }) },
+  'rolling-6':  { label: '6 Mo',  title: 'Rolling 6 months',  computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 6))),  end: fmtDate(new Date()) }) },
+  'rolling-12': { label: 'L12M',  title: 'Rolling 12 months', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 12))), end: fmtDate(new Date()) }) },
+  'rolling-13': { label: 'L13M',  title: 'Rolling 13 months (Qlik default for TTS)', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 13))), end: fmtDate(new Date()) }) },
+  'mtd':          { label: 'MTD',   title: 'Month to date',     computeRange: () => ({ start: fmtDate(startOfMonth(new Date())),                               end: fmtDate(new Date()) }) },
+  'qtd':          { label: 'QTD',   title: 'Quarter to date',   computeRange: () => ({ start: fmtDate(startOfQuarter(new Date())),                              end: fmtDate(new Date()) }) },
+  'ytd':          { label: 'YTD',   title: 'Year to date',      computeRange: () => ({ start: fmtDate(startOfYear(new Date())),                                end: fmtDate(new Date()) }) },
+  'last-month':   { label: 'LM',    title: 'Last month',        computeRange: () => { const d = subMonths(new Date(), 1);   return { start: fmtDate(startOfMonth(d)),   end: fmtDate(endOfMonth(d)) }; } },
+  'last-quarter': { label: 'LQ',    title: 'Last quarter',      computeRange: () => { const d = subQuarters(new Date(), 1); return { start: fmtDate(startOfQuarter(d)), end: fmtDate(endOfQuarter(d)) }; } },
+  'last-year':    { label: 'LY',    title: 'Last year',         computeRange: () => { const d = subYears(new Date(), 1);    return { start: fmtDate(startOfYear(d)),    end: fmtDate(endOfYear(d)) }; } },
+  'trailing-12':  { label: 'T12',   title: 'Trailing 12 months', computeRange: () => ({ start: fmtDate(startOfMonth(subMonths(new Date(), 12))), end: fmtDate(new Date()) }) },
+};
+
+/** Compute the DateRange for a given preset */
+export function computePresetDateRange(preset: PeriodPreset): DateRange {
+  return PRESET_META[preset].computeRange();
+}
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
 export interface DatePeriodPickerProps {
-  /** Currently selected year */
+  /** Currently selected year (used for year buttons and backward compat) */
   year: number;
-  /** Callback when year changes */
+  /** Callback when year changes (backward compat) */
   onYearChange: (year: number) => void;
-  /** Callback when date range changes (includes calculated range based on year/custom selection) */
+  /** Callback when date range changes (backward compat - fires for every selection type) */
   onDateRangeChange?: (range: DateRange) => void;
-  /** Number of years to show (default: 4, going back from current year) */
+  /** NEW: Callback with full period selection (type + preset + dateRange) */
+  onPeriodChange?: (selection: PeriodSelection) => void;
+  /** NEW: Which preset buttons to show before the year buttons. Default: ['rolling-13', 'rolling-12'] */
+  presets?: PeriodPreset[];
+  /** NEW: Whether to show year buttons. Default: true */
+  showYears?: boolean;
+  /** Number of years to show (default: 4) */
   yearsToShow?: number;
   /** Optional className for the container */
   className?: string;
@@ -45,6 +122,8 @@ export interface DatePeriodPickerProps {
   label?: string;
   /** Whether to show the label */
   showLabel?: boolean;
+  /** NEW: Initially selected preset (optional) */
+  defaultPreset?: PeriodPreset;
 }
 
 // Generate years from current year down
@@ -53,134 +132,125 @@ const generateYears = (count: number): number[] => {
   return Array.from({ length: count }, (_, i) => currentYear - i);
 };
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export const DatePeriodPicker = ({
   year,
   onYearChange,
   onDateRangeChange,
+  onPeriodChange,
+  presets,
+  showYears = true,
   yearsToShow = 4,
   className,
   size = 'default',
   label = 'Period:',
   showLabel = true,
+  defaultPreset,
 }: DatePeriodPickerProps) => {
   const currentYear = new Date().getFullYear();
   const availableYears = useMemo(() => generateYears(yearsToShow), [yearsToShow]);
-  
-  // Date filter type: 'year', 'rolling', or 'custom'
-  const [dateFilterType, setDateFilterType] = useState<'year' | 'rolling' | 'custom'>('year');
-  const [rollingPeriod, setRollingPeriod] = useState<RollingPeriod | null>(null);
-  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ 
-    start: null, 
-    end: null 
+
+  // Effective presets – default to legacy rolling 13/12 when not specified
+  const effectivePresets = presets ?? ['rolling-13', 'rolling-12'];
+
+  // Active selection state
+  const [activeType, setActiveType] = useState<'year' | 'preset' | 'custom'>(
+    defaultPreset ? 'preset' : 'year',
+  );
+  const [activePreset, setActivePreset] = useState<PeriodPreset | null>(defaultPreset ?? null);
+  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({
+    start: null,
+    end: null,
   });
 
-  // Calculate rolling period date range (matches Qlik's Rolling12MonthFlag / Rolling13MonthFlag)
-  // Qlik formula: AddMonths(MonthEnd(vMaxDate), -N, 1) to vMaxDate
-  // This means: First day of month N months ago to today
-  const calculateRollingDateRange = useCallback((months: number): DateRange => {
-    const today = new Date();
-    const startDate = startOfMonth(subMonths(today, months));
-    return {
-      start: format(startDate, 'yyyy-MM-dd'),
-      end: format(today, 'yyyy-MM-dd'),
-    };
-  }, []);
+  // ---- Notification helpers ------------------------------------------------
 
-  // Calculate the effective date range based on selection
-  const calculateDateRange = useCallback((
-    filterType: 'year' | 'rolling' | 'custom',
-    selectedYear: number,
-    customRange: { start: Date | null; end: Date | null },
-    rolling: RollingPeriod | null
-  ): DateRange => {
-    if (filterType === 'custom' && customRange.start && customRange.end) {
-      return {
-        start: customRange.start.toISOString().split('T')[0],
-        end: customRange.end.toISOString().split('T')[0],
-      };
-    }
-    
-    if (filterType === 'rolling' && rolling) {
-      const months = rolling === 'rolling12' ? 12 : 13;
-      return calculateRollingDateRange(months);
-    }
-    
-    // For year-based filtering
-    const startOfYear = `${selectedYear}-01-01`;
+  const notify = useCallback(
+    (selection: PeriodSelection) => {
+      onDateRangeChange?.(selection.dateRange);
+      onPeriodChange?.(selection);
+    },
+    [onDateRangeChange, onPeriodChange],
+  );
+
+  // ---- Handlers ------------------------------------------------------------
+
+  const handleYearSelect = (selectedYear: number) => {
+    setActiveType('year');
+    setActivePreset(null);
+    onYearChange(selectedYear);
+
     const today = new Date();
     const isCurrentYear = selectedYear === today.getFullYear();
-    
-    // For current year: use YTD (Jan 1 to today)
-    // For past years: use full year (Jan 1 to Dec 31)
-    const endDate = isCurrentYear 
-      ? today.toISOString().split('T')[0]
-      : `${selectedYear}-12-31`;
-    
-    return {
-      start: startOfYear,
-      end: endDate,
+    const dateRange: DateRange = {
+      start: `${selectedYear}-01-01`,
+      end: isCurrentYear ? fmtDate(today) : `${selectedYear}-12-31`,
     };
-  }, [calculateRollingDateRange]);
-
-  // Notify parent of date range changes
-  const notifyDateRangeChange = useCallback((
-    filterType: 'year' | 'rolling' | 'custom',
-    selectedYear: number,
-    customRange: { start: Date | null; end: Date | null },
-    rolling: RollingPeriod | null = null
-  ) => {
-    if (onDateRangeChange) {
-      const range = calculateDateRange(filterType, selectedYear, customRange, rolling);
-      onDateRangeChange(range);
-    }
-  }, [calculateDateRange, onDateRangeChange]);
-
-  // Handle year button click
-  const handleYearSelect = (selectedYear: number) => {
-    setDateFilterType('year');
-    setRollingPeriod(null);
-    onYearChange(selectedYear);
-    notifyDateRangeChange('year', selectedYear, customDateRange, null);
+    notify({ type: 'year', year: selectedYear, dateRange });
   };
 
-  // Handle rolling period selection
-  const handleRollingSelect = (period: RollingPeriod) => {
-    setDateFilterType('rolling');
-    setRollingPeriod(period);
-    notifyDateRangeChange('rolling', year, customDateRange, period);
+  const handlePresetSelect = (preset: PeriodPreset) => {
+    setActiveType('preset');
+    setActivePreset(preset);
+    const dateRange = computePresetDateRange(preset);
+    notify({ type: 'preset', preset, dateRange });
   };
 
-  // Handle custom date range selection
   const handleCustomDateSelect = (range: { from?: Date; to?: Date } | undefined) => {
-    const newRange = {
-      start: range?.from || null,
-      end: range?.to || null,
-    };
+    const newRange = { start: range?.from || null, end: range?.to || null };
     setCustomDateRange(newRange);
-    
     if (range?.from && range?.to) {
-      setDateFilterType('custom');
-      setRollingPeriod(null);
-      notifyDateRangeChange('custom', year, newRange, null);
+      setActiveType('custom');
+      setActivePreset(null);
+      const dateRange: DateRange = {
+        start: fmtDate(range.from),
+        end: fmtDate(range.to),
+      };
+      notify({ type: 'custom', dateRange });
     }
   };
 
-  // Clear custom date range
   const handleClearCustom = () => {
     setCustomDateRange({ start: null, end: null });
-    setRollingPeriod(null);
-    setDateFilterType('year');
-    notifyDateRangeChange('year', year, { start: null, end: null }, null);
+    setActivePreset(null);
+    setActiveType('year');
+    const today = new Date();
+    const isCurrentYear = year === today.getFullYear();
+    const dateRange: DateRange = {
+      start: `${year}-01-01`,
+      end: isCurrentYear ? fmtDate(today) : `${year}-12-31`,
+    };
+    notify({ type: 'year', year, dateRange });
   };
 
-  // Size-based classes
-  const buttonClasses = size === 'sm' 
-    ? 'px-2 py-1 text-[10px] sm:px-2.5 sm:py-1.5 sm:text-xs'
-    : 'px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm';
+  // ---- Styling helpers -----------------------------------------------------
 
-  const labelClasses = size === 'sm'
-    ? 'text-[9px] sm:text-[10px]'
-    : 'text-[10px] sm:text-xs';
+  const buttonClasses =
+    size === 'sm'
+      ? 'px-2 py-1 text-[10px] sm:px-2.5 sm:py-1.5 sm:text-xs'
+      : 'px-2.5 py-1.5 sm:px-3 md:px-4 sm:py-2 text-[11px] sm:text-xs md:text-sm';
+
+  const labelClasses = size === 'sm' ? 'text-[9px] sm:text-[10px]' : 'text-[10px] sm:text-xs';
+
+  const isActive = (type: 'year' | 'preset' | 'custom', value?: number | PeriodPreset) => {
+    if (type === 'year') return activeType === 'year' && year === value;
+    if (type === 'preset') return activeType === 'preset' && activePreset === value;
+    return activeType === 'custom';
+  };
+
+  const btnCn = (active: boolean) =>
+    cn(
+      buttonClasses,
+      'font-medium rounded-md transition-all whitespace-nowrap touch-manipulation',
+      active
+        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300',
+    );
+
+  // ---- Render --------------------------------------------------------------
 
   return (
     <div className={cn('flex items-center gap-1.5 sm:gap-2 flex-wrap', className)}>
@@ -189,72 +259,58 @@ export const DatePeriodPicker = ({
           {label}
         </span>
       )}
-      
-      <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg overflow-x-auto">
-        {/* Rolling period buttons - matches Qlik Rolling12MonthFlag / Rolling13MonthFlag */}
-        <button 
-          onClick={() => handleRollingSelect('rolling13')} 
-          className={cn(
-            buttonClasses,
-            'font-medium rounded-md transition-all whitespace-nowrap touch-manipulation',
-            dateFilterType === 'rolling' && rollingPeriod === 'rolling13'
-              ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-          )}
-          title="Rolling 13 months (Qlik default for TTS)"
-        >
-          L13M
-        </button>
-        <button 
-          onClick={() => handleRollingSelect('rolling12')} 
-          className={cn(
-            buttonClasses,
-            'font-medium rounded-md transition-all whitespace-nowrap touch-manipulation',
-            dateFilterType === 'rolling' && rollingPeriod === 'rolling12'
-              ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-              : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-          )}
-          title="Rolling 12 months"
-        >
-          L12M
-        </button>
 
-        {/* Separator */}
-        <div className="w-px h-4 bg-slate-300 dark:bg-slate-600 mx-0.5" />
+      <div className="flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 bg-slate-100 dark:bg-slate-800/50 rounded-lg overflow-x-auto">
+        {/* Preset buttons */}
+        {effectivePresets.map((preset) => {
+          const meta = PRESET_META[preset];
+          return (
+            <button
+              key={preset}
+              onClick={() => handlePresetSelect(preset)}
+              className={btnCn(isActive('preset', preset))}
+              title={meta.title}
+            >
+              {meta.label}
+            </button>
+          );
+        })}
+
+        {/* Separator between presets and years (only if both are shown) */}
+        {effectivePresets.length > 0 && showYears && (
+          <div className="w-px h-4 bg-slate-300 dark:bg-slate-600 mx-0.5" />
+        )}
 
         {/* Year buttons */}
-        {availableYears.map(y => (
-          <button 
-            key={y} 
-            onClick={() => handleYearSelect(y)} 
-            className={cn(
-              buttonClasses,
-              'font-medium rounded-md transition-all whitespace-nowrap touch-manipulation',
-              dateFilterType === 'year' && year === y 
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-            )}
-          >
-            {y === currentYear ? `${y} YTD` : y}
-          </button>
-        ))}
-        
+        {showYears &&
+          availableYears.map((y) => (
+            <button
+              key={y}
+              onClick={() => handleYearSelect(y)}
+              className={btnCn(isActive('year', y))}
+            >
+              {y === currentYear ? `${y} YTD` : y}
+            </button>
+          ))}
+
         {/* Custom Date Picker */}
         <Popover>
           <PopoverTrigger asChild>
-            <button 
+            <button
               className={cn(
-                buttonClasses,
-                'font-medium rounded-md transition-all whitespace-nowrap touch-manipulation flex items-center gap-1',
-                dateFilterType === 'custom' 
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                btnCn(isActive('custom')),
+                'flex items-center gap-1',
               )}
             >
-              <CalendarIcon className={size === 'sm' ? 'w-2.5 h-2.5 sm:w-3 sm:h-3' : 'w-3 h-3 sm:w-3.5 sm:h-3.5'} />
-              {dateFilterType === 'custom' && customDateRange.start && customDateRange.end ? (
+              <CalendarIcon
+                className={
+                  size === 'sm' ? 'w-2.5 h-2.5 sm:w-3 sm:h-3' : 'w-3 h-3 sm:w-3.5 sm:h-3.5'
+                }
+              />
+              {activeType === 'custom' && customDateRange.start && customDateRange.end ? (
                 <span className="hidden sm:inline">
-                  {format(customDateRange.start, 'MMM d')} - {format(customDateRange.end, 'MMM d, yyyy')}
+                  {format(customDateRange.start, 'MMM d')} -{' '}
+                  {format(customDateRange.end, 'MMM d, yyyy')}
                 </span>
               ) : (
                 <span className="hidden sm:inline">Custom</span>
@@ -276,50 +332,74 @@ export const DatePeriodPicker = ({
           </PopoverContent>
         </Popover>
       </div>
-      
+
       {/* Clear custom date button */}
-      {dateFilterType === 'custom' && (customDateRange.start || customDateRange.end) && (
+      {activeType === 'custom' && (customDateRange.start || customDateRange.end) && (
         <Button
           variant="ghost"
           size="icon"
           onClick={handleClearCustom}
           className={size === 'sm' ? 'h-5 w-5 sm:h-6 sm:w-6' : 'h-6 w-6 sm:h-7 sm:w-7'}
         >
-          <X className={size === 'sm' ? 'h-2.5 w-2.5 sm:h-3 sm:w-3' : 'h-3 w-3 sm:h-3.5 sm:w-3.5'} />
+          <X
+            className={
+              size === 'sm' ? 'h-2.5 w-2.5 sm:h-3 sm:w-3' : 'h-3 w-3 sm:h-3.5 sm:w-3.5'
+            }
+          />
         </Button>
       )}
     </div>
   );
 };
 
-/**
- * Hook to use DatePeriodPicker state externally
- * Useful when you need to access the date range without using the component
- */
+// ---------------------------------------------------------------------------
+// Hook – useDatePeriodState (backward-compatible + enhanced)
+// ---------------------------------------------------------------------------
+
 export const useDatePeriodState = (initialYear?: number) => {
   const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(initialYear || currentYear);
+  const [year, setYearRaw] = useState(initialYear || currentYear);
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     const today = new Date();
+    const y = initialYear || currentYear;
     return {
-      start: `${year}-01-01`,
-      end: year === currentYear ? today.toISOString().split('T')[0] : `${year}-12-31`,
+      start: `${y}-01-01`,
+      end: y === currentYear ? fmtDate(today) : `${y}-12-31`,
+    };
+  });
+  const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
+    const today = new Date();
+    const y = initialYear || currentYear;
+    return {
+      type: 'year',
+      year: y,
+      dateRange: {
+        start: `${y}-01-01`,
+        end: y === currentYear ? fmtDate(today) : `${y}-12-31`,
+      },
     };
   });
 
   const handleYearChange = useCallback((newYear: number) => {
-    setYear(newYear);
-    // Auto-calculate date range for year selection
+    setYearRaw(newYear);
     const today = new Date();
     const isCurrentYear = newYear === today.getFullYear();
-    setDateRange({
+    const range: DateRange = {
       start: `${newYear}-01-01`,
-      end: isCurrentYear ? today.toISOString().split('T')[0] : `${newYear}-12-31`,
-    });
+      end: isCurrentYear ? fmtDate(today) : `${newYear}-12-31`,
+    };
+    setDateRange(range);
+    setPeriodSelection({ type: 'year', year: newYear, dateRange: range });
   }, []);
 
   const handleDateRangeChange = useCallback((range: DateRange) => {
     setDateRange(range);
+  }, []);
+
+  const handlePeriodChange = useCallback((selection: PeriodSelection) => {
+    setDateRange(selection.dateRange);
+    setPeriodSelection(selection);
+    if (selection.year != null) setYearRaw(selection.year);
   }, []);
 
   return {
@@ -327,6 +407,8 @@ export const useDatePeriodState = (initialYear?: number) => {
     setYear: handleYearChange,
     dateRange,
     setDateRange: handleDateRangeChange,
+    periodSelection,
+    setPeriodSelection: handlePeriodChange,
   };
 };
 

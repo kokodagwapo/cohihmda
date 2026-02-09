@@ -68,6 +68,7 @@ import {
   TopTieringActor as APIActorData,
   CustomDateRange,
 } from "@/hooks/useTopTieringComparisonData";
+import { DatePeriodPicker, type PeriodSelection, type PeriodPreset } from "@/components/ui/DatePeriodPicker";
 
 type TopTieringActor = "branch" | "loan-officer";
 type TimeFilter =
@@ -79,6 +80,21 @@ type TimeFilter =
   | "mtd"
   | "trailing-12"
   | "custom";
+
+/** Map PeriodSelection to TopTiering TimeFilter + optional CustomDateRange */
+const mapPeriodToTopTiering = (selection: PeriodSelection): { timeFilter: TimeFilter; customDateRange?: CustomDateRange } => {
+  if (selection.type === 'custom') {
+    return { timeFilter: 'custom', customDateRange: { start: selection.dateRange.start, end: selection.dateRange.end } };
+  }
+  const directMap: Record<string, TimeFilter> = {
+    'mtd': 'mtd', 'qtd': 'qtd', 'ytd': 'ytd',
+    'last-month': 'last-month', 'last-quarter': 'last-quarter',
+    'last-year': 'last-year', 'trailing-12': 'trailing-12',
+  };
+  const preset = selection.preset;
+  if (preset && directMap[preset]) return { timeFilter: directMap[preset] };
+  return { timeFilter: 'last-year' };
+};
 type ChartSorting = "desc" | "asc";
 
 interface ActorData {
@@ -336,6 +352,16 @@ export function TopTieringComparisonView({
     const saved = localStorage.getItem("toptiering-comparison-time");
     return (saved as TimeFilter) || "last-year";
   });
+  const [ttcPickerYear, setTtcPickerYear] = useState(new Date().getFullYear());
+  const handleTtcPeriodChange = useCallback((selection: PeriodSelection) => {
+    const mapped = mapPeriodToTopTiering(selection);
+    setTimeFilter(mapped.timeFilter);
+    if (mapped.customDateRange) {
+      setCustomDateRange(mapped.customDateRange);
+    } else {
+      setCustomDateRange(undefined);
+    }
+  }, []);
   // Per-chart sorting states (desc = high to low, asc = low to high)
   const [revenueChartSorting, setRevenueChartSorting] = useState<ChartSorting>(
     () => {
@@ -1011,34 +1037,16 @@ export function TopTieringComparisonView({
                   >
                     Time Filter
                   </label>
-                  <Select
-                    value={timeFilter}
-                    onValueChange={(v) => setTimeFilter(v as TimeFilter)}
-                  >
-                    <SelectTrigger
-                      className={`${
-                        isDarkMode
-                          ? "bg-slate-800/60 border-slate-700"
-                          : "bg-white border-slate-300"
-                      }`}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ytd">Year to Date</SelectItem>
-                      <SelectItem value="qtd">Quarter to Date</SelectItem>
-                      <SelectItem value="mtd">Month to Date</SelectItem>
-                      <SelectItem value="trailing-12">
-                        Trailing 12 Months
-                      </SelectItem>
-                      <SelectItem value="last-year">
-                        Last Calendar Year
-                      </SelectItem>
-                      <SelectItem value="last-quarter">Last Quarter</SelectItem>
-                      <SelectItem value="last-month">Last Month</SelectItem>
-                      <SelectItem value="custom">Custom Range</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <DatePeriodPicker
+                    year={ttcPickerYear}
+                    onYearChange={setTtcPickerYear}
+                    presets={['mtd', 'qtd', 'ytd', 'last-month', 'last-quarter', 'last-year', 'trailing-12']}
+                    showYears={false}
+                    onPeriodChange={handleTtcPeriodChange}
+                    defaultPreset="last-year"
+                    showLabel={false}
+                    size="sm"
+                  />
                 </div>
 
                 {/* Actor Selection */}
