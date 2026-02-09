@@ -20,6 +20,7 @@ interface HorizontalSliderProps {
   step?: number;
   formatValue?: (value: number) => string;
   isDarkMode?: boolean;
+  hint?: string;
 }
 
 const HorizontalSlider: React.FC<HorizontalSliderProps> = ({
@@ -31,6 +32,7 @@ const HorizontalSlider: React.FC<HorizontalSliderProps> = ({
   step = 1,
   formatValue,
   isDarkMode = false,
+  hint,
 }) => {
   const formattedValue = formatValue ? formatValue(value) : value.toString();
 
@@ -114,6 +116,11 @@ const HorizontalSlider: React.FC<HorizontalSliderProps> = ({
             />
           </div>
         </div>
+        {hint && (
+          <p className={`text-[9px] sm:text-[10px] mt-1 leading-tight ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+            {hint}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -180,7 +187,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
   );
 
   // Slider values; targets default to Qlik benchmark (25, 45, 85, 85)
-  const [marginIncreaseBP, setMarginIncreaseBP] = useState(FALLBACK_MARGIN_BP);
+  const [marginIncreaseBP, setMarginIncreaseBP] = useState(0);
   const [pullThroughPercent, setPullThroughPercent] = useState(FALLBACK_PULL_THROUGH);
   const [mlo, setMlo] = useState(FALLBACK_MLO_ACTUAL);
   const [processor, setProcessor] = useState(DEFAULT_TARGET_PROCESSOR);
@@ -191,10 +198,9 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
   // When baseline loads, sync margin/pull-through/MLO to actuals and role sliders to tenant targets
   useEffect(() => {
     if (!baseline) return;
-    const marginBp = baseline.marginBps > 0 ? baseline.marginBps : FALLBACK_MARGIN_BP;
     const pullThrough = baseline.pullThroughRate > 0 ? baseline.pullThroughRate : FALLBACK_PULL_THROUGH;
     const mloActual = baseline.avgUnitsPerMlo > 0 ? baseline.avgUnitsPerMlo : FALLBACK_MLO_ACTUAL;
-    setMarginIncreaseBP(marginBp);
+    setMarginIncreaseBP(0); // Reset increase to 0 when baseline changes
     setPullThroughPercent(pullThrough);
     setMlo(mloActual);
     const t = baseline.targetUnits;
@@ -207,10 +213,9 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
   }, [baseline]);
 
   const resetSliders = () => {
-    const marginBp = baseline?.marginBps && baseline.marginBps > 0 ? baseline.marginBps : FALLBACK_MARGIN_BP;
     const pullThrough = baseline?.pullThroughRate && baseline.pullThroughRate > 0 ? baseline.pullThroughRate : FALLBACK_PULL_THROUGH;
     const mloActual = baseline?.avgUnitsPerMlo && baseline.avgUnitsPerMlo > 0 ? baseline.avgUnitsPerMlo : FALLBACK_MLO_ACTUAL;
-    setMarginIncreaseBP(marginBp);
+    setMarginIncreaseBP(0);
     setPullThroughPercent(pullThrough);
     setMlo(mloActual);
     const t = baseline?.targetUnits;
@@ -446,13 +451,10 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
     {
       metric: "Margin Improvement",
       actual: `${baseMarginActualBp} BP`,
-      valueSelected: `${marginIncreaseBP} BP`,
-      profitImprovement: (() => {
-        const deltaBp = marginIncreaseBP - baseMarginActualBp;
-        return Math.round(
-          deltaBp > 0 ? deltaBp * marginProfitPerBp : 0
-        );
-      })(),
+      valueSelected: `${baseMarginActualBp + marginIncreaseBP} BP`,
+      profitImprovement: Math.round(
+        marginIncreaseBP > 0 ? marginIncreaseBP * marginProfitPerBp : 0
+      ),
     },
   ];
 
@@ -579,8 +581,12 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
         {/* Left Panel - Sliders */}
         <div className="col-span-12 lg:col-span-3 overflow-y-auto pr-1 sm:pr-2 flex flex-col px-2 sm:px-3">
           <div className="grid grid-cols-1 gap-2 sm:gap-2.5 flex-1">
+            {/* Section: Revenue & Pipeline */}
+            <div className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest px-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+              Revenue &amp; Pipeline
+            </div>
             <HorizontalSlider
-              label="Margin Increase BP"
+              label="Margin Increase (BP)"
               value={marginIncreaseBP}
               onValueChange={setMarginIncreaseBP}
               min={0}
@@ -588,9 +594,10 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={1}
               formatValue={(val) => `${val}`}
               isDarkMode={isDarkMode}
+              hint={`Current: ${baseMarginActualBp} BP → With increase: ${baseMarginActualBp + marginIncreaseBP} BP`}
             />
             <HorizontalSlider
-              label="Pull through %"
+              label="Pull Through Rate (%)"
               value={pullThroughPercent}
               onValueChange={setPullThroughPercent}
               min={0}
@@ -598,6 +605,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={0.01}
               formatValue={(val) => val.toFixed(2)}
               isDarkMode={isDarkMode}
+              hint={`Baseline: ${basePullThroughActual.toFixed(2)}%`}
             />
             <HorizontalSlider
               label="MLO (units/LO/month)"
@@ -608,7 +616,13 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={0.1}
               formatValue={(val) => val.toFixed(1)}
               isDarkMode={isDarkMode}
+              hint={`Baseline: ${baseMloActual.toFixed(1)} units/LO/month`}
             />
+
+            {/* Section: Staffing Targets */}
+            <div className={`text-[9px] sm:text-[10px] font-semibold uppercase tracking-widest px-1 pt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+              Staffing Targets — units / month / FTE
+            </div>
             <HorizontalSlider
               label="Processor"
               value={processor}
@@ -618,6 +632,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={1}
               formatValue={(val) => `${val}`}
               isDarkMode={isDarkMode}
+              hint={`Actual: ${processorActual} units/mo`}
             />
             <HorizontalSlider
               label="Underwriter"
@@ -628,6 +643,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={1}
               formatValue={(val) => `${val}`}
               isDarkMode={isDarkMode}
+              hint={`Actual: ${underwriterActual} units/mo`}
             />
             <HorizontalSlider
               label="Closer"
@@ -638,9 +654,10 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={1}
               formatValue={(val) => `${val}`}
               isDarkMode={isDarkMode}
+              hint={`Actual: ${closerActual} units/mo`}
             />
             <HorizontalSlider
-              label="Other Support Employees"
+              label="Other Support"
               value={otherSupport}
               onValueChange={setOtherSupport}
               min={0}
@@ -648,6 +665,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               step={1}
               formatValue={(val) => `${val}`}
               isDarkMode={isDarkMode}
+              hint={`Actual: ${otherActual} units/mo`}
             />
           </div>
 
@@ -695,6 +713,9 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
                   <CardTitle className="text-base font-bold">
                     Productivity Improvement
                   </CardTitle>
+                  <p className={`text-[10px] sm:text-xs mt-0.5 font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Actual &amp; Target values represent units per month per FTE. Cost = monthly compensation / units.
+                  </p>
                 </CardHeader>
                 <CardContent className="pt-2">
                   <div className="overflow-x-auto -mx-2 sm:mx-0 max-h-[600px] overflow-y-auto">
@@ -720,14 +741,14 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
-                              Actual
+                              Actual (units/mo)
                             </th>
                             <th
                               className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
-                              Target
+                              Target (units/mo)
                             </th>
                             <th
                               className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
@@ -741,14 +762,14 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
-                              Actual Cost
+                              Actual Cost/Unit
                             </th>
                             <th
                               className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
-                              Target Cost
+                              Target Cost/Unit
                             </th>
                             <th
                               className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
@@ -762,7 +783,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
                                 isDarkMode ? "text-slate-400" : "text-slate-600"
                               }`}
                             >
-                              Productivity Improvement
+                              Est. Improvement
                             </th>
                           </tr>
                         </thead>
@@ -948,6 +969,9 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
               <CardTitle className="text-base font-bold">
                 Additional Profit Improvements
               </CardTitle>
+              <p className={`text-[10px] sm:text-xs mt-0.5 font-normal ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                Revenue impact from adjusting margin, pull-through, and MLO productivity targets
+              </p>
             </CardHeader>
             <CardContent className="pt-2">
               <div className="overflow-x-auto -mx-2 sm:mx-0">
@@ -964,7 +988,7 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
                             isDarkMode ? "text-slate-400" : "text-slate-600"
                           }`}
                         >
-                          Additional Profit Improvements
+                          Metric
                         </th>
                         <th
                           className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
@@ -978,14 +1002,14 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
                             isDarkMode ? "text-slate-400" : "text-slate-600"
                           }`}
                         >
-                          Value Selected
+                          Target (Selected)
                         </th>
                         <th
                           className={`text-center py-1.5 sm:py-2 px-2 sm:px-3 text-[10px] sm:text-xs font-semibold ${
                             isDarkMode ? "text-slate-400" : "text-slate-600"
                           }`}
                         >
-                          Profit Improvement
+                          Est. Profit Improvement
                         </th>
                       </tr>
                     </thead>

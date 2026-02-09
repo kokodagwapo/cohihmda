@@ -38,7 +38,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -46,7 +46,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -63,7 +63,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(user_id)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -84,7 +84,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -92,7 +92,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_employees_email ON public.employees(email)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -100,7 +100,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_employees_employee_id ON public.employees(employee_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -157,43 +157,23 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         county_fips_code TEXT,
         state_fips_code TEXT,
         
-        -- Date fields (all as DATE type)
+        -- Date fields (standardized to common-aliases-list.txt)
         application_date DATE,
-        gfe_application_date DATE,
         started_date DATE,
-        pre_approval_date DATE,
         preapproval_req_dt DATE,
-        disclosure_prep_date DATE,
-        signed_date DATE,
-        scrubbed_date DATE,
-        processing_date DATE,
         submitted_to_processing_date DATE,
         submitted_to_underwriting_date DATE,
-        submittal_date DATE,
-        cond_approval_date DATE,
         conditional_approval_date DATE,
-        resubmittal_date DATE,
-        approval_date DATE,
         uw_final_approval_date DATE,
         uw_denied_date DATE,
         uw_suspended_date DATE,
         ctc_date DATE,
-        ready_for_docs_date DATE,
-        closer_assignment_date DATE,
-        docs_out_date DATE,
-        docs_signing_date DATE,
-        doc_preparation_date DATE,
         closing_date DATE,
         estimated_closing_date DATE,
         funding_date TIMESTAMPTZ,
         funds_sent_date DATE,
-        disbursement_date DATE,
         shipped_date DATE,
         investor_purchase_date DATE,
-        purchased_date DATE,
-        reconciled_date DATE,
-        completion_date DATE,
-        post_closing_date DATE,
         lock_date TIMESTAMPTZ,
         lock_expiration_date DATE,
         buy_side_lock_date DATE,
@@ -202,20 +182,14 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         sell_side_lock_days INTEGER,
         sell_side_lock_expiration DATE,
         investor_lock_date DATE,
-        last_rate_set_date DATE,
-        rate_lock_sell_side_last_rate_set_date DATE,
         loan_estimate_sent_date DATE,
         loan_estimate_received_date DATE,
         revised_le_sent_date DATE,
         revised_le_received_date DATE,
-        initial_disclosure_due_date DATE,
-        gfe_initial_gfe_disclosure_provided_date DATE,
-        til_intl_disclosure_provided_date DATE,
         closing_disclosure_sent_date DATE,
         closing_disclosure_received_date DATE,
         revised_cd_sent_date DATE,
         revised_cd_received_date DATE,
-        closing_docs_1003_signature_date DATE,
         loan_first_payment_date DATE,
         maturity_date DATE,
         note_date DATE,
@@ -226,12 +200,16 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         appraisal_received_date DATE,
         flood_certification_date DATE,
         au_decision_date DATE,
-        repurchase_date DATE,
-        date_sold_to_third_party DATE,
-        date_warehoused DATE,
         last_modified_date TIMESTAMPTZ,
-        appt_reset_date DATE,
-        appt_set_date DATE,
+        
+        -- Non-standard milestone dates (actively used in scorecards/metrics/predictions, not in common-aliases-list.txt)
+        processing_date DATE,
+        submittal_date DATE,
+        resubmittal_date DATE,
+        docs_out_date DATE,
+        docs_signing_date DATE,
+        disbursement_date DATE,
+        date_warehoused DATE,
         
         -- Revenue fields
         origination_points DECIMAL(12,2),
@@ -300,6 +278,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         interest_only_payments BOOLEAN,
         number_of_months_interest_only_payments INTEGER,
         balloon_payments BOOLEAN,
+        p_and_i_payment DECIMAL(12,2),
         piti_payment DECIMAL(12,2),
         
         -- PMI fields
@@ -451,12 +430,6 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         document_type TEXT,
         du_lp_case_id TEXT,
         
-        -- GFE disclosure dates
-        gfe_affiliated_business_disclosure_provided_date DATE,  -- Shortened from 67 chars to stay under PostgreSQL 63-char limit
-        gfe_initial_gfe_disclosure_charm_booklet_provided_date DATE,
-        gfe_initial_gfe_disclosure_hud_special_booklet_provided_date DATE,
-        gfe_initial_gfe_disclosure_heloc_brochure_provided_date DATE,
-        
         -- Other fields
         -- Note: guid is defined at the top of the table as the unique identifier
         uw_touches INTEGER,
@@ -470,7 +443,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         created_by UUID REFERENCES public.users(id)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -479,7 +452,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_application_date ON public.loans(application_date) WHERE application_date IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -487,7 +460,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_closing_date ON public.loans(closing_date) WHERE closing_date IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -495,7 +468,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_funding_date ON public.loans(funding_date) WHERE funding_date IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -503,7 +476,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_loan_type ON public.loans(loan_type) WHERE loan_type IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -511,7 +484,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_current_loan_status ON public.loans(current_loan_status) WHERE current_loan_status IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -519,7 +492,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_branch ON public.loans(branch) WHERE branch IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -528,7 +501,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_guid ON public.loans(guid) WHERE guid IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -537,7 +510,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loans_loan_number ON public.loans(loan_number) WHERE loan_number IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -546,7 +519,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE EXTENSION IF NOT EXISTS vector
-    `
+    `,
       )
       .catch(() => {});
 
@@ -557,7 +530,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_loans_embedding 
       ON public.loans USING ivfflat (embedding vector_cosine_ops) 
       WITH (lists = 100)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -649,7 +622,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
     } catch (error: any) {
       console.error(
         "[TenantSchema] Ratio fields migration error:",
-        error.message
+        error.message,
       );
       // Don't throw - allow schema creation to continue
     }
@@ -676,7 +649,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
     } catch (error: any) {
       console.error(
         "[TenantSchema] Error migrating loan_officer_id:",
-        error.message
+        error.message,
       );
       // Don't throw - allow schema creation to continue
     }
@@ -697,12 +670,12 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         END $$;
       `);
       console.log(
-        "[TenantSchema] Orphaned columns cleanup migration completed"
+        "[TenantSchema] Orphaned columns cleanup migration completed",
       );
     } catch (error: any) {
       console.error(
         "[TenantSchema] Error cleaning up orphaned columns:",
-        error.message
+        error.message,
       );
       // Don't throw - allow schema creation to continue
     }
@@ -753,7 +726,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
     } catch (error: any) {
       console.error(
         "[TenantSchema] Error migrating years-on-job fields:",
-        error.message
+        error.message,
       );
       // Don't throw - allow schema creation to continue
     }
@@ -779,42 +752,58 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
     } catch (error: any) {
       console.error(
         "[TenantSchema] Error migrating cu_risk_score field:",
-        error.message
+        error.message,
       );
       // Don't throw - allow schema creation to continue
     }
 
-    // Migration: Rename truncated GFE disclosure column (PostgreSQL 63-char limit caused truncation)
+    // Migration: Drop non-standard columns removed during common-aliases-list.txt standardization (v3.0 schema cleanup)
     try {
       await pool.query(`
         DO $$
         BEGIN
-          -- Rename the truncated column to the new shortened name
-          IF EXISTS (
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = 'loans' 
-            AND column_name = 'gfe_initial_gfe_disclosure_affiliated_business_disclosure_provi'
-          ) AND NOT EXISTS (
-            SELECT 1 FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = 'loans' 
-            AND column_name = 'gfe_affiliated_business_disclosure_provided_date'
-          ) THEN
-            ALTER TABLE public.loans 
-            RENAME COLUMN gfe_initial_gfe_disclosure_affiliated_business_disclosure_provi 
-            TO gfe_affiliated_business_disclosure_provided_date;
-            RAISE NOTICE 'Renamed truncated GFE disclosure column';
-          END IF;
+          -- Drop date columns not in common-aliases-list.txt
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_application_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS pre_approval_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS disclosure_prep_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS signed_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS scrubbed_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS cond_approval_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS ready_for_docs_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS closer_assignment_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS doc_preparation_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS purchased_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS reconciled_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS completion_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS post_closing_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS last_rate_set_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS rate_lock_sell_side_last_rate_set_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS initial_disclosure_due_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_initial_gfe_disclosure_provided_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS til_intl_disclosure_provided_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS closing_docs_1003_signature_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS repurchase_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS date_sold_to_third_party;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS appt_reset_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS appt_set_date;
+          -- Drop GFE disclosure columns not in common-aliases-list.txt
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_affiliated_business_disclosure_provided_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_initial_gfe_disclosure_affiliated_business_disclosure_provi;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_initial_gfe_disclosure_charm_booklet_provided_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_initial_gfe_disclosure_hud_special_booklet_provided_date;
+          ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_initial_gfe_disclosure_heloc_brochure_provided_date;
+          -- Add p_and_i_payment column if it doesn't exist
+          ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS p_and_i_payment DECIMAL(12,2);
+          RAISE NOTICE 'Schema standardization cleanup completed (common-aliases-list.txt)';
         END $$;
       `);
       console.log(
-        "[TenantSchema] GFE disclosure column rename migration completed"
+        "[TenantSchema] Common-aliases schema standardization migration completed",
       );
     } catch (error: any) {
       console.error(
-        "[TenantSchema] Error renaming GFE disclosure column:",
-        error.message
+        "[TenantSchema] Error in schema standardization migration:",
+        error.message,
       );
       // Don't throw - allow schema creation to continue
     }
@@ -874,7 +863,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -882,7 +871,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_los_connections_active ON public.los_connections(is_active) WHERE is_active = true
-    `
+    `,
       )
       .catch(() => {});
 
@@ -890,7 +879,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_los_connections_type ON public.los_connections(los_type)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -910,7 +899,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
           ADD COLUMN encompass_api_server TEXT DEFAULT 'https://api.elliemae.com';
         END IF;
       END $$;
-    `
+    `,
       )
       .catch(() => {});
 
@@ -929,7 +918,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(los_connection_id, coheus_alias, swap_type)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -937,7 +926,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_connection ON public.encompass_field_swaps(los_connection_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -945,7 +934,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_alias ON public.encompass_field_swaps(coheus_alias)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -960,7 +949,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -968,7 +957,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_encompass_token_cache_expires ON public.encompass_token_cache(expires_at)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -986,7 +975,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         exceeded_threshold BOOLEAN NOT NULL,
         timestamp TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -994,7 +983,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_encompass_concurrency_connection ON public.encompass_concurrency_metrics(los_connection_id, timestamp)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1053,7 +1042,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1076,7 +1065,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1084,7 +1073,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_rag_document_sources_status ON public.rag_document_sources(status)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1108,7 +1097,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1116,7 +1105,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_rag_documents_source ON public.rag_documents(source_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1124,7 +1113,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_rag_documents_status ON public.rag_documents(status)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1143,22 +1132,22 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .catch(() => {});
     await pool
       .query(
-        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS is_global BOOLEAN DEFAULT false`
+        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS is_global BOOLEAN DEFAULT false`,
       )
       .catch(() => {});
     await pool
       .query(
-        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS global_doc_id UUID`
+        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS global_doc_id UUID`,
       )
       .catch(() => {});
     await pool
       .query(
-        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS global_version INTEGER`
+        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS global_version INTEGER`,
       )
       .catch(() => {});
     await pool
       .query(
-        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS source_url TEXT`
+        `ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS source_url TEXT`,
       )
       .catch(() => {});
 
@@ -1183,7 +1172,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(name)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1191,7 +1180,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_personas_is_system ON public.personas(is_system)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1212,7 +1201,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         ('Analyst', 'Builds dashboards and saved views', TRUE,
           '{"can_manage_filters": true, "can_create_reports": true, "can_view_all_data": true}'::jsonb)
       ON CONFLICT (name) DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1233,7 +1222,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         published_by UUID REFERENCES public.users(id),
         notes TEXT -- reason for change
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1241,7 +1230,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_config_versions_type ON public.config_versions(config_type)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1249,7 +1238,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_config_versions_config_id ON public.config_versions(config_id) WHERE config_id IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1257,7 +1246,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_config_versions_status ON public.config_versions(status)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1283,7 +1272,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(los_field_id)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1291,7 +1280,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_custom_fields_category ON public.custom_fields(category) WHERE category IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1299,7 +1288,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_custom_fields_enabled ON public.custom_fields(is_enabled) WHERE is_enabled = TRUE
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1330,7 +1319,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1338,7 +1327,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_range_rules_field ON public.range_rules(field_alias)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1346,7 +1335,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_range_rules_active ON public.range_rules(is_active) WHERE is_active = TRUE
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1362,7 +1351,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         ('fico_score', 'Minimum FICO', 'FICO should be ≥620, warning below 680', 620, NULL, 680, NULL, 'warning', '{}'::jsonb),
         ('loan_amount', 'Jumbo Threshold', 'Jumbo loans (≥$726,200) require additional docs', NULL, 726200, NULL, 700000, 'info', '{}'::jsonb)
       ON CONFLICT DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1393,7 +1382,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1401,7 +1390,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_saved_filters_owner ON public.saved_filters(owner_id) WHERE owner_id IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1409,7 +1398,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_saved_filters_scope ON public.saved_filters(scope)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1417,7 +1406,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_saved_filters_persona ON public.saved_filters(owner_persona_id) WHERE owner_persona_id IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1438,7 +1427,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(scorecard_type, persona_id, metric_name)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1446,7 +1435,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_scoring_weights_type ON public.scoring_weights(scorecard_type)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1454,7 +1443,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_scoring_weights_persona ON public.scoring_weights(persona_id) WHERE persona_id IS NOT NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1465,7 +1454,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_scoring_weights_unique_null_persona 
       ON public.scoring_weights (scorecard_type, metric_name) 
       WHERE persona_id IS NULL
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1489,7 +1478,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         ('operations', NULL, 'turn_time', 0.15, 'Days to complete processing (15% weight)'),
         ('operations', NULL, 'complexity', 0.15, 'Loan complexity handled (15% weight)')
       ON CONFLICT (scorecard_type, metric_name) WHERE persona_id IS NULL DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1502,7 +1491,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         units_per_month INT NOT NULL CHECK (units_per_month > 0),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1512,7 +1501,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       INSERT INTO public.staffing_unit_targets (role_key, units_per_month)
       VALUES ('processor', 25), ('underwriter', 45), ('closer', 85), ('other', 85)
       ON CONFLICT (role_key) DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1544,7 +1533,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(calculation_type, name)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1552,7 +1541,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_tenant_calculations_type ON public.tenant_calculations(calculation_type)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1560,7 +1549,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_tenant_calculations_active ON public.tenant_calculations(calculation_type, is_active) WHERE is_active = TRUE
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1584,7 +1573,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         TRUE
       )
       ON CONFLICT (calculation_type, name) DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1604,7 +1593,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(component_name, condition_value)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1612,7 +1601,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_complexity_components_name ON public.complexity_components(component_name)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1655,7 +1644,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         ('employment', 'self_employed', 0.05, 'Self-employed borrowers require additional income documentation'),
         ('employment', 'w2', 0.00, 'Standard W-2 employment')
       ON CONFLICT (component_name, condition_value) DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1685,7 +1674,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1693,7 +1682,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_saved_visualizations_user_id ON public.saved_visualizations(user_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1701,7 +1690,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_saved_visualizations_position ON public.saved_visualizations(position)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1719,7 +1708,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         metadata JSONB,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1727,7 +1716,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON public.chat_history(user_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1735,7 +1724,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_chat_history_session_id ON public.chat_history(session_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1743,7 +1732,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_chat_history_created_at ON public.chat_history(created_at DESC)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1767,7 +1756,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1775,7 +1764,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_workbench_canvases_user_id ON public.workbench_canvases(user_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1783,7 +1772,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_workbench_canvases_updated ON public.workbench_canvases(updated_at DESC)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1807,7 +1796,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(name)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1815,7 +1804,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_tenant_roles_name ON public.tenant_roles(name)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1830,7 +1819,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(user_id, role_id)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1838,7 +1827,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user_id ON public.user_role_assignments(user_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1855,7 +1844,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         dynamic_source VARCHAR(100),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1863,7 +1852,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_role_field_filters_role_id ON public.role_field_filters(role_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1889,7 +1878,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
          ARRAY['insights'],
          '{"fieldRestrictions": ["branch_price_concession", "corporate_price_concession", "net_buy", "net_sell", "srp_from_investor", "pa_srp_amt", "pa_sell_amt"]}', true)
       ON CONFLICT (name) DO NOTHING
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1915,7 +1904,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(loan_id, created_at)
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1926,7 +1915,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       ALTER TABLE public.loan_predictions 
       ADD COLUMN IF NOT EXISTS loan_data JSONB,
       ADD COLUMN IF NOT EXISTS bucket TEXT DEFAULT 'medium'
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1934,7 +1923,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loan_predictions_loan ON public.loan_predictions(loan_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1942,7 +1931,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loan_predictions_outcome ON public.loan_predictions(predicted_outcome)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1950,7 +1939,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_loan_predictions_created ON public.loan_predictions(created_at DESC)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1972,7 +1961,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         expires_at TIMESTAMPTZ,
         metadata JSONB DEFAULT '{}'
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1980,7 +1969,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_ai_pattern_learnings_type ON public.ai_pattern_learnings(learning_type)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -1988,7 +1977,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_ai_pattern_learnings_active ON public.ai_pattern_learnings(is_active)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2002,7 +1991,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         bucket_snapshot JSONB NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2010,7 +1999,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_historical_loan_bucket_cache_loan ON public.historical_loan_bucket_cache(loan_id)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2030,7 +2019,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2038,7 +2027,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_rag_knowledge_base_active ON public.rag_knowledge_base(is_active)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2046,7 +2035,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       .query(
         `
       CREATE INDEX IF NOT EXISTS idx_rag_knowledge_base_category ON public.rag_knowledge_base(category)
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2067,7 +2056,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
           metadata JSONB DEFAULT '{}',
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
-      `
+      `,
         )
         .catch(() => {});
 
@@ -2075,16 +2064,16 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         .query(
           `
         CREATE INDEX IF NOT EXISTS idx_loan_outcome_embeddings_loan ON public.loan_outcome_embeddings(loan_id)
-      `
+      `,
         )
         .catch(() => {});
 
       console.log(
-        "[TenantSchema] Fallout Prediction tables created (including pgvector)"
+        "[TenantSchema] Fallout Prediction tables created (including pgvector)",
       );
     } catch (error: any) {
       console.warn(
-        "[TenantSchema] pgvector extension not available - loan_outcome_embeddings table not created. RAG predictions will be disabled."
+        "[TenantSchema] pgvector extension not available - loan_outcome_embeddings table not created. RAG predictions will be disabled.",
       );
     }
 
@@ -2098,7 +2087,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
   } catch (error: any) {
     console.error(
       "[TenantSchema] Error creating tenant schema:",
-      error.message
+      error.message,
     );
     throw error;
   }
@@ -2136,7 +2125,7 @@ async function createTenantDerivedFieldFunctions(pool: pg.Pool): Promise<void> {
         RETURN COALESCE(v_revenue, 0);
       END;
       $$ LANGUAGE plpgsql;
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2157,7 +2146,7 @@ async function createTenantDerivedFieldFunctions(pool: pg.Pool): Promise<void> {
         RETURN p_end_date - p_start_date;
       END;
       $$ LANGUAGE plpgsql;
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2185,7 +2174,7 @@ async function createTenantDerivedFieldFunctions(pool: pg.Pool): Promise<void> {
         RETURN v_margin_bps;
       END;
       $$ LANGUAGE plpgsql;
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2220,7 +2209,7 @@ async function createTenantDerivedFieldFunctions(pool: pg.Pool): Promise<void> {
         ', p_date_field, p_date_field);
       END;
       $$ LANGUAGE plpgsql;
-    `
+    `,
       )
       .catch(() => {});
 
@@ -2255,13 +2244,13 @@ async function createTenantDerivedFieldFunctions(pool: pg.Pool): Promise<void> {
         ', p_date_field, p_date_field);
       END;
       $$ LANGUAGE plpgsql;
-    `
+    `,
       )
       .catch(() => {});
   } catch (error: any) {
     console.warn(
       "[TenantSchema] Error creating derived field functions:",
-      error.message
+      error.message,
     );
   }
 }

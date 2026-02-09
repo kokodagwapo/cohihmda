@@ -187,9 +187,14 @@ async function getOpenAIKey(tenantId?: string): Promise<string> {
   );
 }
 
+/** Content part for OpenAI multimodal messages (vision) */
+type OpenAIContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
+
 interface OpenAIChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | OpenAIContentPart[];
 }
 
 async function callOpenAI(
@@ -540,6 +545,7 @@ Fix the SQL query so it executes correctly. Common issues:
 - All non-aggregated columns must appear in GROUP BY
 - DATE_TRUNC expressions in ORDER BY must match GROUP BY exactly, or use positional refs
 - Column names are case-sensitive and must match the schema exactly
+- ROUND(double precision, integer) does not exist in PostgreSQL — use ::numeric instead of ::float. Example: ROUND((COUNT(...)::numeric / NULLIF(..., 0) * 100), 1)
 
 Respond with the same JSON format:
 {
@@ -592,6 +598,9 @@ function sanitizeGeneratedSQL(sql: string): string {
     `INTERVAL '3 months'`
   );
   sanitized = sanitized.replace(/INTERVAL\s*"([^"]+)"/gi, `INTERVAL '$1'`);
+  // Fix ROUND(::float, n) → ROUND(::numeric, n) — PostgreSQL ROUND with precision only works on numeric
+  sanitized = sanitized.replace(/::float\b/gi, "::numeric");
+  sanitized = sanitized.replace(/::double precision\b/gi, "::numeric");
   sanitized = sanitized.replace(/\s{2,}/g, " ");
   return sanitized.trim();
 }
@@ -1317,5 +1326,227 @@ function formatDataRows(rows: any[]): any[] {
 export type DataChatMessage = CohiChatMessage;
 export type DataChatResponse = CohiChatResponse;
 
+// ============================================================================
+// Edit Widget – takes current SQL + vizConfig + user instruction, returns updated
+// ============================================================================
+
+/** A single turn in the edit-widget conversation */
+export interface EditWidgetMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function editWidgetQuery(
+  currentSql: string,
+  currentVizConfig: Partial<VisualizationConfig>,
+  instruction: string,
+  context: ChatContext,
+  history?: EditWidgetMessage[]
+): Promise<{
+  sql: string;
+  vizConfig: VisualizationConfig;
+  message: string;
+  /** Whether the LLM chose to modify the query (false = conversational/clarification only) */
+  modified: boolean;
+}> {
+  const apiKey = await getOpenAIKey(context.tenantId);
+  const schemaContext = context.tenantId
+    ? await getSchemaForTenant(context.tenantId)
+    : getSchemaContext();
+
+  const now = new Date();
+  const systemPrompt = `You are Cohi, a friendly and expert SQL/data visualization assistant. The user is editing an existing dashboard widget and chatting with you about it.
+
+## Database Schema
+${schemaContext}
+
+## Current Date Context
+- Current date: ${now.toISOString().split("T")[0]}
+- Current year: ${now.getFullYear()}
+
+## Current Widget State
+### SQL Query
+\`\`\`sql
+${currentSql}
+\`\`\`
+
+### Visualization Config
+- Type: ${currentVizConfig.type || "bar"}
+- Title: ${currentVizConfig.title || ""}
+${currentVizConfig.xKey ? `- X Key: ${currentVizConfig.xKey}` : ""}
+${currentVizConfig.yKey ? `- Y Key: ${currentVizConfig.yKey}` : ""}
+${currentVizConfig.yKeys ? `- Y Keys: ${currentVizConfig.yKeys.join(", ")}` : ""}
+
+## Your Behavior
+- Be conversational and helpful. Explain what you're doing and why in plain, non-technical language.
+- The user is a business user, NOT a developer. NEVER show SQL, code, column names, or technical details in your message text.
+- Instead of showing code, describe changes in business terms (e.g. "I've updated the approved percentage to use the underwriter final approval date instead" rather than showing SQL).
+- If the user asks a question (e.g. "why is this column all zeros?"), investigate the SQL and schema, explain the likely cause in plain language, and suggest or apply fixes.
+- If the user asks for a change, make it and explain what changed in simple terms.
+- If you're unsure what they want, ask clarifying questions.
+
+## Response Format
+
+**CRITICAL: Your message text must NEVER contain SQL, code blocks, column names, or technical syntax. The user cannot see or understand code.**
+
+When you want to modify the widget, write a friendly plain-text explanation of what you changed, then include EXACTLY ONE fenced JSON block at the very END of your message. The JSON block will be stripped before the user sees your message — it is only for the system to process:
+
+\`\`\`json
+{
+  "sql": "SELECT ...",
+  "visualizationType": "bar"|"line"|"pie"|"area"|"table"|"kpi"|"donut"|"horizontal_bar",
+  "chartConfig": {
+    "title": "...",
+    "xKey": "...",
+    "yKey": "...",
+    "yKeys": [...],
+    "xLabel": "...",
+    "yLabel": "...",
+    "nameKey": "...",
+    "valueKey": "..."
+  }
+}
+\`\`\`
+
+When you do NOT want to modify the widget (just answering or clarifying), respond in plain text only with NO code blocks of any kind.
+
+NEVER use \`\`\`sql blocks, \`\`\`typescript blocks, or any other code fences besides the single \`\`\`json block described above. SQL goes ONLY inside the JSON block's "sql" field.
+
+## Rules for SQL modifications
+- Only generate SELECT queries. Never INSERT, UPDATE, DELETE, DROP, etc.
+- The main table is public.loans aliased as "l".
+- Preserve the overall intent of the original query while applying changes.
+- Verify column names against the schema before using them.
+- ALWAYS include the JSON block when making ANY change — even if the user's request seems simple.`;
+
+  // Build the message list with conversation history
+  const messages: OpenAIChatMessage[] = [
+    { role: "system", content: systemPrompt },
+  ];
+
+  // Include prior conversation turns
+  if (history && history.length > 0) {
+    for (const turn of history) {
+      messages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
+  // Add the latest user message
+  messages.push({ role: "user", content: instruction });
+
+  const response = await callOpenAI(messages, apiKey, {
+    temperature: 0.3,
+    jsonMode: false,  // We need free-form text + optional JSON
+    maxTokens: 3000,
+  });
+
+  // ── Helper: strip ALL code fences from a message (safety net) ──
+  function sanitizeMessage(text: string): string {
+    return text
+      .replace(/```[\w]*\s*[\s\S]*?```/g, "")   // fenced code blocks
+      .replace(/`[^`]+`/g, (match) => {          // inline code – replace with the text inside
+        const inner = match.slice(1, -1);
+        // Keep it if it looks like a normal word/phrase, strip if it looks like code
+        return /^[a-z_]+\.[a-z_]+|SELECT|FROM|WHERE|JOIN|GROUP|ORDER/i.test(inner) ? "" : inner;
+      })
+      .replace(/\n{3,}/g, "\n\n")                // collapse excessive newlines
+      .trim();
+  }
+
+  // ── Try to extract a JSON block from the response ──
+  const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/);
+
+  // Fallback: detect ```sql block (LLM sometimes ignores instructions)
+  let fallbackSql: string | null = null;
+  if (!jsonMatch) {
+    const sqlMatch = response.match(/```sql\s*([\s\S]*?)\s*```/);
+    if (sqlMatch) {
+      fallbackSql = sqlMatch[1].trim();
+    }
+  }
+
+  if (jsonMatch) {
+    // LLM provided the structured JSON block
+    const parsed = JSON.parse(jsonMatch[1]);
+
+    if (!parsed.sql) {
+      return {
+        sql: currentSql,
+        vizConfig: currentVizConfig as VisualizationConfig,
+        message: sanitizeMessage(response),
+        modified: false,
+      };
+    }
+
+    const execResult = await executeQuery(parsed.sql, [], context);
+    const formattedData = formatDataRows(execResult.rows);
+
+    const queryConfig: GeneratedQuery = {
+      sql: parsed.sql,
+      params: [],
+      explanation: "",
+      visualizationType:
+        parsed.visualizationType || currentVizConfig.type || "bar",
+      chartConfig: parsed.chartConfig || {},
+    };
+
+    const vizConfig = buildVisualizationConfig(formattedData, queryConfig);
+    vizConfig.title =
+      parsed.chartConfig?.title || currentVizConfig.title || vizConfig.title;
+
+    const cleanMessage = sanitizeMessage(response);
+
+    return {
+      sql: parsed.sql,
+      vizConfig,
+      message:
+        cleanMessage ||
+        "Done! I've updated the widget — take a look at the preview.",
+      modified: true,
+    };
+  }
+
+  if (fallbackSql) {
+    // LLM used a ```sql block instead of ```json — still use it
+    console.log("[editWidgetQuery] Fallback: extracted SQL from ```sql block");
+
+    const execResult = await executeQuery(fallbackSql, [], context);
+    const formattedData = formatDataRows(execResult.rows);
+
+    const queryConfig: GeneratedQuery = {
+      sql: fallbackSql,
+      params: [],
+      explanation: "",
+      visualizationType: currentVizConfig.type || "bar",
+      chartConfig: {},
+    };
+
+    const vizConfig = buildVisualizationConfig(formattedData, queryConfig);
+    vizConfig.title = currentVizConfig.title || vizConfig.title;
+
+    const cleanMessage = sanitizeMessage(response);
+
+    return {
+      sql: fallbackSql,
+      vizConfig,
+      message:
+        cleanMessage ||
+        "Done! I've updated the widget — take a look at the preview.",
+      modified: true,
+    };
+  }
+
+  // No code blocks at all → purely conversational response
+  return {
+    sql: currentSql,
+    vizConfig: currentVizConfig as VisualizationConfig,
+    message: sanitizeMessage(response),
+    modified: false,
+  };
+}
+
 // Export main functions
-export { generateQuery, executeQuery, buildVisualizationConfig, formatDataRows };
+export { generateQuery, executeQuery, buildVisualizationConfig, formatDataRows, callOpenAI, getOpenAIKey };
+
+// Re-export internal types used by dashboard image analysis
+export type { OpenAIChatMessage, OpenAIContentPart, GeneratedQuery };

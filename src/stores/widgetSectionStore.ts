@@ -75,15 +75,24 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
   },
 
   updateFilters: (sectionId: string, partial: Partial<SectionFilters>) => {
-    set((state) => ({
-      sections: {
-        ...state.sections,
-        [sectionId]: {
-          ...(state.sections[sectionId] ?? DEFAULT_SECTION_FILTERS),
-          ...partial,
-        },
-      },
-    }));
+    set((state) => {
+      const prev = state.sections[sectionId] ?? DEFAULT_SECTION_FILTERS;
+      const merged = { ...prev, ...partial };
+
+      // Cascading reset: when branch changes, reset loanOfficer to 'all'
+      // (unless loanOfficer is also being explicitly set in the same update)
+      if (
+        'branch' in partial &&
+        partial.branch !== prev.branch &&
+        !('loanOfficer' in partial)
+      ) {
+        merged.loanOfficer = 'all';
+      }
+
+      return {
+        sections: { ...state.sections, [sectionId]: merged },
+      };
+    });
   },
 
   registerSection: (sectionId: string, sectionType: SectionType) => {

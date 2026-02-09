@@ -11,6 +11,7 @@ import type { WidgetDefinition, KPIData, ChartData, TableData, TableColumn } fro
 import { KPICard } from '../components/KPICard';
 import { ChartCard } from '../components/ChartCard';
 import { DataTable } from '../components/DataTable';
+import { getTierColor } from '@/utils/tierColors';
 
 // ---------------------------------------------------------------------------
 // Source shape (matches useTopTieringComparisonData return)
@@ -137,16 +138,26 @@ const ttcRevenueChart: WidgetDefinition<ChartData> = {
   dataSelector: (raw) => {
     const d = tc(raw);
     const sorted = [...(d.actors ?? [])].sort((a, b) => b.revenue - a.revenue).slice(0, 20);
+    const totalRev = sorted.reduce((s, a) => s + a.revenue, 0);
+    let cumulative = 0;
+    const data = sorted.map((a) => {
+      cumulative += a.revenue;
+      return {
+        name: a.name?.length > 12 ? a.name.slice(0, 12) + '…' : a.name,
+        revenue: a.revenue,
+        tier: a.tier,
+        cumulativePct: totalRev > 0 ? Math.round((cumulative / totalRev) * 1000) / 10 : 0,
+      };
+    });
     return {
       title: 'Revenue by Actor',
       chartType: 'bar' as const,
-      data: sorted.map((a) => ({
-        name: a.name?.length > 12 ? a.name.slice(0, 12) + '…' : a.name,
-        revenue: a.revenue,
-      })),
-      series: [{ dataKey: 'revenue', name: 'Revenue', color: '#6366f1' }],
+      data,
+      series: [{ dataKey: 'revenue', name: 'Revenue' }],
       xAxisKey: 'name',
       yAxisLabel: 'Revenue ($)',
+      colorAccessor: (row: Record<string, unknown>) => getTierColor(row.tier as string),
+      cumulativeKey: 'cumulativePct',
     };
   },
   defaultSize: { w: 350, h: 200 },
@@ -157,23 +168,33 @@ const ttcRevenueChart: WidgetDefinition<ChartData> = {
 const ttcUnitsChart: WidgetDefinition<ChartData> = {
   id: 'ttc-units-chart',
   name: 'Units by Actor',
-  description: 'Bar chart of units by actor',
+  description: 'Pareto chart of units by actor',
   category: 'chart',
   group: 'TopTiering Comparison',
   dataSource: 'top-tiering-comparison',
   dataSelector: (raw) => {
     const d = tc(raw);
     const sorted = [...(d.actors ?? [])].sort((a, b) => b.units - a.units).slice(0, 20);
+    const totalUnits = sorted.reduce((s, a) => s + a.units, 0);
+    let cumulative = 0;
+    const data = sorted.map((a) => {
+      cumulative += a.units;
+      return {
+        name: a.name?.length > 12 ? a.name.slice(0, 12) + '…' : a.name,
+        units: a.units,
+        tier: a.tier,
+        cumulativePct: totalUnits > 0 ? Math.round((cumulative / totalUnits) * 1000) / 10 : 0,
+      };
+    });
     return {
       title: 'Units by Actor',
       chartType: 'bar' as const,
-      data: sorted.map((a) => ({
-        name: a.name?.length > 12 ? a.name.slice(0, 12) + '…' : a.name,
-        units: a.units,
-      })),
-      series: [{ dataKey: 'units', name: 'Units', color: '#10b981' }],
+      data,
+      series: [{ dataKey: 'units', name: 'Units' }],
       xAxisKey: 'name',
       yAxisLabel: 'Units',
+      colorAccessor: (row: Record<string, unknown>) => getTierColor(row.tier as string),
+      cumulativeKey: 'cumulativePct',
     };
   },
   defaultSize: { w: 350, h: 200 },
@@ -184,23 +205,33 @@ const ttcUnitsChart: WidgetDefinition<ChartData> = {
 const ttcBpsChart: WidgetDefinition<ChartData> = {
   id: 'ttc-bps-chart',
   name: 'Revenue BPS by Actor',
-  description: 'Bar chart of revenue BPS by actor',
+  description: 'Pareto chart of revenue BPS by actor',
   category: 'chart',
   group: 'TopTiering Comparison',
   dataSource: 'top-tiering-comparison',
   dataSelector: (raw) => {
     const d = tc(raw);
     const sorted = [...(d.actors ?? [])].sort((a, b) => b.revenueBPS - a.revenueBPS).slice(0, 20);
+    const totalBps = sorted.reduce((s, a) => s + a.revenueBPS, 0);
+    let cumulative = 0;
+    const data = sorted.map((a) => {
+      cumulative += a.revenueBPS;
+      return {
+        name: a.name?.length > 12 ? a.name.slice(0, 12) + '…' : a.name,
+        bps: a.revenueBPS,
+        tier: a.tier,
+        cumulativePct: totalBps > 0 ? Math.round((cumulative / totalBps) * 1000) / 10 : 0,
+      };
+    });
     return {
       title: 'Revenue BPS by Actor',
       chartType: 'bar' as const,
-      data: sorted.map((a) => ({
-        name: a.name?.length > 12 ? a.name.slice(0, 12) + '…' : a.name,
-        bps: a.revenueBPS,
-      })),
-      series: [{ dataKey: 'bps', name: 'Revenue BPS', color: '#f59e0b' }],
+      data,
+      series: [{ dataKey: 'bps', name: 'Revenue BPS' }],
       xAxisKey: 'name',
       yAxisLabel: 'BPS',
+      colorAccessor: (row: Record<string, unknown>) => getTierColor(row.tier as string),
+      cumulativeKey: 'cumulativePct',
     };
   },
   defaultSize: { w: 350, h: 200 },

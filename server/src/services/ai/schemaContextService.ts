@@ -547,6 +547,77 @@ export async function getColumnsForTenant(
 }
 
 /**
+ * Convert a snake_case column name to a human-readable label.
+ * e.g. "uw_final_approval_date" → "UW Final Approval Date"
+ */
+export function columnToLabel(column: string): string {
+  return column
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\bUw\b/g, "UW")
+    .replace(/\bId\b/g, "ID")
+    .replace(/\bDti\b/g, "DTI")
+    .replace(/\bLtv\b/g, "LTV")
+    .replace(/\bCltv\b/g, "CLTV")
+    .replace(/\bHcltv\b/g, "HCLTV")
+    .replace(/\bFico\b/g, "FICO")
+    .replace(/\bPmi\b/g, "PMI")
+    .replace(/\bNmls\b/g, "NMLS")
+    .replace(/\bArm\b/g, "ARM")
+    .replace(/\bHeloc\b/g, "HELOC")
+    .replace(/\bSrp\b/g, "SRP")
+    .replace(/\bMsr\b/g, "MSR")
+    .replace(/\bCtc\b/g, "CTC")
+    .replace(/\bCd\b/g, "CD")
+    .replace(/\bLe\b/g, "LE")
+    .replace(/\bAu\b/g, "AU")
+    .replace(/\bAus\b/g, "AUS")
+    .replace(/\bAtr\b/g, "ATR")
+    .replace(/\bQm\b/g, "QM")
+    .replace(/\bHmda\b/g, "HMDA")
+    .replace(/\bPa\b/g, "PA")
+    .replace(/\bMo\b/g, "Monthly")
+    .replace(/\bCo\b/g, "Co")
+    .replace(/\bBorr\b/g, "Borrower")
+    .replace(/\bMi\b/g, "MI")
+    .replace(/\bPoc\b/g, "POC")
+    .replace(/\bPiti\b/g, "PITI");
+}
+
+/**
+ * Get available fields for a tenant, grouped by category with human labels.
+ * Used for the field-swap UI in the widget editor.
+ */
+export async function getFieldsForTenant(
+  tenantId: string
+): Promise<{
+  fields: { name: string; label: string; type: string; category: string }[];
+  categories: { id: string; label: string }[];
+}> {
+  const columns = await getColumnsForTenant(tenantId);
+
+  // Filter out internal/system columns
+  const EXCLUDED = new Set(["id", "guid", "created_at", "updated_at", "last_modified_date", "raw_data", "custom_fields"]);
+
+  const fields = columns
+    .filter((c) => !EXCLUDED.has(c.name))
+    .map((c) => ({
+      name: c.name,
+      label: columnToLabel(c.name),
+      type: c.type,
+      category: categoriseColumn(c.name),
+    }));
+
+  const categorySet = new Set(fields.map((f) => f.category));
+  const order = ["core", "personnel", "property", "financial", "dates", "other"];
+  const categories = order
+    .filter((cat) => categorySet.has(cat))
+    .map((cat) => ({ id: cat, label: CATEGORY_TITLES[cat] || cat }));
+
+  return { fields, categories };
+}
+
+/**
  * Invalidate the cached schema for a tenant (e.g. after a migration).
  */
 export function invalidateSchemaCache(tenantId?: string): void {

@@ -64,7 +64,7 @@ router.post(
         loan_purpose, property_type, occupancy_type, channel,
         underwriter, closer, processor,
         ctc_date, approval_date, uw_final_approval_date,
-        cond_approval_date, conditional_approval_date,
+        conditional_approval_date,
         submitted_to_processing_date, submitted_to_underwriting_date
       FROM public.loans 
       WHERE current_loan_status = 'Active Loan'
@@ -97,7 +97,7 @@ router.post(
         loan_purpose, property_type, occupancy_type, channel,
         underwriter, closer, processor,
         ctc_date, approval_date, uw_final_approval_date,
-        cond_approval_date, conditional_approval_date,
+        conditional_approval_date,
         submitted_to_processing_date, submitted_to_underwriting_date
       FROM public.loans 
       WHERE current_loan_status != 'Active Loan' OR current_loan_status IS NULL

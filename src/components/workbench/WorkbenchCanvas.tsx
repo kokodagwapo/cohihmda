@@ -97,6 +97,8 @@ import { WorkbenchCohiPanel } from '@/components/workbench/WorkbenchCohiPanel';
 import { useWorkbenchCohi } from '@/hooks/useWorkbenchCohi';
 import { serializeWidgetCatalog } from '@/utils/widgetCatalogSerializer';
 import type { WidgetAction } from '@/types/widgetActions';
+import { ImageToDashboardDialog } from '@/components/workbench/ImageToDashboardDialog';
+import { Camera } from 'lucide-react';
 
 const UPLOAD_ALLOWED_TYPES = [
   'text/csv',
@@ -516,6 +518,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
   const [showCohiPanel, setShowCohiPanel] = useState(false);
+  const [imageToDashboardOpen, setImageToDashboardOpen] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -663,6 +666,65 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         default:
           // explain_widget, explain_schema, modify_widget – handled in chat only
           break;
+      }
+    },
+    [items, setItemsWithHistory, toast]
+  );
+
+  // ---- Image-to-Dashboard: handle generated groups ----
+  const handleDashboardGenerated = useCallback(
+    (groups: Array<{ title: string; sectionType: string; dateField: string; widgets: Array<{ id: string; sql: string; title: string; vizConfig: any; explanation?: string }> }>) => {
+      const newItems: CanvasLayoutItem[] = [];
+      let yOffset = 20;
+
+      // Find the bottom of existing items so new groups don't overlap
+      for (const item of items) {
+        const bottom = item.y + item.h;
+        if (bottom > yOffset) yOffset = bottom + 20;
+      }
+
+      for (const group of groups) {
+        const groupId = `canvas-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const groupItems = group.widgets.map((w) => ({
+          kind: 'cohi' as const,
+          id: w.id,
+          sql: w.sql,
+          title: w.title,
+          vizConfig: w.vizConfig,
+          explanation: w.explanation,
+        }));
+
+        const groupPayload = {
+          type: 'widget_group' as const,
+          groupId,
+          title: group.title,
+          sectionType: (group.sectionType || 'company-scorecard') as import('@/stores/widgetSectionStore').SectionType,
+          widgetIds: [] as string[],
+          items: groupItems,
+        };
+
+        // Size the group based on widget count
+        const widgetCount = group.widgets.length;
+        const groupHeight = Math.max(500, widgetCount <= 4 ? 500 : 300 + widgetCount * 100);
+
+        newItems.push(
+          createLayoutItem(groupId, 'widget_group', groupPayload, {
+            x: 20,
+            y: yOffset,
+            w: 900,
+            h: groupHeight,
+          })
+        );
+
+        yOffset += groupHeight + 20;
+      }
+
+      if (newItems.length > 0) {
+        setItemsWithHistory((prev) => [...prev, ...newItems]);
+        toast({
+          title: 'Dashboard created from image',
+          description: `Added ${groups.length} group${groups.length !== 1 ? 's' : ''} with ${groups.reduce((s, g) => s + g.widgets.length, 0)} widget${groups.reduce((s, g) => s + g.widgets.length, 0) !== 1 ? 's' : ''}`,
+        });
       }
     },
     [items, setItemsWithHistory, toast]
@@ -1811,6 +1873,19 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30"
+                  onClick={() => setImageToDashboardOpen(true)}
+                >
+                  <Camera className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
+            </Tooltip>
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
             <DropdownMenu>
               <Tooltip>
@@ -2573,6 +2648,13 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           </div>
         </DialogContent>
       </Dialog>
+      {/* ---- Image-to-Dashboard Dialog ---- */}
+      <ImageToDashboardDialog
+        open={imageToDashboardOpen}
+        onOpenChange={setImageToDashboardOpen}
+        tenantId={tenantId}
+        onDashboardGenerated={handleDashboardGenerated}
+      />
     </div>
     </WidgetDataProvider>
   );

@@ -229,8 +229,13 @@ function categorizeColumn(columnName: string): string {
 }
 
 /**
- * GET /api/loans/distinct-values
- * Get distinct values for a specific column (for filter dropdowns)
+ * GET /api/loans/distinct-values/:column
+ * Get distinct values for a specific column (for filter dropdowns).
+ *
+ * Optional query params for cascading filters:
+ *   ?filterBy=<column>&filterValue=<value>
+ * Example: /distinct-values/loan_officer?filterBy=branch&filterValue=Downtown
+ * Returns only loan officers that belong to the "Downtown" branch.
  */
 router.get(
   "/distinct-values/:column",
@@ -273,9 +278,23 @@ router.get(
           .json({ error: "Invalid column for distinct values query" });
       }
 
-      const result = await tenantPool.query(
-        `SELECT DISTINCT ${column} as value FROM public.loans WHERE ${column} IS NOT NULL AND ${column} != '' ORDER BY ${column} LIMIT 100`
-      );
+      // Optional cascading filter: narrow results by another column's value
+      const filterBy = req.query.filterBy as string | undefined;
+      const filterValue = req.query.filterValue as string | undefined;
+
+      let query: string;
+      let params: string[];
+
+      if (filterBy && filterValue && allowedColumns.includes(filterBy)) {
+        // Cascading: e.g. loan_officer WHERE branch = $1
+        query = `SELECT DISTINCT ${column} as value FROM public.loans WHERE ${column} IS NOT NULL AND ${column} != '' AND ${filterBy} = $1 ORDER BY ${column} LIMIT 100`;
+        params = [filterValue];
+      } else {
+        query = `SELECT DISTINCT ${column} as value FROM public.loans WHERE ${column} IS NOT NULL AND ${column} != '' ORDER BY ${column} LIMIT 100`;
+        params = [];
+      }
+
+      const result = await tenantPool.query(query, params);
 
       res.json({ values: result.rows.map((r) => r.value) });
     } catch (error: any) {

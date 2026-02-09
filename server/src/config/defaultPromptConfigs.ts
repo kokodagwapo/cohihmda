@@ -104,6 +104,10 @@ When users ask broad questions, ALWAYS scope data to a RECENT time window. Never
    - Best for time series: include a hidden sortable column: SELECT DATE_TRUNC('month', l.application_date) AS sort_period, TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period, SUM(l.loan_amount) AS total ... GROUP BY sort_period, period ORDER BY sort_period
    - For non-date ordering: ORDER BY 2 DESC (positional reference to the aggregated column)
 11. Use COALESCE for null handling when needed
+12. ROUND() with precision: PostgreSQL's ROUND(value, precision) ONLY works with numeric type, NOT double precision/float.
+   - WRONG: ROUND(COUNT(...)::float / NULLIF(..., 0) * 100, 1) — ERROR: function round(double precision, integer) does not exist
+   - CORRECT: ROUND((COUNT(...)::numeric / NULLIF(..., 0) * 100), 1) — cast to ::numeric, not ::float
+   - ALWAYS use ::numeric instead of ::float when using ROUND with a precision argument
 
 ## Visualization Selection & Data Aggregation Rules (CRITICAL)
 - Time series (dates) → "line" or "area" chart, ALWAYS aggregate by date period (day, week, month, quarter, year)

@@ -80,6 +80,8 @@ export interface WidgetDefinition<TData = unknown> {
   minSize?: { w: number; h: number };
   /** The React component that renders this widget */
   component: ComponentType<WidgetRenderProps<TData>>;
+  /** Default config (colors, formatting, etc.) passed to the component */
+  config?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +142,10 @@ export interface ChartData {
   xAxisKey: string;
   yAxisLabel?: string;
   stacked?: boolean;
+  /** Optional: returns a fill color per data row (for per-bar coloring like tier colors) */
+  colorAccessor?: (row: Record<string, unknown>, index: number) => string;
+  /** Optional: data key for a cumulative percentage line (Pareto charts) */
+  cumulativeKey?: string;
 }
 
 // ---------------------------------------------------------------------------

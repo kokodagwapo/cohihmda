@@ -752,7 +752,7 @@ export function prepareLoanData(loans: any[]): any[] {
     // Milestone dates for pipeline stage determination (close-late prediction)
     const ctcDate = parseDate(loan.ctc_date || rawData.ctc_date);
     const approvalDate = parseDate(loan.approval_date || loan.uw_final_approval_date || rawData.approval_date || rawData.uw_final_approval_date);
-    const condApprovalDate = parseDate(loan.cond_approval_date || loan.conditional_approval_date || rawData.cond_approval_date || rawData.conditional_approval_date);
+    const condApprovalDate = parseDate(loan.conditional_approval_date || rawData.conditional_approval_date);
     const submittedToProcessingDate = parseDate(loan.submitted_to_processing_date || rawData.submitted_to_processing_date);
     const submittedToUwDate = parseDate(loan.submitted_to_underwriting_date || rawData.submitted_to_underwriting_date);
 
@@ -2608,7 +2608,7 @@ function determinePipelineStage(loan: any): { stage: string; readiness: number }
   if (has(loan.approvalDate) || has(loan.approval_date) || has(loan.uw_final_approval_date)) {
     return { stage: 'Approved', readiness: 6 };
   }
-  if (has(loan.condApprovalDate) || has(loan.cond_approval_date) || has(loan.conditional_approval_date)) {
+  if (has(loan.condApprovalDate) || has(loan.conditional_approval_date)) {
     return { stage: 'Conditional Approval', readiness: 5 };
   }
   if (has(loan.lockDate) || has(loan.lock_date)) {
@@ -2627,6 +2627,14 @@ function determinePipelineStage(loan: any): { stage: string; readiness: number }
  * Historical on-time closing statistics for a tenant.
  * Computed once per predict flow from historical loans that have both estimated_closing_date and closing_date.
  */
+export interface StageToClosePercentiles {
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  count: number;
+}
+
 export interface OnTimeStats {
   /** Overall on-time rate (0-1). null if no data. */
   overallOnTimeRate: number | null;
@@ -2634,6 +2642,8 @@ export interface OnTimeStats {
   rateByStageAndBucket: Record<string, { onTime: number; total: number; rate: number }>;
   /** Cycle time percentiles (application_date → closing_date) */
   cycleTimePercentiles: { p25: number; p50: number; p75: number; p90: number } | null;
+  /** Average days from each pipeline stage to closing. Key = readiness (1-7). */
+  stageToClosePercentiles: Record<string, StageToClosePercentiles>;
   /** Number of historical loans with both dates */
   sampleSize: number;
 }
@@ -2650,7 +2660,7 @@ function computeHistoricalOnTimeStats(historicalLoans: any[]): OnTimeStats {
   });
 
   if (withBothDates.length === 0) {
-    return { overallOnTimeRate: null, rateByStageAndBucket: {}, cycleTimePercentiles: null, sampleSize: 0 };
+    return { overallOnTimeRate: null, rateByStageAndBucket: {}, cycleTimePercentiles: null, stageToClosePercentiles: {}, sampleSize: 0 };
   }
 
   // On-time rate overall
@@ -2668,10 +2678,6 @@ function computeHistoricalOnTimeStats(historicalLoans: any[]): OnTimeStats {
     // Determine what stage the loan reached (using the same milestone fields)
     const { readiness } = determinePipelineStage(loan);
 
-    // For historical loans, we compute the variance (actual - estimated) in days
-    // but for the lookup table, we bucket by readiness score only (since we can't know
-    // what "days remaining" was at prediction time for historical loans).
-    // Instead, we'll compute rate by readiness level.
     const key = String(readiness);
     if (!rateMap[key]) rateMap[key] = { onTime: 0, total: 0 };
     rateMap[key].total++;
@@ -2686,7 +2692,89 @@ function computeHistoricalOnTimeStats(historicalLoans: any[]): OnTimeStats {
     rateByStageAndBucket[key] = { ...val, rate: val.total > 0 ? val.onTime / val.total : 0 };
   }
 
-  // Cycle time percentiles (application → closing)
+  // ======== Stage-to-Close Time Percentiles ========
+  // For each pipeline stage, compute how many days it took from reaching that stage to closing.
+  // This tells us: "A loan at Locked stage historically takes a median of X days to fund."
+  //
+  // For each historical loan that has a closing_date, we look at every milestone date it has.
+  // Each milestone represents a stage the loan passed through. We compute:
+  //   days = closing_date - milestone_date
+  // and bucket by the readiness level of that milestone.
+  //
+  // This means a single loan contributes to MULTIPLE stage buckets (e.g., a loan that went
+  // through Processing → UW → Locked → Approved → CTC → Closed contributes to stages 2-7).
+  const stageToCloseDays: Record<string, number[]> = {};
+  const has = (v: any) => v != null && v !== '' && v !== 'null';
+
+  // Map of: readiness → list of field names that indicate the loan reached that stage
+  const stageFields: Array<{ readiness: number; fields: string[] }> = [
+    { readiness: 7, fields: ['ctcDate', 'ctc_date'] },
+    { readiness: 6, fields: ['approvalDate', 'approval_date', 'uw_final_approval_date'] },
+    { readiness: 5, fields: ['condApprovalDate', 'conditional_approval_date', 'cond_approval_date'] },
+    { readiness: 4, fields: ['lockDate', 'lock_date'] },
+    { readiness: 3, fields: ['submittedToUwDate', 'submitted_to_underwriting_date'] },
+    { readiness: 2, fields: ['submittedToProcessingDate', 'submitted_to_processing_date'] },
+  ];
+
+  for (const loan of historicalLoans) {
+    const closeDateRaw = loan.closingDate || loan.closing_date;
+    if (!closeDateRaw) continue;
+    const closeDate = new Date(closeDateRaw);
+    if (isNaN(closeDate.getTime())) continue;
+
+    for (const { readiness, fields } of stageFields) {
+      // Find the first non-null milestone date for this stage
+      let milestoneDate: Date | null = null;
+      for (const f of fields) {
+        if (has(loan[f])) {
+          const d = new Date(loan[f]);
+          if (!isNaN(d.getTime())) {
+            milestoneDate = d;
+            break;
+          }
+        }
+      }
+      if (!milestoneDate) continue;
+
+      const days = Math.floor((closeDate.getTime() - milestoneDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (days < 0 || days > 365) continue; // Sanity: ignore negative or > 1 year
+
+      const key = String(readiness);
+      if (!stageToCloseDays[key]) stageToCloseDays[key] = [];
+      stageToCloseDays[key].push(days);
+    }
+  }
+
+  // Also compute stage 1 (Not Yet In Processing) using application_date → closing_date
+  for (const loan of historicalLoans) {
+    const appDateRaw = loan.applicationDate || loan.application_date;
+    const closeDateRaw = loan.closingDate || loan.closing_date;
+    if (!appDateRaw || !closeDateRaw) continue;
+    const appDate = new Date(appDateRaw);
+    const closeDate = new Date(closeDateRaw);
+    if (isNaN(appDate.getTime()) || isNaN(closeDate.getTime())) continue;
+    const days = Math.floor((closeDate.getTime() - appDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (days < 0 || days > 365) continue;
+    if (!stageToCloseDays['1']) stageToCloseDays['1'] = [];
+    stageToCloseDays['1'].push(days);
+  }
+
+  // Build percentiles per stage
+  const stageToClosePercentiles: Record<string, StageToClosePercentiles> = {};
+  for (const [key, days] of Object.entries(stageToCloseDays)) {
+    if (days.length < 5) continue; // Need enough samples
+    days.sort((a, b) => a - b);
+    const pct = (p: number) => days[Math.min(Math.floor(p * days.length), days.length - 1)];
+    stageToClosePercentiles[key] = {
+      p25: pct(0.25),
+      p50: pct(0.5),
+      p75: pct(0.75),
+      p90: pct(0.9),
+      count: days.length,
+    };
+  }
+
+  // Cycle time percentiles (application → closing) — overall, not per stage
   const cycleTimes = historicalLoans
     .map((loan) => {
       const appDate = loan.applicationDate || loan.application_date;
@@ -2707,15 +2795,23 @@ function computeHistoricalOnTimeStats(historicalLoans: any[]): OnTimeStats {
     cycleTimePercentiles = { p25: pct(0.25), p50: pct(0.5), p75: pct(0.75), p90: pct(0.9) };
   }
 
-  return { overallOnTimeRate, rateByStageAndBucket, cycleTimePercentiles, sampleSize: withBothDates.length };
+  return { overallOnTimeRate, rateByStageAndBucket, cycleTimePercentiles, stageToClosePercentiles, sampleSize: withBothDates.length };
 }
 
 /**
  * Calculate the probability (0-100) that an active loan will close on time.
- * Uses estimated_closing_date, pipeline stage, historical on-time rates, and cycle time percentiles.
+ *
+ * Primary signal: compare "days remaining until estimated close" against
+ * the historical distribution of "days from this pipeline stage to closing."
+ *
+ * Example: If loans at the Locked stage historically take a median of 22 days
+ * to close, and this loan has 30 days remaining → comfortable (high probability).
+ * If it only has 8 days remaining → behind schedule (low probability).
+ *
+ * Falls back to on-time rates and loan age when data is insufficient.
  */
 function calculateCloseOnTimeProbability(loan: any, stats: OnTimeStats): number {
-  const { readiness } = determinePipelineStage(loan);
+  const { readiness, stage } = determinePipelineStage(loan);
   const now = new Date();
 
   // Stage readiness factor: maps readiness 1-7 to a multiplier
@@ -2741,22 +2837,61 @@ function calculateCloseOnTimeProbability(loan: any, stats: OnTimeStats): number 
       if (daysRemaining < -3) return 0;
       if (daysRemaining < 0) return Math.min(100, Math.max(0, Math.round(10 * stageFactor)));
 
-      // Base probability from historical on-time rate for this readiness level
-      let baseRate = stats.overallOnTimeRate ?? 0.6; // Default 60% if no data
+      // ---- Primary: stage-to-close time comparison ----
+      // "How many days does it historically take from THIS stage to closing?"
+      // Compare that against how many days this loan has left.
+      const stagePercentiles = stats.stageToClosePercentiles[String(readiness)];
+      if (stagePercentiles && stagePercentiles.count >= 5) {
+        const { p25, p50, p75, p90 } = stagePercentiles;
+
+        // How much buffer does this loan have?
+        // ratio > 1.0 = more time than the median → good
+        // ratio < 1.0 = less time than the median → behind
+        // ratio = 0   = no time left
+        const ratio = p50 > 0 ? daysRemaining / p50 : (daysRemaining > 0 ? 2.0 : 0);
+
+        let baseProb: number;
+        if (daysRemaining >= p90) {
+          // Way more time than even the slowest loans need — very likely on time
+          baseProb = 95;
+        } else if (daysRemaining >= p75) {
+          // More time than 75% of loans needed — high confidence
+          baseProb = 85;
+        } else if (daysRemaining >= p50) {
+          // More time than the median — decent chance
+          baseProb = 70;
+        } else if (daysRemaining >= p25) {
+          // Less than median but more than the fast 25% — getting tight
+          baseProb = 50;
+        } else if (daysRemaining > 0) {
+          // Less time than even the fastest 25% needed — unlikely unless almost done
+          // Scale from 10 (barely any time) to 40 (close to p25)
+          baseProb = Math.round(10 + 30 * (daysRemaining / Math.max(p25, 1)));
+        } else {
+          // 0 days remaining
+          baseProb = 5;
+        }
+
+        // Apply stage factor: CTC with tight timeline is still more likely than In Processing
+        const prob = Math.round(baseProb * stageFactor);
+        return Math.min(100, Math.max(0, prob));
+      }
+
+      // ---- Fallback: on-time rate + time bonus (original logic) ----
+      // Used when we don't have enough stage-to-close samples for this readiness level
+      let baseRate = stats.overallOnTimeRate ?? 0.6;
       const stageStats = stats.rateByStageAndBucket[String(readiness)];
       if (stageStats && stageStats.total >= 5) {
         baseRate = stageStats.rate;
       }
 
-      // Adjust by days remaining: more time = more likely to close on time
       let timeBonus = 0;
       if (daysRemaining >= 30) timeBonus = 15;
       else if (daysRemaining >= 14) timeBonus = 10;
       else if (daysRemaining >= 7) timeBonus = 0;
       else if (daysRemaining >= 3) timeBonus = -10;
-      else timeBonus = -25; // 0-2 days remaining
+      else timeBonus = -25;
 
-      // For low-readiness loans with few days left, apply heavy penalty
       if (readiness <= 3 && daysRemaining < 7) {
         timeBonus -= 20;
       }
@@ -2766,10 +2901,9 @@ function calculateCloseOnTimeProbability(loan: any, stats: OnTimeStats): number 
     }
   }
 
-  // --- Path B: no estimated_closing_date — use cycle time percentile ---
+  // --- Path B: no estimated_closing_date — use stage-to-close percentiles + loan age ---
   const appDateRaw = loan.applicationDate || loan.application_date;
   if (appDateRaw == null) {
-    // No dates at all — return middle estimate adjusted by stage
     return Math.min(100, Math.max(0, Math.round(50 * stageFactor)));
   }
 
@@ -2780,6 +2914,19 @@ function calculateCloseOnTimeProbability(loan: any, stats: OnTimeStats): number 
 
   const loanAgeDays = Math.floor((now.getTime() - appDate.getTime()) / (1000 * 60 * 60 * 24));
 
+  // Try stage-to-close for stage 1 (application → close) to compare against loan age
+  const appToClosePercentiles = stats.stageToClosePercentiles['1'];
+  if (appToClosePercentiles && appToClosePercentiles.count >= 10) {
+    const { p50, p75, p90 } = appToClosePercentiles;
+    let baseProb: number;
+    if (loanAgeDays > p90) baseProb = 15;
+    else if (loanAgeDays > p75) baseProb = 35;
+    else if (loanAgeDays > p50) baseProb = 55;
+    else baseProb = 80;
+    return Math.min(100, Math.max(0, Math.round(baseProb * stageFactor)));
+  }
+
+  // Fallback: overall cycle time percentiles
   if (stats.cycleTimePercentiles) {
     const { p50, p75, p90 } = stats.cycleTimePercentiles;
     let baseProb: number;
@@ -2790,7 +2937,7 @@ function calculateCloseOnTimeProbability(loan: any, stats: OnTimeStats): number 
     return Math.min(100, Math.max(0, Math.round(baseProb * stageFactor)));
   }
 
-  // No cycle time data — crude fallback
+  // No historical data at all — crude fallback
   let baseProb: number;
   if (loanAgeDays > 60) baseProb = 25;
   else if (loanAgeDays > 45) baseProb = 40;
@@ -3229,11 +3376,15 @@ async function runPredictFlow(
 
   // Compute historical on-time closing stats for close-late prediction
   const onTimeStats = computeHistoricalOnTimeStats(historicalLoans);
+  const stageNames: Record<string, string> = { '1': 'App→Close', '2': 'Processing→Close', '3': 'UW→Close', '4': 'Lock→Close', '5': 'CondAppr→Close', '6': 'Approved→Close', '7': 'CTC→Close' };
   logInfo('Close-late stats', {
     sampleSize: onTimeStats.sampleSize,
     overallOnTimeRate: onTimeStats.overallOnTimeRate != null ? Math.round(onTimeStats.overallOnTimeRate * 100) + '%' : 'none',
     cycleTimePercentiles: onTimeStats.cycleTimePercentiles,
-    stageRates: Object.entries(onTimeStats.rateByStageAndBucket).map(([k, v]) => `readiness=${k}: ${Math.round(v.rate * 100)}% (n=${v.total})`)
+    stageRates: Object.entries(onTimeStats.rateByStageAndBucket).map(([k, v]) => `readiness=${k}: ${Math.round(v.rate * 100)}% (n=${v.total})`),
+    stageToCloseDays: Object.entries(onTimeStats.stageToClosePercentiles).map(([k, v]) =>
+      `${stageNames[k] || `stage${k}`}: p25=${v.p25}d p50=${v.p50}d p75=${v.p75}d p90=${v.p90}d (n=${v.count})`
+    ),
   });
 
   // Precompute pull-through by role (used for both calibration and active loan summaries)
