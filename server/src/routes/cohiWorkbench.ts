@@ -27,7 +27,7 @@ import {
   deleteConversation,
   type ConversationMessage,
 } from "../services/ai/cohiConversationService.js";
-import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
+import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js";
 import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 
@@ -480,7 +480,7 @@ router.get(
 
       const conversation = await getConversation(
         tenantId,
-        req.params.id,
+        req.params.id as string,
         req.userId!
       );
 
@@ -516,7 +516,7 @@ router.post(
 
       const success = await appendMessage(
         tenantId,
-        req.params.id,
+        req.params.id as string,
         req.userId!,
         message
       );
@@ -548,7 +548,7 @@ router.delete(
 
       const success = await deleteConversation(
         tenantId,
-        req.params.id,
+        req.params.id as string,
         req.userId!
       );
 
