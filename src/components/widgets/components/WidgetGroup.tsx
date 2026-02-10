@@ -65,6 +65,7 @@ import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDial
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
+import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
 import type { DateFilter } from '@/hooks/useCohiWidgetData';
 
@@ -324,6 +325,7 @@ function layoutToMap(layout: Layout[]): Record<string, { x: number; y: number; w
 
 function GridCellWidget({
   item,
+  itemId,
   width,
   height,
   dateFilter,
@@ -336,6 +338,8 @@ function GridCellWidget({
   onOpenEditDialog,
 }: {
   item: GroupWidgetItem;
+  /** Stable unique ID used for canvasDataStore reporting */
+  itemId: string;
   width: number;
   height: number;
   dateFilter: DateFilter | null;
@@ -482,9 +486,9 @@ function GridCellWidget({
       {/* Widget content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {item.kind === 'registry' ? (
-          <GridCellRegistryWidget defId={item.defId} width={width} height={height - 20} />
+          <GridCellRegistryWidget defId={item.defId} canvasItemId={itemId} width={width} height={height - 20} />
         ) : (
-          <GridCellCohiWidget item={item} width={width} height={height - 20} dateFilter={dateFilter} onVizTypeChange={onVizTypeChange} />
+          <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} onVizTypeChange={onVizTypeChange} />
         )}
       </div>
     </div>
@@ -493,27 +497,48 @@ function GridCellWidget({
 
 function GridCellRegistryWidget({
   defId,
+  canvasItemId,
   width,
   height,
 }: {
   defId: string;
+  canvasItemId: string;
   width: number;
   height: number;
 }) {
   const definition = getWidgetDefinition(defId);
-  if (!definition) return null;
+  const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
+  const removeWidget = useCanvasDataStore((s) => s.removeWidget);
 
-  const { data, loading, error } = useWidgetData(
-    definition.dataSource,
-    definition.dataSelector,
+  const { data: selectedData, loading, error } = useWidgetData(
+    definition?.dataSource ?? '',
+    definition?.dataSelector,
   );
+
+  // Report data to canvasDataStore for Cohi chat context
+  useEffect(() => {
+    if (!definition) return;
+    if (!loading && selectedData != null && !error) {
+      reportWidgetData(canvasItemId, {
+        widgetName: definition.name,
+        category: definition.category as 'kpi' | 'chart' | 'table' | 'embed' | 'other',
+        data: selectedData,
+      });
+    }
+    return () => {
+      removeWidget(canvasItemId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedData, loading, error, canvasItemId]);
+
+  if (!definition) return null;
 
   const Component = definition.component;
 
   return (
     <div className="h-full w-full">
       <Component
-        data={data}
+        data={selectedData}
         loading={loading}
         error={error}
         width={width}
@@ -526,12 +551,14 @@ function GridCellRegistryWidget({
 
 function GridCellCohiWidget({
   item,
+  canvasItemId,
   width,
   height,
   dateFilter,
   onVizTypeChange,
 }: {
   item: Extract<GroupWidgetItem, { kind: 'cohi' }>;
+  canvasItemId: string;
   width: number;
   height: number;
   dateFilter: DateFilter | null;
@@ -550,6 +577,7 @@ function GridCellCohiWidget({
         height={height}
         groupDateFilter={dateFilter}
         onVizTypeChange={onVizTypeChange}
+        canvasItemId={canvasItemId}
       />
     </div>
   );
@@ -1256,6 +1284,7 @@ export function WidgetGroup({
                 <div key={key} className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-700/60 shadow-sm overflow-hidden transition-shadow hover:shadow-md">
                   <GridCellWidget
                     item={item}
+                    itemId={`${groupId}__${key}`}
                     width={cellW}
                     height={cellH}
                     dateFilter={groupDateFilter}

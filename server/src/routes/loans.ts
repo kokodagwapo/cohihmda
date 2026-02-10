@@ -67,7 +67,7 @@ import { getStaffingUnitTargets } from "../utils/staffingUnitTargets.js";
 // Helper function to calculate days between dates
 function daysBetween(
   date1: Date | string | null,
-  date2: Date | string | null
+  date2: Date | string | null,
 ): number | null {
   if (!date1 || !date2) return null;
   const d1 = new Date(date1);
@@ -137,7 +137,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch loans schema" });
     }
-  }
+  },
 );
 
 /**
@@ -145,30 +145,48 @@ router.get(
  * Send loan card as email with inline image
  * Body: { to: string, loanId: string, officerName?: string, imageBase64: string }
  */
-router.post('/email-card', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
-  try {
-    const { to, loanId, officerName, imageBase64 } = req.body;
-    if (!to || typeof to !== 'string' || !to.trim()) {
-      return res.status(400).json({ error: 'Recipient email (to) is required' });
+router.post(
+  "/email-card",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const { to, loanId, officerName, imageBase64 } = req.body;
+      if (!to || typeof to !== "string" || !to.trim()) {
+        return res
+          .status(400)
+          .json({ error: "Recipient email (to) is required" });
+      }
+      if (!loanId || typeof loanId !== "string" || !loanId.trim()) {
+        return res.status(400).json({ error: "Loan ID is required" });
+      }
+      if (!imageBase64 || typeof imageBase64 !== "string") {
+        return res
+          .status(400)
+          .json({ error: "Image data (imageBase64) is required" });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(to.trim())) {
+        return res
+          .status(400)
+          .json({ error: "Invalid recipient email address" });
+      }
+      const subject = `Loan Update: ${loanId}${officerName ? ` - ${officerName}` : ""}`;
+      await sendLoanCardEmail(
+        to.trim(),
+        subject,
+        loanId,
+        officerName || "",
+        imageBase64,
+      );
+      res.json({ success: true, message: "Email sent" });
+    } catch (error: any) {
+      logError("Error sending loan card email", error, { userId: req.userId });
+      res.status(500).json({ error: error.message || "Failed to send email" });
     }
-    if (!loanId || typeof loanId !== 'string' || !loanId.trim()) {
-      return res.status(400).json({ error: 'Loan ID is required' });
-    }
-    if (!imageBase64 || typeof imageBase64 !== 'string') {
-      return res.status(400).json({ error: 'Image data (imageBase64) is required' });
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(to.trim())) {
-      return res.status(400).json({ error: 'Invalid recipient email address' });
-    }
-    const subject = `Loan Update: ${loanId}${officerName ? ` - ${officerName}` : ''}`;
-    await sendLoanCardEmail(to.trim(), subject, loanId, officerName || '', imageBase64);
-    res.json({ success: true, message: 'Email sent' });
-  } catch (error: any) {
-    logError('Error sending loan card email', error, { userId: req.userId });
-    res.status(500).json({ error: error.message || 'Failed to send email' });
-  }
-});
+  },
+);
 
 // Helper function to categorize columns
 function categorizeColumn(columnName: string): string {
@@ -306,7 +324,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch distinct values" });
     }
-  }
+  },
 );
 
 /**
@@ -408,7 +426,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch channels" });
     }
-  }
+  },
 );
 
 /**
@@ -449,7 +467,7 @@ router.get(
           {
             loanTableAlias: "", // No alias for simple queries
             startParamIndex: paramIndex,
-          }
+          },
         );
 
         if (accessFilter) {
@@ -457,7 +475,7 @@ router.get(
             // User has no loan access - return empty result
             logDebug(
               "[Loans] User has no loan access, returning empty result",
-              { userId: req.userId }
+              { userId: req.userId },
             );
             return res.json({
               loans: [],
@@ -614,7 +632,7 @@ router.get(
           .filter((f) => nullableColumns.includes(f.trim()));
         nullFields.forEach((field) => {
           conditions.push(
-            `(${field.trim()} IS NULL OR ${field.trim()}::text = '')`
+            `(${field.trim()} IS NULL OR ${field.trim()}::text = '')`,
           );
         });
       }
@@ -628,7 +646,7 @@ router.get(
           .filter((f) => nullableColumns.includes(f.trim()));
         notNullFields.forEach((field) => {
           conditions.push(
-            `(${field.trim()} IS NOT NULL AND ${field.trim()}::text != '')`
+            `(${field.trim()} IS NOT NULL AND ${field.trim()}::text != '')`,
           );
         });
       }
@@ -706,7 +724,7 @@ router.get(
 
       res.status(500).json({ error: error.message || "Failed to fetch loans" });
     }
-  }
+  },
 );
 
 /**
@@ -752,9 +770,8 @@ router.get(
 
       // REFACTORED: Use metricsService for efficient SQL-based metrics computation
       // with user access filtering
-      const { queryMetrics, queryMetricGroupedBy } = await import(
-        "../services/metrics/metricsService.js"
-      );
+      const { queryMetrics, queryMetricGroupedBy } =
+        await import("../services/metrics/metricsService.js");
       const accessFilter = accessCtx.getFilter("l");
 
       // Build access clause for direct queries
@@ -775,7 +792,7 @@ router.get(
               "avg_cycle_time",
               "pull_through_rate",
             ],
-            { userAccessFilter: accessFilter }
+            { userAccessFilter: accessFilter },
           ),
           // Group by loan type
           queryMetricGroupedBy(tenantPool, "total_units", "loan_type", {
@@ -793,7 +810,7 @@ router.get(
         GROUP BY l.current_loan_status
         ORDER BY COUNT(*) DESC
       `,
-            accessParams
+            accessParams,
           ),
           // Volume metrics - use single efficient query with access filter
           tenantPool.query(
@@ -813,7 +830,7 @@ router.get(
         FROM public.loans l
         WHERE 1=1 ${accessClause}
       `,
-            accessParams
+            accessParams,
           ),
         ]);
 
@@ -823,10 +840,10 @@ router.get(
       const lockedLoans = Number(metrics.locked_loans?.value || 0);
       const totalLoans = Number(metrics.total_units?.value || 0);
       const avgCycleTime = Math.round(
-        Number(metrics.avg_cycle_time?.value || 0)
+        Number(metrics.avg_cycle_time?.value || 0),
       );
       const pullThroughRate = parseFloat(
-        Number(metrics.pull_through_rate?.value || 0).toFixed(1)
+        Number(metrics.pull_through_rate?.value || 0).toFixed(1),
       );
 
       // Build byLoanType from grouped metrics
@@ -843,7 +860,7 @@ router.get(
       WHERE 1=1 ${accessClause}
       GROUP BY l.loan_type
     `,
-        accessParams
+        accessParams,
       );
 
       volumeByTypeResult.rows.forEach((row: any) => {
@@ -911,7 +928,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch loan statistics" });
     }
-  }
+  },
 );
 
 /**
@@ -962,28 +979,28 @@ router.get(
           const start = new Date(
             now.getFullYear(),
             now.getMonth() - 3,
-            now.getDate()
+            now.getDate(),
           );
           startDate = start.toISOString().split("T")[0];
         } else if (period === "rolling_6_months") {
           const start = new Date(
             now.getFullYear(),
             now.getMonth() - 6,
-            now.getDate()
+            now.getDate(),
           );
           startDate = start.toISOString().split("T")[0];
         } else if (period === "rolling_12_months") {
           const start = new Date(
             now.getFullYear(),
             now.getMonth() - 12,
-            now.getDate()
+            now.getDate(),
           );
           startDate = start.toISOString().split("T")[0];
         } else if (period === "rolling_18_months") {
           const start = new Date(
             now.getFullYear(),
             now.getMonth() - 18,
-            now.getDate()
+            now.getDate(),
           );
           startDate = start.toISOString().split("T")[0];
         }
@@ -1028,7 +1045,7 @@ router.get(
           ${accessClause}
           ${dateClause}
         `,
-        params
+        params,
       );
 
       const row = result.rows[0] || {};
@@ -1064,7 +1081,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch active loans count" });
     }
-  }
+  },
 );
 
 /**
@@ -1160,7 +1177,7 @@ router.get(
       } else if (yearFilter) {
         // Year filter on started_date
         conditions.push(
-          `EXTRACT(YEAR FROM COALESCE(started_date, created_at)) = $${paramIndex}`
+          `EXTRACT(YEAR FROM COALESCE(started_date, created_at)) = $${paramIndex}`,
         );
         params.push(yearFilter);
         paramIndex++;
@@ -1195,7 +1212,7 @@ router.get(
           conditions.push(`(channel ILIKE '%retail%')`);
         } else if (channelGroup === "TPO") {
           conditions.push(
-            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`
+            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`,
           );
         } else if (channelGroup === "99-Missing") {
           // Qlik convention: 99-Missing represents NULL or empty channel values
@@ -1203,7 +1220,7 @@ router.get(
         } else if (channelGroup === "Other") {
           // Other = not Retail, not TPO, and not missing
           conditions.push(
-            `(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`
+            `(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`,
           );
         }
         // If channelGroup is 'All' or not recognized, don't add filter
@@ -1220,19 +1237,19 @@ router.get(
       if (excludeOutOfRange) {
         // FICO Score: In Range = 350 <= x < 900 (Out of Range = < 350 OR >= 900)
         conditions.push(
-          `(fico_score IS NULL OR (fico_score >= 350 AND fico_score < 900))`
+          `(fico_score IS NULL OR (fico_score >= 350 AND fico_score < 900))`,
         );
         // Interest Rate: In Range = 0 < x < 15 (Out of Range = <= 0 OR >= 15)
         conditions.push(
-          `(interest_rate IS NULL OR (interest_rate > 0 AND interest_rate < 15))`
+          `(interest_rate IS NULL OR (interest_rate > 0 AND interest_rate < 15))`,
         );
         // LTV Ratio: In Range = 0 < x < 110 (Out of Range = <= 0 OR >= 110)
         conditions.push(
-          `(ltv_ratio IS NULL OR (ltv_ratio > 0 AND ltv_ratio < 110))`
+          `(ltv_ratio IS NULL OR (ltv_ratio > 0 AND ltv_ratio < 110))`,
         );
         // BE DTI Ratio: In Range = 0 < x < 70 (Out of Range = <= 0 OR >= 70)
         conditions.push(
-          `(be_dti_ratio IS NULL OR (be_dti_ratio > 0 AND be_dti_ratio < 70))`
+          `(be_dti_ratio IS NULL OR (be_dti_ratio > 0 AND be_dti_ratio < 70))`,
         );
       }
 
@@ -1269,15 +1286,15 @@ router.get(
          FROM public.loans 
          ${whereClause}
          ORDER BY COALESCE(started_date, created_at) DESC`,
-            params
+            params,
           ),
         2, // max retries
-        500 // delay between retries
+        500, // delay between retries
       );
 
       // Debug: Also get total count without date filter to understand the gap
       const totalCountResult = await tenantPool.query(
-        `SELECT COUNT(*) as total FROM public.loans`
+        `SELECT COUNT(*) as total FROM public.loans`,
       );
       const totalInDb = totalCountResult.rows[0]?.total || 0;
 
@@ -1299,7 +1316,7 @@ router.get(
       GROUP BY current_loan_status
       ORDER BY count DESC
     `,
-        params
+        params,
       );
 
       logInfo("[Funnel] Query returned", {
@@ -1376,7 +1393,7 @@ router.get(
         if (["denied", "declined"].includes(currentStatus)) return "Denied";
         if (
           ["funded", "closed", "originated", "complete", "completed"].includes(
-            currentStatus
+            currentStatus,
           )
         )
           return "Closed";
@@ -1394,7 +1411,7 @@ router.get(
       const loansStarted = loans.length;
       const loansStartedVolume = loans.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // RESPA App Status logic from Qlik: if(Len(Trim([Application Date]))>0,'Yes','No')
@@ -1404,22 +1421,22 @@ router.get(
         (l) =>
           l.application_date !== null &&
           l.application_date !== undefined &&
-          String(l.application_date).trim() !== ""
+          String(l.application_date).trim() !== "",
       );
       const loansWithRespaAppVolume = loansWithRespaApp.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       const loansNoRespaApp = loans.filter(
         (l) =>
           l.application_date === null ||
           l.application_date === undefined ||
-          String(l.application_date).trim() === ""
+          String(l.application_date).trim() === "",
       );
       const loansNoRespaAppVolume = loansNoRespaApp.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // Active Loan Flag from Qlik: if("Current Loan Status" = 'Active Loan' AND Len([Application Date])>0, 'Yes', 'No')
@@ -1440,7 +1457,7 @@ router.get(
       });
       const stillActiveVolume = stillActive.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // Originated loans - Pull Through Originated Flag from Qlik
@@ -1457,7 +1474,7 @@ router.get(
       });
       const originatedVolume = originated.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // Fallout - Withdrawn
@@ -1479,7 +1496,7 @@ router.get(
       });
       const falloutWithdrawnVolume = falloutWithdrawn.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // Fallout - Denied
@@ -1498,7 +1515,7 @@ router.get(
       });
       const falloutDeniedVolume = falloutDenied.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // Calculate revenue (simplified - 1% of loan amount)
@@ -1585,7 +1602,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to calculate funnel data" });
     }
-  }
+  },
 );
 
 /**
@@ -1605,7 +1622,7 @@ router.get(
       if (!tenantId) {
         const profileResult = await pool.query(
           "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-          [req.userId]
+          [req.userId],
         );
         tenantId = profileResult.rows[0]?.tenant_id;
       }
@@ -1614,11 +1631,11 @@ router.get(
       if (!tenantId) {
         const userResult = await pool.query(
           "SELECT role FROM public.users WHERE id = $1",
-          [req.userId]
+          [req.userId],
         );
         if (userResult.rows[0]?.role === "super_admin") {
           const defaultTenantResult = await pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`
+            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`,
           );
           if (defaultTenantResult.rows.length > 0) {
             tenantId = defaultTenantResult.rows[0].id;
@@ -1673,10 +1690,10 @@ router.get(
              (funding_date IS NULL AND closing_date IS NULL)  -- Include active loans
            )
          ORDER BY application_date DESC`,
-            [tenantId, startDateStr]
+            [tenantId, startDateStr],
           ),
         2,
-        500
+        500,
       );
 
       const allLoans = allLoansResult.rows;
@@ -1707,7 +1724,7 @@ router.get(
           return "Denied";
         if (
           ["ORIGINATED", "FUNDED", "CLOSED", "COMPLETE", "COMPLETED"].includes(
-            rawStatus
+            rawStatus,
           )
         )
           return "Closed";
@@ -1722,7 +1739,7 @@ router.get(
         const inferredStatus = getInferredStatus(l);
         if (
           !["Active", "Locked", "Submitted", "Approved", "CTC"].includes(
-            inferredStatus
+            inferredStatus,
           )
         )
           return false;
@@ -1747,8 +1764,8 @@ router.get(
         const fundDate = l.funding_date
           ? new Date(l.funding_date)
           : l.closing_date
-          ? new Date(l.closing_date)
-          : null;
+            ? new Date(l.closing_date)
+            : null;
         if (!fundDate) return false;
         return fundDate >= effectiveStartDate && fundDate <= effectiveEndDate;
       });
@@ -1792,7 +1809,7 @@ router.get(
       // Calculate averages with WAC formula: Sum(Loan Amount * Interest Rate) / Sum(Loan Amount)
       const activeVolume = activeLoans.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
       const activeWac =
         activeVolume > 0
@@ -1805,7 +1822,7 @@ router.get(
 
       const submittedVolume = submittedMTD.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
       const submittedWac =
         submittedVolume > 0
@@ -1818,7 +1835,7 @@ router.get(
 
       const fundedVolume = fundedMTD.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
       const fundedWac =
         fundedVolume > 0
@@ -1867,7 +1884,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch company overview" });
     }
-  }
+  },
 );
 
 /**
@@ -1887,7 +1904,7 @@ router.get(
       if (!tenantId) {
         const profileResult = await pool.query(
           "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-          [req.userId]
+          [req.userId],
         );
         tenantId = profileResult.rows[0]?.tenant_id;
       }
@@ -1896,11 +1913,11 @@ router.get(
       if (!tenantId) {
         const userResult = await pool.query(
           "SELECT role FROM public.users WHERE id = $1",
-          [req.userId]
+          [req.userId],
         );
         if (userResult.rows[0]?.role === "super_admin") {
           const defaultTenantResult = await pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`
+            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`,
           );
           if (defaultTenantResult.rows.length > 0) {
             tenantId = defaultTenantResult.rows[0].id;
@@ -1935,13 +1952,13 @@ router.get(
           conditions.push(`(channel ILIKE '%retail%')`);
         } else if (channelGroup === "TPO") {
           conditions.push(
-            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`
+            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`,
           );
         } else if (channelGroup === "99-Missing") {
           conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
         } else if (channelGroup === "Other") {
           conditions.push(
-            `(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`
+            `(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`,
           );
         }
       }
@@ -1965,10 +1982,10 @@ router.get(
          FROM public.loans 
          WHERE ${whereClause}
          ORDER BY application_date DESC`,
-            params
+            params,
           ),
         2,
-        500
+        500,
       );
 
       const allLoans = loansResult.rows;
@@ -1999,7 +2016,7 @@ router.get(
       });
       const activeVolume = activeLoans.reduce(
         (sum, l) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
 
       // Calculate average cycle time (application to closing/funding) for loans within date range
@@ -2025,7 +2042,7 @@ router.get(
       const avgCycleTime =
         cycleTimes.length > 0
           ? Math.round(
-              cycleTimes.reduce((sum, d) => sum + d, 0) / cycleTimes.length
+              cycleTimes.reduce((sum, d) => sum + d, 0) / cycleTimes.length,
             )
           : 43; // Default fallback
 
@@ -2033,7 +2050,7 @@ router.get(
       // Target: 35 days, calculate percentage within target
       const targetCycleTime = 35;
       const withinTarget = cycleTimes.filter(
-        (d) => d <= targetCycleTime
+        (d) => d <= targetCycleTime,
       ).length;
       const processingEfficiency =
         cycleTimes.length > 0
@@ -2067,7 +2084,7 @@ router.get(
         appToLockTimes.length > 0
           ? Math.round(
               appToLockTimes.reduce((sum, d) => sum + d, 0) /
-                appToLockTimes.length
+                appToLockTimes.length,
             )
           : Math.round(avgCycleTime * 0.28);
 
@@ -2075,7 +2092,7 @@ router.get(
         lockToCTCTimes.length > 0
           ? Math.round(
               lockToCTCTimes.reduce((sum, d) => sum + d, 0) /
-                lockToCTCTimes.length
+                lockToCTCTimes.length,
             )
           : Math.round(avgCycleTime * 0.42);
 
@@ -2083,7 +2100,7 @@ router.get(
         ctcToFundingTimes.length > 0
           ? Math.round(
               ctcToFundingTimes.reduce((sum, d) => sum + d, 0) /
-                ctcToFundingTimes.length
+                ctcToFundingTimes.length,
             )
           : Math.round(avgCycleTime * 0.3);
 
@@ -2116,7 +2133,7 @@ router.get(
             actual: appToLockActual,
             overTarget: appToLockActual - appToLockTarget,
             percentOver: Math.round(
-              ((appToLockActual - appToLockTarget) / appToLockTarget) * 100
+              ((appToLockActual - appToLockTarget) / appToLockTarget) * 100,
             ),
           },
           lockToCTC: {
@@ -2124,7 +2141,7 @@ router.get(
             actual: lockToCTCActual,
             overTarget: lockToCTCActual - lockToCTCTarget,
             percentOver: Math.round(
-              ((lockToCTCActual - lockToCTCTarget) / lockToCTCTarget) * 100
+              ((lockToCTCActual - lockToCTCTarget) / lockToCTCTarget) * 100,
             ),
           },
           ctcToFunding: {
@@ -2133,7 +2150,7 @@ router.get(
             overTarget: ctcToFundingActual - ctcToFundingTarget,
             percentOver: Math.round(
               ((ctcToFundingActual - ctcToFundingTarget) / ctcToFundingTarget) *
-                100
+                100,
             ),
           },
         },
@@ -2146,7 +2163,7 @@ router.get(
         error: error.message || "Failed to fetch operations overview",
       });
     }
-  }
+  },
 );
 
 /**
@@ -2162,20 +2179,20 @@ router.get(
       // Get tenant_id
       const profileResult = await pool.query(
         "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-        [req.userId]
+        [req.userId],
       );
 
       const tenantId = profileResult.rows[0]?.tenant_id;
 
       // Get all loans count
       const allLoansResult = await pool.query(
-        "SELECT COUNT(*) as total FROM public.loans"
+        "SELECT COUNT(*) as total FROM public.loans",
       );
       const totalLoans = allLoansResult.rows[0]?.total || 0;
 
       // Get loans by tenant
       const loansByTenantResult = await pool.query(
-        "SELECT tenant_id, COUNT(*) as count FROM public.loans GROUP BY tenant_id LIMIT 10"
+        "SELECT tenant_id, COUNT(*) as count FROM public.loans GROUP BY tenant_id LIMIT 10",
       );
 
       // Get user's tenant loans
@@ -2184,7 +2201,7 @@ router.get(
       if (tenantId) {
         const userLoansResult = await pool.query(
           "SELECT loan_id, borrower_name, status, lock_date, closing_date FROM public.loans WHERE tenant_id = $1 LIMIT 5",
-          [tenantId]
+          [tenantId],
         );
         userLoansCount = userLoansResult.rows.length;
         userLoansSample = userLoansResult.rows;
@@ -2205,7 +2222,7 @@ router.get(
       logError("Diagnostic endpoint error", error, { userId: req.userId });
       res.status(500).json({ error: error.message });
     }
-  }
+  },
 );
 
 /**
@@ -2221,7 +2238,7 @@ router.put(
       const { loanId } = req.params;
       const profileResult = await pool.query(
         "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-        [req.userId]
+        [req.userId],
       );
 
       if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
@@ -2233,7 +2250,7 @@ router.put(
       // Verify loan belongs to tenant
       const loanCheck = await pool.query(
         "SELECT loan_id FROM public.loans WHERE loan_id = $1 AND tenant_id = $2",
-        [loanId, tenantId]
+        [loanId, tenantId],
       );
 
       if (loanCheck.rows.length === 0) {
@@ -2306,7 +2323,7 @@ router.put(
       });
       res.status(500).json({ error: error.message || "Failed to update loan" });
     }
-  }
+  },
 );
 
 /**
@@ -2340,7 +2357,7 @@ router.get(
         // Fall back to getting tenant_id from profile
         const profileResult = await pool.query(
           "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-          [req.userId]
+          [req.userId],
         );
 
         if (
@@ -2404,10 +2421,10 @@ router.get(
            AND COALESCE(funding_date, closing_date) >= $2
            AND COALESCE(funding_date, closing_date) <= $3
            ${channelClause}`,
-            [tenantId, startDateStr, endDateStr]
+            [tenantId, startDateStr, endDateStr],
           ),
         2,
-        500
+        500,
       );
       const fundedLoans = fundedLoansResult.rows;
 
@@ -2431,10 +2448,10 @@ router.get(
              current_loan_status ILIKE '%incomplete%'
            )
            ${channelClause}`,
-            [tenantId, startDateStr, endDateStr]
+            [tenantId, startDateStr, endDateStr],
           ),
         2,
-        500
+        500,
       );
       const lostOpportunityLoans = lostOpportunityResult.rows;
 
@@ -2450,10 +2467,10 @@ router.get(
            AND application_date <= $3
            AND (current_loan_status ILIKE '%denied%' OR current_loan_status ILIKE '%declined%')
            ${channelClause}`,
-            [tenantId, startDateStr, endDateStr]
+            [tenantId, startDateStr, endDateStr],
           ),
         2,
-        500
+        500,
       );
       const deniedLoans = deniedResult.rows;
 
@@ -2468,10 +2485,10 @@ router.get(
            AND COALESCE(started_date, application_date) >= $2
            AND COALESCE(started_date, application_date) <= $3
            ${channelClause}`,
-            [tenantId, startDateStr, endDateStr]
+            [tenantId, startDateStr, endDateStr],
           ),
         2,
-        500
+        500,
       );
       const startedLoans = startedResult.rows;
 
@@ -2672,7 +2689,7 @@ router.get(
 
         // Started loans for this tier (for pull-through)
         const tierStartedLoans = startedLoans.filter((l: any) =>
-          tierNames.has(l[actorColumn])
+          tierNames.has(l[actorColumn]),
         );
         const tierFundedCount = tierActors.reduce((sum, a) => sum + a.units, 0);
         const pullThrough =
@@ -2734,7 +2751,7 @@ router.get(
       const totalLostOpportunityUnits = lostOpportunityLoans.length;
       const totalLostOpportunityRevenue = lostOpportunityLoans.reduce(
         (sum: number, l: any) => sum + calcRevenue(l),
-        0
+        0,
       );
       const totalDeniedUnits = deniedLoans.length;
       const totalPullThrough =
@@ -2815,7 +2832,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch toptiering data" });
     }
-  }
+  },
 );
 
 /**
@@ -2964,12 +2981,12 @@ router.get(
       const monthEndOfVMaxDate = new Date(
         vMaxDate.getFullYear(),
         vMaxDate.getMonth() + 1,
-        0
+        0,
       ); // Last day of vMaxDate's month
       const twelveMonthsBeforeVMaxDateMonth = new Date(
         vMaxDate.getFullYear(),
         vMaxDate.getMonth() - 12,
-        1
+        1,
       );
       const effectiveStartDate = twelveMonthsBeforeVMaxDateMonth;
 
@@ -2988,7 +3005,7 @@ router.get(
         COUNT(*) FILTER (WHERE funding_date IS NOT NULL AND funding_date >= '2026-01-01') as funded_jan_2026_plus
       FROM public.loans
     `,
-        [vMaxDate]
+        [vMaxDate],
       );
 
       // Get monthly breakdown for Retail channel to compare with Qlik
@@ -3006,7 +3023,7 @@ router.get(
       GROUP BY TO_CHAR(funding_date, 'YYYY-MM')
       ORDER BY month
     `,
-        [vMaxDate]
+        [vMaxDate],
       );
 
       const monthlyData = monthlyBreakdown.rows.reduce((acc: any, row: any) => {
@@ -3067,10 +3084,10 @@ router.get(
            AND UPPER(TRIM(${actorColumn})) NOT IN ('99-MISSING', 'MISSING', 'NO LO FOUND', 'NO LOAN OFFICER', 'NO BRANCH FOUND', 'UNKNOWN')
            AND UPPER(TRIM(${actorColumn})) NOT LIKE '99-%'
            ${channelClause}`,
-            [startDateStr, endDateStr]
+            [startDateStr, endDateStr],
           ),
         2,
-        500
+        500,
       );
       const fundedLoans = fundedLoansResult.rows;
 
@@ -3089,10 +3106,10 @@ router.get(
          WHERE COALESCE(started_date, application_date) >= $1
            AND COALESCE(started_date, application_date) <= $2
            ${channelClause}`,
-            [startDateStr, endDateStr]
+            [startDateStr, endDateStr],
           ),
         2,
-        500
+        500,
       );
       const channelFilteredLoans = supportingLoansResult.rows;
 
@@ -3155,17 +3172,17 @@ router.get(
       // Additional debug: count loans by date type and missing LO
       // Note: fundedLoans now only includes loans with funding_date (to match Qlik's DateType='Funding')
       const loansWithClosingDate = fundedLoans.filter(
-        (l: any) => l.closing_date
+        (l: any) => l.closing_date,
       ).length;
       const loansWithoutClosingDate = fundedLoans.filter(
-        (l: any) => !l.closing_date
+        (l: any) => !l.closing_date,
       ).length;
       const debugTotalVolume = fundedLoans.reduce(
         (sum: number, l: any) => sum + (parseFloat(l.loan_amount) || 0),
-        0
+        0,
       );
       const loansWithZeroAmount = fundedLoans.filter(
-        (l: any) => !l.loan_amount || parseFloat(l.loan_amount) === 0
+        (l: any) => !l.loan_amount || parseFloat(l.loan_amount) === 0,
       ).length;
 
       // Debug: count loans excluded due to missing LO
@@ -3174,7 +3191,7 @@ router.get(
           if (!l.funding_date) return false;
           const fd = new Date(l.funding_date);
           return fd >= effectiveStartDate && fd <= effectiveEndDate;
-        }
+        },
       ).length;
       const loansExcludedDueToMissingLO =
         fundedLoansBeforeMissingFilter - fundedLoans.length;
@@ -3324,7 +3341,7 @@ router.get(
         if (isActorMissing(actorName)) return; // Use helper function for consistent filtering
         actorStartedCount.set(
           actorName,
-          (actorStartedCount.get(actorName) || 0) + 1
+          (actorStartedCount.get(actorName) || 0) + 1,
         );
       });
 
@@ -3367,7 +3384,7 @@ router.get(
         // Count as application (denominator) - all inactive loans with application_date in range
         actorApplicationCountForPullThrough.set(
           actorName,
-          (actorApplicationCountForPullThrough.get(actorName) || 0) + 1
+          (actorApplicationCountForPullThrough.get(actorName) || 0) + 1,
         );
 
         // Count if funded (numerator) - [Pull Through Originated Flag]={Yes} = has funding_date
@@ -3375,7 +3392,7 @@ router.get(
         if (hasFundingDate) {
           actorFundedCountForPullThrough.set(
             actorName,
-            (actorFundedCountForPullThrough.get(actorName) || 0) + 1
+            (actorFundedCountForPullThrough.get(actorName) || 0) + 1,
           );
         }
       });
@@ -3507,7 +3524,7 @@ router.get(
       const totalLostOpportunityUnits = lostOpportunityLoans.length;
       const totalLostOpportunityRevenue = lostOpportunityLoans.reduce(
         (sum: number, l: any) => sum + calcLoanRevenue(l),
-        0
+        0,
       );
       const totalDeniedUnits = deniedLoans.length;
 
@@ -3596,12 +3613,12 @@ router.get(
       // Calculate denied revenue (revenue from denied loans)
       const totalDeniedRevenue = deniedLoans.reduce(
         (sum: number, l: any) => sum + calcLoanRevenue(l),
-        0
+        0,
       );
 
       // Debug: Log W-H Days calculation info
       const loansWithInvestorPurchaseDate = fundedLoans.filter(
-        (l: any) => l.investor_purchase_date
+        (l: any) => l.investor_purchase_date,
       ).length;
       const loansWithValidWhDays = fundedLoans.filter((l: any) => {
         if (!l.funding_date) return false;
@@ -3809,7 +3826,7 @@ router.get(
         if (data.concessions.length > 0) {
           const totalActorConcession = data.concessions.reduce(
             (a, b) => a + b,
-            0
+            0,
           );
           if (totalActorConcession > 0) {
             totalConcessionPerActor += totalActorConcession;
@@ -4148,7 +4165,7 @@ router.get(
         tierDeniedRevenue: number,
         tierWhDaysData: { sum: number; weight: number },
         tierConditionsData: { sum: number; count: number },
-        totalApps: number
+        totalApps: number,
       ) {
         if (tierActors.length === 0) return createEmptyTierSummary();
 
@@ -4157,15 +4174,15 @@ router.get(
         const tierRevenue = tierActors.reduce((sum, a) => sum + a.revenue, 0);
         const tierLostUnits = tierActors.reduce(
           (sum, a) => sum + a.lostOpportunityUnits,
-          0
+          0,
         );
         const tierLostRevenue = tierActors.reduce(
           (sum, a) => sum + a.lostOpportunityRevenue,
-          0
+          0,
         );
         const tierDenied = tierActors.reduce(
           (sum, a) => sum + a.deniedUnits,
-          0
+          0,
         );
 
         // Weighted averages for the tier
@@ -4210,13 +4227,13 @@ router.get(
         // Average loan complexity for tier (weighted by units)
         // Note: avgComplexity already has the (1 + raw) * 100 formula applied
         const tierComplexityActors = tierActors.filter(
-          (a: any) => a.avgComplexity !== undefined && a.avgComplexity > 0
+          (a: any) => a.avgComplexity !== undefined && a.avgComplexity > 0,
         );
         const tierAvgComplexity =
           tierComplexityActors.length > 0
             ? tierComplexityActors.reduce(
                 (sum: number, a: any) => sum + a.avgComplexity * a.units,
-                0
+                0,
               ) / tierUnits
             : 100; // Default to 100 (which is (1 + 0) * 100)
 
@@ -4283,7 +4300,7 @@ router.get(
         tierActors: ActorScore[],
         loans: any[],
         actorColumn: string,
-        maxDate: Date
+        maxDate: Date,
       ) {
         const tierActorNames = new Set(tierActors.map((a) => a.name));
         let whDaysSum = 0,
@@ -4358,29 +4375,29 @@ router.get(
       // Calculate tier summaries with additional metrics
       const topActors = actorsWithProduction.filter((a) => a.tier === "top");
       const secondActors = actorsWithProduction.filter(
-        (a) => a.tier === "second"
+        (a) => a.tier === "second",
       );
       const bottomActors = actorsWithProduction.filter(
-        (a) => a.tier === "bottom"
+        (a) => a.tier === "bottom",
       );
 
       const topTierData = calcTierSpecificData(
         topActors,
         fundedLoans,
         actorColumn,
-        effectiveEndDate
+        effectiveEndDate,
       );
       const secondTierData = calcTierSpecificData(
         secondActors,
         fundedLoans,
         actorColumn,
-        effectiveEndDate
+        effectiveEndDate,
       );
       const bottomTierData = calcTierSpecificData(
         bottomActors,
         fundedLoans,
         actorColumn,
-        effectiveEndDate
+        effectiveEndDate,
       );
 
       const tierSummary = {
@@ -4389,36 +4406,36 @@ router.get(
           topTierData.deniedRevenue,
           topTierData.whDaysData,
           topTierData.conditionsData,
-          totalApplications
+          totalApplications,
         ),
         second: calcTierSummary(
           secondActors,
           secondTierData.deniedRevenue,
           secondTierData.whDaysData,
           secondTierData.conditionsData,
-          totalApplications
+          totalApplications,
         ),
         bottom: calcTierSummary(
           bottomActors,
           bottomTierData.deniedRevenue,
           bottomTierData.whDaysData,
           bottomTierData.conditionsData,
-          totalApplications
+          totalApplications,
         ),
       };
 
       // Debug: Find actors with TTS <= 0 (Qlik excludes these from count)
       const actorsWithTTSZeroOrLess = actorsWithProduction.filter(
-        (a) => a.ttsScore <= 0
+        (a) => a.ttsScore <= 0,
       );
       const actorsWithTTSPositive = actorsWithProduction.filter(
-        (a) => a.ttsScore > 0
+        (a) => a.ttsScore > 0,
       );
 
       // Calculate units only for actors with TTS > 0 (matching Qlik's filter)
       const unitsForTTSPositiveActors = actorsWithTTSPositive.reduce(
         (sum, a) => sum + a.units,
-        0
+        0,
       );
 
       // Results summary simplified
@@ -4431,11 +4448,11 @@ router.get(
       // Average complexity weighted by units across all actors
       // Note: avgComplexity already has the (1 + raw) * 100 formula applied
       const complexityActors = actorsWithProduction.filter(
-        (a: any) => a.avgComplexity > 0
+        (a: any) => a.avgComplexity > 0,
       );
       const totalComplexityWeighted = complexityActors.reduce(
         (sum: number, a: any) => sum + a.avgComplexity * a.units,
-        0
+        0,
       );
       const avgComplexityTotal =
         totalUnits > 0 ? totalComplexityWeighted / totalUnits : 100;
@@ -4527,7 +4544,7 @@ router.get(
         error: error.message || "Failed to fetch sales scorecard data",
       });
     }
-  }
+  },
 );
 
 /**
@@ -4628,7 +4645,7 @@ router.get(
       const effectiveStartDate = new Date(
         vMaxDate.getFullYear(),
         vMaxDate.getMonth() - monthsBack,
-        1
+        1,
       );
 
       // Detailed date range logging for debugging Qlik discrepancies
@@ -4637,10 +4654,10 @@ router.get(
         vMaxDateSource: lastModifiedResult.rows[0]?.max_last_modified
           ? "last_modified_date"
           : maxDateResult.rows[0]?.max_updated_at
-          ? "updated_at"
-          : maxDateResult.rows[0]?.max_funding_date
-          ? "funding_date"
-          : "current_date",
+            ? "updated_at"
+            : maxDateResult.rows[0]?.max_funding_date
+              ? "funding_date"
+              : "current_date",
         effectiveStartDate: effectiveStartDate.toISOString(),
         effectiveEndDate: effectiveEndDate.toISOString(),
         monthsBack,
@@ -4700,7 +4717,7 @@ router.get(
         AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
         ${channelClause}
     `,
-        [startDateStr, endDateStr]
+        [startDateStr, endDateStr],
       );
 
       const outputLoans = outputLoansResult.rows;
@@ -5019,7 +5036,7 @@ router.get(
       // Helper: Create tier summary
       function createOpsTierSummary(
         tierActors: typeof actorsWithTTS,
-        allActors: typeof actorsWithTTS
+        allActors: typeof actorsWithTTS,
       ) {
         if (tierActors.length === 0) {
           return createEmptyOpsTierSummary();
@@ -5061,7 +5078,8 @@ router.get(
             tierActors.reduce((sum, a) => sum + a.purchasePercent, 0) /
             tierActors.length,
           waFico: Math.round(
-            tierActors.reduce((sum, a) => sum + a.waFico, 0) / tierActors.length
+            tierActors.reduce((sum, a) => sum + a.waFico, 0) /
+              tierActors.length,
           ),
           waLtv:
             tierActors.reduce((sum, a) => sum + a.waLtv, 0) / tierActors.length,
@@ -5116,10 +5134,10 @@ router.get(
           vMaxDateSource: lastModifiedResult.rows[0]?.max_last_modified
             ? "last_modified_date"
             : maxDateResult.rows[0]?.max_updated_at
-            ? "updated_at"
-            : maxDateResult.rows[0]?.max_funding_date
-            ? "funding_date"
-            : "current_date",
+              ? "updated_at"
+              : maxDateResult.rows[0]?.max_funding_date
+                ? "funding_date"
+                : "current_date",
           startDate: effectiveStartDate.toISOString(),
           startDateFormatted: `${
             effectiveStartDate.getMonth() + 1
@@ -5159,7 +5177,7 @@ router.get(
         error: error.message || "Failed to fetch operations scorecard data",
       });
     }
-  }
+  },
 );
 
 // Helper function for empty ops tier summary
@@ -5287,7 +5305,7 @@ router.get(
       const effectiveStartDate = new Date(
         vMaxDate.getFullYear(),
         vMaxDate.getMonth() - monthsCount,
-        1
+        1,
       );
 
       // Detailed date range logging for debugging Qlik discrepancies
@@ -5296,10 +5314,10 @@ router.get(
         vMaxDateSource: lastModifiedResult.rows[0]?.max_last_modified
           ? "last_modified_date"
           : maxDateResult.rows[0]?.max_updated_at
-          ? "updated_at"
-          : maxDateResult.rows[0]?.max_funding_date
-          ? "funding_date"
-          : "current_date",
+            ? "updated_at"
+            : maxDateResult.rows[0]?.max_funding_date
+              ? "funding_date"
+              : "current_date",
         effectiveStartDate: effectiveStartDate.toISOString(),
         effectiveEndDate: effectiveEndDate.toISOString(),
         monthsCount,
@@ -5360,7 +5378,7 @@ router.get(
         AND UPPER(TRIM(${config.actorColumn})) != '99-MISSING'
         ${channelClause}
     `,
-        [startDateStr, endDateStr]
+        [startDateStr, endDateStr],
       );
 
       const outputLoans = outputLoansResult.rows;
@@ -5560,7 +5578,7 @@ router.get(
 
       // Calculate company averages for TTS
       const actors = Array.from(actorMap.values()).filter(
-        (a) => a.totalUnits > 0
+        (a) => a.totalUnits > 0,
       );
       const actorCount = actors.length;
 
@@ -5801,7 +5819,7 @@ router.get(
             sum +
             Object.values(a.months).reduce(
               (s: number, m: any) => s + (m.unitsOutput || 0),
-              0
+              0,
             )
           );
         }, 0);
@@ -5821,7 +5839,7 @@ router.get(
             tierActors.filter((a) => {
               const actorData = actorMap.get(a.name);
               return actorData && actorData.allTurnTimes.length > 0;
-            }).length
+            }).length,
           );
 
         return {
@@ -5908,15 +5926,15 @@ router.get(
             effectiveStartDate: effectiveStartDate.toISOString(),
             effectiveStartFormatted: effectiveStartDate.toLocaleDateString(
               "en-US",
-              { month: "short", day: "numeric", year: "numeric" }
+              { month: "short", day: "numeric", year: "numeric" },
             ),
             effectiveEndDate: effectiveEndDate.toISOString(),
             effectiveEndFormatted: effectiveEndDate.toLocaleDateString(
               "en-US",
-              { month: "short", day: "numeric", year: "numeric" }
+              { month: "short", day: "numeric", year: "numeric" },
             ),
             expectedQlikRange: `>=${effectiveStartDate.toLocaleDateString(
-              "en-US"
+              "en-US",
             )}<${effectiveEndDate.toLocaleDateString("en-US")}`,
           },
           actorConfig: {
@@ -5937,7 +5955,7 @@ router.get(
           error.message || "Failed to fetch operations scorecard trends data",
       });
     }
-  }
+  },
 );
 
 /**
@@ -5994,7 +6012,10 @@ router.get(
           currentStartDate = parsedStart;
           currentEndDate = parsedEnd;
         } else {
-          logWarn("[SalesTrends] Invalid start_date/end_date params, falling back to default", { customStartDate, customEndDate });
+          logWarn(
+            "[SalesTrends] Invalid start_date/end_date params, falling back to default",
+            { customStartDate, customEndDate },
+          );
           currentEndDate = new Date(vMaxDate);
           currentStartDate = new Date(vMaxDate);
           currentStartDate.setMonth(currentStartDate.getMonth() - monthsBack);
@@ -6009,10 +6030,13 @@ router.get(
       }
 
       // Previous period: same duration before current period (for trend calculation)
-      const periodDurationMs = currentEndDate.getTime() - currentStartDate.getTime();
+      const periodDurationMs =
+        currentEndDate.getTime() - currentStartDate.getTime();
       const previousEndDate = new Date(currentStartDate);
       previousEndDate.setDate(previousEndDate.getDate() - 1); // Last day before current period
-      const previousStartDate = new Date(previousEndDate.getTime() - periodDurationMs);
+      const previousStartDate = new Date(
+        previousEndDate.getTime() - periodDurationMs,
+      );
 
       logInfo("[SalesTrends] Date ranges calculated", {
         dateRange,
@@ -6051,7 +6075,7 @@ router.get(
         AND funding_date >= $1
         AND funding_date <= $2
     `,
-        [previousStartDate.toISOString(), currentEndDate.toISOString()]
+        [previousStartDate.toISOString(), currentEndDate.toISOString()],
       );
 
       const allLoans = loansResult.rows;
@@ -6092,10 +6116,10 @@ router.get(
 
       // Filter out missing LOs for current period
       const validCurrentLoans = currentPeriodLoans.filter(
-        (l: any) => !isActorMissing(l.loan_officer)
+        (l: any) => !isActorMissing(l.loan_officer),
       );
       const validPreviousLoans = previousPeriodLoans.filter(
-        (l: any) => !isActorMissing(l.loan_officer)
+        (l: any) => !isActorMissing(l.loan_officer),
       );
 
       // Aggregate per-LO metrics for current period
@@ -6239,7 +6263,7 @@ router.get(
       const totalUnits = loanOfficers.reduce((sum, lo) => sum + lo.closed, 0);
       const totalVolumeKPI = loanOfficers.reduce(
         (sum, lo) => sum + lo.volume,
-        0
+        0,
       );
       const activeLOs = loanOfficers.length;
       const allTurnTimes = validCurrentLoans
@@ -6248,7 +6272,7 @@ router.get(
       const avgTurnTime =
         allTurnTimes.length > 0
           ? Math.round(
-              allTurnTimes.reduce((a, b) => a + b, 0) / allTurnTimes.length
+              allTurnTimes.reduce((a, b) => a + b, 0) / allTurnTimes.length,
             )
           : 0;
 
@@ -6267,7 +6291,7 @@ router.get(
           value: validCurrentLoans.filter(
             (l: any) =>
               l.loan_type === "Conventional" &&
-              parseFloat(l.loan_amount || 0) <= conformingLimit
+              parseFloat(l.loan_amount || 0) <= conformingLimit,
           ).length,
           fill: "#3b82f6",
         },
@@ -6296,7 +6320,7 @@ router.get(
           value: validCurrentLoans.filter(
             (l: any) =>
               l.loan_type === "Conventional" &&
-              parseFloat(l.loan_amount || 0) > conformingLimit
+              parseFloat(l.loan_amount || 0) > conformingLimit,
           ).length,
           fill: "#ec4899",
         },
@@ -6372,7 +6396,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch sales trends data" });
     }
-  }
+  },
 );
 
 /**
@@ -6434,7 +6458,7 @@ router.get(
         AND funding_date >= $2
         AND funding_date <= $3
     `,
-        [decodedLoName, startDate.toISOString(), endDate.toISOString()]
+        [decodedLoName, startDate.toISOString(), endDate.toISOString()],
       );
 
       const loLoans = loansResult.rows;
@@ -6466,11 +6490,11 @@ router.get(
       const totalClosed = filteredLoans.length;
       const totalVolume = filteredLoans.reduce(
         (sum: number, l: any) => sum + parseFloat(l.loan_amount || 0),
-        0
+        0,
       );
       const totalRevenue = filteredLoans.reduce(
         (sum: number, l: any) => sum + calcLoanRevenue(l),
-        0
+        0,
       );
       const avgMargin =
         totalVolume > 0 ? (totalRevenue / totalVolume) * 10000 : 0;
@@ -6495,7 +6519,7 @@ router.get(
       GROUP BY loan_officer
       ORDER BY units DESC
     `,
-        [decodedLoName, startDate.toISOString(), endDate.toISOString()]
+        [decodedLoName, startDate.toISOString(), endDate.toISOString()],
       );
 
       const branchLOs = branchRankResult.rows;
@@ -6531,11 +6555,11 @@ router.get(
           const monthLoans = data.loans;
           const monthVolume = monthLoans.reduce(
             (sum: number, l: any) => sum + parseFloat(l.loan_amount || 0),
-            0
+            0,
           );
           const monthRevenue = monthLoans.reduce(
             (sum: number, l: any) => sum + calcLoanRevenue(l),
-            0
+            0,
           );
           const monthTurnTimes = monthLoans
             .map((l: any) => calcTurnTime(l))
@@ -6554,7 +6578,7 @@ router.get(
               monthTurnTimes.length > 0
                 ? Math.round(
                     monthTurnTimes.reduce((a, b) => a + b, 0) /
-                      monthTurnTimes.length
+                      monthTurnTimes.length,
                   )
                 : 0,
           };
@@ -6602,7 +6626,7 @@ router.get(
         error: error.message || "Failed to fetch sales trends drilldown",
       });
     }
-  }
+  },
 );
 
 /**
@@ -6694,12 +6718,12 @@ router.get(
               effectiveStartDate = new Date(
                 vMaxDate.getFullYear(),
                 lastQuarter * 3,
-                1
+                1,
               );
               effectiveEndDate = new Date(
                 vMaxDate.getFullYear(),
                 (lastQuarter + 1) * 3,
-                0
+                0,
               );
             }
             dateRangeLabel = "Last Quarter";
@@ -6710,12 +6734,12 @@ router.get(
             effectiveStartDate = new Date(
               lastMonth.getFullYear(),
               lastMonth.getMonth(),
-              1
+              1,
             );
             effectiveEndDate = new Date(
               lastMonth.getFullYear(),
               lastMonth.getMonth() + 1,
-              0
+              0,
             );
             dateRangeLabel = "Last Month";
             break;
@@ -6734,7 +6758,7 @@ router.get(
             effectiveStartDate = new Date(
               vMaxDate.getFullYear(),
               vMaxDate.getMonth(),
-              1
+              1,
             );
             effectiveEndDate = new Date(vMaxDate);
             dateRangeLabel = "Month to Date";
@@ -6842,26 +6866,26 @@ router.get(
 
       const actorDataResult = await tenantPool.query(
         actorDataQuery,
-        queryParams
+        queryParams,
       );
 
       // Filter out missing actors (double-check with helper function)
       const rawActors = actorDataResult.rows.filter(
-        (row) => !isActorMissing(row.actor_name)
+        (row) => !isActorMissing(row.actor_name),
       );
 
       // Calculate totals
       const totalRevenue = rawActors.reduce(
         (sum, a) => sum + parseFloat(a.revenue || 0),
-        0
+        0,
       );
       const totalUnits = rawActors.reduce(
         (sum, a) => sum + parseInt(a.units || 0),
-        0
+        0,
       );
       const totalVolume = rawActors.reduce(
         (sum, a) => sum + parseFloat(a.volume || 0),
-        0
+        0,
       );
 
       // Assign tiers based on cumulative revenue percentage (50/30/20 split)
@@ -6997,10 +7021,10 @@ router.get(
 
         const lastYearResult = await tenantPool.query(
           lastYearQuery,
-          lastYearParams
+          lastYearParams,
         );
         const lastYearRevenue = parseFloat(
-          lastYearResult.rows[0]?.last_year_revenue || 0
+          lastYearResult.rows[0]?.last_year_revenue || 0,
         );
 
         if (lastYearRevenue > 0) {
@@ -7062,7 +7086,7 @@ router.get(
         error: error.message || "Failed to fetch toptiering comparison data",
       });
     }
-  }
+  },
 );
 
 /**
@@ -7128,7 +7152,7 @@ router.post(
 
       const loansResult = await tenantPool.query(
         activeLoansQuery,
-        cutoffDate ? [cutoffDate.toISOString().split("T")[0]] : []
+        cutoffDate ? [cutoffDate.toISOString().split("T")[0]] : [],
       );
       let activeLoans = loansResult.rows;
 
@@ -7199,7 +7223,7 @@ router.post(
       try {
         const { decryptAPIKeys } = await import("../services/encryption.js");
         const apiKeyResult = await tenantPool.query(
-          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
+          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`,
         );
         if (apiKeyResult.rows[0]?.openai_api_key) {
           const decrypted = await decryptAPIKeys({
@@ -7210,14 +7234,13 @@ router.post(
       } catch (apiKeyError: any) {
         logInfo(
           "Could not fetch tenant API key, will use environment variable",
-          { error: apiKeyError.message }
+          { error: apiKeyError.message },
         );
       }
 
       // Import and call prediction service
-      const { predictLoanOutcomes } = await import(
-        "../services/dashboard/predictionService.js"
-      );
+      const { predictLoanOutcomes } =
+        await import("../services/dashboard/predictionService.js");
 
       const result = await predictLoanOutcomes(
         {
@@ -7227,7 +7250,7 @@ router.post(
           tenantId,
           tenantPool, // Pass tenant pool for isolated tenant database queries
         },
-        tenantApiKey
+        tenantApiKey,
       );
 
       // DRASTICALLY reduce response size - frontend only needs summary + limited loan data
@@ -7369,7 +7392,7 @@ router.post(
         .status(500)
         .json({ error: error.message || "Failed to predict loan outcomes" });
     }
-  }
+  },
 );
 
 /**
@@ -7389,9 +7412,8 @@ router.get(
       const tenantContext = getTenantContext(req);
       const tenantId = tenantContext.tenantId;
 
-      const { getPredictInProgress } = await import(
-        "../services/dashboard/predictionService.js"
-      );
+      const { getPredictInProgress } =
+        await import("../services/dashboard/predictionService.js");
       const inProgress = getPredictInProgress(tenantId ?? null);
       res.json({ inProgress });
     } catch (error: any) {
@@ -7400,7 +7422,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch predict status" });
     }
-  }
+  },
 );
 
 /**
@@ -7488,7 +7510,7 @@ router.get(
             .length,
           deny: predictions.filter((p) => p.predictedOutcome === "deny").length,
           originate: predictions.filter(
-            (p) => p.predictedOutcome === "originate"
+            (p) => p.predictedOutcome === "originate",
           ).length,
         },
       });
@@ -7505,7 +7527,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to fetch loan predictions" });
     }
-  }
+  },
 );
 
 /**
@@ -7519,9 +7541,8 @@ router.post(
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      const { syncMarketRatesFromFRED } = await import(
-        "../services/dashboard/marketRateService.js"
-      );
+      const { syncMarketRatesFromFRED } =
+        await import("../services/dashboard/marketRateService.js");
       const { startDate, endDate } = req.body;
 
       logInfo("Syncing market rates from FRED API", {
@@ -7545,7 +7566,7 @@ router.post(
         error: error.message || "Failed to sync market rates from FRED API",
       });
     }
-  }
+  },
 );
 
 /**
@@ -7563,7 +7584,7 @@ router.get(
     // DEPRECATED: Use /api/predictions/:loanId/recommendations instead
     addDeprecationHeaders(
       res,
-      `/api/predictions/${req.params.loanId}/recommendations`
+      `/api/predictions/${req.params.loanId}/recommendations`,
     );
     try {
       const tenantContext = getTenantContext(req);
@@ -7577,7 +7598,7 @@ router.get(
       // Fetch the loan data
       const loanResult = await tenantPool.query(
         `SELECT * FROM public.loans WHERE loan_id = $1`,
-        [loanId]
+        [loanId],
       );
 
       if (loanResult.rows.length === 0) {
@@ -7591,7 +7612,7 @@ router.get(
       try {
         const { decryptAPIKeys } = await import("../services/encryption.js");
         const apiKeyResult = await tenantPool.query(
-          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
+          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`,
         );
         if (apiKeyResult.rows[0]?.openai_api_key) {
           const decrypted = await decryptAPIKeys({
@@ -7632,7 +7653,7 @@ router.get(
       try {
         const recommendations = await generateAIRecommendations(
           loan,
-          apiKeyToUse
+          apiKeyToUse,
         );
         res.json({
           loanId,
@@ -7642,7 +7663,7 @@ router.get(
       } catch (aiError: any) {
         logError(
           "AI recommendation generation failed, falling back to rules",
-          aiError
+          aiError,
         );
         const recommendations = generateRuleBasedRecommendations(loan);
         res.json({
@@ -7661,7 +7682,7 @@ router.get(
         .status(500)
         .json({ error: error.message || "Failed to get loan recommendations" });
     }
-  }
+  },
 );
 
 /**
@@ -7677,17 +7698,17 @@ function generateRuleBasedRecommendations(loan: any): string[] {
 
   if (fico && fico < 680) {
     recommendations.push(
-      "Consider credit counseling or rapid rescoring to improve FICO score before proceeding"
+      "Consider credit counseling or rapid rescoring to improve FICO score before proceeding",
     );
   }
   if (dti && dti > 43) {
     recommendations.push(
-      "High DTI detected - explore debt payoff strategies or income documentation to improve qualification"
+      "High DTI detected - explore debt payoff strategies or income documentation to improve qualification",
     );
   }
   if (ltv && ltv > 80) {
     recommendations.push(
-      "High LTV may require PMI - discuss options with borrower including larger down payment"
+      "High LTV may require PMI - discuss options with borrower including larger down payment",
     );
   }
 
@@ -7697,16 +7718,16 @@ function generateRuleBasedRecommendations(loan: any): string[] {
     : null;
   if (appDate) {
     const daysSinceApp = Math.floor(
-      (Date.now() - appDate.getTime()) / (1000 * 60 * 60 * 24)
+      (Date.now() - appDate.getTime()) / (1000 * 60 * 60 * 24),
     );
     if (daysSinceApp > 30) {
       recommendations.push(
-        `Loan has been in pipeline ${daysSinceApp} days - review status and address any outstanding conditions`
+        `Loan has been in pipeline ${daysSinceApp} days - review status and address any outstanding conditions`,
       );
     }
     if (daysSinceApp > 45) {
       recommendations.push(
-        "Consider rate lock extension options to protect borrower from market volatility"
+        "Consider rate lock extension options to protect borrower from market volatility",
       );
     }
   }
@@ -7715,12 +7736,12 @@ function generateRuleBasedRecommendations(loan: any): string[] {
   const loanType = (loan.loan_type || "").toLowerCase();
   if (loanType.includes("jumbo") || loanType.includes("non-conforming")) {
     recommendations.push(
-      "Jumbo loan - ensure all reserve requirements and documentation are complete"
+      "Jumbo loan - ensure all reserve requirements and documentation are complete",
     );
   }
   if (loanType.includes("investment") || loanType.includes("investor")) {
     recommendations.push(
-      "Investment property - verify rental income documentation and DSCR requirements"
+      "Investment property - verify rental income documentation and DSCR requirements",
     );
   }
 
@@ -7728,17 +7749,17 @@ function generateRuleBasedRecommendations(loan: any): string[] {
   const loanPurpose = (loan.loan_purpose || loan.purpose || "").toLowerCase();
   if (loanPurpose.includes("cash") && loanPurpose.includes("out")) {
     recommendations.push(
-      "Cash-out refinance - confirm seasoning requirements and verify use of funds"
+      "Cash-out refinance - confirm seasoning requirements and verify use of funds",
     );
   }
 
   // Default recommendations if none specific
   if (recommendations.length === 0) {
     recommendations.push(
-      "Continue monitoring loan progress and maintain regular borrower communication"
+      "Continue monitoring loan progress and maintain regular borrower communication",
     );
     recommendations.push(
-      "Ensure all conditions are cleared promptly to minimize pipeline time"
+      "Ensure all conditions are cleared promptly to minimize pipeline time",
     );
   }
 
@@ -7750,7 +7771,7 @@ function generateRuleBasedRecommendations(loan: any): string[] {
  */
 async function generateAIRecommendations(
   loan: any,
-  apiKey: string
+  apiKey: string,
 ): Promise<string[]> {
   const loanSummary = {
     loanAmount: loan.loan_amount,
@@ -7837,7 +7858,7 @@ router.delete(
       const { loanId } = req.params;
       const profileResult = await pool.query(
         "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-        [req.userId]
+        [req.userId],
       );
 
       if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
@@ -7849,7 +7870,7 @@ router.delete(
       // Verify loan belongs to tenant and delete
       const result = await pool.query(
         "DELETE FROM public.loans WHERE loan_id = $1 AND tenant_id = $2 RETURNING loan_id",
-        [loanId, tenantId]
+        [loanId, tenantId],
       );
 
       if (result.rows.length === 0) {
@@ -7869,7 +7890,7 @@ router.delete(
       });
       res.status(500).json({ error: error.message || "Failed to delete loan" });
     }
-  }
+  },
 );
 
 export default router;

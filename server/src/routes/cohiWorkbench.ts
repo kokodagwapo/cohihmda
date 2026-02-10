@@ -27,6 +27,11 @@ import {
   deleteConversation,
   type ConversationMessage,
 } from "../services/ai/cohiConversationService.js";
+import {
+  executeQuery,
+  formatDataRows,
+  type ChatContext,
+} from "../services/ai/cohiChatService.js";
 import { getPromptConfig, buildPrompt } from "../services/promptConfigService.js";
 import { decryptAPIKeys } from "../services/encryption.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
@@ -43,9 +48,22 @@ interface CanvasStateSnapshot {
     title: string;
     sectionType: string;
     widgetIds: string[];
+    filters?: {
+      dateRange?: string;
+      dateField?: string;
+      branch?: string;
+      loanOfficer?: string;
+    };
   }[];
   standaloneWidgets: { id: string; type: string; title?: string }[];
   totalItems: number;
+  /** Actual data from rendered widgets */
+  widgetData?: {
+    itemId: string;
+    widgetName: string;
+    category: string;
+    data: unknown;
+  }[];
 }
 
 interface OpenAIChatMessage {
@@ -137,25 +155,151 @@ async function callOpenAI(
 // Build workbench system prompt
 // ============================================================================
 
+// ---- Data formatting helpers for canvas context ----
+
+/** Rough token estimation: ~4 chars per token */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/** Format a number compactly for the LLM context */
+function fmtNum(val: unknown): string {
+  if (val == null) return "N/A";
+  const n = Number(val);
+  if (Number.isNaN(n)) return String(val);
+  if (Math.abs(n) >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(2);
+}
+
+/** Format KPI data into a compact readable string */
+function formatKpiData(data: any): string {
+  if (!data) return "";
+  // Direct KPI shape: { value, label, format, subtitle }
+  if (data.value !== undefined) {
+    const val = data.format === "currency" ? fmtNum(data.value)
+      : data.format === "percent" ? `${Number(data.value).toFixed(1)}%`
+      : fmtNum(data.value);
+    return data.subtitle ? `${val} (${data.subtitle})` : val;
+  }
+  // Fallback: stringify compactly
+  return JSON.stringify(data).substring(0, 200);
+}
+
+/** Format chart data into a compact summary string */
+function formatChartData(data: any): string {
+  if (!data) return "";
+  const chartData: any[] = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+  if (chartData.length === 0) return "(no data)";
+
+  const xKey = data.xKey || Object.keys(chartData[0] || {})[0];
+  const yKey = data.yKey || Object.keys(chartData[0] || {})[1];
+
+  // Show first 8 data points compactly
+  const points = chartData.slice(0, 8).map((row: any) => {
+    const x = row[xKey] ?? "";
+    const y = row[yKey] ?? "";
+    return `${x}: ${fmtNum(y)}`;
+  });
+  const suffix = chartData.length > 8 ? ` ... (${chartData.length} total points)` : "";
+  return points.join(", ") + suffix;
+}
+
+/** Format table data into a compact summary string */
+function formatTableData(data: any): string {
+  if (!data) return "";
+  const rows: any[] = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+  if (rows.length === 0) return "(no data)";
+
+  const keys = Object.keys(rows[0] || {}).slice(0, 6);
+  const header = keys.join(" | ");
+  const bodyRows = rows.slice(0, 5).map((row: any) =>
+    keys.map((k) => {
+      const v = row[k];
+      return v == null ? "-" : typeof v === "number" ? fmtNum(v) : String(v).substring(0, 30);
+    }).join(" | ")
+  );
+  const suffix = rows.length > 5 ? `\n... (${rows.length} total rows)` : "";
+  return `${header}\n${bodyRows.join("\n")}${suffix}`;
+}
+
+/** Max chars for the data section (~4000 tokens) */
+const MAX_DATA_CHARS = 16000;
+
 function buildCanvasContext(state: CanvasStateSnapshot): string {
   if (state.totalItems === 0) return "The canvas is currently empty.";
 
   const lines: string[] = ["## CURRENT CANVAS STATE\n"];
+
+  // ---- Structural info with filter context ----
   if (state.groups.length > 0) {
-    lines.push(`### Widget Groups (${state.groups.length})`);
+    lines.push(`### Dashboard Groups on Canvas (${state.groups.length})`);
     for (const g of state.groups) {
+      let filterStr = "";
+      if (g.filters) {
+        const parts: string[] = [];
+        if (g.filters.dateRange) parts.push(`Date: ${g.filters.dateRange}`);
+        if (g.filters.dateField) parts.push(`Field: ${g.filters.dateField}`);
+        if (g.filters.branch) parts.push(`Branch: ${g.filters.branch}`);
+        if (g.filters.loanOfficer) parts.push(`LO: ${g.filters.loanOfficer}`);
+        if (parts.length > 0) filterStr = ` [Filters: ${parts.join(", ")}]`;
+      }
       lines.push(
-        `- Group "${g.title}" (${g.sectionType}): [${g.widgetIds.join(", ")}]`
+        `- **${g.title}** (${g.sectionType}, ${g.widgetIds.length} widgets)${filterStr}`
       );
     }
     lines.push("");
   }
+
   if (state.standaloneWidgets.length > 0) {
     lines.push(`### Standalone Items (${state.standaloneWidgets.length})`);
     for (const w of state.standaloneWidgets) {
       lines.push(`- ${w.id} (${w.type})${w.title ? ": " + w.title : ""}`);
     }
+    lines.push("");
   }
+
+  // ---- Actual widget data values ----
+  if (state.widgetData && state.widgetData.length > 0) {
+    lines.push("### LIVE DATA VALUES (what the user currently sees)\n");
+
+    // Sort: KPIs first (most compact and useful), then charts, then tables
+    const sorted = [...state.widgetData].sort((a, b) => {
+      const order: Record<string, number> = { kpi: 0, chart: 1, table: 2, embed: 3, other: 4 };
+      return (order[a.category] ?? 4) - (order[b.category] ?? 4);
+    });
+
+    let charBudget = MAX_DATA_CHARS;
+
+    for (const entry of sorted) {
+      if (charBudget <= 0) {
+        lines.push("... (additional widget data truncated to stay within context limits)");
+        break;
+      }
+
+      let formatted = "";
+      switch (entry.category) {
+        case "kpi":
+          formatted = `- **${entry.widgetName}**: ${formatKpiData(entry.data)}`;
+          break;
+        case "chart":
+          formatted = `- **${entry.widgetName}** (chart): ${formatChartData(entry.data)}`;
+          break;
+        case "table":
+          formatted = `- **${entry.widgetName}** (table):\n${formatTableData(entry.data)}`;
+          break;
+        default:
+          formatted = `- **${entry.widgetName}**: ${JSON.stringify(entry.data).substring(0, 150)}`;
+          break;
+      }
+
+      charBudget -= formatted.length;
+      lines.push(formatted);
+    }
+  }
+
   return lines.join("\n");
 }
 
@@ -170,6 +314,8 @@ You help users build, modify, and understand data visualizations on their canvas
 5. **Delete widgets** using the "delete_widget" action
 6. **Explain widgets** to teach users how they work
 7. **Explain schema fields** so users understand their data
+8. **Query live data** from the database to answer analytical questions using "query_data"
+9. **See actual data** on the canvas (KPI values, chart data, table rows) — use this to give data-driven answers
 
 ## Response Format
 You MUST respond with valid JSON in this exact format:
@@ -209,11 +355,28 @@ Each action in the "actions" array must be one of:
 8. **create_canvas**: Build a full multi-section dashboard canvas at once
    {"type": "create_canvas", "title": "Monthly Executive Review", "sectionKeys": ["executiveDashboard", "companyScorecard", "salesScorecard"], "explanation": "Why this combination"}
 
+9. **query_data**: Run a SQL query to answer a data question (results are returned to you automatically)
+   {"type": "query_data", "sql": "SELECT ...", "explanation": "What this query checks"}
+   Use query_data when:
+   - The user asks a question that requires data NOT visible on the canvas
+   - The user asks for deeper drill-down beyond what the current widgets show
+   - You need to verify or compute something that isn't in the LIVE DATA VALUES
+   PREFER answering from canvas data when possible (faster, no extra query needed).
+   The query results will be automatically provided back to you so you can formulate a data-driven answer.
+
+## Data Awareness (CRITICAL)
+The CURRENT CANVAS STATE section below includes LIVE DATA VALUES — actual numbers the user is seeing.
+- When the user asks about their data, ALWAYS reference the actual values from the LIVE DATA VALUES section
+- Cite specific numbers: "Your pull-through rate is 72.3%" not "your pull-through rate looks good"
+- If the user asks about something visible on the canvas, answer from the data directly — do NOT use query_data
+- Only use query_data when the answer requires data NOT already shown on the canvas
+- When providing auto-insights, reference the actual KPI values and chart trends you can see
+
 ## Important Rules
 - When the user asks to "build me a dashboard" or "create a full dashboard" or requests multiple sections at once, use "create_canvas" to add all sections in one action
 - When the user asks for something that matches an existing widget in the catalog, ALWAYS prefer "add_existing_widget" over "create_widget"
 - When suggesting a dashboard, use the section keys: companyScorecard, salesScorecard, operationsScorecard, operationsTrends, salesTrends, loanFunnel, topTieringComparison, creditRiskManagement, leaderboard, executiveDashboard
-- For "create_widget", write PostgreSQL-compatible SQL against the "loans" table
+- For "create_widget" and "query_data", write PostgreSQL-compatible SQL against the "loans" table
 - Include "teachingNotes" when explaining how data works or when the user seems to be learning
 - Always be concise but informative in your "message"
 - If you're unsure what the user wants, ask a clarifying question in "message" with no actions
@@ -226,7 +389,7 @@ When users ask broad or ambiguous questions, ALWAYS scope data to a RECENT time 
 - "Any issues?" → Show current pipeline only (active loans, recent anomalies)
 - When in doubt, default to the LAST 90 DAYS as the time window
 
-## SQL Generation Rules for create_widget (CRITICAL)
+## SQL Generation Rules for create_widget and query_data (CRITICAL)
 1. ALWAYS use table alias "l": FROM public.loans l
 2. Generate ONLY SELECT queries (no INSERT, UPDATE, DELETE)
 3. NEVER use SELECT * — always specify columns
@@ -361,28 +524,159 @@ router.post(
         };
       }
 
+      const VALID_ACTION_TYPES = [
+        "add_existing_widget",
+        "create_widget",
+        "create_canvas",
+        "modify_widget",
+        "delete_widget",
+        "suggest_dashboard",
+        "explain_widget",
+        "explain_schema",
+        "query_data",
+      ];
+
       // Validate actions
-      const validActions = (parsed.actions || []).filter(
+      let validActions = (parsed.actions || []).filter(
         (a: any) =>
           a &&
           typeof a.type === "string" &&
-          [
-            "add_existing_widget",
-            "create_widget",
-            "create_canvas",
-            "modify_widget",
-            "delete_widget",
-            "suggest_dashboard",
-            "explain_widget",
-            "explain_schema",
-          ].includes(a.type)
+          VALID_ACTION_TYPES.includes(a.type)
       );
 
+      // ------------------------------------------------------------------
+      // Two-pass flow: if the LLM emitted query_data actions, execute
+      // the SQL and make a second LLM call with the results.
+      // ------------------------------------------------------------------
+      const queryActions = validActions.filter((a: any) => a.type === "query_data" && a.sql);
+      let finalMessage = parsed.message || "I processed your request.";
+      let finalTeachingNotes = parsed.teachingNotes || undefined;
+      let finalSuggestions = parsed.suggestedQuestions || [];
+
+      if (queryActions.length > 0 && tenantId) {
+        console.log(
+          `[CohiWorkbench] Executing ${queryActions.length} query_data action(s) for two-pass flow`
+        );
+
+        const queryResults: { sql: string; explanation: string; data?: any[]; error?: string }[] = [];
+
+        for (const qa of queryActions) {
+          try {
+            // Validate: only SELECT queries allowed
+            const trimmedSql = qa.sql.trim().toUpperCase();
+            if (!trimmedSql.startsWith("SELECT") && !trimmedSql.startsWith("WITH")) {
+              queryResults.push({
+                sql: qa.sql,
+                explanation: qa.explanation,
+                error: "Only SELECT queries are allowed.",
+              });
+              continue;
+            }
+
+            const context: ChatContext = {
+              tenantId: tenantId!,
+              userId: req.userId || "workbench",
+              userRole: "user",
+            };
+
+            const result = await executeQuery(qa.sql, [], context);
+            const formattedRows = formatDataRows(result.rows).slice(0, 100);
+
+            queryResults.push({
+              sql: qa.sql,
+              explanation: qa.explanation,
+              data: formattedRows,
+            });
+
+            // Attach results to the action so frontend can display them
+            qa.results = formattedRows;
+          } catch (err: any) {
+            console.error(`[CohiWorkbench] query_data execution error:`, err.message);
+            queryResults.push({
+              sql: qa.sql,
+              explanation: qa.explanation,
+              error: err.message,
+            });
+            qa.results = [];
+          }
+        }
+
+        // Build follow-up prompt with query results
+        const resultsContext = queryResults.map((qr, i) => {
+          if (qr.error) {
+            return `Query ${i + 1} ("${qr.explanation}"): ERROR - ${qr.error}`;
+          }
+          const rows = qr.data || [];
+          if (rows.length === 0) {
+            return `Query ${i + 1} ("${qr.explanation}"): No results returned.`;
+          }
+          // Format results compactly
+          const cols = Object.keys(rows[0] || {});
+          const header = cols.join(" | ");
+          const dataLines = rows.slice(0, 20).map((row: any) =>
+            cols.map((c) => {
+              const v = row[c];
+              return v == null ? "-" : String(v).substring(0, 40);
+            }).join(" | ")
+          );
+          const suffix = rows.length > 20 ? `\n... (${rows.length} total rows)` : "";
+          return `Query ${i + 1} ("${qr.explanation}"):\n${header}\n${dataLines.join("\n")}${suffix}`;
+        }).join("\n\n");
+
+        // Second LLM call with query results
+        const followUpMessages: OpenAIChatMessage[] = [
+          ...messages,
+          { role: "assistant", content: rawResponse },
+          {
+            role: "user",
+            content: `Here are the results of the SQL queries you requested:\n\n${resultsContext}\n\nNow answer the original question using these actual results. Include specific numbers and be precise. Respond in JSON format with "message", "actions" (empty array is fine), "teachingNotes" (optional), and "suggestedQuestions".`,
+          },
+        ];
+
+        try {
+          const secondResponse = await callOpenAI(followUpMessages, apiKey, {
+            temperature: 0.3,
+            maxTokens: 3000,
+            jsonMode: true,
+          });
+
+          let secondParsed: any;
+          try {
+            secondParsed = JSON.parse(secondResponse);
+          } catch {
+            secondParsed = { message: secondResponse };
+          }
+
+          // Use the second response's message (it has the actual data-driven answer)
+          finalMessage = secondParsed.message || finalMessage;
+          finalTeachingNotes = secondParsed.teachingNotes || finalTeachingNotes;
+          if (secondParsed.suggestedQuestions?.length) {
+            finalSuggestions = secondParsed.suggestedQuestions;
+          }
+
+          // Merge any new actions from the second response (non-query ones)
+          const secondActions = (secondParsed.actions || []).filter(
+            (a: any) => a && typeof a.type === "string" && VALID_ACTION_TYPES.includes(a.type) && a.type !== "query_data"
+          );
+          if (secondActions.length > 0) {
+            validActions = [...validActions, ...secondActions];
+          }
+
+          console.log(
+            `[CohiWorkbench] Two-pass complete. Final message length: ${finalMessage.length}`
+          );
+        } catch (err: any) {
+          console.error("[CohiWorkbench] Second LLM call failed:", err.message);
+          // Fall back to the first response's message with a note about the data
+          finalMessage += "\n\n(I ran the queries but encountered an issue formulating the final answer. The query results are attached.)";
+        }
+      }
+
       const response = {
-        message: parsed.message || "I processed your request.",
+        message: finalMessage,
         actions: validActions,
-        teachingNotes: parsed.teachingNotes || undefined,
-        suggestedQuestions: parsed.suggestedQuestions || [],
+        teachingNotes: finalTeachingNotes,
+        suggestedQuestions: finalSuggestions,
         error: undefined as string | undefined,
       };
 

@@ -20,7 +20,8 @@ export type WidgetAction =
   | DeleteWidgetAction
   | SuggestDashboardAction
   | ExplainWidgetAction
-  | ExplainSchemaAction;
+  | ExplainSchemaAction
+  | QueryDataAction;
 
 export interface AddExistingWidgetAction {
   type: 'add_existing_widget';
@@ -96,6 +97,16 @@ export interface ExplainSchemaAction {
   explanation: string;
 }
 
+export interface QueryDataAction {
+  type: 'query_data';
+  /** SQL query that was executed to answer the user's question */
+  sql: string;
+  /** What the query was checking */
+  explanation: string;
+  /** Query results (populated by backend before returning to frontend) */
+  results?: unknown[];
+}
+
 // ---------------------------------------------------------------------------
 // Workbench chat message (extends base chat message with actions)
 // ---------------------------------------------------------------------------
@@ -124,6 +135,13 @@ export interface CanvasStateSnapshot {
     title: string;
     sectionType: string;
     widgetIds: string[];
+    /** Active filter state for the group (date range, branch, etc.) */
+    filters?: {
+      dateRange?: string;
+      dateField?: string;
+      branch?: string;
+      loanOfficer?: string;
+    };
   }[];
   /** All standalone items on the canvas */
   standaloneWidgets: {
@@ -133,4 +151,11 @@ export interface CanvasStateSnapshot {
   }[];
   /** Total item count */
   totalItems: number;
+  /** Actual data from rendered widgets (KPI values, chart data, etc.) */
+  widgetData?: {
+    itemId: string;
+    widgetName: string;
+    category: string;
+    data: unknown;
+  }[];
 }

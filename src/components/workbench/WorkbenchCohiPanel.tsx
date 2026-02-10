@@ -24,6 +24,8 @@ import {
   Lightbulb,
   MessageSquare,
   Database,
+  Search,
+  Code,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -59,27 +61,66 @@ function ActionCard({
   action: WidgetAction;
   onExecute: (a: WidgetAction) => void;
 }) {
+  const [sqlExpanded, setSqlExpanded] = useState(false);
+
   const iconMap: Record<WidgetAction['type'], React.ReactNode> = {
     add_existing_widget: <PlusCircle className="h-4 w-4 text-emerald-500" />,
     create_widget: <Sparkles className="h-4 w-4 text-indigo-500" />,
+    create_canvas: <LayoutDashboard className="h-4 w-4 text-blue-500" />,
     modify_widget: <Sparkles className="h-4 w-4 text-amber-500" />,
     delete_widget: <Trash2 className="h-4 w-4 text-red-500" />,
     suggest_dashboard: <LayoutDashboard className="h-4 w-4 text-blue-500" />,
     explain_widget: <Info className="h-4 w-4 text-sky-500" />,
     explain_schema: <BookOpen className="h-4 w-4 text-violet-500" />,
+    query_data: <Search className="h-4 w-4 text-cyan-500" />,
   };
 
   const labelMap: Record<WidgetAction['type'], string> = {
     add_existing_widget: 'Add widget',
     create_widget: 'Create widget',
+    create_canvas: 'Create canvas',
     modify_widget: 'Modify widget',
     delete_widget: 'Remove widget',
     suggest_dashboard: 'Add dashboard',
     explain_widget: 'Explain',
     explain_schema: 'Explain fields',
+    query_data: 'Data query',
   };
 
-  const isExecutable = ['add_existing_widget', 'create_widget', 'modify_widget', 'delete_widget', 'suggest_dashboard'].includes(action.type);
+  const isExecutable = ['add_existing_widget', 'create_widget', 'create_canvas', 'modify_widget', 'delete_widget', 'suggest_dashboard'].includes(action.type);
+
+  // Special rendering for query_data actions
+  if (action.type === 'query_data') {
+    return (
+      <div className="rounded-lg border border-cyan-200/60 dark:border-cyan-800/40 bg-cyan-50/30 dark:bg-cyan-950/20 p-3 space-y-2">
+        <div className="flex items-start gap-2">
+          <Search className="h-4 w-4 text-cyan-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+              Live query executed
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {action.explanation}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSqlExpanded(!sqlExpanded)}
+          className="flex items-center gap-1 text-[10px] text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
+        >
+          <Code className="h-3 w-3" />
+          {sqlExpanded ? 'Hide SQL' : 'Show SQL'}
+          {sqlExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+        {sqlExpanded && (
+          <pre className="text-[10px] text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+            {action.sql}
+          </pre>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 p-3 space-y-2">

@@ -479,7 +479,7 @@ const SalesScorecard = () => {
       case "bottom":
         return (
           <span
-            className={`${baseClasses} bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300`}
+            className={`${baseClasses} bg-tier-bottom-light text-slate-600 dark:bg-tier-bottom-dark dark:text-slate-300`}
           >
             Bottom
           </span>
@@ -534,13 +534,18 @@ const SalesScorecard = () => {
     return String(value);
   };
 
-  // Get rating color class based on value (100 = average)
-  const getRatingColorClass = (rating: number): string => {
-    if (rating >= 120)
-      return isDarkMode ? "text-emerald-400" : "text-emerald-600";
-    if (rating >= 100) return isDarkMode ? "text-blue-400" : "text-blue-600";
-    if (rating >= 80) return isDarkMode ? "text-amber-400" : "text-amber-600";
-    return isDarkMode ? "text-rose-400" : "text-rose-600";
+  // Get TTS score text color based on the actor's assigned tier
+  // Uses the custom tier colors from tailwind config to stay consistent
+  // with summary headers, badges, and column tints
+  const getTierScoreColorClass = (tier: TTSTier): string => {
+    switch (tier) {
+      case "top":
+        return isDarkMode ? "text-blue-400" : "text-tier-top";
+      case "second":
+        return isDarkMode ? "text-green-400" : "text-tier-second";
+      case "bottom":
+        return isDarkMode ? "text-slate-400" : "text-slate-500";
+    }
   };
 
   const convertToCSV = (data: any, tab: ActiveTab): string => {
@@ -1563,7 +1568,7 @@ const SalesScorecard = () => {
                                           )}
                                         </td>
                                         <td
-                                          className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${
+                                          className={`py-3 px-4 text-sm text-right font-mono bg-tier-top-light dark:bg-tier-top-dark ${
                                             isDarkMode
                                               ? "text-slate-200"
                                               : "text-slate-900"
@@ -1575,7 +1580,7 @@ const SalesScorecard = () => {
                                           )}
                                         </td>
                                         <td
-                                          className={`py-3 px-4 text-sm text-right font-mono bg-blue-500/10 ${
+                                          className={`py-3 px-4 text-sm text-right font-mono bg-tier-second-light dark:bg-tier-second-dark ${
                                             isDarkMode
                                               ? "text-slate-200"
                                               : "text-slate-900"
@@ -1587,7 +1592,7 @@ const SalesScorecard = () => {
                                           )}
                                         </td>
                                         <td
-                                          className={`py-3 px-4 text-sm text-right font-mono bg-rose-500/10 ${
+                                          className={`py-3 px-4 text-sm text-right font-mono bg-tier-bottom-light dark:bg-tier-bottom-dark ${
                                             isDarkMode
                                               ? "text-slate-200"
                                               : "text-slate-900"
@@ -1686,8 +1691,8 @@ const SalesScorecard = () => {
                                         {actor.name || "-"}
                                       </td>
                                       <td
-                                        className={`py-3 px-4 text-sm text-right font-bold ${getRatingColorClass(
-                                          actor.ttsScore ?? 0
+                                        className={`py-3 px-4 text-sm text-right font-bold ${getTierScoreColorClass(
+                                          actor.tier
                                         )}`}
                                       >
                                         {(actor.ttsScore ?? 0).toFixed(2)}

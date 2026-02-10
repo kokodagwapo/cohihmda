@@ -290,10 +290,20 @@ router.get(
         effectiveStartDate = new Date(vMaxDate.getFullYear(), vMaxDate.getMonth() - 12, 1);
       }
 
+      // Calculate months in the date range for per-month averages
+      const monthsInRange = Math.max(
+        1,
+        (effectiveEndDate.getFullYear() - effectiveStartDate.getFullYear()) * 12 +
+          effectiveEndDate.getMonth() -
+          effectiveStartDate.getMonth() +
+          1
+      );
+
       logInfo("[Scorecard/Sales] Start", {
         actor,
         channel: channelGroup,
         hasAccessFilter: accessCtx.requiresFiltering,
+        monthsInRange,
       });
 
       // TTS Weight Configuration - load from database or use defaults
@@ -425,6 +435,8 @@ router.get(
         ficoWeighted: { sum: number; weight: number };
         ltvWeighted: { sum: number; weight: number };
         dtiWeighted: { sum: number; weight: number };
+        whDaysWeighted: { sum: number; weight: number };
+        conditionsValues: number[];
       }
 
       const actorMap = new Map<string, ActorMetrics>();
@@ -450,6 +462,8 @@ router.get(
           ficoWeighted: { sum: 0, weight: 0 },
           ltvWeighted: { sum: 0, weight: 0 },
           dtiWeighted: { sum: 0, weight: 0 },
+          whDaysWeighted: { sum: 0, weight: 0 },
+          conditionsValues: [],
         };
 
         const loanAmount = parseFloat(l.loan_amount) || 0;
@@ -501,6 +515,36 @@ router.get(
         if (dti >= 0 && dti <= 70) {
           existing.dtiWeighted.sum += dti * loanAmount;
           existing.dtiWeighted.weight += loanAmount;
+        }
+
+        // Warehouse holding days (Qlik: W-H Days, volume-weighted)
+        // If investor purchased: purchase_date - funding_date
+        // If not yet purchased (and not brokered): use effectiveEndDate - funding_date
+        const investorStatus = (l.investor_status || "").toUpperCase();
+        if (investorStatus !== "PURCHASED" && l.funding_date && loanAmount > 0) {
+          let whDays = 0;
+          if (l.investor_purchase_date) {
+            const diffMs =
+              new Date(l.investor_purchase_date).getTime() -
+              new Date(l.funding_date).getTime();
+            whDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+          } else {
+            // Not yet purchased: days from funding to end of period
+            const diffMs =
+              effectiveEndDate.getTime() -
+              new Date(l.funding_date).getTime();
+            whDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+          }
+          if (whDays >= 0) {
+            existing.whDaysWeighted.sum += whDays * loanAmount;
+            existing.whDaysWeighted.weight += loanAmount;
+          }
+        }
+
+        // Number of conditions
+        const conditions = parseFloat(l.number_of_conditions) || 0;
+        if (conditions > 0) {
+          existing.conditionsValues.push(conditions);
         }
 
         actorMap.set(actorName, existing);
@@ -680,6 +724,15 @@ router.get(
             actor.dtiWeighted.weight > 0
               ? actor.dtiWeighted.sum / actor.dtiWeighted.weight
               : 0;
+          const waWhDays =
+            actor.whDaysWeighted.weight > 0
+              ? actor.whDaysWeighted.sum / actor.whDaysWeighted.weight
+              : 0;
+          const avgConditions =
+            actor.conditionsValues.length > 0
+              ? actor.conditionsValues.reduce((a, b) => a + b, 0) /
+                actor.conditionsValues.length
+              : 0;
 
           return {
             name: actor.name,
@@ -694,6 +747,8 @@ router.get(
             waFico: safeNum(waFico),
             waLtv: safeNum(waLtv),
             waDti: safeNum(waDti),
+            waWhDays: safeNum(waWhDays),
+            avgConditions: safeNum(avgConditions),
             lostOpportunityUnits: safeNum(actor.lostOpportunityUnits),
             lostOpportunityRevenue: safeNum(actor.lostOpportunityRevenue),
             deniedUnits: safeNum(actor.deniedUnits),
@@ -727,39 +782,149 @@ router.get(
       const secondActors = actorsWithTiers.filter((a) => a.tier === "second");
       const bottomActors = actorsWithTiers.filter((a) => a.tier === "bottom");
 
+      // Compute all 28 tier summary fields matching frontend TTSTierSummary interface
       const calcTierSummary = (actors: typeof actorsWithTiers) => {
-        if (actors.length === 0) {
-          return {
-            count: 0,
-            units: 0,
-            volume: 0,
-            revenue: 0,
-            avgTtsScore: 0,
-            avgTurnTime: 0,
-            pullThrough: 0,
-            loanComplexityScore: 0,
-          };
-        }
-        // Calculate weighted average complexity (weighted by units)
+        const emptyTierSummary = {
+          count: 0,
+          units: 0,
+          unitsPercent: 0,
+          volume: 0,
+          volumePercent: 0,
+          revenue: 0,
+          revenueBps: 0,
+          avgTurnTime: 0,
+          pullThrough: 0,
+          waFico: 0,
+          waLtv: 0,
+          waDti: 0,
+          waWhDays: 0,
+          avgConditions: 0,
+          lostOpportunityUnits: 0,
+          lostOpportunityUnitsPercent: 0,
+          lostOpportunityRevenue: 0,
+          deniedUnits: 0,
+          deniedUnitsPercent: 0,
+          deniedRevenue: 0,
+          lostOpportunityAndDeniedRevenue: 0,
+          lostOpportunityAndDeniedRevenueBps: 0,
+          avgLoRevenue: 0,
+          avgLoUnits: 0,
+          avgLoUnitsPerMonth: 0,
+          avgLoVolume: 0,
+          avgLoVolumePerMonth: 0,
+          avgTtsScore: 0,
+          loanComplexityScore: 0,
+        };
+
+        if (actors.length === 0) return emptyTierSummary;
+
+        // Core aggregates
+        const tierUnits = actors.reduce((sum, a) => sum + a.units, 0);
+        const tierVolume = actors.reduce((sum, a) => sum + a.volume, 0);
+        const tierRevenue = actors.reduce((sum, a) => sum + a.revenue, 0);
+
+        // Lost opportunity / denied aggregates
+        const tierLostOppUnits = actors.reduce(
+          (sum, a) => sum + a.lostOpportunityUnits,
+          0
+        );
+        const tierLostOppRevenue = actors.reduce(
+          (sum, a) => sum + a.lostOpportunityRevenue,
+          0
+        );
+        const tierDeniedUnits = actors.reduce(
+          (sum, a) => sum + a.deniedUnits,
+          0
+        );
+        // Approximate total applications as funded + lost + denied
+        const tierTotalApps = tierUnits + tierLostOppUnits + tierDeniedUnits;
+
+        // Weighted averages (weighted by volume since actor values are volume-weighted)
+        const tierWaFico =
+          tierVolume > 0
+            ? actors.reduce((sum, a) => sum + a.waFico * a.volume, 0) /
+              tierVolume
+            : 0;
+        const tierWaLtv =
+          tierVolume > 0
+            ? actors.reduce((sum, a) => sum + a.waLtv * a.volume, 0) /
+              tierVolume
+            : 0;
+        const tierWaDti =
+          tierVolume > 0
+            ? actors.reduce((sum, a) => sum + a.waDti * a.volume, 0) /
+              tierVolume
+            : 0;
+
+        // Complexity (weighted by units)
         const complexityWeighted = actors.reduce(
           (sum, a) => sum + a.avgComplexity * a.units,
           0
         );
-        const tierTotalUnits = actors.reduce((sum, a) => sum + a.units, 0);
         const avgComplexity =
-          tierTotalUnits > 0 ? complexityWeighted / tierTotalUnits : 100;
+          tierUnits > 0 ? complexityWeighted / tierUnits : 0;
 
         return {
           count: actors.length,
-          units: actors.reduce((sum, a) => sum + a.units, 0),
-          volume: actors.reduce((sum, a) => sum + a.volume, 0),
-          revenue: actors.reduce((sum, a) => sum + a.revenue, 0),
+          units: tierUnits,
+          unitsPercent:
+            totalUnits > 0 ? (tierUnits / totalUnits) * 100 : 0,
+          volume: tierVolume,
+          volumePercent:
+            totalVolume > 0 ? (tierVolume / totalVolume) * 100 : 0,
+          revenue: tierRevenue,
+          revenueBps:
+            tierVolume > 0 ? (tierRevenue / tierVolume) * 10000 : 0,
           avgTtsScore:
             actors.reduce((sum, a) => sum + a.ttsScore, 0) / actors.length,
           avgTurnTime:
             actors.reduce((sum, a) => sum + a.avgTurnTime, 0) / actors.length,
           pullThrough:
             actors.reduce((sum, a) => sum + a.pullThrough, 0) / actors.length,
+          waFico: tierWaFico,
+          waLtv: tierWaLtv,
+          waDti: tierWaDti,
+          waWhDays:
+            tierVolume > 0
+              ? actors.reduce((sum, a) => sum + a.waWhDays * a.volume, 0) /
+                tierVolume
+              : 0,
+          avgConditions:
+            actors.length > 0
+              ? actors.reduce((sum, a) => sum + a.avgConditions, 0) /
+                actors.length
+              : 0,
+          lostOpportunityUnits: tierLostOppUnits,
+          lostOpportunityUnitsPercent:
+            tierTotalApps > 0
+              ? (tierLostOppUnits / tierTotalApps) * 100
+              : 0,
+          lostOpportunityRevenue: tierLostOppRevenue,
+          deniedUnits: tierDeniedUnits,
+          deniedUnitsPercent:
+            tierTotalApps > 0
+              ? (tierDeniedUnits / tierTotalApps) * 100
+              : 0,
+          deniedRevenue: 0, // Not tracked separately at actor level
+          lostOpportunityAndDeniedRevenue: tierLostOppRevenue,
+          lostOpportunityAndDeniedRevenueBps:
+            tierVolume > 0
+              ? (tierLostOppRevenue / tierVolume) * 10000
+              : 0,
+          avgLoRevenue:
+            actors.length > 0 ? tierRevenue / actors.length : 0,
+          avgLoUnits:
+            actors.length > 0 ? tierUnits / actors.length : 0,
+          avgLoUnitsPerMonth:
+            actors.length > 0
+              ? tierUnits / actors.length / monthsInRange
+              : 0,
+          avgLoVolume:
+            actors.length > 0 ? tierVolume / actors.length : 0,
+          avgLoVolumePerMonth:
+            actors.length > 0
+              ? tierVolume / actors.length / monthsInRange
+              : 0,
           loanComplexityScore: avgComplexity,
         };
       };
@@ -778,7 +943,45 @@ router.get(
       const companyAvgComplexity =
         totalUnits > 0 ? companyComplexityWeighted / totalUnits : 100;
 
-      // Company totals
+      // Company-wide aggregates for totals row
+      const totalLostOppUnits = actorsWithTiers.reduce(
+        (sum, a) => sum + a.lostOpportunityUnits,
+        0
+      );
+      const totalLostOppRevenue = actorsWithTiers.reduce(
+        (sum, a) => sum + a.lostOpportunityRevenue,
+        0
+      );
+      const totalDeniedUnits = actorsWithTiers.reduce(
+        (sum, a) => sum + a.deniedUnits,
+        0
+      );
+      const totalApps = totalUnits + totalLostOppUnits + totalDeniedUnits;
+
+      // Weighted averages across all actors (weighted by volume)
+      const companyWaFico =
+        totalVolume > 0
+          ? actorsWithTiers.reduce(
+              (sum, a) => sum + a.waFico * a.volume,
+              0
+            ) / totalVolume
+          : 0;
+      const companyWaLtv =
+        totalVolume > 0
+          ? actorsWithTiers.reduce(
+              (sum, a) => sum + a.waLtv * a.volume,
+              0
+            ) / totalVolume
+          : 0;
+      const companyWaDti =
+        totalVolume > 0
+          ? actorsWithTiers.reduce(
+              (sum, a) => sum + a.waDti * a.volume,
+              0
+            ) / totalVolume
+          : 0;
+
+      // Company totals (all 28 metrics matching frontend TotalsData interface)
       const totals = {
         actorCount: actorsWithTiers.length,
         units: totalUnits,
@@ -787,6 +990,56 @@ router.get(
         revenueBps: totalVolume > 0 ? (totalRevenue / totalVolume) * 10000 : 0,
         avgTurnTime: companyAvgTurnTime,
         pullThrough: companyPullThrough,
+        waFico: companyWaFico,
+        waLtv: companyWaLtv,
+        waDti: companyWaDti,
+        waWhDays:
+          totalVolume > 0
+            ? actorsWithTiers.reduce(
+                (sum, a) => sum + a.waWhDays * a.volume,
+                0
+              ) / totalVolume
+            : 0,
+        avgConditions:
+          actorsWithTiers.length > 0
+            ? actorsWithTiers.reduce(
+                (sum, a) => sum + a.avgConditions,
+                0
+              ) / actorsWithTiers.length
+            : 0,
+        lostOpportunityUnits: totalLostOppUnits,
+        lostOpportunityUnitsPercent:
+          totalApps > 0 ? (totalLostOppUnits / totalApps) * 100 : 0,
+        lostOpportunityRevenue: totalLostOppRevenue,
+        deniedUnits: totalDeniedUnits,
+        deniedUnitsPercent:
+          totalApps > 0 ? (totalDeniedUnits / totalApps) * 100 : 0,
+        deniedRevenue: 0, // Not tracked separately
+        lostOpportunityAndDeniedRevenue: totalLostOppRevenue,
+        lostOpportunityAndDeniedRevenueBps:
+          totalVolume > 0
+            ? (totalLostOppRevenue / totalVolume) * 10000
+            : 0,
+        avgLoRevenue:
+          actorsWithTiers.length > 0
+            ? totalRevenue / actorsWithTiers.length
+            : 0,
+        avgLoUnits:
+          actorsWithTiers.length > 0
+            ? totalUnits / actorsWithTiers.length
+            : 0,
+        avgLoUnitsPerMonth:
+          actorsWithTiers.length > 0
+            ? totalUnits / actorsWithTiers.length / monthsInRange
+            : 0,
+        avgLoVolume:
+          actorsWithTiers.length > 0
+            ? totalVolume / actorsWithTiers.length
+            : 0,
+        avgLoVolumePerMonth:
+          actorsWithTiers.length > 0
+            ? totalVolume / actorsWithTiers.length / monthsInRange
+            : 0,
         avgTtsScore:
           actorsWithTiers.length > 0
             ? actorsWithTiers.reduce((sum, a) => sum + a.ttsScore, 0) /

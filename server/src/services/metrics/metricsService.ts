@@ -319,6 +319,42 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     defaultDateField: "application_date", // Filter by application_date to match Qlik's DateType={'Application'}
   },
 
+  // HMDA metrics - exclude Active loans to match Qlik:
+  // Sum/Count({$<DateType={'Application'},[$(vToDate)]={'Yes'}, [Current Loan Status]-={"*Active*"}, ...>}...)
+  hmda_volume: {
+    id: "hmda_volume",
+    name: "Volume All Final HMDA Status",
+    description:
+      "Sum of loan_amount excluding Active loans. Matches Qlik Volume All Final HMDA Status which uses [Current Loan Status]-={\"*Active*\"}.",
+    category: "volume",
+    formula:
+      "Sum({$<DateType={'Application'},[$(vToDate)]={'Yes'},[Current Loan Status]-={\"*Active*\"},[Consolidated Channels]={'$(vChannelGroup)'}>}[Loan Amount])",
+    sqlQuery: `SUM(CASE 
+      WHEN l.application_date IS NOT NULL 
+        AND NOT (l.current_loan_status ILIKE '%Active%') 
+      THEN COALESCE(l.loan_amount, 0) 
+      ELSE 0 
+    END)`,
+    dependencies: [],
+    defaultDateField: "application_date",
+  },
+  hmda_units: {
+    id: "hmda_units",
+    name: "Units All Final HMDA Status",
+    description:
+      "Count of loans excluding Active loans. Matches Qlik Units All Final HMDA Status which uses [Current Loan Status]-={\"*Active*\"}.",
+    category: "count",
+    formula:
+      "Count({$<DateType={'Application'},[$(vToDate)]={'Yes'},[Current Loan Status]-={\"*Active*\"},[Consolidated Channels]={'$(vChannelGroup)'}>}[Loan Number])",
+    sqlQuery: `COUNT(CASE 
+      WHEN l.application_date IS NOT NULL 
+        AND NOT (l.current_loan_status ILIKE '%Active%') 
+      THEN 1 
+    END)`,
+    dependencies: [],
+    defaultDateField: "application_date",
+  },
+
   // Funnel Metrics (based on Qlik Logic Dictionary)
   // IMPORTANT: Date filtering should be on started_date (Started Year), NOT application_date
   // RESPA App Status is then calculated based on whether application_date exists
@@ -547,45 +583,57 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   // Interest Rate: typically 0 < rate <= 15
   wa_fico: {
     id: "wa_fico",
-    name: "Weighted Average FICO",
+    name: "Originated Weighted Average FICO",
     description:
-      "Volume-weighted average FICO score. Excludes out-of-range values (< 350 or > 900). Matches Qlik vFICOMin/vFICOMax.",
+      "Volume-weighted average FICO score for ORIGINATED loans only. Excludes out-of-range values (< 350 or > 900). Matches Qlik Originated WA FICO which uses [Pull Through Originated Flag]*={'Yes'} and [FICO Out of Range Flag]={No}.",
     category: "count",
     formula:
-      "Sum({<[FICO Out of Range Flag]={No}>}[FICO Score] * [Loan Amount]) / Sum([Loan Amount])",
+      "Sum({<[FICO Out of Range Flag]={No}, [Pull Through Originated Flag]*={'Yes'}>}[FICO Score] * [Loan Amount]) / Sum({<[FICO Out of Range Flag]={No}, [Pull Through Originated Flag]*={'Yes'}>}[Loan Amount])",
     sqlQuery: `ROUND(
-      SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.fico_score * l.loan_amount ELSE 0 END) / 
-      NULLIF(SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900 THEN l.loan_amount ELSE 0 END), 0)
+      SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900
+        AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        THEN l.fico_score * l.loan_amount ELSE 0 END) / 
+      NULLIF(SUM(CASE WHEN l.fico_score >= 350 AND l.fico_score <= 900
+        AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        THEN l.loan_amount ELSE 0 END), 0)
     , 0)`,
     dependencies: [],
     defaultDateField: "application_date",
   },
   wa_ltv: {
     id: "wa_ltv",
-    name: "Weighted Average LTV",
+    name: "Originated Weighted Average LTV",
     description:
-      "Volume-weighted average LTV ratio. Excludes out-of-range values (< 0 or > 110). Matches Qlik vLTVMin/vLTVMax.",
+      "Volume-weighted average LTV ratio for ORIGINATED loans only. Excludes out-of-range values (< 0 or > 110). Matches Qlik Originated WA LTV which uses [Pull Through Originated Flag]*={'Yes'} and [LTV Out of Range Flag]={No}.",
     category: "count",
     formula:
-      "Sum({<[LTV Out of Range Flag]={No}>}[LTV Ratio] * [Loan Amount]) / Sum([Loan Amount])",
+      "Sum({<[LTV Out of Range Flag]={No}, [Pull Through Originated Flag]*={'Yes'}>}[LTV Ratio] * [Loan Amount]) / Sum({<[LTV Out of Range Flag]={No}, [Pull Through Originated Flag]*={'Yes'}>}[Loan Amount])",
     sqlQuery: `ROUND(
-      SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.ltv_ratio * l.loan_amount ELSE 0 END) / 
-      NULLIF(SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110 THEN l.loan_amount ELSE 0 END), 0)
+      SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110
+        AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        THEN l.ltv_ratio * l.loan_amount ELSE 0 END) / 
+      NULLIF(SUM(CASE WHEN l.ltv_ratio >= 0 AND l.ltv_ratio <= 110
+        AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        THEN l.loan_amount ELSE 0 END), 0)
     , 1)`,
     dependencies: [],
     defaultDateField: "application_date",
   },
   wa_dti: {
     id: "wa_dti",
-    name: "Weighted Average DTI",
+    name: "Originated Weighted Average DTI",
     description:
-      "Volume-weighted average DTI ratio. Excludes out-of-range values (< 0 or > 70). Matches Qlik vDTIMin/vDTIMax.",
+      "Volume-weighted average DTI ratio for ORIGINATED loans only. Excludes out-of-range values (< 0 or > 70). Matches Qlik Originated WA DTI which uses [Pull Through Originated Flag]*={'Yes'} and [DTI Out of Range Flag]={No}.",
     category: "count",
     formula:
-      "Sum({<[DTI Out of Range Flag]={No}>}[BE DTI Ratio] * [Loan Amount]) / Sum([Loan Amount])",
+      "Sum({<[DTI Out of Range Flag]={No}, [Pull Through Originated Flag]*={'Yes'}>}[BE DTI Ratio] * [Loan Amount]) / Sum({<[DTI Out of Range Flag]={No}, [Pull Through Originated Flag]*={'Yes'}>}[Loan Amount])",
     sqlQuery: `ROUND(
-      SUM(CASE WHEN l.be_dti_ratio >= 0 AND l.be_dti_ratio <= 70 THEN l.be_dti_ratio * l.loan_amount ELSE 0 END) / 
-      NULLIF(SUM(CASE WHEN l.be_dti_ratio >= 0 AND l.be_dti_ratio <= 70 THEN l.loan_amount ELSE 0 END), 0)
+      SUM(CASE WHEN l.be_dti_ratio >= 0 AND l.be_dti_ratio <= 70
+        AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        THEN l.be_dti_ratio * l.loan_amount ELSE 0 END) / 
+      NULLIF(SUM(CASE WHEN l.be_dti_ratio >= 0 AND l.be_dti_ratio <= 70
+        AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
+        THEN l.loan_amount ELSE 0 END), 0)
     , 1)`,
     dependencies: [],
     defaultDateField: "application_date",
@@ -1914,7 +1962,6 @@ export async function queryMetricGroupedBy(
       ${additionalFiltersClause.clause}
     GROUP BY l.${effectiveGroupBy}
     ORDER BY ${metric.sqlQuery} DESC NULLS LAST
-    LIMIT 50
   `;
 
   if (process.env.NODE_ENV === "development") {

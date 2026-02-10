@@ -85,6 +85,7 @@ import { getWidgetDefinition } from '@/components/widgets/registry';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { WorkbenchCohiPanel } from '@/components/workbench/WorkbenchCohiPanel';
 import { useWorkbenchCohi } from '@/hooks/useWorkbenchCohi';
+import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { serializeWidgetCatalog } from '@/utils/widgetCatalogSerializer';
 import type { WidgetAction } from '@/types/widgetActions';
 import { ImageToDashboardDialog } from '@/components/workbench/ImageToDashboardDialog';
@@ -864,6 +865,12 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
 
   // Build tenant query param once for all canvas API calls
   const tenantQs = useMemo(() => (tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''), [tenantId]);
+
+  // Clear canvas data store when switching canvases
+  const clearCanvasData = useCanvasDataStore((s) => s.clearAll);
+  useEffect(() => {
+    clearCanvasData();
+  }, [loadCanvasId, clearCanvasData]);
 
   useEffect(() => {
     if (!loadCanvasId) return;

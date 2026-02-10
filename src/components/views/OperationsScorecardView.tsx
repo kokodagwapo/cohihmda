@@ -1260,16 +1260,16 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           Average Units Output Per Month
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.totals.avgUnitsPerMonth}
+                          {safeFixed(displayData.totals.avgUnitsPerMonth, 1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.topTier.avgUnitsPerMonth}
+                          {safeFixed(displayData.topTier.avgUnitsPerMonth, 1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.secondTier.avgUnitsPerMonth}
+                          {safeFixed(displayData.secondTier.avgUnitsPerMonth, 1)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.bottomTier.avgUnitsPerMonth}
+                          {safeFixed(displayData.bottomTier.avgUnitsPerMonth, 1)}
                         </td>
                       </tr>
 
@@ -1432,16 +1432,16 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           WA FICO
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.totals.waFico}
+                          {Math.round(displayData.totals.waFico || 0)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-teal-600/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.topTier.waFico}
+                          {Math.round(displayData.topTier.waFico || 0)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-emerald-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.secondTier.waFico}
+                          {Math.round(displayData.secondTier.waFico || 0)}
                         </td>
                         <td className={`py-3 px-4 text-sm text-right font-mono bg-lime-500/10 ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>
-                          {displayData.bottomTier.waFico}
+                          {Math.round(displayData.bottomTier.waFico || 0)}
                         </td>
                       </tr>
 

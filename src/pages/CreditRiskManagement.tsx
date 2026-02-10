@@ -550,30 +550,20 @@ export default function CreditRiskManagement() {
         <div className="space-y-4">
         {/* Header Section */}
         <div className="flex flex-col gap-6">
-          {/* Title and Action Buttons */}
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div className="space-y-1">
-              <h1 className="text-3xl font-light text-slate-900 dark:text-white tracking-tight">
-                Credit Risk Management
-              </h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {canvasMode ? `Canvas Mode: ${canvasEntityName}` : 'Monitor and analyze credit risk across your loan portfolio'}
-              </p>
-            </div>
+          {/* Canvas Mode Exit Button */}
+          {canvasMode && (
             <div className="flex items-center gap-2">
-              {canvasMode && (
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-9 w-9 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  onClick={exitCanvas}
-                  title="Exit Canvas Mode"
-                >
-                  <Minimize2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                </Button>
-              )}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                onClick={exitCanvas}
+                title="Exit Canvas Mode"
+              >
+                <Minimize2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              </Button>
             </div>
-          </div>
+          )}
 
           {/* Filters - DatePeriodPicker and Application Type */}
           <div className="bg-white dark:bg-slate-800/50 rounded-xl p-5 border border-slate-200/60 dark:border-slate-700/60 shadow-sm">

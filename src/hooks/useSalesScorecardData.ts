@@ -151,14 +151,14 @@ export interface SalesScorecardData {
  * Hook for fetching TTS Sales Scorecard data
  *
  * TTS (Top Tier Score) is a weighted composite score that measures performance
- * relative to company averages using 6 components:
- * - Unit Rating (20%), Volume Rating (20%), Margin Rating (20%)
- * - Concession Rating (20%), Pull-Through Rating (15%), Turn Time Rating (5%)
+ * relative to company averages using 6 components (weights from tenant config):
+ * - Unit Rating, Volume Rating, Margin Rating
+ * - Concession Rating, Pull-Through Rating, Turn Time Rating
  *
- * Tier assignment is based on TTS SCORE THRESHOLDS (from Qlik):
- * - Top Tier: TTS > 120 (20%+ above average)
- * - Second Tier: TTS 100-120 (above average)
- * - Bottom Tier: TTS < 100 (below average)
+ * Tier assignment is based on PERCENTILE DISTRIBUTION (Pareto 20/30/50):
+ * - Top Tier: 80th+ percentile (top 20% of actors by TTS score rank)
+ * - Second Tier: 50th-80th percentile (middle 30%)
+ * - Bottom Tier: Below 50th percentile (bottom 50%)
  *
  * Default time frame: Rolling 13 months (per Qlik eCCA_TVI_Score_13_Months)
  *
@@ -273,14 +273,14 @@ export const getTierColorClass = (
 ): string => {
   const colors = {
     top: isDarkMode
-      ? "bg-emerald-900/30 text-emerald-300"
-      : "bg-emerald-100 text-emerald-700",
+      ? "bg-tier-top-dark text-blue-300"
+      : "bg-tier-top-light text-tier-top",
     second: isDarkMode
-      ? "bg-blue-900/30 text-blue-300"
-      : "bg-blue-100 text-blue-700",
+      ? "bg-tier-second-dark text-green-300"
+      : "bg-tier-second-light text-tier-second",
     bottom: isDarkMode
-      ? "bg-rose-900/30 text-rose-300"
-      : "bg-rose-100 text-rose-700",
+      ? "bg-tier-bottom-dark text-slate-300"
+      : "bg-tier-bottom-light text-slate-600",
   };
   return colors[tier];
 };

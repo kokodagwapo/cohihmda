@@ -54,6 +54,9 @@ export interface ScorecardTotals {
   originatedRevenue: number;      // Revenue for originated loans only (matches Qlik CompanyScorecard_Originated Revenue $)
   govtUnits: number;
   purchaseUnits: number;
+  // HMDA (excludes Active loans to match Qlik)
+  hmdaVolume: number;             // Volume All Final HMDA Status
+  hmdaUnits: number;              // Units All Final HMDA Status
   // Withdrawn Totals
   withdrawnVolume: number;        // Withdrawn $ (sum of loan amounts for withdrawn loans)
   withdrawnProformaRevenue: number; // W/D ProForma Revenue
@@ -78,6 +81,9 @@ export interface BranchData {
   revenue: number;
   govtUnits: number;
   purchaseUnits: number;
+  // HMDA (excludes Active loans to match Qlik)
+  hmdaVolume: number;             // Volume All Final HMDA Status
+  hmdaUnits: number;              // Units All Final HMDA Status
   // Withdrawn Totals
   withdrawnVolume: number;        // Withdrawn $
   withdrawnProformaRevenue: number; // W/D ProForma Revenue
@@ -113,6 +119,9 @@ const SCORECARD_METRICS = [
   'originated_revenue',         // Revenue for originated loans only (matches Qlik CompanyScorecard_Originated Revenue $)
   'govt_originated_units',      // Gov't ORIGINATED units (matches Qlik Company Scorecard - uses Pull Through Originated Flag)
   'purchase_originated_units',  // Purchase ORIGINATED units (matches Qlik Company Scorecard - uses Pull Through Originated Flag)
+  // HMDA metrics (exclude Active loans to match Qlik)
+  'hmda_volume',                // Volume All Final HMDA Status (excludes Active)
+  'hmda_units',                 // Units All Final HMDA Status (excludes Active)
   // Withdrawn Totals
   'withdrawn_volume',           // Withdrawn $ (sum of loan amounts for withdrawn loans)
   'withdrawn_proforma_revenue', // W/D ProForma Revenue
@@ -151,6 +160,8 @@ function transformGroupedToRows(groupedData: MetricsByGroup, sortByVolume = true
     revenue: getMetricValue('originated_revenue', groupKey),
     govtUnits: getMetricValue('govt_originated_units', groupKey),
     purchaseUnits: getMetricValue('purchase_originated_units', groupKey),
+    hmdaVolume: getMetricValue('hmda_volume', groupKey),
+    hmdaUnits: getMetricValue('hmda_units', groupKey),
     withdrawnVolume: getMetricValue('withdrawn_volume', groupKey),
     withdrawnProformaRevenue: getMetricValue('withdrawn_proforma_revenue', groupKey),
     deniedVolume: getMetricValue('denied_volume', groupKey),
@@ -184,6 +195,9 @@ function transformTotalsResponse(metrics: Record<string, MetricResult>): Scoreca
     originatedRevenue: getValue('originated_revenue'), // Revenue for originated loans only
     govtUnits: getValue('govt_originated_units'), // Gov't ORIGINATED units (Qlik Company Scorecard)
     purchaseUnits: getValue('purchase_originated_units'), // Purchase ORIGINATED units (Qlik Company Scorecard)
+    // HMDA (excludes Active loans)
+    hmdaVolume: getValue('hmda_volume'), // Volume All Final HMDA Status
+    hmdaUnits: getValue('hmda_units'), // Units All Final HMDA Status
     // Withdrawn Totals
     withdrawnVolume: getValue('withdrawn_volume'), // Withdrawn $
     withdrawnProformaRevenue: getValue('withdrawn_proforma_revenue'), // W/D ProForma Revenue
@@ -219,12 +233,11 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
         additionalFilters.consolidated_channel = filters.channel;
       }
 
-      // Build request body with optional dateField override
-      // When dateField is specified, all metrics will use this date field instead of their defaults
+      // Build request body - each metric uses its own defaultDateField
+      // (matching Qlik where each expression has its own DateType, e.g. Application, Started, Funding)
       const requestBody = {
         metricIds: SCORECARD_METRICS,
         dateRange: { start: dateRangeStart, end: dateRangeEnd },
-        ...(filters.dateField && { dateField: filters.dateField }), // Override date field for all metrics
         ...(Object.keys(additionalFilters).length > 0 && { additionalFilters })
       };
 
@@ -267,7 +280,7 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
     } finally {
       setLoading(false);
     }
-  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.dateField, filters.tenantId]);
+  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.tenantId]);
 
   useEffect(() => {
     fetchData();

@@ -14,6 +14,8 @@ import type {
   CanvasStateSnapshot,
 } from '@/types/widgetActions';
 import type { CanvasLayoutItem } from '@/components/workbench/canvas/types';
+import { useCanvasDataStore } from '@/stores/canvasDataStore';
+import { useWidgetSectionStore } from '@/stores/widgetSectionStore';
 
 // ---------------------------------------------------------------------------
 // Tenant resolution helper – mirrors logic from useCohiChat
@@ -144,13 +146,31 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
     const groups: CanvasStateSnapshot['groups'] = [];
     const standaloneWidgets: CanvasStateSnapshot['standaloneWidgets'] = [];
 
+    // Read filter state for widget groups
+    const sectionState = useWidgetSectionStore.getState().sections;
+
     for (const item of canvasItems) {
       if (item.payload.type === 'widget_group') {
+        // Resolve active filters for this group
+        const sectionFilters = sectionState[item.payload.groupId];
+        const filters: CanvasStateSnapshot['groups'][0]['filters'] = sectionFilters
+          ? {
+              dateRange: sectionFilters.periodSelection?.preset
+                || (sectionFilters.dateRange
+                  ? `${sectionFilters.dateRange.start} to ${sectionFilters.dateRange.end}`
+                  : `${sectionFilters.year}`),
+              dateField: sectionFilters.dateField || undefined,
+              branch: sectionFilters.branch !== 'all' ? sectionFilters.branch : undefined,
+              loanOfficer: sectionFilters.loanOfficer !== 'all' ? sectionFilters.loanOfficer : undefined,
+            }
+          : undefined;
+
         groups.push({
           groupId: item.payload.groupId,
           title: item.payload.title,
           sectionType: item.payload.sectionType,
           widgetIds: item.payload.widgetIds,
+          filters,
         });
       } else {
         standaloneWidgets.push({
@@ -164,10 +184,20 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
       }
     }
 
+    // Collect rendered widget data from the canvas data store
+    const dataSnapshot = useCanvasDataStore.getState().getSnapshot();
+    const widgetData = dataSnapshot.map((entry) => ({
+      itemId: entry.itemId,
+      widgetName: entry.widgetName,
+      category: entry.category,
+      data: entry.data,
+    }));
+
     return {
       groups,
       standaloneWidgets,
       totalItems: canvasItems.length,
+      widgetData: widgetData.length > 0 ? widgetData : undefined,
     };
   }, [canvasItems]);
 

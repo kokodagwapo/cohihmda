@@ -234,14 +234,14 @@ export const getTierColorClass = (
 ): string => {
   const colors = {
     top: isDarkMode
-      ? "bg-teal-900/30 text-teal-300"
-      : "bg-teal-100 text-teal-700",
+      ? "bg-tier-top-dark text-blue-300"
+      : "bg-tier-top-light text-tier-top",
     second: isDarkMode
-      ? "bg-emerald-900/30 text-emerald-300"
-      : "bg-emerald-100 text-emerald-700",
+      ? "bg-tier-second-dark text-green-300"
+      : "bg-tier-second-light text-tier-second",
     bottom: isDarkMode
-      ? "bg-lime-900/30 text-lime-300"
-      : "bg-lime-100 text-lime-700",
+      ? "bg-tier-bottom-dark text-slate-300"
+      : "bg-tier-bottom-light text-slate-600",
   };
   return colors[tier];
 };
