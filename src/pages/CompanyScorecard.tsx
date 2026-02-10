@@ -7,8 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
-import { TrendingUp, TrendingDown, BarChart3, Building2, FileText, Users, Trophy, AlertTriangle, Loader2, Maximize2 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { TrendingUp, Trophy, AlertTriangle, Loader2, Maximize2 } from 'lucide-react';
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
@@ -21,8 +20,6 @@ import { ExportShareMenu } from '@/components/common/ExportShareMenu';
 import { CompanyScorecardDetailTable, SortKey } from '@/components/scorecard/CompanyScorecardDetailTable';
 import type { ExportData } from '@/utils/exportUtils';
 import { KPICard, formatKPIValue } from '@/components/widgets/components/KPICard';
-import { ChartCard } from '@/components/widgets/components/ChartCard';
-import type { KPIData, ChartData, WidgetRenderProps } from '@/components/widgets/registry/types';
 
 const CompanyScorecard = () => {
   const pageRef = useRef<HTMLDivElement>(null);
@@ -42,9 +39,7 @@ const CompanyScorecard = () => {
   const [detailPageSize, setDetailPageSize] = useState(10);
   const [drilldownTitle, setDrilldownTitle] = useState<string | null>(null);
   const [drilldownSortKey, setDrilldownSortKey] = useState<SortKey | undefined>(undefined);
-  // Date field selector - which date to filter all metrics on
-  // Default to 'application_date' to match Qlik Company Scorecard behavior (DateType={'Application'})
-  const [selectedDateField, setSelectedDateField] = useState<string>('application_date');
+  // Each metric uses its own defaultDateField (matching Qlik per-expression DateType behavior)
   // Channel filter from global store (synced with header)
   const { selectedChannel } = useChannelStore();
   
@@ -76,15 +71,6 @@ const CompanyScorecard = () => {
     setSelectedLoanOfficer('all');
   }, []);
 
-  // Date field options matching Qlik DateType values
-  const dateFieldOptions = [
-    { value: 'application_date', label: 'Application Date' },
-    { value: 'funding_date', label: 'Funding Date' },
-    { value: 'started_date', label: 'Started Date' },
-    { value: 'closing_date', label: 'Closing Date' },
-    { value: 'lock_date', label: 'Lock Date' },
-  ];
-
   // Fetch data using the hook with calculated date range
   const filters: ScorecardFilters = {
     year: selectedYear,
@@ -93,7 +79,6 @@ const CompanyScorecard = () => {
     application: selectedApplication,
     channel: selectedChannel, // Channel filter - matches Qlik [Consolidated Channels]
     dateRange: dateRange, // Pass the calculated date range from the hook
-    dateField: selectedDateField, // All metrics will filter on this date field
     tenantId: tenantId // Tenant context (admins viewing other tenants, or user's own tenant)
   };
   const { data, loading, error } = useCompanyScorecardData(filters);
@@ -109,25 +94,6 @@ const CompanyScorecard = () => {
     }
     return 'Full Year';
   };
-
-  // Transform branch data for charts
-  const branchVolumeData = useMemo(() => {
-    if (!data?.byBranch) return [];
-    return data.byBranch.slice(0, 10).map(branch => ({
-      name: branch.name.length > 10 ? branch.name.substring(0, 10) + '...' : branch.name,
-      fullName: branch.name,
-      volume: Math.round(branch.volume / 1000000) // Convert to millions
-    }));
-  }, [data?.byBranch]);
-
-  const branchPullThroughData = useMemo(() => {
-    if (!data?.byBranch) return [];
-    return data.byBranch.slice(0, 10).map(branch => ({
-      name: branch.name.length > 10 ? branch.name.substring(0, 10) + '...' : branch.name,
-      fullName: branch.name,
-      pullThrough: branch.pullThroughRate
-    }));
-  }, [data?.byBranch]);
 
   // Compute top/bottom performers
   const insights = useMemo(() => {
@@ -733,18 +699,6 @@ const CompanyScorecard = () => {
                 size="default"
               />
               
-              {/* Date Field Selector - Which date to filter all metrics on */}
-              <Select value={selectedDateField} onValueChange={setSelectedDateField}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Date Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dateFieldOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
               <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
               
               <Select value={selectedBranch} onValueChange={handleBranchChange}>
@@ -824,51 +778,6 @@ const CompanyScorecard = () => {
               loading={false} error={null} width={180} height={120}
               onClick={() => openDrilldown('WA DTI', 'waDti')}
               config={{ color: 'rose' }}
-            />
-          </div>
-        </div>
-
-        {/* Charts Section – shared widget components */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => openDrilldown('Volume by Branch', 'applicationsTakenDollar', 'branch')}
-            className="cursor-pointer transition hover:-translate-y-0.5"
-          >
-            <ChartCard
-              data={branchVolumeData.length > 0 ? {
-                title: 'Volume by Branch ($M)',
-                chartType: 'bar',
-                data: branchVolumeData,
-                series: [{ dataKey: 'volume', name: 'Volume ($M)', color: '#3b82f6' }],
-                xAxisKey: 'name',
-              } : null}
-              loading={false}
-              error={branchVolumeData.length === 0 ? 'No branch data available' : null}
-              width={500}
-              height={380}
-            />
-          </div>
-
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => openDrilldown('Pull-Through by Branch', 'originatedUnitsPct', 'branch')}
-            className="cursor-pointer transition hover:-translate-y-0.5"
-          >
-            <ChartCard
-              data={branchPullThroughData.length > 0 ? {
-                title: 'Pull-Through by Branch (%)',
-                chartType: 'bar',
-                data: branchPullThroughData,
-                series: [{ dataKey: 'pullThrough', name: 'Pull-Through %', color: '#10b981' }],
-                xAxisKey: 'name',
-              } : null}
-              loading={false}
-              error={branchPullThroughData.length === 0 ? 'No branch data available' : null}
-              width={500}
-              height={380}
             />
           </div>
         </div>

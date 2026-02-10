@@ -9,7 +9,7 @@
  * can re-scope the data range without re-prompting the LLM.
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   BarChart,
   Bar,
@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { useCohiWidgetData, type DateFilter } from '@/hooks/useCohiWidgetData';
 import {
   computePresetDateRange,
@@ -150,6 +151,8 @@ interface CohiWidgetRendererProps {
   groupDateFilter?: DateFilter | null;
   /** Called when the user changes the visualization type (bar, line, pie, etc.) */
   onVizTypeChange?: (type: VisualizationConfig['type']) => void;
+  /** Canvas layout item ID – for reporting data to canvasDataStore */
+  canvasItemId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -366,9 +369,12 @@ export function CohiWidgetRenderer({
   height = 350,
   groupDateFilter,
   onVizTypeChange,
+  canvasItemId,
 }: CohiWidgetRendererProps) {
   // When inside a WidgetGroup the group's filter controls are authoritative
   const isInsideGroup = groupDateFilter !== undefined;
+  const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
+  const removeWidgetFromStore = useCanvasDataStore((s) => s.removeWidget);
 
   // ─── Chart type state ───
   const [chartType, setChartTypeLocal] = useState<VisualizationConfig['type']>(vizConfig.type);
@@ -406,6 +412,25 @@ export function CohiWidgetRenderer({
 
   const { data, loading, error, refetch } = useCohiWidgetData(sql, tenantId, effectiveDateFilter);
   const effectiveConfig = { ...vizConfig, type: chartType };
+
+  // Report data to canvasDataStore for Cohi chat context
+  useEffect(() => {
+    if (!canvasItemId) return;
+    if (!loading && data != null && !error) {
+      const vizType = vizConfig.type;
+      const category: 'kpi' | 'chart' | 'table' | 'other' =
+        vizType === 'kpi' ? 'kpi' : vizType === 'table' ? 'table' : 'chart';
+      reportWidgetData(canvasItemId, {
+        widgetName: title,
+        category,
+        data: { vizType, data, xKey: vizConfig.xKey, yKey: vizConfig.yKey },
+      });
+    }
+    return () => {
+      if (canvasItemId) removeWidgetFromStore(canvasItemId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, loading, error, canvasItemId]);
 
   // ─── Handlers ───
   const handlePresetClick = useCallback((preset: PeriodPreset) => {

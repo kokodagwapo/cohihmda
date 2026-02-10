@@ -17,6 +17,7 @@ import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useChannelStore } from "@/stores/channelStore";
 import { useWidgetSectionStore } from "@/stores/widgetSectionStore";
+import { useCanvasDataStore } from "@/stores/canvasDataStore";
 import { getWidgetDefinition } from "@/components/widgets/registry";
 import { useWidgetData } from "@/components/widgets/data";
 import { SectionHeader } from "@/components/widgets/components/SectionHeader";
@@ -753,17 +754,23 @@ const SECTION_ACCENT: Record<string, string> = {
 };
 
 /** Renders a registry-based widget using the widget architecture.
- *  Data is provided by the WidgetDataProvider context wrapping the canvas. */
+ *  Data is provided by the WidgetDataProvider context wrapping the canvas.
+ *  Reports its rendered data to canvasDataStore for Cohi chat context. */
 function RegistryWidgetEmbed({
   payload,
   width,
   height,
+  canvasItemId,
 }: {
   payload: Extract<CanvasWidgetPayload, { type: "registry_widget" }>;
   width?: number;
   height?: number;
+  /** Canvas layout item ID – used to key the data in canvasDataStore */
+  canvasItemId?: string;
 }) {
   const definition = getWidgetDefinition(payload.definitionId);
+  const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
+  const removeWidget = useCanvasDataStore((s) => s.removeWidget);
 
   // Determine accent class for section grouping
   const sectionType = payload.sectionId
@@ -785,6 +792,22 @@ function RegistryWidgetEmbed({
     definition.dataSelector,
     payload.sectionId,
   );
+
+  // Report data to canvasDataStore when it loads
+  const itemId = canvasItemId || payload.definitionId;
+  useEffect(() => {
+    if (!loading && selectedData != null && !error) {
+      reportWidgetData(itemId, {
+        widgetName: definition.name,
+        category: definition.category as 'kpi' | 'chart' | 'table' | 'embed' | 'other',
+        data: selectedData,
+      });
+    }
+    return () => {
+      removeWidget(itemId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedData, loading, error, itemId]);
 
   const Component = definition.component;
 
@@ -811,11 +834,13 @@ function CohiWidgetRendererWithTenant({
   style,
   width,
   height,
+  canvasItemId,
 }: {
   payload: Extract<CanvasWidgetPayload, { type: 'cohi_widget' }>;
   style: React.CSSProperties;
   width?: number;
   height?: number;
+  canvasItemId?: string;
 }) {
   const { selectedTenantId } = useTenantStore();
   return (
@@ -828,6 +853,7 @@ function CohiWidgetRendererWithTenant({
         tenantId={selectedTenantId}
         width={width}
         height={height}
+        canvasItemId={canvasItemId}
       />
     </div>
   );
@@ -929,7 +955,7 @@ export function WidgetRenderer({
   if (type === "registry_widget" && payload.type === "registry_widget") {
     return (
       <div style={{ ...style, width: "100%", height: "100%" }} className="w-full h-full min-h-0">
-        <RegistryWidgetEmbed payload={payload} width={width} height={height} />
+        <RegistryWidgetEmbed payload={payload} width={width} height={height} canvasItemId={item.i} />
       </div>
     );
   }
@@ -990,6 +1016,7 @@ export function WidgetRenderer({
         style={style}
         width={width}
         height={height}
+        canvasItemId={item.i}
       />
     );
   }

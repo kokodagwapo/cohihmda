@@ -32,7 +32,7 @@ export type ActorMissingMode = "strict" | "extended";
  */
 export const isActorMissing = (
   name: string | null | undefined,
-  mode: ActorMissingMode = "extended"
+  mode: ActorMissingMode = "extended",
 ): boolean => {
   if (!name || name.trim() === "") return true;
   const normalized = name.toUpperCase().trim();
@@ -64,7 +64,7 @@ export const isActorMissing = (
  */
 export const buildActorNotMissingClause = (
   actorColumn: string,
-  mode: ActorMissingMode = "extended"
+  mode: ActorMissingMode = "extended",
 ): string => {
   const baseClause = `${actorColumn} IS NOT NULL AND TRIM(${actorColumn}) != ''`;
 
@@ -155,7 +155,7 @@ export type ChannelGroup = "Retail" | "TPO" | "99-Missing" | "Other" | "All";
  */
 export const filterByChannel = (
   channel: string | null | undefined,
-  channelGroup: string | undefined
+  channelGroup: string | undefined,
 ): boolean => {
   if (!channelGroup || channelGroup === "All") return true;
   const ch = (channel || "").toLowerCase();
@@ -189,7 +189,7 @@ export const filterByChannel = (
  */
 export const buildChannelWhereClause = (
   channelGroup: string | undefined,
-  tableAlias: string = ""
+  tableAlias: string = "",
 ): string => {
   if (!channelGroup || channelGroup === "All") return "";
 
@@ -220,7 +220,7 @@ export const buildChannelWhereClause = (
       // This handles when users select individual channels from the dropdown
       return `AND LOWER(TRIM(${col})) = LOWER('${channelGroup.replace(
         /'/g,
-        "''"
+        "''",
       )}')`;
   }
 };
@@ -270,7 +270,7 @@ export const getActorLabelForChannel = (channelGroup?: string): string => {
  */
 export const getActorSqlExpression = (
   channelGroup?: string,
-  tableAlias: string = "l"
+  tableAlias: string = "l",
 ): string => {
   const column = getActorColumnForChannel(channelGroup);
   return `COALESCE(NULLIF(TRIM(${tableAlias}.${column}), ''), 'Unassigned')`;
@@ -288,7 +288,7 @@ export const getActorSqlExpression = (
 export const buildActorNotMissingClauseForChannel = (
   channelGroup?: string,
   tableAlias: string = "l",
-  includeUnassigned: boolean = true
+  includeUnassigned: boolean = true,
 ): string => {
   const column = getActorColumnForChannel(channelGroup);
   if (includeUnassigned) {
@@ -340,7 +340,7 @@ export interface LoanRevenueData {
 export const calcLoanRevenue = (loan: LoanRevenueData): number => {
   // Parse values to numbers - PostgreSQL can return strings for NUMERIC types
   const baseBuyRate = parseFloat(
-    String(loan.rate_lock_buy_side_base_price_rate ?? "")
+    String(loan.rate_lock_buy_side_base_price_rate ?? ""),
   );
   const loanAmount = parseFloat(String(loan.loan_amount ?? "")) || 0;
 
@@ -406,11 +406,13 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  */
 export const getTenantRevenueExpression = async (
   pool: pg.Pool,
-  tableAlias?: string
+  tableAlias?: string,
 ): Promise<string> => {
   try {
     // Try to get from cache first (must be per-tenant: pool._connectionKey set by tenantDbManager)
-    const poolId = (pool as pg.Pool & { _connectionKey?: string })._connectionKey ?? "default";
+    const poolId =
+      (pool as pg.Pool & { _connectionKey?: string })._connectionKey ??
+      "default";
     const cached = tenantRevenueExpressionCache.get(poolId);
 
     if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
@@ -457,7 +459,7 @@ export const getTenantRevenueExpression = async (
     // On any error, fall back to default
     console.warn(
       "[scorecard-utils] Error fetching tenant revenue expression, using default:",
-      error
+      error,
     );
     return applyTableAlias(REVENUE_SQL_EXPRESSION, tableAlias);
   }
@@ -559,7 +561,7 @@ export const getVMaxDate = async (pool: pg.Pool): Promise<Date> => {
  */
 export const calculateRollingStartDate = (
   maxDate: Date,
-  monthsBack: number
+  monthsBack: number,
 ): Date => {
   const startDate = new Date(maxDate);
   // Go back to first day of month, then subtract months
@@ -642,7 +644,7 @@ export const assignTTSTier = (ttsScore: number): TTSTier => {
  */
 export const assignTTSTierByPercentile = (
   totalCount: number,
-  actorIndex: number
+  actorIndex: number,
 ): TTSTier => {
   if (totalCount === 0) return "bottom";
 
@@ -679,7 +681,7 @@ export const assignTTSTierByPercentile = (
  * @returns The same array with tiers assigned
  */
 export const assignTiersByPercentile = <T extends { tier?: TTSTier }>(
-  actors: T[]
+  actors: T[],
 ): T[] => {
   const totalCount = actors.length;
   return actors.map((actor, index) => ({
@@ -696,10 +698,13 @@ export const assignTiersByPercentile = <T extends { tier?: TTSTier }>(
 export const assignTiersByCumulativeValue = <T>(
   actorsSortedByUnits: T[],
   totalUnits: number,
-  getUnits: (a: T) => number = (a: T) => (a as { units: number }).units
+  getUnits: (a: T) => number = (a: T) => (a as { units: number }).units,
 ): (T & { tier: TTSTier })[] => {
   if (actorsSortedByUnits.length === 0 || totalUnits <= 0) {
-    return actorsSortedByUnits.map((a) => ({ ...a, tier: "bottom" as TTSTier }));
+    return actorsSortedByUnits.map((a) => ({
+      ...a,
+      tier: "bottom" as TTSTier,
+    }));
   }
   const topThreshold = totalUnits * 0.5;
   const secondThreshold = totalUnits * 0.8;
@@ -821,7 +826,7 @@ export const DEFAULT_COMPLEXITY_WEIGHTS: ComplexityConfig = {
  */
 export const calcLoanComplexity = (
   loan: LoanComplexityData,
-  config?: ComplexityConfig
+  config?: ComplexityConfig,
 ): number => {
   // Use provided config or fall back to defaults
   const weights = config || DEFAULT_COMPLEXITY_WEIGHTS;
@@ -831,7 +836,7 @@ export const calcLoanComplexity = (
   const loanType = (loan.loan_type || "").toUpperCase();
   if (
     ["FHA", "VA", "USDA", "FARMERSHOMEA", "FARMERSHOMEADMINISTRATION"].includes(
-      loanType
+      loanType,
     )
   ) {
     complexity += weights.loan_type_government ?? 10;
@@ -922,7 +927,7 @@ export const parseComplexityConfig = (
     component_name: string;
     condition_value: string;
     weight: number;
-  }>
+  }>,
 ): ComplexityConfig => {
   const config: ComplexityConfig = { ...DEFAULT_COMPLEXITY_WEIGHTS };
 
@@ -956,7 +961,7 @@ export const WA_THRESHOLDS = {
  */
 export const isValidForWA = (
   value: number | null | undefined,
-  type: keyof typeof WA_THRESHOLDS
+  type: keyof typeof WA_THRESHOLDS,
 ): boolean => {
   if (value == null) return false;
   const { min, max } = WA_THRESHOLDS[type];

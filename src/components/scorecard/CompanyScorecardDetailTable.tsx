@@ -136,9 +136,9 @@ export function CompanyScorecardDetailTable({
       case 'withdrawnProformaRevenue':
         return row.withdrawnProformaRevenue;
       case 'volumeAllFinal':
-        return row.tieringVolume;
+        return row.hmdaVolume;
       case 'unitsAllFinal':
-        return row.totalLoansWithRespa;
+        return row.hmdaUnits;
       case 'originatedVolume':
         return row.volume;
       case 'withdrawnDollar':
@@ -265,8 +265,8 @@ export function CompanyScorecardDetailTable({
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${pctClass('goodLow', deniedPctTotals, isDarkMode)}`}>{deniedPctTotals.toFixed(1)}%</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.originatedRevenue)}</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.withdrawnProformaRevenue)}</td>
-              <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.totalVolume)}</td>
-              <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatNumber(t.totalLoansWithRespa)}</td>
+              <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.hmdaVolume)}</td>
+              <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatNumber(t.hmdaUnits)}</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.originatedVolume)}</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.withdrawnVolume)}</td>
               <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(t.deniedVolume)}</td>
@@ -296,8 +296,8 @@ export function CompanyScorecardDetailTable({
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${pctClass('goodLow', denPct, isDarkMode)}`}>{denPct.toFixed(1)}%</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.revenue)}</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.withdrawnProformaRevenue)}</td>
-                  <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.tieringVolume)}</td>
-                  <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatNumber(row.totalLoansWithRespa)}</td>
+                  <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.hmdaVolume)}</td>
+                  <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatNumber(row.hmdaUnits)}</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.volume)}</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.withdrawnVolume)}</td>
                   <td className={`text-right py-2 px-2 text-[11px] sm:text-sm sm:py-2.5 sm:px-3 font-mono ${textDefault}`}>{formatLargeNumber(row.deniedVolume)}</td>
