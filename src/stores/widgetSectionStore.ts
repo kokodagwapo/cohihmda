@@ -19,7 +19,8 @@ export type SectionType =
   | 'sales-trends'
   | 'funnel'
   | 'top-tiering-comparison'
-  | 'leaderboard';
+  | 'leaderboard'
+  | 'executive-dashboard';
 
 export interface SectionFilters {
   /** Which dashboard this section represents – maps to a data source */

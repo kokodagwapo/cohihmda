@@ -212,20 +212,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     tenantId: selectedTenantId,
   });
 
-  // Debug: trace Sales Scorecard filter values reaching the provider
   const ssDateRange = ssFilters.periodSelection?.dateRange ?? ssFilters.dateRange;
-  console.log('[WidgetDataProvider] Sales Scorecard filters:', {
-    actorType: ssFilters.actorType,
-    dateRange: ssDateRange,
-    periodSelection: ssFilters.periodSelection ? {
-      type: ssFilters.periodSelection.type,
-      preset: ssFilters.periodSelection.preset,
-      year: ssFilters.periodSelection.year,
-      dateRange: ssFilters.periodSelection.dateRange,
-    } : undefined,
-    rawDateRange: ssFilters.dateRange,
-    sectionType: ssFilters.sectionType,
-  });
 
   const salesScorecard = useSalesScorecardData(
     ssFilters.actorType,
@@ -357,6 +344,33 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     'dashboard-metrics': {
       data: leaderboardData,
       loading: leaderboardLoading,
+      error: null,
+    },
+    // Self-managed embed components fetch their own data.
+    // Provide static placeholders so useWidgetData resolves.
+    'executive-dashboard': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
+    'closing-forecast': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
+    'financial-modeling': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
+    'aletheia-insights': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
+    'industry-news': {
+      data: { ready: true },
+      loading: false,
       error: null,
     },
   }), [

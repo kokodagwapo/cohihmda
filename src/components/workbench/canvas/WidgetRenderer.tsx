@@ -6,7 +6,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { EnhancedVisualization } from "@/components/visualizations/EnhancedVisualization";
 import { LeaderBoardSection } from "@/components/dashboard/LeaderBoardSection";
-import { ExecutiveDashboard } from "@/components/dashboard/ExecutiveDashboard";
 import { ClosingFalloutForecast } from "@/components/dashboard/ClosingFalloutForecast";
 import { LoanFunnelView } from "@/components/views/LoanFunnelView";
 import { TopTieringComparisonView } from "@/components/views/TopTieringComparisonView";
@@ -268,19 +267,6 @@ function DashboardSectionEmbed({
             dateFilter="mtd"
             selectedTenantId={selectedTenantId}
             hideAvatar
-          />
-        </div>
-      );
-    case "executiveDashboard":
-      return (
-        <div
-          className="h-full w-full overflow-auto rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
-          style={scrollStyle}
-        >
-          <ExecutiveDashboard
-            dateFilter="mtd"
-            year={currentYear}
-            selectedTenantId={selectedTenantId}
           />
         </div>
       );

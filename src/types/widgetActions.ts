@@ -15,6 +15,7 @@ import type { VisualizationConfig } from '@/hooks/useCohiChat';
 export type WidgetAction =
   | AddExistingWidgetAction
   | CreateWidgetAction
+  | CreateCanvasAction
   | ModifyWidgetAction
   | DeleteWidgetAction
   | SuggestDashboardAction
@@ -57,6 +58,16 @@ export interface DeleteWidgetAction {
   type: 'delete_widget';
   /** Instance ID on the canvas to remove */
   instanceId: string;
+  /** LLM-generated explanation */
+  explanation: string;
+}
+
+export interface CreateCanvasAction {
+  type: 'create_canvas';
+  /** Human-readable title for the canvas */
+  title: string;
+  /** Array of section keys from SECTION_TO_WIDGETS to add */
+  sectionKeys: string[];
   /** LLM-generated explanation */
   explanation: string;
 }

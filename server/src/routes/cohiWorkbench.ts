@@ -206,9 +206,13 @@ Each action in the "actions" array must be one of:
 7. **explain_schema**: Teach about data fields
    {"type": "explain_schema", "fields": ["field1", "field2"], "explanation": "What these fields mean"}
 
+8. **create_canvas**: Build a full multi-section dashboard canvas at once
+   {"type": "create_canvas", "title": "Monthly Executive Review", "sectionKeys": ["executiveDashboard", "companyScorecard", "salesScorecard"], "explanation": "Why this combination"}
+
 ## Important Rules
+- When the user asks to "build me a dashboard" or "create a full dashboard" or requests multiple sections at once, use "create_canvas" to add all sections in one action
 - When the user asks for something that matches an existing widget in the catalog, ALWAYS prefer "add_existing_widget" over "create_widget"
-- When suggesting a dashboard, use the section keys: companyScorecard, salesScorecard, operationsScorecard, operationsTrends, salesTrends, loanFunnel, topTieringComparison, creditRiskManagement, leaderboard
+- When suggesting a dashboard, use the section keys: companyScorecard, salesScorecard, operationsScorecard, operationsTrends, salesTrends, loanFunnel, topTieringComparison, creditRiskManagement, leaderboard, executiveDashboard
 - For "create_widget", write PostgreSQL-compatible SQL against the "loans" table
 - Include "teachingNotes" when explaining how data works or when the user seems to be learning
 - Always be concise but informative in your "message"
@@ -365,6 +369,7 @@ router.post(
           [
             "add_existing_widget",
             "create_widget",
+            "create_canvas",
             "modify_widget",
             "delete_widget",
             "suggest_dashboard",

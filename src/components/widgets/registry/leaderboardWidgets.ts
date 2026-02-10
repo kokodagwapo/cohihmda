@@ -1,65 +1,30 @@
 /**
- * Widget definitions for the Leaderboard data source.
+ * Widget definitions for the Leaderboard.
  *
- * Provides a simple table of top performers from
- * useLeaderboardData.
+ * Single full-component embed that preserves all interactive features:
+ * top-5 cards with rank badges, collapsible ranks 6-10 table,
+ * scope/period/ranking metric selectors, drill-down modals with
+ * per-metric rankings, badges, and streaks.
  */
 
-import type { WidgetDefinition, TableData, TableColumn } from './types';
-import { DataTable } from '../components/DataTable';
+import type { WidgetDefinition } from './types';
+import { LeaderboardEmbed } from '../components/LeaderboardEmbed';
 
 // ---------------------------------------------------------------------------
-// Source shape – useLeaderboardData returns { leaderboardData: Leader[], loading }
+// Full embed widget
 // ---------------------------------------------------------------------------
 
-interface Leader {
-  name: string;
-  branch?: string;
-  units?: number;
-  volume?: number;
-  revenue?: number;
-  tier?: string;
-  badges?: string[];
-  [key: string]: unknown;
-}
-
-// ---------------------------------------------------------------------------
-// Table Widget
-// ---------------------------------------------------------------------------
-
-const leaderboardTable: WidgetDefinition<TableData> = {
-  id: 'leaderboard-table',
+const leaderboardEmbed: WidgetDefinition = {
+  id: 'leaderboard-embed',
   name: 'Leaderboard',
-  description: 'Top performers leaderboard table',
-  category: 'table',
+  description: 'Full leaderboard with top-5 cards, rankings, drill-down modals, and scope/metric filters',
+  category: 'table', // Use 'table' category for full-width sizing
   group: 'Leaderboard',
   dataSource: 'dashboard-metrics',
-  dataSelector: (raw) => {
-    const leaders = (Array.isArray(raw) ? raw : []) as Leader[];
-    const cols: TableColumn[] = [
-      { key: 'name', label: 'Name', align: 'left' },
-      { key: 'branch', label: 'Branch', align: 'left' },
-      { key: 'units', label: 'Units', align: 'right', format: 'number' },
-      { key: 'volume', label: 'Volume', align: 'right', format: 'currency' },
-      { key: 'revenue', label: 'Revenue', align: 'right', format: 'currency' },
-      { key: 'tier', label: 'Tier', align: 'center' },
-    ];
-    return {
-      title: 'Leaderboard',
-      columns: cols,
-      rows: leaders.slice(0, 25).map((l) => ({
-        name: l.name,
-        branch: l.branch ?? '',
-        units: l.units ?? 0,
-        volume: l.volume ?? 0,
-        revenue: l.revenue ?? 0,
-        tier: l.tier ?? '',
-      })),
-    };
-  },
-  defaultSize: { w: 500, h: 220 },
-  minSize: { w: 250, h: 112 },
-  component: DataTable,
+  dataSelector: () => ({ ready: true }), // Component does its own data fetching
+  defaultSize: { w: 500, h: 800 },
+  minSize: { w: 400, h: 400 },
+  component: LeaderboardEmbed as any,
 };
 
 // ---------------------------------------------------------------------------
@@ -67,5 +32,5 @@ const leaderboardTable: WidgetDefinition<TableData> = {
 // ---------------------------------------------------------------------------
 
 export const leaderboardWidgets: WidgetDefinition[] = [
-  leaderboardTable,
+  leaderboardEmbed,
 ];

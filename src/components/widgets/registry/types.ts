@@ -22,7 +22,12 @@ export type DataSourceId =
   | 'funnel'
   | 'top-tiering-comparison'
   | 'dashboard-insights'
-  | 'dashboard-metrics';
+  | 'dashboard-metrics'
+  | 'executive-dashboard'
+  | 'closing-forecast'
+  | 'financial-modeling'
+  | 'aletheia-insights'
+  | 'industry-news';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

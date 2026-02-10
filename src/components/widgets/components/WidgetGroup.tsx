@@ -190,7 +190,18 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'funnel':               { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',       dot: 'bg-sky-500' },
   'top-tiering-comparison': { border: 'border-cyan-400/50',  bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',     accent: 'text-cyan-600 dark:text-cyan-400',     dot: 'bg-cyan-500' },
   'leaderboard':          { border: 'border-rose-400/50',    bg: 'bg-rose-50/50 dark:bg-rose-950/20',     accent: 'text-rose-600 dark:text-rose-400',     dot: 'bg-rose-500' },
+  'executive-dashboard':  { border: 'border-blue-400/50',    bg: 'bg-blue-50/50 dark:bg-blue-950/20',     accent: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500' },
 };
+
+/**
+ * Sections whose embedded component manages its own filter UI (date pickers,
+ * scope selectors, etc.). The WidgetGroup header hides its own date/filter
+ * controls for these sections to avoid redundant/conflicting UI.
+ */
+const SELF_MANAGED_SECTIONS: Set<SectionType> = new Set([
+  'executive-dashboard',
+  'leaderboard',
+]);
 
 // Map SectionType → DataSourceId for add-widget filtering
 const SECTION_TO_SOURCE: Record<SectionType, string> = {
@@ -203,6 +214,7 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
   'funnel':               'funnel',
   'top-tiering-comparison': 'top-tiering-comparison',
   'leaderboard':          'dashboard-metrics',
+  'executive-dashboard':  'executive-dashboard',
 };
 
 // ---------------------------------------------------------------------------
@@ -1020,6 +1032,8 @@ export function WidgetGroup({
         return { presets: ['mtd', 'qtd', 'ytd', 'last-month', 'last-quarter', 'last-year', 'trailing-12'], showYears: false };
       case 'leaderboard':
         return { presets: ['mtd', 'qtd', 'last-month', 'last-quarter', 'last-year'], showYears: false };
+      case 'executive-dashboard':
+        return { presets: ['mtd', 'ytd', 'last-month', 'last-year'], showYears: false };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
@@ -1158,8 +1172,11 @@ export function WidgetGroup({
           </div>
         </div>
 
-        {/* Date period picker + extra filters (only show when expanded) */}
-        {!collapsed && (
+        {/* Date period picker + extra filters (only show when expanded).
+            Sections whose embedded component manages its own filter controls
+            (e.g. ExecutiveDashboard, LeaderBoardSection) skip the group-level
+            date picker to avoid redundant/conflicting controls. */}
+        {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && (
           <div className="flex items-center gap-2 px-3 pb-2.5 flex-wrap">
             <DatePeriodPicker
               year={filters.year}

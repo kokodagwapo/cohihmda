@@ -14,7 +14,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput } from 'lucide-react';
+import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** Optional: for dashboard_section widgets, allow hiding sub-sections (e.g. Executive summary). */
@@ -55,6 +55,8 @@ interface CanvasWidgetCardProps {
   onMoveToGroup?: (groupId: string) => void;
   /** Called when the user wants to wrap this standalone item in a new group */
   onWrapInGroup?: () => void;
+  /** Called when the user wants to edit this widget with Cohi AI */
+  onEditWithCohi?: () => void;
 }
 
 export function CanvasWidgetCard({
@@ -75,6 +77,7 @@ export function CanvasWidgetCard({
   availableGroups = [],
   onMoveToGroup,
   onWrapInGroup,
+  onEditWithCohi,
 }: CanvasWidgetCardProps) {
   const hasHideableSections = hideableSections.length > 0 && typeof onToggleSection === 'function';
   const hasLayerActions = typeof onBringToFront === 'function' || typeof onSendToBack === 'function';
@@ -209,6 +212,15 @@ export function CanvasWidgetCard({
                     Wrap in new group
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {onEditWithCohi && (
+              <>
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEditWithCohi(); }} className="gap-2">
+                  <Sparkles className="h-4 w-4 text-violet-500" />
+                  Edit with Cohi
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
             )}
