@@ -15,6 +15,11 @@ import { salesTrendsWidgets } from './salesTrendsWidgets';
 import { loanFunnelWidgets } from './loanFunnelWidgets';
 import { topTieringComparisonWidgets } from './topTieringComparisonWidgets';
 import { leaderboardWidgets } from './leaderboardWidgets';
+import { executiveDashboardWidgets } from './executiveDashboardWidgets';
+import { closingForecastWidgets } from './closingForecastWidgets';
+import { financialModelingWidgets } from './financialModelingWidgets';
+import { aletheiaInsightsWidgets } from './aletheiaInsightsWidgets';
+import { industryNewsWidgets } from './industryNewsWidgets';
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -30,6 +35,11 @@ const allWidgets: WidgetDefinition[] = [
   ...loanFunnelWidgets,
   ...topTieringComparisonWidgets,
   ...leaderboardWidgets,
+  ...executiveDashboardWidgets,
+  ...closingForecastWidgets,
+  ...financialModelingWidgets,
+  ...aletheiaInsightsWidgets,
+  ...industryNewsWidgets,
 ];
 
 // ---------------------------------------------------------------------------

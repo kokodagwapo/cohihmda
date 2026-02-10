@@ -26,6 +26,7 @@ import {
   Link2,
   Building2,
   Upload,
+  ArrowLeftRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -34,15 +35,17 @@ import { FieldMappingTab } from "./FieldMappingTab";
 import { RevenueFormulaTab } from "./RevenueFormulaTab";
 import { ScoringWeightsTab } from "./ScoringWeightsTab";
 import { LegacyConfigImportTab } from "./LegacyConfigImportTab";
+import { TenantConfigTransferDialog } from "./TenantConfigTransferDialog";
 
 export function TenantConfigSection() {
   const { toast } = useToast();
 
   // Use admin tenant context
-  const { selectedTenantId, isTenantAdmin, currentTenantName } =
+  const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName } =
     useAdminTenant();
   const [activeTab, setActiveTab] = useState("mapping");
   const [loading, setLoading] = useState(false);
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
 
   // Data states
   const [scoringWeights, setScoringWeights] = useState<Record<string, any[]>>(
@@ -163,20 +166,33 @@ export function TenantConfigSection() {
                 </CardDescription>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={loadData}
-              disabled={loading}
-              className="font-light"
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
+            <div className="flex items-center gap-2">
+              {isPlatformAdmin && selectedTenantId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTransferDialogOpen(true)}
+                  className="font-light"
+                >
+                  <ArrowLeftRight className="h-4 w-4" />
+                  <span className="ml-2">Export / Import</span>
+                </Button>
               )}
-              <span className="ml-2">Refresh</span>
-            </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadData}
+                disabled={loading}
+                className="font-light"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                <span className="ml-2">Refresh</span>
+              </Button>
+            </div>
           </div>
         </CardHeader>
       </Card>
@@ -261,6 +277,14 @@ export function TenantConfigSection() {
             </>
           )}
         </Tabs>
+      )}
+      {/* Config Transfer Dialog (platform admin only) */}
+      {isPlatformAdmin && (
+        <TenantConfigTransferDialog
+          open={transferDialogOpen}
+          onOpenChange={setTransferDialogOpen}
+          losConnections={losConnections}
+        />
       )}
     </motion.div>
   );

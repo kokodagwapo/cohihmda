@@ -1440,7 +1440,7 @@ router.get(
           "uw_approval_date",
           "uw_final_approval_date",
           "submitted_to_underwriting_date",
-          "cond_approval_date",
+          "conditional_approval_date",
           "uw_denied_date",
           "current_loan_status",
           "loan_amount"

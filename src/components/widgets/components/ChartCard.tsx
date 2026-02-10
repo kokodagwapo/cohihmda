@@ -50,7 +50,7 @@ export function ChartCard({
 
   const renderChart = useMemo(() => {
     if (!data) return null;
-    const { chartType, data: chartData, series, xAxisKey, stacked } = data;
+    const { chartType, data: chartData, series, xAxisKey, stacked, colorAccessor, cumulativeKey } = data;
 
     const commonAxisProps = {
       tick: { fontSize: 11, fill: 'currentColor' },
@@ -58,22 +58,75 @@ export function ChartCard({
       axisLine: false,
     };
 
+    const tooltipStyle = {
+      backgroundColor: 'var(--tooltip-bg, #fff)',
+      border: '1px solid var(--tooltip-border, #e2e8f0)',
+      borderRadius: '8px',
+      fontSize: '12px',
+    };
+
     switch (chartType) {
-      case 'bar':
+      case 'bar': {
+        // When colorAccessor or cumulativeKey is present, render as ComposedChart
+        // to support per-bar Cell fills and an optional cumulative percentage line.
+        if (colorAccessor || cumulativeKey) {
+          return (
+            <ResponsiveContainer width="100%" height={chartHeight}>
+              <ComposedChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200/50 dark:stroke-slate-700/50" />
+                <XAxis dataKey={xAxisKey} {...commonAxisProps} />
+                <YAxis yAxisId="left" {...commonAxisProps} />
+                <Tooltip contentStyle={tooltipStyle} />
+                {series.length > 1 && <Legend wrapperStyle={{ fontSize: '11px' }} />}
+                {series.map((s, i) => (
+                  <Bar
+                    key={s.dataKey}
+                    dataKey={s.dataKey}
+                    name={s.name}
+                    yAxisId="left"
+                    fill={getColor(s, i)}
+                    radius={[4, 4, 0, 0]}
+                    stackId={stacked ? 'stack' : undefined}
+                  >
+                    {colorAccessor &&
+                      chartData.map((entry, idx) => (
+                        <Cell key={idx} fill={colorAccessor(entry, idx)} />
+                      ))}
+                  </Bar>
+                ))}
+                {cumulativeKey && (
+                  <>
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      domain={[0, 100]}
+                      tickFormatter={(v: number) => `${v}%`}
+                      {...commonAxisProps}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey={cumulativeKey}
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: '#3b82f6' }}
+                      name="Cumulative %"
+                    />
+                  </>
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          );
+        }
+
+        // Standard bar chart (no per-bar coloring, no cumulative line)
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
             <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200/50 dark:stroke-slate-700/50" />
               <XAxis dataKey={xAxisKey} {...commonAxisProps} />
               <YAxis {...commonAxisProps} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'var(--tooltip-bg, #fff)',
-                  border: '1px solid var(--tooltip-border, #e2e8f0)',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                }}
-              />
+              <Tooltip contentStyle={tooltipStyle} />
               {series.length > 1 && <Legend wrapperStyle={{ fontSize: '11px' }} />}
               {series.map((s, i) => (
                 <Bar
@@ -88,6 +141,7 @@ export function ChartCard({
             </BarChart>
           </ResponsiveContainer>
         );
+      }
 
       case 'line':
         return (

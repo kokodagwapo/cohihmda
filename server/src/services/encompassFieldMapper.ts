@@ -46,25 +46,12 @@ const COLUMN_NAME_ALIASES: Record<string, string> = {
   // Milestone dates (DB uses _date suffix)
   'started': 'started_date',
   'approval': 'approval_date',
-  'appt_set': 'appt_set_date',
-  'appt_reset': 'appt_reset_date',
-  'closer_assignment': 'closer_assignment_date',
-  'completion': 'completion_date',
-  'cond_approval': 'cond_approval_date',
-  'disclosure_prep': 'disclosure_prep_date',
-  'doc_preparation': 'doc_preparation_date',
+  'cond_approval': 'conditional_approval_date',
   'docs_out': 'docs_out_date',
   'docs_signing': 'docs_signing_date',
   'funding': 'funding_date',
-  'post_closing': 'post_closing_date',
-  'preapproval': 'pre_approval_date',
   'processing': 'processing_date',
-  'purchased': 'purchased_date',
-  'ready_for_docs': 'ready_for_docs_date',
-  'reconciled': 'reconciled_date',
   'resubmittal': 'resubmittal_date',
-  'scrubbed': 'scrubbed_date',
-  'signed': 'signed_date',
   'submittal': 'submittal_date',
   'shipping': 'shipped_date',
   
@@ -74,7 +61,7 @@ const COLUMN_NAME_ALIASES: Record<string, string> = {
   'frefinance_cash_out_type': 'refinance_cash_out_type',
   
   // Payment fields
-  'pampi_payment': 'piti_payment',  // P&I Payment maps to PITI Payment column
+  'pampi_payment': 'p_and_i_payment',  // P&I Payment (P&amp;I Payment alias) maps to p_and_i_payment column
   
   // MI fields (dictionary has "MI % Coverage 1" -> "mi_coverage_1", DB has "mi_percent_coverage_1")
   'mi_coverage_1': 'mi_percent_coverage_1',
@@ -89,8 +76,6 @@ const COLUMN_NAME_ALIASES: Record<string, string> = {
   'mavent_highcost_result': 'mavent_high_cost_result',
   'mavent_atrqm_result': 'mavent_atr_qm_result',
   
-  // GFE disclosure fields (shortened to stay under PostgreSQL 63-char limit)
-  'gfe_initial_gfe_disclosure_affiliated_business_disclosure_provided_date': 'gfe_affiliated_business_disclosure_provided_date',
 };
 
 /**

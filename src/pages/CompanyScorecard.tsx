@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -10,6 +10,7 @@ import { useTheme } from '@/components/theme-provider';
 import { TrendingUp, TrendingDown, BarChart3, Building2, FileText, Users, Trophy, AlertTriangle, Loader2, Maximize2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useCompanyScorecardData, ScorecardFilters } from '@/hooks/useCompanyScorecardData';
+import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { DatePeriodPicker, useDatePeriodState, DateRange } from '@/components/ui/DatePeriodPicker';
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -56,6 +57,24 @@ const CompanyScorecard = () => {
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Fetch filter options from API (with cascading: LO list filtered by selected branch)
+  const { options: branchOptions } = useFilterOptions({
+    column: 'branch',
+    tenantId,
+  });
+  const { options: loOptions } = useFilterOptions({
+    column: 'loan_officer',
+    tenantId,
+    filterBy: selectedBranch !== 'all' ? 'branch' : undefined,
+    filterValue: selectedBranch !== 'all' ? selectedBranch : undefined,
+  });
+
+  // Cascading reset: when branch changes, reset loan officer to 'all'
+  const handleBranchChange = useCallback((branch: string) => {
+    setSelectedBranch(branch);
+    setSelectedLoanOfficer('all');
+  }, []);
 
   // Date field options matching Qlik DateType values
   const dateFieldOptions = [
@@ -695,7 +714,8 @@ const CompanyScorecard = () => {
         <div className="flex-1 flex flex-col min-w-0">
           <TopTieringTopBar title="Company Scorecard" onOpenSidebar={() => setSidebarOpen(true)} />
 
-      <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3 max-w-[1800px] mx-auto">
+      <main className="relative flex-1 overflow-y-auto px-4 sm:px-6 py-2 sm:py-3">
+        <div className="max-w-[1800px] mx-auto">
         {/* Header Section */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-4">
@@ -727,13 +747,13 @@ const CompanyScorecard = () => {
               
               <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 hidden sm:block" />
               
-              <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+              <Select value={selectedBranch} onValueChange={handleBranchChange}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue placeholder="Branch" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Branches</SelectItem>
-                  {data?.branches.map(branch => (
+                  {branchOptions.map(branch => (
                     <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                   ))}
                 </SelectContent>
@@ -744,7 +764,7 @@ const CompanyScorecard = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Loan Officers</SelectItem>
-                  {data?.loanOfficers.map(lo => (
+                  {loOptions.map(lo => (
                     <SelectItem key={lo} value={lo}>{lo}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1091,6 +1111,7 @@ const CompanyScorecard = () => {
             </CardContent>
           </Card>
         </div>
+        </div>{/* end max-w wrapper */}
       </main>
         </div>
       </div>

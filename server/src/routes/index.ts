@@ -30,6 +30,7 @@ import newsRoutes from "./news.js";
 import globalKnowledgeRoutes from "./admin/globalKnowledge.js";
 import aiPromptsRoutes from "./admin/aiPrompts.js";
 import platformSettingsRoutes from "./admin/platformSettings.js";
+import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
 import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import shareLinksRoutes from "./shareLinks.js";
 import workbenchRoutes from "./workbench.js";
@@ -82,6 +83,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
   app.use("/api/admin/ai-prompts", aiPromptsRoutes);
   app.use("/api/admin/platform-settings", platformSettingsRoutes);
+  app.use("/api/admin/tenant-config-transfer", tenantConfigExportRoutes);
   app.use("/api/knowledge-center", knowledgeCenterRoutes);
   app.use("/api/share-links", shareLinksRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)

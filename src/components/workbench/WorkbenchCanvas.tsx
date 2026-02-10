@@ -19,7 +19,6 @@ import {
   LayoutDashboard,
   BarChart3,
   Target,
-  Trophy,
   ChevronDown,
   FileSpreadsheet,
   FileText,
@@ -43,15 +42,6 @@ import {
   Eraser,
   MessageSquare,
   StickyNote,
-  Zap,
-  Newspaper,
-  Filter,
-  ArrowLeftRight,
-  Shield,
-  ClipboardList,
-  TrendingUp,
-  LineChart,
-  Calculator,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -97,6 +87,8 @@ import { WorkbenchCohiPanel } from '@/components/workbench/WorkbenchCohiPanel';
 import { useWorkbenchCohi } from '@/hooks/useWorkbenchCohi';
 import { serializeWidgetCatalog } from '@/utils/widgetCatalogSerializer';
 import type { WidgetAction } from '@/types/widgetActions';
+import { ImageToDashboardDialog } from '@/components/workbench/ImageToDashboardDialog';
+import { Camera } from 'lucide-react';
 
 const UPLOAD_ALLOWED_TYPES = [
   'text/csv',
@@ -253,62 +245,10 @@ function normalizeTemplateItems(
   });
 }
 
-type DashboardSectionItem = {
-  id: string;
-  title: string;
-  icon: React.ComponentType<{ className?: string }>;
-  iconClass?: string;
-};
-
-/** Dashboard sections used for Add-from-dashboard. */
-const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionItem[] }[] = [
-  {
-    label: 'Insights',
-    items: [
-      { id: 'aletheiaInsights', title: 'Cohi Daily Briefings', icon: Zap, iconClass: 'text-emerald-500' },
-      { id: 'industryNews', title: 'Mortgage News', icon: Newspaper, iconClass: 'text-blue-500' },
-    ],
-  },
-  {
-    label: 'Dashboards',
-    items: [
-      { id: 'leaderboard', title: 'Leaderboard', icon: Trophy, iconClass: 'text-amber-500' },
-      { id: 'executiveDashboard', title: 'Business Overview', icon: Target, iconClass: 'text-blue-500' },
-      { id: 'closingFalloutForecast', title: 'Closing & Fallout Forecast', icon: BarChart3, iconClass: 'text-emerald-500' },
-    ],
-  },
-  {
-    label: 'Top Tiering',
-    items: [
-      { id: 'loanFunnel', title: 'Loan Funnel', icon: Filter, iconClass: 'text-blue-500' },
-      { id: 'topTieringComparison', title: 'TopTiering Comparison', icon: ArrowLeftRight, iconClass: 'text-sky-500' },
-      { id: 'creditRiskManagement', title: 'Credit Risk Management', icon: Shield, iconClass: 'text-emerald-500' },
-      { id: 'companyScorecard', title: 'Company Scorecard', icon: ClipboardList, iconClass: 'text-indigo-500' },
-    ],
-  },
-  {
-    label: 'Sales',
-    items: [
-      { id: 'salesScorecard', title: 'Sales Scorecard', icon: Target, iconClass: 'text-violet-500' },
-      { id: 'salesTrends', title: 'Sales Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
-    ],
-  },
-  {
-    label: 'Operations',
-    items: [
-      { id: 'operationsScorecard', title: 'Operations Scorecard', icon: Target, iconClass: 'text-indigo-500' },
-      { id: 'operationsTrends', title: 'Operations Trends', icon: LineChart, iconClass: 'text-blue-500' },
-    ],
-  },
-  {
-    label: 'Financial Modeling',
-    items: [
-      { id: 'financialModeling', title: 'Financial Modeling Sandbox', icon: Calculator, iconClass: 'text-amber-500' },
-    ],
-  },
-];
-
-const DASHBOARD_SECTION_ITEMS = DASHBOARD_SECTION_GROUPS.flatMap((group) => group.items);
+// Re-export shared section config so existing imports from WorkbenchCanvas keep working
+export type { DashboardSectionItem } from './workbenchSections';
+export { STANDALONE_WIDGETS, DASHBOARD_SECTION_GROUPS } from './workbenchSections';
+import { STANDALONE_WIDGETS, DASHBOARD_SECTION_GROUPS, DASHBOARD_SECTION_ITEMS } from './workbenchSections';
 
 /**
  * Maps dashboard sectionIds to a section definition with:
@@ -432,7 +372,13 @@ const SECTION_TO_WIDGETS: Record<string, {
   leaderboard: {
     sectionType: 'leaderboard',
     widgetIds: [
-      'leaderboard-table',
+      'leaderboard-embed',
+    ],
+  },
+  executiveDashboard: {
+    sectionType: 'executive-dashboard',
+    widgetIds: [
+      'exec-dashboard-embed',
     ],
   },
 };
@@ -475,13 +421,19 @@ function convertLayoutToPixels(
   return items.map((item) => ({ ...item, ...gridToPixels(item, containerWidth) }));
 }
 
+export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'idle';
+
 export interface WorkbenchCanvasProps {
   loadCanvasId?: string | null;
   onLoaded?: () => void;
+  /** Called after a canvas is saved (new or existing) with (canvasId, title) */
+  onSaved?: (canvasId: string, title: string) => void;
   tenantId?: string | null;
+  /** Called when dirty state changes so parent can show indicator on tab */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchCanvasProps) {
+export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onDirtyChange }: WorkbenchCanvasProps) {
   const {
     items,
     annotations,
@@ -515,7 +467,16 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const [activeAddGroup, setActiveAddGroup] = useState(() => DASHBOARD_SECTION_GROUPS[0]?.label ?? 'Insights');
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
-  const [showCohiPanel, setShowCohiPanel] = useState(false);
+  const [showCohiPanel, setShowCohiPanel] = useState(() => {
+    // Auto-open Cohi panel on first visit
+    const visited = localStorage.getItem('cohi-workbench-visited');
+    if (!visited) {
+      localStorage.setItem('cohi-workbench-visited', '1');
+      return true;
+    }
+    return false;
+  });
+  const [imageToDashboardOpen, setImageToDashboardOpen] = useState(false);
   const [aiBackgroundLoading, setAiBackgroundLoading] = useState(false);
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -526,6 +487,80 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
   const { toast } = useToast();
   const pendingPins = useCanvasPinStore((s) => s.pendingPins);
   const consumePendingPins = useCanvasPinStore((s) => s.consumePendingPins);
+
+  /* ─── Autosave: dirty-state tracking & debounced save ─── */
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const lastSavedSnapshotRef = useRef<string>('');
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Build a snapshot string for comparison
+  const currentSnapshot = useMemo(() => {
+    try {
+      return JSON.stringify({ items, annotations, bg: canvasBackground, uploads, title: saveTitle });
+    } catch {
+      return '';
+    }
+  }, [items, annotations, canvasBackground, uploads, saveTitle]);
+
+  // Determine dirty state
+  const isDirty = useMemo(() => {
+    if (!lastSavedSnapshotRef.current) return false; // never saved/loaded — not dirty
+    return currentSnapshot !== lastSavedSnapshotRef.current;
+  }, [currentSnapshot]);
+
+  // Notify parent of dirty state changes
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  // Update visual save status based on dirty
+  useEffect(() => {
+    if (isDirty && saveStatus !== 'saving') {
+      setSaveStatus('unsaved');
+    } else if (!isDirty && saveStatus !== 'saving') {
+      setSaveStatus(canvasId ? 'saved' : 'idle');
+    }
+  }, [isDirty, canvasId, saveStatus]);
+
+  // Autosave: debounce 5s after last change for already-saved canvases
+  useEffect(() => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (!canvasId || !isDirty) return;
+
+    autosaveTimerRef.current = setTimeout(async () => {
+      const title = saveTitle.trim() || 'Untitled canvas';
+      const content = {
+        layoutVersion: 'freeform-v1',
+        layout: items,
+        annotations,
+        background: canvasBackground,
+        uploadsMeta: uploads,
+      };
+      setSaveStatus('saving');
+      try {
+        await api.request(`/api/workbench/canvases/${canvasId}${tenantQs}`, {
+          method: 'PUT',
+          body: JSON.stringify({ title, content }),
+        });
+        lastSavedSnapshotRef.current = JSON.stringify({ items, annotations, bg: canvasBackground, uploads, title: saveTitle });
+        setSaveStatus('saved');
+        onSaved?.(canvasId, title);
+      } catch {
+        setSaveStatus('unsaved');
+      }
+    }, 5000);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSnapshot, canvasId]);
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
@@ -576,9 +611,27 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           break;
         }
         case 'suggest_dashboard': {
-          const section = SECTION_TO_WIDGETS[action.sectionKey as keyof typeof SECTION_TO_WIDGETS];
+          const sectionKey = action.sectionKey as string;
+          const sectionTitle = sectionKey.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim();
+
+          // Check standalone widgets first
+          const sw = STANDALONE_WIDGETS[sectionKey];
+          if (sw) {
+            const swItem = createLayoutItem(
+              `canvas-${Date.now()}`,
+              'registry_widget',
+              { type: 'registry_widget', definitionId: sw.defId },
+              { x: 20, y: 20, w: sw.w, h: sw.h },
+            );
+            setItemsWithHistory([...items, swItem]);
+            toast({ title: 'Widget added', description: `Added "${sectionTitle}" to canvas` });
+            break;
+          }
+
+          // Full dashboard sections
+          const section = SECTION_TO_WIDGETS[sectionKey];
           if (!section) {
-            toast({ title: 'Dashboard not found', description: `Unknown section: ${action.sectionKey}`, variant: 'destructive' });
+            toast({ title: 'Dashboard not found', description: `Unknown section: ${sectionKey}`, variant: 'destructive' });
             return;
           }
           const gId = `cohi-dash-${Date.now()}`;
@@ -588,7 +641,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
             {
               type: 'widget_group',
               groupId: gId,
-              title: action.sectionKey.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim(),
+              title: sectionTitle,
               sectionType: section.sectionType as SectionType,
               widgetIds: section.widgetIds,
             },
@@ -660,9 +713,150 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           toast({ title: 'Widget removed' });
           break;
         }
+        case 'create_canvas': {
+          // Build a full canvas from multiple dashboard sections
+          const sectionKeys = action.sectionKeys ?? [];
+          if (sectionKeys.length === 0) {
+            toast({ title: 'No sections specified', variant: 'destructive' });
+            break;
+          }
+          if (action.title) setSaveTitle(action.title);
+          const newItems: CanvasLayoutItem[] = [];
+          let yOffset = 0;
+          const groupW = Math.max(width - 32, 480);
+          const EMBED_HEIGHTS: Record<string, number> = {
+            executiveDashboard: 700,
+            leaderboard: 850,
+          };
+
+          for (const key of sectionKeys) {
+            const itemId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+            const sectionTitle = key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim();
+
+            // Standalone widgets – add as registry_widget directly
+            const standalone = STANDALONE_WIDGETS[key];
+            if (standalone) {
+              newItems.push(
+                createLayoutItem(itemId, 'registry_widget', {
+                  type: 'registry_widget',
+                  definitionId: standalone.defId,
+                }, { x: 0, y: yOffset, w: Math.min(standalone.w, groupW), h: standalone.h })
+              );
+              yOffset += standalone.h + 24;
+              continue;
+            }
+
+            // Full dashboard sections – add as widget_group
+            const section = SECTION_TO_WIDGETS[key];
+            if (!section) continue;
+            const groupId = `cohi-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+            const embedH = EMBED_HEIGHTS[key];
+            let groupH: number;
+            if (embedH && section.widgetIds.length <= 2) {
+              groupH = embedH;
+            } else {
+              const kpiCount = section.widgetIds.filter((id) => {
+                const def = getWidgetDefinition(id);
+                return def?.category === 'kpi';
+              }).length;
+              const kpiRows = Math.ceil(kpiCount / 7);
+              const chartCount = section.widgetIds.filter((id) => {
+                const d = getWidgetDefinition(id);
+                return d?.category === 'chart' || d?.category === 'distribution';
+              }).length;
+              const tableCount = section.widgetIds.filter((id) => {
+                const d = getWidgetDefinition(id);
+                return d?.category === 'table';
+              }).length;
+              const chartRows = Math.ceil(chartCount / 2);
+              const contentH = kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
+              groupH = Math.max(350, 110 + contentH);
+            }
+
+            newItems.push(
+              createLayoutItem(itemId, 'widget_group', {
+                type: 'widget_group',
+                groupId,
+                title: sectionTitle,
+                sectionType: section.sectionType as SectionType,
+                widgetIds: section.widgetIds,
+              }, { x: 0, y: yOffset, w: groupW, h: groupH })
+            );
+            yOffset += groupH + 24;
+          }
+
+          if (newItems.length > 0) {
+            setItemsWithHistory((prev) => [...prev, ...newItems]);
+            toast({
+              title: action.title || 'Canvas created',
+              description: `Added ${newItems.length} dashboard section${newItems.length !== 1 ? 's' : ''} to canvas`,
+            });
+          }
+          break;
+        }
         default:
           // explain_widget, explain_schema, modify_widget – handled in chat only
           break;
+      }
+    },
+    [items, setItemsWithHistory, toast, width]
+  );
+
+  // ---- Image-to-Dashboard: handle generated groups ----
+  const handleDashboardGenerated = useCallback(
+    (groups: Array<{ title: string; sectionType: string; dateField: string; widgets: Array<{ id: string; sql: string; title: string; vizConfig: any; explanation?: string }> }>) => {
+      const newItems: CanvasLayoutItem[] = [];
+      let yOffset = 20;
+
+      // Find the bottom of existing items so new groups don't overlap
+      for (const item of items) {
+        const bottom = item.y + item.h;
+        if (bottom > yOffset) yOffset = bottom + 20;
+      }
+
+      for (const group of groups) {
+        const groupId = `canvas-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const groupItems = group.widgets.map((w) => ({
+          kind: 'cohi' as const,
+          id: w.id,
+          sql: w.sql,
+          title: w.title,
+          vizConfig: w.vizConfig,
+          explanation: w.explanation,
+        }));
+
+        const groupPayload = {
+          type: 'widget_group' as const,
+          groupId,
+          title: group.title,
+          sectionType: (group.sectionType || 'company-scorecard') as import('@/stores/widgetSectionStore').SectionType,
+          widgetIds: [] as string[],
+          items: groupItems,
+        };
+
+        // Size the group based on widget count
+        const widgetCount = group.widgets.length;
+        const groupHeight = Math.max(500, widgetCount <= 4 ? 500 : 300 + widgetCount * 100);
+
+        newItems.push(
+          createLayoutItem(groupId, 'widget_group', groupPayload, {
+            x: 20,
+            y: yOffset,
+            w: 900,
+            h: groupHeight,
+          })
+        );
+
+        yOffset += groupHeight + 20;
+      }
+
+      if (newItems.length > 0) {
+        setItemsWithHistory((prev) => [...prev, ...newItems]);
+        toast({
+          title: 'Dashboard created from image',
+          description: `Added ${groups.length} group${groups.length !== 1 ? 's' : ''} with ${groups.reduce((s, g) => s + g.widgets.length, 0)} widget${groups.reduce((s, g) => s + g.widgets.length, 0) !== 1 ? 's' : ''}`,
+        });
       }
     },
     [items, setItemsWithHistory, toast]
@@ -694,6 +888,21 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         if (data.title) setSaveTitle(data.title);
         if (typeof data.favorited === 'boolean') setShareFavorited(data.favorited);
         setCanvasId(data.id);
+        // Snapshot baseline for dirty-state tracking (after a tick so state is flushed)
+        requestAnimationFrame(() => {
+          const shouldConvert2 = (content.layoutVersion as string | undefined) !== 'freeform-v1' && isLikelyGridLayout(content.layout ?? []);
+          const layoutForSnap = shouldConvert2
+            ? convertLayoutToPixels(content.layout ?? [], Math.max(width - 32, 480))
+            : (content.layout ?? []);
+          lastSavedSnapshotRef.current = JSON.stringify({
+            items: layoutForSnap,
+            annotations: content.annotations ?? [],
+            bg: content.background ?? canvasBackground,
+            uploads: content.uploadsMeta ?? [],
+            title: data.title ?? 'Untitled canvas',
+          });
+          setSaveStatus('saved');
+        });
         onLoaded?.();
       } catch {
         if (!cancelled) toast({ title: 'Failed to load canvas', variant: 'destructive' });
@@ -701,6 +910,33 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     })();
     return () => { cancelled = true; };
   }, [loadCanvasId, onLoaded, toast, width, tenantQs]);
+
+  /* ─── Auto-insights: ask Cohi to analyze canvas data on first load ─── */
+  const autoInsightsFiredRef = useRef(false);
+  useEffect(() => {
+    // Fire once when a canvas loads with items and the Cohi panel is open
+    if (autoInsightsFiredRef.current) return;
+    if (!canvasId || items.length === 0 || !showCohiPanel) return;
+    // Only fire for loaded canvases (not brand-new ones)
+    if (!loadCanvasId) return;
+
+    autoInsightsFiredRef.current = true;
+    // Delay slightly to let the canvas and data settle
+    const timer = setTimeout(() => {
+      const sectionNames = items
+        .filter((it) => it.payload.type === 'widget_group')
+        .map((it) => (it.payload as any).title || 'Unknown')
+        .join(', ');
+      cohiSendMessage(
+        `I just opened this canvas which contains: ${sectionNames || 'some widgets'}. ` +
+        `Give me 2-3 quick key insights or observations based on the dashboard sections visible. ` +
+        `Focus on what might need attention or interesting trends. Keep it concise.`
+      );
+    }, 2000);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId, items.length, showCohiPanel, loadCanvasId]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -881,38 +1117,56 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
 
   const addDashboardSection = useCallback(
     (sectionId: string, title: string) => {
-      // Check if this section has a widget-based layout
+      // ── Standalone widgets (no WidgetGroup wrapper) ──────────────────
+      const standalone = STANDALONE_WIDGETS[sectionId];
+      if (standalone) {
+        const { x, y } = getNextPosition(items);
+        const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const newItem = createLayoutItem(id, 'registry_widget', {
+          type: 'registry_widget' as const,
+          definitionId: standalone.defId,
+        }, { x, y, w: standalone.w, h: standalone.h });
+
+        setItemsWithHistory((prev) => [...prev, newItem]);
+        toast({ title: `${title} added`, description: 'Widget added to canvas.' });
+        return;
+      }
+
+      // ── Full dashboard sections (WidgetGroup wrapper) ────────────────
       const widgetLayout = SECTION_TO_WIDGETS[sectionId];
       if (widgetLayout) {
-        // Create a single widget_group container that holds everything
         const groupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { x, y: startY } = getNextPosition(items);
 
-        // Calculate group size – fill available canvas width
         const groupW = canvasWidth || 1200;
-        // Estimate height: header ~90px + content
-        // 36-col grid, 16px rows: KPIs ~60px tall (3 rows), ~12 per row (3 cols each)
-        // Charts/distributions: ~170px tall, ~4 per row
-        // Tables: ~220px tall, wide
         const kpiCount = widgetLayout.widgetIds.filter((id) => {
           const def = getWidgetDefinition(id);
           return def?.category === 'kpi';
         }).length;
-        const otherCount = widgetLayout.widgetIds.length - kpiCount;
-        // 36-col grid, 16px rows.  KPIs: w=5 → 7 per row, h=4 → 64px.
-        // Charts: w=18 → 2 per row, h=12 → 192px.  Tables: w=36, h=16 → 256px.
-        const kpiRows = Math.ceil(kpiCount / 7);
-        const chartCount = widgetLayout.widgetIds.filter((id) => {
-          const d = getWidgetDefinition(id);
-          return d?.category === 'chart' || d?.category === 'distribution';
-        }).length;
-        const tableCount = widgetLayout.widgetIds.filter((id) => {
-          const d = getWidgetDefinition(id);
-          return d?.category === 'table';
-        }).length;
-        const chartRows = Math.ceil(chartCount / 2);
-        const contentH = kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
-        const groupH = Math.max(350, 110 + contentH);
+        // Embed sections (ExecDashboard, Leaderboard) get explicit minimum heights
+        const EMBED_MIN_HEIGHTS: Record<string, number> = {
+          executiveDashboard: 700,
+          leaderboard: 850,
+        };
+        const embedOverride = EMBED_MIN_HEIGHTS[sectionId];
+        let groupH: number;
+
+        if (embedOverride && widgetLayout.widgetIds.length <= 2) {
+          groupH = embedOverride;
+        } else {
+          const kpiRows = Math.ceil(kpiCount / 7);
+          const chartCount = widgetLayout.widgetIds.filter((id) => {
+            const d = getWidgetDefinition(id);
+            return d?.category === 'chart' || d?.category === 'distribution';
+          }).length;
+          const tableCount = widgetLayout.widgetIds.filter((id) => {
+            const d = getWidgetDefinition(id);
+            return d?.category === 'table';
+          }).length;
+          const chartRows = Math.ceil(chartCount / 2);
+          const contentH = kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
+          groupH = Math.max(350, 110 + contentH);
+        }
 
         const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const newItem = createLayoutItem(id, 'widget_group', {
@@ -983,23 +1237,20 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     }
   }, [pendingPins, consumePendingPins, toast]);
 
-  // Listen for registry widget additions from the sidebar catalog
+  // Listen for dashboard section additions from the sidebar
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail?.definitionId) {
-        const size = detail.defaultSize ?? { w: 300, h: 200 };
-        addWidget(
-          'registry_widget',
-          { type: 'registry_widget' as const, definitionId: detail.definitionId, config: detail.config },
-          size,
-        );
-        toast({ title: 'Widget added', description: detail.name ?? 'Added to canvas' });
+      if (detail?.sectionId) {
+        const item = DASHBOARD_SECTION_ITEMS.find((s) => s.id === detail.sectionId);
+        if (item) {
+          addDashboardSection(item.id, item.title);
+        }
       }
     };
-    window.addEventListener('add-registry-widget', handler);
-    return () => window.removeEventListener('add-registry-widget', handler);
-  }, [addWidget, toast]);
+    window.addEventListener('add-dashboard-section', handler);
+    return () => window.removeEventListener('add-dashboard-section', handler);
+  }, [addDashboardSection]);
 
   // Listen for generic canvas widget additions (from Cohi Chat "Add to Workbench")
   useEffect(() => {
@@ -1346,6 +1597,9 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
     }
   }, [captureCanvasAsBlob, saveTitle, toast]);
 
+
+
+
   /** Excel export: multi-sheet workbook from widget data (KPIs, tables, charts, text, insights). */
   const handleExportExcel = useCallback(() => {
     const safeName = (saveTitle || 'canvas').replace(/[^a-z0-9]/gi, '_');
@@ -1490,11 +1744,12 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
 
   const getShareUrl = useCallback(() => {
     if (!canvasId) return '';
-    const params = new URLSearchParams({ canvas: canvasId });
+    const params = new URLSearchParams();
     const pin = sharePin.trim();
     if (pin) params.set('pin', pin);
     if (shareScope) params.set('scope', shareScope);
-    return `${window.location.origin}/workbench?${params.toString()}`;
+    const qs = params.toString();
+    return `${window.location.origin}/my-dashboard/${canvasId}${qs ? `?${qs}` : ''}`;
   }, [canvasId, sharePin, shareScope]);
 
   const getEmbedCode = useCallback(() => {
@@ -1635,6 +1890,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
       uploadsMeta: uploads,
     };
     setIsSaving(true);
+    setSaveStatus('saving');
     try {
       if (canvasId) {
         await api.request(`/api/workbench/canvases/${canvasId}${tenantQs}`, {
@@ -1642,6 +1898,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           body: JSON.stringify({ title, content }),
         });
         toast({ title: 'Canvas saved', description: title });
+        onSaved?.(canvasId, title);
       } else {
         const data = await api.request<{ id: string }>(`/api/workbench/canvases${tenantQs}`, {
           method: 'POST',
@@ -1656,14 +1913,19 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         });
         setCanvasId(data.id);
         toast({ title: 'Canvas saved', description: title });
+        onSaved?.(data.id, title);
       }
+      // Update snapshot so dirty-state resets
+      lastSavedSnapshotRef.current = JSON.stringify({ items, annotations, bg: canvasBackground, uploads, title: saveTitle });
+      setSaveStatus('saved');
       setSaveDialogOpen(false);
     } catch (err) {
+      setSaveStatus('unsaved');
       toast({ title: 'Save failed', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
-  }, [canvasId, items, annotations, canvasBackground, uploads, saveTitle, toast, tenantQs]);
+  }, [canvasId, items, annotations, canvasBackground, uploads, saveTitle, toast, tenantQs, onSaved]);
 
   const hasItems = items.length > 0;
 
@@ -1683,15 +1945,14 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
 
   return (
     <WidgetDataProvider>
-    <div ref={containerRef} className="w-full">
-      <div className="flex min-h-[calc(100vh-12rem)]">
+    <div ref={containerRef} className="flex h-full w-full min-h-0">
       <div
         id="workbench-canvas-root"
-        className="flex-1 min-w-0 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm flex flex-col overflow-hidden"
+        className="flex-1 min-w-0 flex flex-col overflow-hidden"
         style={canvasContainerStyle}
       >
-        {/* Toolbar — single row, icon-first, compact */}
-        <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-2 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[52px]">
+        {/* Toolbar — sticky at top of canvas, always visible */}
+        <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20">
           <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1734,6 +1995,16 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
               </TooltipTrigger>
               <TooltipContent side="bottom">Save</TooltipContent>
             </Tooltip>
+            {/* Autosave status indicator */}
+            {saveStatus === 'saving' && (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap animate-pulse">Saving…</span>
+            )}
+            {saveStatus === 'saved' && canvasId && !isDirty && (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap">Saved</span>
+            )}
+            {saveStatus === 'unsaved' && canvasId && isDirty && (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Unsaved changes</span>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={handleShareClick}>
@@ -1763,9 +2034,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 <DropdownMenuItem onClick={() => backgroundImageInputRef.current?.click()} className="gap-2">
                   <Image className="h-4 w-4" /> Upload image
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setAiBackgroundResult(null); setAiBackgroundOpen(true); }} className="gap-2">
-                  <Sparkles className="h-4 w-4" /> Create with Cohi (AI)
-                </DropdownMenuItem>
+                {/* AI background generation hidden until backend endpoint is implemented */}
                 <DropdownMenuSeparator />
                 <div className="px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">Templates</div>
                 {BACKGROUND_TEMPLATES.map((t) => (
@@ -1811,6 +2080,19 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30"
+                  onClick={() => setImageToDashboardOpen(true)}
+                >
+                  <Camera className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
+            </Tooltip>
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
             <DropdownMenu>
               <Tooltip>
@@ -2043,7 +2325,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         </div>
 
         {/* Canvas surface: freeform or empty state + annotations overlay */}
-        <div className="flex-1 p-4 min-h-[400px] overflow-auto canvas-freeform">
+        <div className="flex-1 p-2 min-h-0 overflow-auto canvas-freeform">
           <style>{`
             .canvas-freeform .react-resizable-handle {
               opacity: 0;
@@ -2216,6 +2498,14 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
                       availableGroups={availableGroups}
                       onMoveToGroup={handleMoveToGroup}
                       onWrapInGroup={handleWrapInGroup}
+                      onEditWithCohi={() => {
+                        // Open Cohi panel with context about this widget
+                        setShowCohiPanel(true);
+                        const widgetTitle = (payload as any).title || (payload as any).sectionId || item.type;
+                        const widgetType = item.type;
+                        const contextMsg = `Help me edit the "${widgetTitle}" widget (type: ${widgetType}, ID: ${item.i}). What changes can I make?`;
+                        cohiSendMessage(contextMsg);
+                      }}
                     >
                       <WidgetRenderer
                         item={item}
@@ -2264,34 +2554,52 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
               })
             ) : (
               <div className="flex items-center justify-center p-8 min-h-[400px]">
-                <div className="text-center max-w-md">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                    <LayoutDashboard className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+                <div className="text-center max-w-lg">
+                  <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
+                    <Sparkles className="w-8 h-8 text-white" />
                   </div>
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Canvas</h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                    Add widgets, upload files, or choose a background. Use &quot;Add from dashboard&quot; to place sections here.
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                    What would you like to build?
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
+                    Add a dashboard section from the library, ask Cohi to create one for you, or upload a screenshot of a dashboard to recreate.
                   </p>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="gap-2">
-                        <LayoutDashboard className="h-4 w-4" />
-                        Add from dashboard
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="center" className="w-72">
-                      {DASHBOARD_SECTION_ITEMS.map((section) => {
-                        const Icon = section.icon;
-                        return (
-                          <DropdownMenuItem key={section.id} onClick={() => addDashboardSection(section.id, section.title)} className="gap-2">
-                            <Icon className={`h-4 w-4 ${section.iconClass ?? 'text-slate-500'}`} />
-                            <span>{section.title}</span>
-                          </DropdownMenuItem>
-                        );
-                      })}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="gap-2">
+                          <LayoutDashboard className="h-4 w-4" />
+                          Add Content
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="center" className="w-72 max-h-80 overflow-y-auto">
+                        {DASHBOARD_SECTION_GROUPS.map((group, gi) => (
+                          <React.Fragment key={group.label}>
+                            {gi > 0 && <DropdownMenuSeparator />}
+                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-slate-400">{group.label}</DropdownMenuLabel>
+                            {group.items.map((section) => {
+                              const Icon = section.icon;
+                              return (
+                                <DropdownMenuItem key={section.id} onClick={() => addDashboardSection(section.id, section.title)} className="gap-2">
+                                  <Icon className={`h-4 w-4 ${section.iconClass ?? 'text-slate-500'}`} />
+                                  <span>{section.title}</span>
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </React.Fragment>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowCohiPanel(true)}>
+                      <Sparkles className="h-4 w-4 text-violet-500" />
+                      Ask Cohi
+                    </Button>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setImageToDashboardOpen(true)}>
+                      <Upload className="h-4 w-4" />
+                      Upload Screenshot
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2398,6 +2706,27 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
             )}
           </div>
         </div>
+
+        {/* Floating "Ask Cohi" prompt bar — always visible at bottom of canvas */}
+        {!showCohiPanel && (
+          <div className="sticky bottom-0 z-10 px-4 pb-3 pt-1 pointer-events-none">
+            <div className="pointer-events-auto max-w-xl mx-auto">
+              <button
+                type="button"
+                onClick={() => setShowCohiPanel(true)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-slate-200/70 dark:border-slate-700/50 shadow-lg shadow-slate-200/40 dark:shadow-black/20 hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-violet-100/30 dark:hover:shadow-violet-900/20 transition-all group"
+              >
+                <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
+                  <Sparkles className="h-3.5 w-3.5 text-white" />
+                </div>
+                <span className="text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
+                  Ask Cohi to build a dashboard, analyze data, or answer questions…
+                </span>
+                <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 ml-auto shrink-0 group-hover:text-violet-500 transition-colors" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Cohi Assistant Panel (docks right) */}
@@ -2411,7 +2740,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
         onClearMessages={cohiClearMessages}
         onExecuteAction={handleCohiAction}
       />
-      </div>{/* end flex wrapper */}
 
       <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
         <AlertDialogContent>
@@ -2573,6 +2901,13 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, tenantId }: WorkbenchC
           </div>
         </DialogContent>
       </Dialog>
+      {/* ---- Image-to-Dashboard Dialog ---- */}
+      <ImageToDashboardDialog
+        open={imageToDashboardOpen}
+        onOpenChange={setImageToDashboardOpen}
+        tenantId={tenantId}
+        onDashboardGenerated={handleDashboardGenerated}
+      />
     </div>
     </WidgetDataProvider>
   );

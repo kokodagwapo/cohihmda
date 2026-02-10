@@ -32,10 +32,10 @@ import {
   FolderInput,
   GripVertical,
   Maximize2,
+  MessageSquare,
   Minimize2,
   Plus,
   Trash2,
-  X,
   Pencil,
   Check,
   Sparkles,
@@ -61,8 +61,10 @@ import {
 } from '@/components/widgets/registry';
 import { useWidgetData } from '@/components/widgets/data';
 import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRenderer';
+import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDialog';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { useTenantStore } from '@/stores/tenantStore';
+import { useFilterOptions } from '@/hooks/useFilterOptions';
 import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
 import type { DateFilter } from '@/hooks/useCohiWidgetData';
 
@@ -138,6 +140,46 @@ const ACTOR_TYPE_OPTIONS = [
   { value: 'branch', label: 'By Branch' },
 ];
 
+// ---------------------------------------------------------------------------
+// Data-driven section filter config
+// ---------------------------------------------------------------------------
+
+/**
+ * Describes a single filter field that a section type supports.
+ * Filters with `staticOptions` render a plain dropdown.
+ * Filters with `optionsSource` fetch distinct values from the API.
+ * Filters with `dependsOn` cascade: their options are narrowed by the parent
+ * filter value, and they reset to 'all' when the parent changes.
+ */
+interface SectionFilterField {
+  /** Which SectionFilters key this maps to */
+  key: keyof SectionFilters;
+  /** Display label shown next to the dropdown */
+  label: string;
+  /** Label for the "all" option (e.g. "All Branches"). Empty string = no "all" option. */
+  allLabel: string;
+  /** DB column name for fetching distinct values from /api/loans/distinct-values/:column */
+  optionsSource?: string;
+  /** For cascading: which other filter key provides the parent value */
+  dependsOn?: keyof SectionFilters;
+  /** For static (non-API) option lists */
+  staticOptions?: { value: string; label: string }[];
+}
+
+const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> = {
+  'company-scorecard': [
+    { key: 'dateField', label: 'Date Field', allLabel: '', staticOptions: DATE_FIELD_OPTIONS },
+    { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
+    { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
+  ],
+  'credit-risk': [
+    { key: 'applicationType', label: 'Type', allLabel: '', staticOptions: APPLICATION_TYPE_OPTIONS },
+  ],
+  'sales-scorecard': [
+    { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
+  ],
+};
+
 const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: string; dot: string }> = {
   'company-scorecard':    { border: 'border-indigo-400/50',  bg: 'bg-indigo-50/50 dark:bg-indigo-950/20',  accent: 'text-indigo-600 dark:text-indigo-400',  dot: 'bg-indigo-500' },
   'credit-risk':          { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
@@ -148,7 +190,18 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'funnel':               { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',       dot: 'bg-sky-500' },
   'top-tiering-comparison': { border: 'border-cyan-400/50',  bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',     accent: 'text-cyan-600 dark:text-cyan-400',     dot: 'bg-cyan-500' },
   'leaderboard':          { border: 'border-rose-400/50',    bg: 'bg-rose-50/50 dark:bg-rose-950/20',     accent: 'text-rose-600 dark:text-rose-400',     dot: 'bg-rose-500' },
+  'executive-dashboard':  { border: 'border-blue-400/50',    bg: 'bg-blue-50/50 dark:bg-blue-950/20',     accent: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500' },
 };
+
+/**
+ * Sections whose embedded component manages its own filter UI (date pickers,
+ * scope selectors, etc.). The WidgetGroup header hides its own date/filter
+ * controls for these sections to avoid redundant/conflicting UI.
+ */
+const SELF_MANAGED_SECTIONS: Set<SectionType> = new Set([
+  'executive-dashboard',
+  'leaderboard',
+]);
 
 // Map SectionType → DataSourceId for add-widget filtering
 const SECTION_TO_SOURCE: Record<SectionType, string> = {
@@ -161,6 +214,7 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
   'funnel':               'funnel',
   'top-tiering-comparison': 'top-tiering-comparison',
   'leaderboard':          'dashboard-metrics',
+  'executive-dashboard':  'executive-dashboard',
 };
 
 // ---------------------------------------------------------------------------
@@ -279,6 +333,7 @@ function GridCellWidget({
   otherGroups,
   onMoveToGroup,
   onVizTypeChange,
+  onOpenEditDialog,
 }: {
   item: GroupWidgetItem;
   width: number;
@@ -290,6 +345,7 @@ function GridCellWidget({
   otherGroups?: { id: string; title: string }[];
   onMoveToGroup?: (targetGroupId: string) => void;
   onVizTypeChange?: (type: string) => void;
+  onOpenEditDialog?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
@@ -316,6 +372,7 @@ function GridCellWidget({
   }
 
   const hasOtherGroups = otherGroups && otherGroups.length > 0 && onMoveToGroup;
+  const canEdit = item.kind === 'cohi' && !!onOpenEditDialog;
 
   return (
     <div
@@ -341,6 +398,18 @@ function GridCellWidget({
           'flex items-center gap-0.5 transition-opacity',
           hovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
+          {/* Edit with Cohi (only for cohi widgets) */}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenEditDialog!(); }}
+              className="p-0.5 rounded text-slate-400 hover:text-violet-600 hover:bg-violet-50 dark:hover:text-violet-400 dark:hover:bg-violet-900/30 canvas-interactive transition-colors"
+              title="Edit with Cohi"
+              aria-label="Edit with Cohi"
+            >
+              <MessageSquare className="h-3 w-3" />
+            </button>
+          )}
           {/* Move to group popover */}
           {hasOtherGroups && (
             <div className="relative">
@@ -449,6 +518,7 @@ function GridCellRegistryWidget({
         error={error}
         width={width}
         height={height}
+        config={definition.config}
       />
     </div>
   );
@@ -706,6 +776,8 @@ export function WidgetGroup({
   const [localTitle, setLocalTitle] = useState(title);
   const [maximizedItem, setMaximizedItem] = useState<GroupWidgetItem | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const addPickerRef = useRef<HTMLDivElement>(null);
   const filtersRestoredRef = useRef(false);
@@ -792,9 +864,11 @@ export function WidgetGroup({
     if (filters.dateField && filters.dateField !== 'application_date') toSave.dateField = filters.dateField;
     if (filters.applicationType && filters.applicationType !== 'Applications Taken') toSave.applicationType = filters.applicationType;
     if (filters.actorType && filters.actorType !== 'loan_officer') toSave.actorType = filters.actorType;
+    if (filters.branch && filters.branch !== 'all') toSave.branch = filters.branch;
+    if (filters.loanOfficer && filters.loanOfficer !== 'all') toSave.loanOfficer = filters.loanOfficer;
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType]);
+  }, [filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -884,6 +958,22 @@ export function WidgetGroup({
     [items, persistItems],
   );
 
+  // ── Edit widget save handler (called from EditWidgetDialog) ──
+  const { selectedTenantId: tenantIdForEdit } = useTenantStore();
+  const handleEditWidgetSave = useCallback(
+    (index: number, updated: { sql: string; vizConfig: any; title: string; explanation?: string }) => {
+      const item = items[index];
+      if (item.kind !== 'cohi') return;
+      const next = items.map((it, i) =>
+        i === index
+          ? { ...item, sql: updated.sql, vizConfig: updated.vizConfig, title: updated.title, explanation: updated.explanation || item.explanation }
+          : it,
+      );
+      persistItems(next);
+    },
+    [items, persistItems],
+  );
+
   const handleAddRegistryWidget = useCallback(
     (defId: string) => {
       const next = [...items, { kind: 'registry' as const, defId }];
@@ -942,6 +1032,8 @@ export function WidgetGroup({
         return { presets: ['mtd', 'qtd', 'ytd', 'last-month', 'last-quarter', 'last-year', 'trailing-12'], showYears: false };
       case 'leaderboard':
         return { presets: ['mtd', 'qtd', 'last-month', 'last-quarter', 'last-year'], showYears: false };
+      case 'executive-dashboard':
+        return { presets: ['mtd', 'ytd', 'last-month', 'last-year'], showYears: false };
       default:
         return {}; // default behavior: rolling-13, rolling-12 + year buttons
     }
@@ -1080,8 +1172,11 @@ export function WidgetGroup({
           </div>
         </div>
 
-        {/* Date period picker + extra filters (only show when expanded) */}
-        {!collapsed && (
+        {/* Date period picker + extra filters (only show when expanded).
+            Sections whose embedded component manages its own filter controls
+            (e.g. ExecutiveDashboard, LeaderBoardSection) skip the group-level
+            date picker to avoid redundant/conflicting controls. */}
+        {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && (
           <div className="flex items-center gap-2 px-3 pb-2.5 flex-wrap">
             <DatePeriodPicker
               year={filters.year}
@@ -1095,32 +1190,25 @@ export function WidgetGroup({
               yearsToShow={4}
             />
 
-            {sectionType === 'company-scorecard' && (
-              <FilterSelect
-                value={filters.dateField}
-                onChange={(v) => update({ dateField: v })}
-                options={DATE_FIELD_OPTIONS}
-                label="Date Field"
-              />
-            )}
-
-            {sectionType === 'credit-risk' && (
-              <FilterSelect
-                value={filters.applicationType}
-                onChange={(v) => update({ applicationType: v })}
-                options={APPLICATION_TYPE_OPTIONS}
-                label="Type"
-              />
-            )}
-
-            {sectionType === 'sales-scorecard' && (
-              <FilterSelect
-                value={filters.actorType}
-                onChange={(v) => update({ actorType: v as 'branch' | 'loan_officer' })}
-                options={ACTOR_TYPE_OPTIONS}
-                label="View"
-              />
-            )}
+            {/* Data-driven filters from SECTION_FILTER_CONFIG */}
+            {(SECTION_FILTER_CONFIG[sectionType] ?? []).map((field) => {
+              // Resolve the parent filter's DB column name for cascading
+              const sectionFields = SECTION_FILTER_CONFIG[sectionType] ?? [];
+              const parentField = field.dependsOn
+                ? sectionFields.find((f) => f.key === field.dependsOn)
+                : undefined;
+              return (
+                <DynamicFilterSelect
+                  key={field.key}
+                  field={field}
+                  value={String(filters[field.key] ?? '')}
+                  onChange={(v) => update({ [field.key]: v } as Partial<SectionFilters>)}
+                  parentValue={field.dependsOn ? String(filters[field.dependsOn] ?? 'all') : undefined}
+                  parentColumn={parentField?.optionsSource}
+                  tenantId={tenantIdForEdit}
+                />
+              );
+            })}
           </div>
         )}
       </div>
@@ -1177,6 +1265,7 @@ export function WidgetGroup({
                     otherGroups={otherGroups}
                     onMoveToGroup={(targetId) => handleMoveItemToGroup(idx, targetId)}
                     onVizTypeChange={item.kind === 'cohi' ? (type) => handleVizTypeChange(idx, type) : undefined}
+                    onOpenEditDialog={item.kind === 'cohi' ? () => { setEditingItemIdx(idx); setEditDialogOpen(true); } : undefined}
                   />
                 </div>
               );
@@ -1207,12 +1296,27 @@ export function WidgetGroup({
         onClose={() => setMaximizedItem(null)}
         dateFilter={groupDateFilter}
       />
+
+      {/* Edit Widget Dialog */}
+      {editingItemIdx !== null && items[editingItemIdx]?.kind === 'cohi' && (
+        <EditWidgetDialog
+          open={editDialogOpen}
+          onOpenChange={(open) => {
+            setEditDialogOpen(open);
+            if (!open) setEditingItemIdx(null);
+          }}
+          item={items[editingItemIdx] as Extract<GroupWidgetItem, { kind: 'cohi' }>}
+          tenantId={tenantIdForEdit}
+          dateFilter={groupDateFilter}
+          onSave={(updated) => handleEditWidgetSave(editingItemIdx, updated)}
+        />
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Compact filter dropdown
+// Compact filter dropdown (static options)
 // ---------------------------------------------------------------------------
 
 function FilterSelect({
@@ -1239,6 +1343,114 @@ function FilterSelect({
           title={label}
         >
           {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-slate-400 pointer-events-none" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic filter: renders static options OR fetches from API, with cascading
+// ---------------------------------------------------------------------------
+
+function DynamicFilterSelect({
+  field,
+  value,
+  onChange,
+  parentValue,
+  parentColumn,
+  tenantId,
+}: {
+  field: SectionFilterField;
+  value: string;
+  onChange: (value: string) => void;
+  /** Current value of the parent filter (for cascading). undefined = no parent. */
+  parentValue?: string;
+  /** DB column name of the parent filter (resolved from its optionsSource). */
+  parentColumn?: string;
+  tenantId?: string | null;
+}) {
+  // For static options, delegate to the simple FilterSelect
+  if (field.staticOptions) {
+    return (
+      <FilterSelect
+        value={value}
+        onChange={onChange}
+        options={field.staticOptions}
+        label={field.label}
+      />
+    );
+  }
+
+  // API-driven options (optionsSource must be set)
+  return (
+    <ApiFilterSelect
+      field={field}
+      value={value}
+      onChange={onChange}
+      parentValue={parentValue}
+      parentColumn={parentColumn}
+      tenantId={tenantId}
+    />
+  );
+}
+
+/** Separate component so the useFilterOptions hook is only called for API-driven fields. */
+function ApiFilterSelect({
+  field,
+  value,
+  onChange,
+  parentValue,
+  parentColumn,
+  tenantId,
+}: {
+  field: SectionFilterField;
+  value: string;
+  onChange: (value: string) => void;
+  parentValue?: string;
+  parentColumn?: string;
+  tenantId?: string | null;
+}) {
+  const { options, loading } = useFilterOptions({
+    column: field.optionsSource!,
+    tenantId,
+    filterBy: parentColumn && parentValue && parentValue !== 'all'
+      ? parentColumn
+      : undefined,
+    filterValue: parentValue && parentValue !== 'all' ? parentValue : undefined,
+  });
+
+  // Build the dropdown options: "All X" + fetched values
+  const selectOptions = useMemo(() => {
+    const items: { value: string; label: string }[] = [];
+    if (field.allLabel) {
+      items.push({ value: 'all', label: field.allLabel });
+    }
+    for (const opt of options) {
+      items.push({ value: opt, label: opt });
+    }
+    return items;
+  }, [options, field.allLabel]);
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+        {field.label}
+      </span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={loading && options.length === 0}
+          className="appearance-none h-6 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 pl-2 pr-5 text-[11px] font-medium text-slate-700 dark:text-slate-200 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 canvas-interactive disabled:opacity-50"
+          title={field.label}
+        >
+          {selectOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

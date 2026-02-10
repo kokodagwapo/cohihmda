@@ -2005,7 +2005,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
     toast({ title: "Downloaded", description: "Chart saved as PNG." });
   };
 
-  const isMyDashboard = pathname === "/my-dashboard";
+  const isMyDashboard = pathname === "/my-dashboard" || pathname.startsWith("/my-dashboard/");
 
   if (!isOpen) {
     if (!onOpen) return null;

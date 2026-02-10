@@ -12,16 +12,26 @@ import {
   refineCohiQuery, 
   executeQuery,
   formatDataRows,
+  editWidgetQuery,
   CohiChatMessage, 
   CohiChatResponse,
   VisualizationConfig,
   ChatContext
 } from '../services/ai/cohiChatService.js';
+import {
+  analyzeDashboardImage,
+  generateWidgetsFromBlueprint,
+  type DashboardGroupBlueprint,
+} from '../services/ai/dashboardImageService.js';
 import { 
   checkSectionAccess, 
   getUserPermissions,
   QueryContext 
 } from '../services/ai/queryBuilderService.js';
+import {
+  getFieldsForTenant,
+  columnToLabel,
+} from '../services/ai/schemaContextService.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
@@ -288,42 +298,88 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
     // Optionally inject a date-range filter into the SQL.
     // dateFilter: { column: string, start: string (YYYY-MM-DD), end: string (YYYY-MM-DD) }
     //
-    // Strategy: inject the condition into the SQL's own WHERE clause so that
-    // it references the original table columns (not an outer subquery which
-    // may have aggregated or renamed them).
+    // Strategy:
+    //   1. Strip any existing date comparison conditions on the same column
+    //      (including aliased references like l.column or loans.column) so we
+    //      don't end up with contradictory ranges.
+    //   2. Inject our own condition into the WHERE clause.
     let effectiveSql = sql;
     if (dateFilter && dateFilter.column && dateFilter.start && dateFilter.end) {
       const col = dateFilter.column.replace(/[^a-zA-Z0-9_.]/g, ''); // sanitise column name
       const cond = `${col} >= '${dateFilter.start}'::date AND ${col} <= '${dateFilter.end}'::date`;
 
-      // 1. Try to append to the last WHERE clause (before GROUP BY / ORDER BY / LIMIT / HAVING)
-      //    Works for the vast majority of LLM-generated queries.
+      // --- Step 1: Strip existing date conditions on this column ---
+      // Match patterns like:
+      //   l.application_date >= '2024-01-01'
+      //   application_date < '2025-01-01'::date
+      //   l.application_date BETWEEN '...' AND '...'
+      //   DATE_TRUNC('year', CURRENT_DATE) (when used as bound for the column)
+      // Handles optional table alias (e.g. l. or loans.)
+      const colEscaped = col.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Match any alias prefix followed by the column name
+      const colPattern = `(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}`;
+
+      // Remove simple comparison conditions: column >=/<=/>/< 'date-literal'(::date/::timestamp)?
+      // Also handles DATE_TRUNC(...) and CURRENT_DATE expressions on the right-hand side
+      const dateComparisonPattern = new RegExp(
+        `\\b${colPattern}\\s*(?:>=|<=|>|<)\\s*(?:'[^']*'(?:::(?:date|timestamp))?|DATE_TRUNC\\s*\\([^)]*\\)|CURRENT_DATE(?:\\s*-\\s*INTERVAL\\s*'[^']*')?)`,
+        'gi'
+      );
+      // Remove BETWEEN ... AND ... on this column
+      const betweenPattern = new RegExp(
+        `\\b${colPattern}\\s+BETWEEN\\s+'[^']*'(?:::(?:date|timestamp))?\\s+AND\\s+'[^']*'(?:::(?:date|timestamp))?`,
+        'gi'
+      );
+
+      // Strip the conditions and clean up leftover AND/OR operators
+      effectiveSql = effectiveSql.replace(betweenPattern, ' TRUE ');
+      effectiveSql = effectiveSql.replace(dateComparisonPattern, ' TRUE ');
+
+      // Clean up: collapse "TRUE AND TRUE" → "TRUE", "WHERE TRUE AND" → "WHERE", etc.
+      // Repeated passes to handle nested cleanup
+      for (let pass = 0; pass < 3; pass++) {
+        effectiveSql = effectiveSql
+          .replace(/\bTRUE\s+AND\s+TRUE\b/gi, 'TRUE')
+          .replace(/\bTRUE\s+OR\s+TRUE\b/gi, 'TRUE')
+          .replace(/\bAND\s+TRUE\b/gi, '')
+          .replace(/\bTRUE\s+AND\b/gi, '')
+          .replace(/\bOR\s+TRUE\b/gi, '')
+          .replace(/\bTRUE\s+OR\b/gi, '')
+          .replace(/\bWHERE\s+TRUE\s*(?=\bGROUP\b|\bORDER\b|\bLIMIT\b|\bHAVING\b|\bUNION\b|\bINTERSECT\b|\bEXCEPT\b|\)|$)/gi, '')
+          .replace(/\bWHERE\s+TRUE\s+(?=AND|OR)\s*/gi, 'WHERE ');
+      }
+      // Remove any "WHERE" that's now empty (only whitespace before GROUP BY etc.)
+      effectiveSql = effectiveSql.replace(/\bWHERE\s+(?=GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT|\)|$)/gi, '');
+
+      // --- Step 2: Inject the new date condition ---
       const whereRegex = /\bWHERE\b/gi;
       let lastWhereIdx = -1;
       let m: RegExpExecArray | null;
-      while ((m = whereRegex.exec(sql)) !== null) {
+      while ((m = whereRegex.exec(effectiveSql)) !== null) {
         lastWhereIdx = m.index;
       }
 
       if (lastWhereIdx >= 0) {
-        const afterWhere = sql.substring(lastWhereIdx + 5);
+        const afterWhere = effectiveSql.substring(lastWhereIdx + 5);
         const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
         if (boundary) {
           const insertAt = lastWhereIdx + 5 + boundary.index;
-          effectiveSql = sql.substring(0, insertAt) + ` AND ${cond} ` + sql.substring(insertAt);
+          effectiveSql = effectiveSql.substring(0, insertAt) + ` AND ${cond} ` + effectiveSql.substring(insertAt);
         } else {
-          effectiveSql = sql + ` AND ${cond}`;
+          effectiveSql = effectiveSql + ` AND ${cond}`;
         }
       } else {
-        // 2. No WHERE clause – insert one before the first GROUP BY / ORDER BY / LIMIT
-        const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(sql);
+        // No WHERE clause – insert one before the first GROUP BY / ORDER BY / LIMIT
+        const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(effectiveSql);
         if (boundary) {
           const insertAt = boundary.index;
-          effectiveSql = sql.substring(0, insertAt) + `WHERE ${cond} ` + sql.substring(insertAt);
+          effectiveSql = effectiveSql.substring(0, insertAt) + `WHERE ${cond} ` + effectiveSql.substring(insertAt);
         } else {
-          effectiveSql = sql + ` WHERE ${cond}`;
+          effectiveSql = effectiveSql + ` WHERE ${cond}`;
         }
       }
+
+      console.log(`[CohiChat] Date filter applied on ${col} [${dateFilter.start} → ${dateFilter.end}]`);
     }
 
     const tenantContext = getTenantContext(req);
@@ -591,6 +647,173 @@ router.get('/permissions', authenticateToken, attachTenantContext, async (req: A
     res.status(500).json({ 
       error: 'Failed to fetch permissions',
       message: error.message 
+    });
+  }
+});
+
+// ============================================================================
+// Edit Widget with Cohi
+// ============================================================================
+
+/**
+ * POST /api/cohi-chat/edit-widget
+ * Conversational widget editing – supports multi-turn chat with optional SQL modifications.
+ * Body: { sql, vizConfig, instruction, history?: {role,content}[] }
+ * Returns: { sql, vizConfig, message, modified }
+ */
+router.post('/edit-widget', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { sql, vizConfig, instruction, history } = req.body;
+
+    if (!sql || typeof sql !== 'string') {
+      return res.status(400).json({ error: 'sql is required' });
+    }
+    if (!instruction || typeof instruction !== 'string') {
+      return res.status(400).json({ error: 'instruction is required' });
+    }
+
+    const chatContext = buildChatContext(req);
+    console.log(`[CohiChat] Edit-widget conversation: "${instruction.substring(0, 80)}..."`);
+
+    const result = await editWidgetQuery(
+      sql,
+      vizConfig || {},
+      instruction,
+      chatContext,
+      Array.isArray(history) ? history : undefined,
+    );
+
+    console.log(`[CohiChat] Edit-widget response (modified=${result.modified}): ${result.message.substring(0, 120)}...`);
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('[CohiChat] Error editing widget:', error);
+    res.status(500).json({
+      error: 'Failed to edit widget',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// Widget Field Introspection
+// ============================================================================
+
+/**
+ * POST /api/cohi-chat/widget-fields
+ * Given a widget's SQL, returns which fields are being used and all available
+ * fields the user could swap them for, grouped by category.
+ */
+router.post('/widget-fields', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  try {
+    const { sql } = req.body;
+    const tenantId = getTenantContext(req)?.tenantId;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenant context required' });
+    }
+
+    // Get all available fields for this tenant
+    const { fields, categories } = await getFieldsForTenant(tenantId);
+    const fieldNameSet = new Set(fields.map((f) => f.name));
+
+    // Extract fields used in the SQL by matching against known column names
+    const usedFields: { name: string; label: string; type: string; category: string }[] = [];
+    if (sql && typeof sql === 'string') {
+      const sqlLower = sql.toLowerCase();
+      for (const field of fields) {
+        // Match the column name as a whole word in the SQL (with optional table alias prefix)
+        const pattern = new RegExp(`\\b(?:[a-z_]+\\.)?${field.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        if (pattern.test(sql)) {
+          usedFields.push(field);
+        }
+      }
+    }
+
+    res.json({
+      usedFields,
+      availableFields: fields,
+      categories,
+    });
+  } catch (error: any) {
+    console.error('[CohiChat] Error getting widget fields:', error);
+    res.status(500).json({
+      error: 'Failed to get widget fields',
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// Dashboard Image Analysis
+// ============================================================================
+
+/**
+ * POST /api/cohi-chat/analyze-dashboard-image
+ * Upload a dashboard screenshot and get a structured blueprint back
+ */
+router.post('/analyze-dashboard-image', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { image, description } = req.body;
+
+    if (!image || typeof image !== 'string') {
+      return res.status(400).json({ error: 'image (base64 data URL) is required' });
+    }
+
+    // Validate it looks like a data URL or base64
+    if (!image.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'image must be a base64 data URL (data:image/...)' });
+    }
+
+    const chatContext = buildChatContext(req);
+    console.log(`[CohiChat] Analyzing dashboard image for tenant ${chatContext.tenantId}`);
+
+    const blueprint = await analyzeDashboardImage(
+      image,
+      chatContext.tenantId,
+      description
+    );
+
+    console.log(`[CohiChat] Blueprint generated: ${blueprint.title} with ${blueprint.groups.length} group(s)`);
+    for (const g of blueprint.groups) {
+      console.log(`  Group "${g.title}": ${g.widgets.length} widget(s)`);
+    }
+
+    res.json({ blueprint });
+  } catch (error: any) {
+    console.error('[CohiChat] Error analyzing dashboard image:', error);
+    res.status(500).json({
+      error: 'Failed to analyze dashboard image',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/cohi-chat/generate-dashboard-widgets
+ * Generate actual SQL-backed widgets from a blueprint group
+ */
+router.post('/generate-dashboard-widgets', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { blueprint: group } = req.body as { blueprint: DashboardGroupBlueprint };
+
+    if (!group || !group.title || !Array.isArray(group.widgets)) {
+      return res.status(400).json({ error: 'Invalid blueprint group structure' });
+    }
+
+    const chatContext = buildChatContext(req);
+    console.log(`[CohiChat] Generating ${group.widgets.length} widget(s) for group "${group.title}"`);
+
+    const result = await generateWidgetsFromBlueprint(group, chatContext);
+
+    console.log(`[CohiChat] Generated ${result.widgets.length} widget(s) for group "${group.title}"`);
+
+    res.json({ group: result });
+  } catch (error: any) {
+    console.error('[CohiChat] Error generating dashboard widgets:', error);
+    res.status(500).json({
+      error: 'Failed to generate dashboard widgets',
+      message: error.message,
     });
   }
 });

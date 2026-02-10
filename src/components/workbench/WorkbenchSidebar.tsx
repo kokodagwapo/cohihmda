@@ -1,23 +1,19 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Folder, Share2, Library, Copy, Loader2, LayoutDashboard, Star, PanelLeftClose, PanelLeftOpen, Blocks, Search, Plus, Trash2, Heart, FolderOpen } from 'lucide-react';
+import { LayoutGrid, Library, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search, Plus, Trash2, Heart, FolderOpen } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IconBadge } from '@/components/workbench/IconBadge';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { WidgetCatalog } from '@/components/widgets/catalog';
-import type { WidgetDefinition } from '@/components/widgets/registry';
+import { DASHBOARD_SECTION_GROUPS } from './workbenchSections';
 
 export type CanvasListItem = { id: string; title: string; content: any; created_at: string; updated_at: string; favorited: boolean };
 
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
-  { path: '/workbench/shared', label: 'Shared With Me', icon: Share2, variant: 'rose' as const },
-  { path: '/workbench/team-folders', label: 'Team Folders', icon: Folder, variant: 'slate' as const },
-  { path: '/workbench/favorites', label: 'Bookmarks', icon: Star, variant: 'amber' as const },
+  // Shared With Me, Team Folders, and Bookmarks are hidden until implemented
   { label: 'Cohi Dashboard Library', icon: Library, variant: 'sky' as const, scrollTarget: 'cohi-dashboard-library' },
 ];
 
@@ -37,16 +33,11 @@ export interface WorkbenchSidebarProps {
   onDeleteCanvas?: (id: string, title: string) => void;
 }
 
-type TemplateRow = { id: string; name: string; category: string; description: string | null };
-
 function SidebarContent({
   onItemClick,
   onToggleCollapse,
   pathname,
-  templates,
-  onCopyTemplate,
-  copyingId,
-  onAddWidget,
+  onAddDashboardSection,
   canvasList,
   canvasSearch,
   onCanvasSearchChange,
@@ -58,10 +49,7 @@ function SidebarContent({
   onItemClick?: () => void;
   onToggleCollapse?: () => void;
   pathname: string;
-  templates: TemplateRow[];
-  onCopyTemplate: (id: string) => void;
-  copyingId: string | null;
-  onAddWidget: (def: WidgetDefinition) => void;
+  onAddDashboardSection: (sectionId: string) => void;
   canvasList?: CanvasListItem[];
   canvasSearch?: string;
   onCanvasSearchChange?: (search: string) => void;
@@ -198,61 +186,41 @@ function SidebarContent({
         </div>
       )}
 
-      {/* Cohi Dashboard Library */}
+      {/* Cohi Dashboard Library – predefined dashboard sections */}
       <div id="cohi-dashboard-library" className="flex-1 min-h-0 p-3 border-t border-slate-200/70 dark:border-slate-700/50">
         <h3 className="px-2 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
           <IconBadge icon={Library} variant="sky" size="sm" rounded="lg" />
-          Cohi Dashboard Library
+          Dashboard Library
         </h3>
         <p className="mt-2.5 px-2 text-[13px] text-slate-500 dark:text-slate-400 leading-snug">
-          Browse Cohi-curated templates. Copy any dashboard into your workbench to customize.
+          Add a full dashboard section to your canvas.
         </p>
-        {templates.length === 0 ? (
-          <div className="mt-3 rounded-xl border border-dashed border-slate-200/80 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-800/30 p-5 text-center">
-            <IconBadge icon={Folder} variant="slate" size="lg" rounded="xl" className="mx-auto mb-2.5" />
-            <p className="text-xs font-medium text-slate-600 dark:text-slate-400">No templates yet</p>
-            <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">Executive, Sales, Ops, Fallout, and more</p>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-2.5">
-            {templates.map((t) => (
-              <div
-                key={t.id}
-                className="rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/90 dark:bg-slate-800/50 p-3.5 shadow-sm hover:shadow transition-shadow duration-200"
-              >
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{t.name}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">{t.category} · {t.description || 'Template'}</p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-2.5 h-8 gap-2 rounded-lg border-slate-200/80 dark:border-slate-700/80 hover:border-emerald-300 dark:hover:border-emerald-700/60 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 text-xs transition-colors"
-                  onClick={() => onCopyTemplate(t.id)}
-                  disabled={copyingId === t.id}
-                >
-                  {copyingId === t.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                  )}
-                  Copy to My Workbench
-                </Button>
+        <div className="mt-3 space-y-3">
+          {DASHBOARD_SECTION_GROUPS.map((group) => (
+            <div key={group.label}>
+              <p className="px-2 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">{group.label}</p>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-colors"
+                      onClick={() => {
+                        onAddDashboardSection(item.id);
+                        onItemClick?.();
+                      }}
+                    >
+                      <Icon className={cn('h-4 w-4 shrink-0', item.iconClass)} />
+                      <span className="truncate">{item.title}</span>
+                      <Plus className="h-3 w-3 text-slate-400 ml-auto shrink-0 opacity-0 group-hover:opacity-100" />
+                    </button>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Widget Library */}
-      <div className="p-3 border-t border-slate-200/70 dark:border-slate-700/50">
-        <h3 className="px-2 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-2">
-          <IconBadge icon={Blocks} variant="violet" size="sm" rounded="lg" />
-          Widget Library
-        </h3>
-        <p className="mt-2 px-2 text-[13px] text-slate-500 dark:text-slate-400 leading-snug">
-          Add individual KPIs, charts, and tables to your canvas.
-        </p>
-        <div className="mt-2.5">
-          <WidgetCatalog onAddWidget={onAddWidget} />
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -274,46 +242,15 @@ export function WorkbenchSidebar({
   onDeleteCanvas,
 }: WorkbenchSidebarProps) {
   const isMobile = useIsMobile();
-  const [templates, setTemplates] = useState<TemplateRow[]>([]);
-  const [copyingId, setCopyingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const tRes = await api.request<{ templates: TemplateRow[] }>('/api/workbench/dashboard-templates');
-        setTemplates(tRes?.templates ?? []);
-      } catch {
-        setTemplates([]);
-      }
-    })();
-  }, []);
-
-  const onCopyTemplate = async (id: string) => {
-    setCopyingId(id);
-    try {
-      await api.request(`/api/workbench/dashboard-templates/${id}/copy`, { method: 'POST', body: JSON.stringify({}) });
-      onSidebarOpenChange(false);
-    } catch {
-      // keep UI; toast could be added
-    } finally {
-      setCopyingId(null);
-    }
-  };
 
   const closeSheet = () => onSidebarOpenChange(false);
   const location = useLocation();
   const collapsed = sidebarCollapsed ?? false;
   const onCollapsed = onSidebarCollapsedChange ?? (() => {});
 
-  const handleAddWidget = useCallback((def: WidgetDefinition) => {
+  const handleAddDashboardSection = useCallback((sectionId: string) => {
     window.dispatchEvent(
-      new CustomEvent('add-registry-widget', {
-        detail: {
-          definitionId: def.id,
-          name: def.name,
-          defaultSize: def.defaultSize,
-        },
-      }),
+      new CustomEvent('add-dashboard-section', { detail: { sectionId } }),
     );
   }, []);
 
@@ -322,10 +259,7 @@ export function WorkbenchSidebar({
       onItemClick={closeSheet}
       onToggleCollapse={!isMobile && !collapsed ? () => onCollapsed(true) : undefined}
       pathname={location.pathname}
-      templates={templates}
-      onCopyTemplate={onCopyTemplate}
-      copyingId={copyingId}
-      onAddWidget={handleAddWidget}
+      onAddDashboardSection={handleAddDashboardSection}
       canvasList={canvasList}
       canvasSearch={canvasSearch}
       onCanvasSearchChange={onCanvasSearchChange}
