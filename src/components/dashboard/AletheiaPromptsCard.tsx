@@ -5,26 +5,115 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
-  Pin,
   RefreshCw,
   Sparkles,
   ChevronRight,
+  ChevronLeft,
   MessageSquare,
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  TrendingUp,
 } from "lucide-react";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
-import { Link } from "react-router-dom";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
 import type { ExportData } from "@/utils/exportUtils";
 
+// ============================================================================
+// Bucket configuration
+// ============================================================================
+
+interface BucketConfig {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  gradient: string;
+  borderColor: string;
+  bgColor: string;
+  bgColorDark: string;
+  iconColor: string;
+  badgeBg: string;
+  badgeText: string;
+  dotColor: string;
+  stripColor: string;
+  emptyMessage: string;
+}
+
+const BUCKET_ORDER: BucketConfig[] = [
+  {
+    id: "critical",
+    label: "Critical",
+    icon: AlertCircle,
+    gradient: "from-rose-500 to-red-600",
+    borderColor: "border-rose-200/70 dark:border-rose-800/50",
+    bgColor: "bg-rose-50/60",
+    bgColorDark: "dark:bg-rose-950/20",
+    iconColor: "text-rose-600 dark:text-rose-400",
+    badgeBg: "bg-rose-100 dark:bg-rose-900/40",
+    badgeText: "text-rose-700 dark:text-rose-300",
+    dotColor: "bg-rose-500",
+    stripColor: "border-l-rose-500",
+    emptyMessage: "No critical issues detected",
+  },
+  {
+    id: "attention",
+    label: "Needs Attention",
+    icon: AlertTriangle,
+    gradient: "from-amber-400 to-orange-500",
+    borderColor: "border-amber-200/70 dark:border-amber-800/50",
+    bgColor: "bg-amber-50/60",
+    bgColorDark: "dark:bg-amber-950/20",
+    iconColor: "text-amber-600 dark:text-amber-400",
+    badgeBg: "bg-amber-100 dark:bg-amber-900/40",
+    badgeText: "text-amber-700 dark:text-amber-300",
+    dotColor: "bg-amber-400",
+    stripColor: "border-l-amber-400",
+    emptyMessage: "Nothing flagged for attention",
+  },
+  {
+    id: "working",
+    label: "What's Working",
+    icon: CheckCircle2,
+    gradient: "from-blue-500 to-indigo-600",
+    borderColor: "border-blue-200/70 dark:border-blue-800/50",
+    bgColor: "bg-blue-50/60",
+    bgColorDark: "dark:bg-blue-950/20",
+    iconColor: "text-blue-600 dark:text-blue-400",
+    badgeBg: "bg-blue-100 dark:bg-blue-900/40",
+    badgeText: "text-blue-700 dark:text-blue-300",
+    dotColor: "bg-blue-500",
+    stripColor: "border-l-blue-500",
+    emptyMessage: "No standout performance flagged",
+  },
+  {
+    id: "context",
+    label: "Context & Trends",
+    icon: TrendingUp,
+    gradient: "from-slate-400 to-slate-500",
+    borderColor: "border-slate-200/70 dark:border-slate-700/50",
+    bgColor: "bg-slate-50/60",
+    bgColorDark: "dark:bg-slate-900/30",
+    iconColor: "text-slate-500 dark:text-slate-400",
+    badgeBg: "bg-slate-100 dark:bg-slate-800/50",
+    badgeText: "text-slate-600 dark:text-slate-400",
+    dotColor: "bg-slate-400",
+    stripColor: "border-l-slate-300 dark:border-l-slate-600",
+    emptyMessage: "No contextual trends available",
+  },
+];
+
+// ============================================================================
+// Props
+// ============================================================================
+
 interface AletheiaPromptsCardProps {
   dateFilter: "today" | "mtd" | "ytd" | "custom";
   onDataAvailabilityChange?: (hasData: boolean) => void;
-  /** Called when user clicks "Ask Cohi" – opens the page-level Cohi panel */
   onOpenCohiPanel?: () => void;
   briefingContext?: {
     dialogues?: Array<{ message: string; type: string; priority: string }>;
@@ -39,6 +128,217 @@ interface AletheiaPromptsCardProps {
   selectedChannel?: string | null;
 }
 
+// ============================================================================
+// Bucket Lane sub-component — shows one insight at a time, auto-rotates,
+// expandable to show all insights in the section
+// ============================================================================
+
+interface BucketLaneProps {
+  config: BucketConfig;
+  insights: AletheiaInsight[];
+  onInsightClick: (insight: AletheiaInsight) => void;
+  isDrillable: (insight: AletheiaInsight) => boolean;
+}
+
+function BucketLane({
+  config,
+  insights,
+  onInsightClick,
+  isDrillable,
+}: BucketLaneProps) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedInsightIdx, setSelectedInsightIdx] = useState<number | null>(
+    null
+  );
+  const [isPaused, setIsPaused] = useState(false);
+
+  // Auto-rotate through insights every 8 seconds (only when collapsed & not paused)
+  useEffect(() => {
+    if (isExpanded || isPaused || insights.length <= 1) return;
+    const timer = setInterval(() => {
+      setActiveIdx((prev) => (prev + 1) % insights.length);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [isExpanded, isPaused, insights.length]);
+
+  // Reset active index when insights change
+  useEffect(() => {
+    setActiveIdx(0);
+    setSelectedInsightIdx(null);
+  }, [insights.length]);
+
+  const goNext = () =>
+    setActiveIdx((prev) => (prev + 1) % insights.length);
+  const goPrev = () =>
+    setActiveIdx((prev) => (prev - 1 + insights.length) % insights.length);
+
+  const BucketIcon = config.icon;
+  const current = insights[activeIdx];
+
+  // Render a single insight row
+  const renderInsightRow = (
+    insight: AletheiaInsight,
+    idx: number,
+    showUnderstory: boolean
+  ) => {
+    const canDrill = isDrillable(insight);
+    const isSelected = selectedInsightIdx === idx;
+
+    return (
+      <div
+        key={idx}
+        className="cursor-pointer"
+        onClick={() => {
+          if (isSelected && canDrill) {
+            onInsightClick(insight);
+          } else {
+            setSelectedInsightIdx(isSelected ? null : idx);
+          }
+        }}
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+      >
+        <p className="text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
+          {insight.headline || insight.message}
+        </p>
+
+        <AnimatePresence>
+          {isSelected && (insight.understory || insight.reasoning) && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                {insight.understory || insight.reasoning}
+              </p>
+              {canDrill && (
+                <span className="inline-flex items-center gap-0.5 mt-1.5 text-[11px] text-blue-500 dark:text-blue-400 font-medium">
+                  View details
+                  <ChevronRight className="w-3 h-3" />
+                </span>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className={`rounded-2xl border ${config.borderColor} ${config.bgColor} ${config.bgColorDark} backdrop-blur-sm overflow-hidden`}
+    >
+      {/* Bucket header */}
+      <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
+        <div className="flex items-center gap-2.5">
+          <div
+            className={`w-6 h-6 rounded-md bg-gradient-to-br ${config.gradient} flex items-center justify-center shadow-sm`}
+          >
+            <BucketIcon className="w-3 h-3 text-white" strokeWidth={2} />
+          </div>
+          <h4 className="text-[13px] font-semibold text-slate-800 dark:text-slate-200 tracking-tight">
+            {config.label}
+          </h4>
+          {insights.length > 1 && (
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${config.badgeBg} ${config.badgeText}`}
+            >
+              {insights.length}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {/* Prev / Next (collapsed mode, multiple insights) */}
+          {!isExpanded && insights.length > 1 && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  goPrev();
+                }}
+                className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+                aria-label="Previous insight"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums min-w-[28px] text-center">
+                {activeIdx + 1}/{insights.length}
+              </span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  goNext();
+                }}
+                className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+                aria-label="Next insight"
+              >
+                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+            </>
+          )}
+          {/* Expand / Collapse toggle */}
+          {insights.length > 1 && (
+            <button
+              onClick={() => {
+                setIsExpanded((prev) => !prev);
+                setSelectedInsightIdx(null);
+              }}
+              className="ml-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-slate-500 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors"
+            >
+              {isExpanded ? "Collapse" : "Show all"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Content area */}
+      <div className="px-4 pb-3.5">
+        {!isExpanded ? (
+          /* ---- Single insight view with crossfade ---- */
+          current && (
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeIdx}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.25 }}
+              >
+                {renderInsightRow(current, activeIdx, false)}
+              </motion.div>
+            </AnimatePresence>
+          )
+        ) : (
+          /* ---- Expanded: all insights stacked ---- */
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-3"
+          >
+            {insights.map((insight, idx) => (
+              <div
+                key={idx}
+                className={`rounded-lg px-3 py-2.5 border-l-4 ${config.stripColor} bg-white/70 dark:bg-slate-800/50 border border-white/60 dark:border-slate-700/40`}
+              >
+                {renderInsightRow(insight, idx, false)}
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Main component
+// ============================================================================
+
 export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   dateFilter,
   onDataAvailabilityChange,
@@ -48,22 +348,18 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   selectedChannel,
 }: AletheiaPromptsCardProps) {
   const sectionRef = useRef<HTMLDivElement>(null);
-  const [currentSet, setCurrentSet] = useState(0);
-  const [expandedInsight, setExpandedInsight] = useState<number | null>(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [pinnedInsights, setPinnedInsights] = useState<Set<string>>(new Set());
-  // Modal state for insight details
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] =
     useState<AletheiaInsight | null>(null);
 
-  // Use custom hook for data fetching
+  // Data hook
   const {
     allInsights,
     insightsLoading,
     insightsError,
     funnelData,
     metadata,
+    needsGeneration,
     refreshInsights,
   } = useAletheiaData(
     dateFilter,
@@ -74,12 +370,13 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Handle refresh with loading state
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    refreshInsights();
-    // Reset after a short delay to show the animation
-    setTimeout(() => setIsRefreshing(false), 1500);
+    try {
+      await refreshInsights();
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [refreshInsights]);
 
   useEffect(() => {
@@ -95,97 +392,64 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       window.removeEventListener("cohi-demo-seeded", handler as EventListener);
   }, [refreshInsights, selectedTenantId]);
 
-  // Handle insight click to show detail modal
-  const handleInsightClick = useCallback((insight: AletheiaInsight) => {
-    // Only show modal for insights with drillable sources
-    const drillableSources = [
+  // Drill-down logic
+  const drillableSources = useMemo(
+    () => [
       "predictions",
       "credit_risk",
       "lost_opportunity",
       "pipeline",
       "performance",
       "comparisons",
-    ];
-    if (insight.source && drillableSources.includes(insight.source)) {
-      setSelectedInsight(insight);
-      setIsModalOpen(true);
-    }
-  }, []);
-
-  // Check if an insight is drillable
-  const isDrillable = useCallback((insight: AletheiaInsight) => {
-    const drillableSources = [
-      "predictions",
-      "credit_risk",
-      "lost_opportunity",
-      "pipeline",
-      "performance",
-      "comparisons",
-    ];
-    return insight.source && drillableSources.includes(insight.source);
-  }, []);
-
-  // Create unique ID for each insight based on message content (must be defined before useMemo)
-  const getInsightId = useCallback(
-    (insight: AletheiaInsight, index: number) => {
-      return `${dateFilter}-${index}-${insight.message.substring(0, 50)}`;
-    },
-    [dateFilter]
+    ],
+    []
   );
 
-  // Group insights into sets of 3 with priority color coding (using useMemo to ensure consistent calculation)
-  const unpinnedInsights = useMemo(() => {
-    return allInsights.filter((insight, idx) => {
-      const insightId = getInsightId(insight, idx);
-      return !pinnedInsights.has(insightId);
-    });
-  }, [allInsights, pinnedInsights, getInsightId]);
-
-  const insightSets = useMemo(() => {
-    const sets = [];
-    for (let i = 0; i < unpinnedInsights.length; i += 3) {
-      sets.push(unpinnedInsights.slice(i, i + 3));
-    }
-    return sets;
-  }, [unpinnedInsights]);
-
-  // Get pinned insights in their original order
-  const pinnedInsightsList = useMemo(() => {
-    return allInsights.filter((insight, idx) => {
-      const insightId = getInsightId(insight, idx);
-      return pinnedInsights.has(insightId);
-    });
-  }, [allInsights, pinnedInsights, getInsightId]);
-
-  // Get current set of insights for rotation
-  const currentInsights = useMemo(() => {
-    return insightSets[currentSet] || [];
-  }, [insightSets, currentSet]);
-
-  // Rotate through sets every 15 seconds - pause when user is interacting
-  useEffect(() => {
-    if (isPaused || insightSets.length === 0) return;
-    const interval = setInterval(() => {
-      setCurrentSet((prev) => (prev + 1) % insightSets.length);
-    }, 15000); // 15 seconds per set for comfortable reading
-    return () => clearInterval(interval);
-  }, [isPaused, insightSets.length]);
-
-  // Toggle pin/unpin insight
-  const togglePin = (insight: (typeof allInsights)[0], index: number) => {
-    const insightId = getInsightId(insight, index);
-    setPinnedInsights((prev) => {
-      const next = new Set(prev);
-      if (next.has(insightId)) {
-        next.delete(insightId);
-      } else {
-        next.add(insightId);
+  const handleInsightClick = useCallback(
+    (insight: AletheiaInsight) => {
+      if (insight.source && drillableSources.includes(insight.source)) {
+        setSelectedInsight(insight);
+        setIsModalOpen(true);
       }
-      return next;
-    });
-  };
+    },
+    [drillableSources]
+  );
 
-  // Render the component – 2026-style: glassmorphism, strategic minimalism, fluid typography
+  const isDrillable = useCallback(
+    (insight: AletheiaInsight) => {
+      return !!(insight.source && drillableSources.includes(insight.source));
+    },
+    [drillableSources]
+  );
+
+  // Group insights by bucket
+  const bucketedInsights = useMemo(() => {
+    const map: Record<string, AletheiaInsight[]> = {
+      critical: [],
+      attention: [],
+      working: [],
+      context: [],
+    };
+
+    for (const insight of allInsights) {
+      const bucket = insight.bucket || "context"; // default untagged to context
+      if (map[bucket]) {
+        map[bucket].push(insight);
+      } else {
+        map.context.push(insight);
+      }
+    }
+    return map;
+  }, [allInsights]);
+
+  // Count non-empty buckets for grid sizing
+  const nonEmptyBuckets = useMemo(
+    () => BUCKET_ORDER.filter((b) => bucketedInsights[b.id]?.length > 0),
+    [bucketedInsights]
+  );
+
+  const hasInsights = allInsights.length > 0;
+
   return (
     <div className="mb-6 sm:mb-10 aletheia-prompts-card">
       <motion.div
@@ -195,7 +459,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         className="relative overflow-hidden rounded-2xl sm:rounded-3xl p-4 sm:p-5 md:p-6 lg:p-8 border border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-[0_8px_32px_rgba(15,23,42,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.24)]"
       >
-        {/* Header */}
+        {/* ===== Header ===== */}
         <div className="flex items-center justify-between mb-5 sm:mb-6 md:mb-8">
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 dark:shadow-blue-600/15 ring-1 ring-white/20">
@@ -216,13 +480,16 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     AI
                   </span>
                 )}
-                <span className="text-slate-400 dark:text-slate-500">
-                  {allInsights.length} insights
-                </span>
+                {hasInsights && (
+                  <span className="text-slate-400 dark:text-slate-500">
+                    {allInsights.length} insights
+                  </span>
+                )}
               </p>
             </div>
           </div>
-          {/* Briefing Controls and Refresh - Right side of header */}
+
+          {/* Controls */}
           <div className="flex items-center gap-2">
             <ExportShareMenu
               title="Cohi Insights"
@@ -232,12 +499,19 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 tables: [
                   {
                     name: "Insights",
-                    headers: ["Type", "Message", "Reasoning", "Source"],
+                    headers: [
+                      "Bucket",
+                      "Headline",
+                      "Detail",
+                      "Source",
+                      "Severity",
+                    ],
                     rows: allInsights.map((insight) => [
-                      insight.type || "--",
-                      insight.message || "--",
-                      insight.reasoning || "--",
+                      insight.bucket || "--",
+                      insight.headline || insight.message || "--",
+                      insight.understory || insight.reasoning || "--",
                       insight.source || "--",
+                      insight.severity_score?.toFixed(2) || "--",
                     ]),
                   },
                 ],
@@ -248,7 +522,6 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 label: "Cohi Insights",
               }}
             />
-            {/* Documentation links hidden for now */}
             <button
               onClick={handleRefresh}
               disabled={insightsLoading || isRefreshing}
@@ -276,210 +549,95 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           </div>
         </div>
 
-        {!insightsLoading && allInsights.length === 0 && (
-          <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-5 text-sm text-slate-600 dark:text-slate-400">
-            Insights will appear once live data is available for this tenant.
-          </div>
-        )}
-
-        {/* Pinned Insights */}
-        {pinnedInsightsList.length > 0 && (
-          <div className="mb-4 sm:mb-5 md:mb-6 space-y-2 sm:space-y-3">
-            {pinnedInsightsList.map((insight, idx) => {
-              const insightId = getInsightId(
-                insight,
-                allInsights.indexOf(insight)
-              );
-              const InsightIcon = insight.icon;
-              return (
-                <motion.div
-                  key={insightId}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 shadow-sm"
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        insight.type === "success"
-                          ? "bg-emerald-100 dark:bg-emerald-900/30"
-                          : insight.type === "warning"
-                          ? "bg-amber-100 dark:bg-amber-900/30"
-                          : insight.type === "error"
-                          ? "bg-rose-100 dark:bg-rose-900/30"
-                          : "bg-blue-100 dark:bg-blue-900/30"
-                      }`}
-                    >
-                      <InsightIcon
-                        className={`w-4 h-4 ${
-                          insight.type === "success"
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : insight.type === "warning"
-                            ? "text-amber-600 dark:text-amber-400"
-                            : insight.type === "error"
-                            ? "text-rose-600 dark:text-rose-400"
-                            : "text-blue-600 dark:text-blue-400"
-                        }`}
-                        strokeWidth={1.5}
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm sm:text-base text-slate-900 dark:text-white font-light leading-relaxed">
-                        {insight.message}
-                      </p>
-                      {insight.reasoning && (
-                        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1 font-light">
-                          {insight.reasoning}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() =>
-                        togglePin(insight, allInsights.indexOf(insight))
-                      }
-                      className="ml-2 p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
-                      aria-label="Unpin insight"
-                    >
-                      <Pin
-                        className="w-4 h-4 text-blue-600 dark:text-blue-400"
-                        strokeWidth={2}
-                      />
-                    </button>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Rotating Insights */}
-        {currentInsights.length > 0 && (
-          <motion.div
-            key={currentSet}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.4 }}
-            className="space-y-2 sm:space-y-3"
-            onMouseEnter={() => setIsPaused(true)}
-            onMouseLeave={() => setIsPaused(false)}
-          >
-            {currentInsights.map((insight, idx) => {
-              const globalIdx = allInsights.indexOf(insight);
-              const insightId = getInsightId(insight, globalIdx);
-              const InsightIcon = insight.icon;
-              const canDrill = isDrillable(insight);
-              return (
-                <motion.div
-                  key={insightId}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: idx * 0.1 }}
-                  className={`p-4 rounded-2xl bg-white/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/70 shadow-sm hover:shadow-md transition-all duration-200 ${
-                    canDrill
-                      ? "cursor-pointer hover:border-blue-300/80 dark:hover:border-blue-500/50"
-                      : "cursor-default"
-                  }`}
-                  onClick={() => {
-                    if (canDrill) {
-                      handleInsightClick(insight);
-                    } else {
-                      setExpandedInsight(
-                        expandedInsight === globalIdx ? null : globalIdx
-                      );
-                    }
-                  }}
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        insight.type === "success"
-                          ? "bg-emerald-100 dark:bg-emerald-900/30"
-                          : insight.type === "warning"
-                          ? "bg-amber-100 dark:bg-amber-900/30"
-                          : insight.type === "error"
-                          ? "bg-rose-100 dark:bg-rose-900/30"
-                          : insight.type === "critical"
-                          ? "bg-rose-100 dark:bg-rose-900/30"
-                          : "bg-blue-100 dark:bg-blue-900/30"
-                      }`}
-                    >
-                      <InsightIcon
-                        className={`w-4 h-4 ${
-                          insight.type === "success"
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : insight.type === "warning"
-                            ? "text-amber-600 dark:text-amber-400"
-                            : insight.type === "error"
-                            ? "text-rose-600 dark:text-rose-400"
-                            : insight.type === "critical"
-                            ? "text-rose-600 dark:text-rose-400"
-                            : "text-blue-600 dark:text-blue-400"
-                        }`}
-                        strokeWidth={1.5}
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm sm:text-base text-slate-900 dark:text-white font-light leading-relaxed">
-                        {insight.message}
-                      </p>
-                      {expandedInsight === globalIdx && insight.reasoning && (
-                        <motion.p
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-2 font-light"
-                        >
-                          {insight.reasoning}
-                        </motion.p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {canDrill && (
-                        <div
-                          className="p-1.5 rounded-lg text-blue-500 dark:text-blue-400"
-                          title="Click to view details"
-                        >
-                          <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
-                        </div>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePin(insight, globalIdx);
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
-                        aria-label="Pin insight"
-                      >
-                        <Pin
-                          className="w-4 h-4 text-slate-400 dark:text-slate-500"
-                          strokeWidth={1.5}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </motion.div>
-        )}
-
-        {/* Pagination Dots */}
-        {insightSets.length > 1 && (
-          <div className="flex items-center justify-center gap-2 mt-4 sm:mt-5 md:mt-6">
-            {insightSets.map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => setCurrentSet(idx)}
-                className={`w-2 h-2 rounded-full transition-all ${
-                  currentSet === idx
-                    ? "bg-blue-600 dark:bg-blue-400 w-6"
-                    : "bg-slate-300 dark:bg-slate-600"
-                }`}
-                aria-label={`Go to insight set ${idx + 1}`}
+        {/* ===== Loading shimmer ===== */}
+        {insightsLoading && !hasInsights && (
+          <div className="flex flex-col gap-4">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-28 rounded-2xl bg-slate-100/80 dark:bg-slate-800/40 animate-pulse"
               />
             ))}
+          </div>
+        )}
+
+        {/* ===== Needs Generation CTA ===== */}
+        {!insightsLoading && needsGeneration && !hasInsights && (
+          <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-8 text-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <Sparkles className="w-7 h-7 text-white" strokeWidth={1.5} />
+              </div>
+              <div>
+                <p className="text-base font-medium text-slate-800 dark:text-slate-200">
+                  Ready to generate insights
+                </p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Cohi will analyze your data across 4 categories using AI
+                </p>
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-sm font-medium shadow-lg shadow-blue-500/20 hover:shadow-blue-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                {isRefreshing ? (
+                  <>
+                    <RefreshCw
+                      className="w-4 h-4 animate-spin"
+                      strokeWidth={1.5}
+                    />
+                    Generating insights...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" strokeWidth={1.5} />
+                    Generate Insights
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ===== Empty state (no data at all) ===== */}
+        {!insightsLoading && !needsGeneration && !hasInsights && (
+          <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-6 text-center">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Insights will appear once live data is available for this tenant.
+            </p>
+          </div>
+        )}
+
+        {/* ===== Generating overlay ===== */}
+        {isRefreshing && hasInsights && (
+          <div className="mb-4 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40">
+            <RefreshCw
+              className="w-3.5 h-3.5 text-blue-500 animate-spin"
+              strokeWidth={2}
+            />
+            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+              Regenerating insights...
+            </span>
+          </div>
+        )}
+
+        {/* ===== Bucket Lanes (stacked) ===== */}
+        {hasInsights && (
+          <div className="flex flex-col gap-4">
+            {BUCKET_ORDER.map((bucket) => {
+              const items = bucketedInsights[bucket.id] || [];
+              if (items.length === 0) return null;
+              return (
+                <BucketLane
+                  key={bucket.id}
+                  config={bucket}
+                  insights={items}
+                  onInsightClick={handleInsightClick}
+                  isDrillable={isDrillable}
+                />
+              );
+            })}
           </div>
         )}
       </motion.div>
@@ -493,7 +651,9 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         }}
         insightSource={selectedInsight?.source || ""}
         insightMessage={selectedInsight?.message || ""}
+        insightId={selectedInsight?.insightId}
         dateFilter={dateFilter}
+        selectedTenantId={selectedTenantId}
       />
     </div>
   );

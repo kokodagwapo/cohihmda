@@ -8,7 +8,9 @@ interface InsightDetailModalProps {
   onClose: () => void;
   insightSource: string;
   insightMessage: string;
+  insightId?: number;
   dateFilter: string;
+  selectedTenantId?: string | null;
 }
 
 interface LoanRow {
@@ -58,7 +60,8 @@ interface DetailData {
   months?: MonthRow[];
 }
 
-const formatCurrency = (value: number) => {
+const formatCurrency = (value: number | undefined | null) => {
+  if (value == null || isNaN(value)) return '$0';
   if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
   if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
   return `$${value.toFixed(0)}`;
@@ -104,7 +107,9 @@ export const InsightDetailModal = ({
   onClose, 
   insightSource, 
   insightMessage,
-  dateFilter 
+  insightId,
+  dateFilter,
+  selectedTenantId,
 }: InsightDetailModalProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,15 +120,18 @@ export const InsightDetailModal = ({
     if (isOpen && insightSource) {
       fetchDetails();
     }
-  }, [isOpen, insightSource, dateFilter]);
+  }, [isOpen, insightSource, insightId, dateFilter]);
 
   const fetchDetails = async () => {
     setLoading(true);
     setError(null);
     
     try {
+      const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+      const idParam = insightId ? `&insightId=${insightId}` : '';
+      const headlineParam = !insightId && insightMessage ? `&headline=${encodeURIComponent(insightMessage)}` : '';
       const result = await api.request<DetailData>(
-        `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}`
+        `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}${tenantParam}${idParam}${headlineParam}`
       );
       setData(result);
     } catch (err: any) {

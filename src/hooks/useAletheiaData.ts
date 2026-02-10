@@ -3,18 +3,33 @@ import { api } from "@/lib/api";
 import { CheckCircle2, Info, AlertTriangle, AlertCircle } from "lucide-react";
 
 export interface AletheiaInsight {
+  /** DB row id from generated_insights — used for exact drill-down queries */
+  insightId?: number;
   type: "success" | "info" | "warning" | "error" | "critical";
   icon: any;
   message: string;
   priority: "critical" | "high" | "medium" | "low" | "standard";
   reasoning?: string;
   source?: string;
+  // Enriched categorized fields
+  bucket?: "working" | "attention" | "critical" | "context";
+  headline?: string;
+  understory?: string;
+  severity_score?: number;
+  bucketPriority?: "BLUE" | "YELLOW" | "RED" | "GRAY";
+  impact?: {
+    type?: string;
+    estimated_dollars?: number | null;
+    units_affected?: number | null;
+  };
+  evidence?: { metrics?: string[]; comparisons?: string[] };
 }
 
 export interface InsightsMetadata {
   usedLLM: boolean;
   generatedAt: string;
   summaryForPodcast?: string;
+  needsGeneration?: boolean;
 }
 
 // Map API insight type to icon
@@ -80,17 +95,80 @@ export const useAletheiaData = (
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [funnelData, setFunnelData] = useState<any>(null);
   const [metadata, setMetadata] = useState<InsightsMetadata | null>(null);
-  const [refreshCounter, setRefreshCounter] = useState(0);
+  const [needsGeneration, setNeedsGeneration] = useState(false);
 
-  // Function to force refresh insights (bypasses cache)
-  const refreshInsights = useCallback(() => {
-    setRefreshCounter((prev) => prev + 1);
-  }, []);
+  // Map API response insights to component format
+  const mapInsights = (data: any): AletheiaInsight[] => {
+    if (
+      !data.insights ||
+      !Array.isArray(data.insights) ||
+      data.insights.length === 0
+    ) {
+      return [];
+    }
+    return data.insights.map((insight: any) => ({
+      insightId: insight.id ?? insight.insightId,
+      type: insight.type || "info",
+      icon: getIconForType(insight.type || "info"),
+      message: insight.headline || insight.message || "",
+      priority: insight.priority || "standard",
+      reasoning: insight.understory || insight.reasoning || "",
+      source: insight.source || "other",
+      // Enriched fields
+      bucket: insight.bucket,
+      headline: insight.headline,
+      understory: insight.understory,
+      severity_score: insight.severity_score,
+      bucketPriority: insight.bucketPriority,
+      impact: insight.impact,
+      evidence: insight.evidence,
+    }));
+  };
 
-  // Fetch dynamic insights from API (with LLM support)
+  // Refresh insights via POST (triggers fresh LLM generation)
+  const refreshInsights = useCallback(async () => {
+    setInsightsLoading(true);
+    setInsightsError(null);
+    setNeedsGeneration(false);
+
+    try {
+      const tenantParam = selectedTenantId
+        ? `&tenant_id=${selectedTenantId}`
+        : "";
+      const channelParam =
+        selectedChannel && selectedChannel !== "All"
+          ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+          : "";
+
+      const data = await api.request<any>(
+        `/api/dashboard/insights/refresh?dateFilter=${dateFilter}${tenantParam}${channelParam}`,
+        { method: "POST" }
+      );
+
+      setMetadata({
+        usedLLM: data.usedLLM ?? true,
+        generatedAt: data.generatedAt || new Date().toISOString(),
+        summaryForPodcast: data.summaryForPodcast,
+        needsGeneration: false,
+      });
+
+      const mapped = mapInsights(data);
+      if (mapped.length > 0) {
+        setAllInsights(mapped);
+      } else {
+        setAllInsights(getDemoInsights());
+      }
+    } catch (error: any) {
+      console.error("Error refreshing insights:", error);
+      setInsightsError(error.message || "Failed to refresh insights");
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [dateFilter, selectedTenantId, selectedChannel]);
+
+  // Initial load: GET reads from DB (fast, no LLM call)
   // Note: onDataAvailabilityChange is intentionally NOT in the dependency array
   // because it's a callback for reporting state, not for triggering fetches.
-  // Including it would cause infinite re-renders if the parent doesn't memoize it.
   useEffect(() => {
     const fetchInsights = async () => {
       setInsightsLoading(true);
@@ -99,7 +177,6 @@ export const useAletheiaData = (
       // Check if user has a valid token before making API call
       const token = localStorage.getItem("auth_token");
       if (!token) {
-        // No token - use demo data directly without making API call
         const demoInsights = getDemoInsights();
         setAllInsights(demoInsights);
         setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
@@ -112,55 +189,41 @@ export const useAletheiaData = (
         const tenantParam = selectedTenantId
           ? `&tenant_id=${selectedTenantId}`
           : "";
-        const forceRefreshParam =
-          refreshCounter > 0 ? "&forceRefresh=true" : "";
-        // Don't send channel filter when "All" is selected
         const channelParam =
           selectedChannel && selectedChannel !== "All"
             ? `&channel_group=${encodeURIComponent(selectedChannel)}`
             : "";
-        // Using useLLM=false to use rule-based insights (faster, no API key required)
+
         const data = await api.request<any>(
-          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=false${tenantParam}${forceRefreshParam}${channelParam}`
+          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}`
         );
 
-        // Store metadata about the response
         setMetadata({
           usedLLM: data.usedLLM ?? false,
           generatedAt: data.generatedAt || new Date().toISOString(),
           summaryForPodcast: data.summaryForPodcast,
+          needsGeneration: data.needsGeneration ?? false,
         });
 
-        if (
-          data.insights &&
-          Array.isArray(data.insights) &&
-          data.insights.length > 0
-        ) {
-          // Map API insights to component format with icons, preserving source information
-          const mappedInsights: AletheiaInsight[] = data.insights.map(
-            (insight: any) => ({
-              type: insight.type || "info",
-              icon: getIconForType(insight.type || "info"),
-              message: insight.message || "",
-              priority: insight.priority || "standard",
-              reasoning: insight.reasoning || "",
-              source: insight.source || "other", // Preserve source for grouping
-            })
-          );
-          setAllInsights(mappedInsights);
+        if (data.needsGeneration) {
+          setNeedsGeneration(true);
+          setAllInsights([]);
         } else {
-          // If API returns empty or no insights, use demo data
-          const demoInsights = getDemoInsights();
-          setAllInsights(demoInsights);
-          setInsightsError(null);
+          setNeedsGeneration(false);
+          const mapped = mapInsights(data);
+          if (mapped.length > 0) {
+            setAllInsights(mapped);
+          } else {
+            const demoInsights = getDemoInsights();
+            setAllInsights(demoInsights);
+            setInsightsError(null);
+          }
         }
       } catch (error: any) {
-        // Handle unauthorized errors silently (user not logged in)
         if (
           error.message?.includes("Unauthorized") ||
           error.message?.includes("401")
         ) {
-          // User not authenticated - use demo data without logging error
           const demoInsights = getDemoInsights();
           setAllInsights(demoInsights);
           setMetadata({
@@ -172,7 +235,6 @@ export const useAletheiaData = (
           error.message?.includes("timed out") ||
           error.message?.includes("timeout")
         ) {
-          // For timeout errors, log as warning since we have demo data fallback
           console.warn(
             "Insights request timed out, using demo data fallback:",
             error.message
@@ -185,7 +247,6 @@ export const useAletheiaData = (
           });
           setInsightsError(null);
         } else {
-          // Other errors - log but still use demo data
           console.error("Error fetching insights:", error);
           setInsightsError(error.message || "Failed to fetch insights");
           const demoInsights = getDemoInsights();
@@ -201,17 +262,13 @@ export const useAletheiaData = (
     };
 
     fetchInsights();
-  }, [dateFilter, selectedTenantId, selectedChannel, refreshCounter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dateFilter, selectedTenantId, selectedChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch funnel data for briefing context
   useEffect(() => {
     const fetchFunnelData = async () => {
-      // Check if user has a valid token before making API call
       const token = localStorage.getItem("auth_token");
-      if (!token) {
-        // No token - skip API call, briefing will work without funnel data
-        return;
-      }
+      if (!token) return;
 
       try {
         const tenantParam = selectedTenantId
@@ -222,15 +279,12 @@ export const useAletheiaData = (
         );
         setFunnelData(data);
       } catch (error: any) {
-        // Handle unauthorized errors silently (user not logged in)
         if (
           error.message?.includes("Unauthorized") ||
           error.message?.includes("401")
         ) {
-          // User not authenticated - continue without funnel data
           return;
         }
-        // For timeout errors, log as warning since briefing works without funnel data
         if (
           error.message?.includes("timed out") ||
           error.message?.includes("timeout")
@@ -242,7 +296,6 @@ export const useAletheiaData = (
         } else {
           console.error("Error fetching funnel data:", error);
         }
-        // Continue without funnel data - briefing will work without it
       }
     };
 
@@ -252,7 +305,6 @@ export const useAletheiaData = (
   // Handle error state and set demo insights if needed
   useEffect(() => {
     if (insightsError && allInsights.length === 0 && !insightsLoading) {
-      // Fallback to demo insights if API fails
       const demoInsights = getDemoInsights();
       setAllInsights(demoInsights);
     }
@@ -271,6 +323,7 @@ export const useAletheiaData = (
     insightsError,
     funnelData,
     metadata,
+    needsGeneration,
     refreshInsights,
   };
 };

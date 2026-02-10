@@ -9,7 +9,7 @@
  * - Export/import functionality
  */
 
-import { pool as managementPool } from "../config/database.js";
+import { pool as managementPool } from "../config/managementDatabase.js";
 import {
   DEFAULT_PROMPT_CONFIGS,
   PromptConfig,
@@ -199,6 +199,85 @@ export async function seedDefaultPrompts(): Promise<number> {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("[PromptConfig] Error seeding defaults:", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Force re-seed: upserts ALL default prompts — overwrites system_prompt, model,
+ * temperature, max_tokens for any that already exist.  New prompts are inserted.
+ * Does NOT touch user_prompt_template if the admin has customised it.
+ */
+export async function forceSeedDefaultPrompts(): Promise<number> {
+  if (!(await tableExists())) {
+    console.log("[PromptConfig] Table does not exist, skipping force-seed");
+    return 0;
+  }
+
+  const client = await managementPool.connect();
+  let upserted = 0;
+
+  try {
+    await client.query("BEGIN");
+
+    for (const prompt of DEFAULT_PROMPT_CONFIGS) {
+      await client.query(
+        `
+        INSERT INTO ai_prompt_configs (
+          id, name, description, category,
+          system_prompt, user_prompt_template,
+          model, temperature, max_tokens, json_mode,
+          available_variables,
+          default_system_prompt, default_user_prompt_template,
+          default_model, default_temperature, default_max_tokens,
+          is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $5, $6, $7, $8, $9, true)
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          category = EXCLUDED.category,
+          system_prompt = EXCLUDED.system_prompt,
+          model = EXCLUDED.model,
+          temperature = EXCLUDED.temperature,
+          max_tokens = EXCLUDED.max_tokens,
+          json_mode = EXCLUDED.json_mode,
+          available_variables = EXCLUDED.available_variables,
+          default_system_prompt = EXCLUDED.default_system_prompt,
+          default_model = EXCLUDED.default_model,
+          default_temperature = EXCLUDED.default_temperature,
+          default_max_tokens = EXCLUDED.default_max_tokens,
+          updated_at = NOW()
+        `,
+        [
+          prompt.id,
+          prompt.name,
+          prompt.description,
+          prompt.category,
+          prompt.system_prompt,
+          prompt.user_prompt_template || null,
+          prompt.model,
+          prompt.temperature,
+          prompt.max_tokens,
+          prompt.json_mode,
+          JSON.stringify(prompt.available_variables),
+        ]
+      );
+      upserted++;
+    }
+
+    // Invalidate prompt cache so new values are picked up immediately
+    promptCache.clear();
+
+    await client.query("COMMIT");
+    console.log(
+      `[PromptConfig] Force-seeded ${upserted} default prompts (upsert)`
+    );
+    return upserted;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("[PromptConfig] Error force-seeding defaults:", error);
     throw error;
   } finally {
     client.release();

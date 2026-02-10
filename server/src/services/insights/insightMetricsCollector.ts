@@ -39,13 +39,19 @@ export interface InsightMetricsPayload {
     likelyWithdraw: number;
     likelyDeny: number;
     likelyOriginate: number;
+    /** All loan IDs predicted to withdraw or deny (any confidence) */
+    allAtRiskLoanIds: string[];
+    /** Volume of ALL withdraw/deny predictions */
+    allAtRiskVolume: number;
+    /** Loans with >= 70% confidence for withdraw/deny */
     highRiskLoans: Array<{
       loanId: string;
       confidence: number;
       predictedOutcome: string;
       riskFactors: string[];
     }>;
-    totalAtRiskVolume: number;
+    /** Volume of ONLY the >=70% confidence loans */
+    highRiskVolume: number;
   };
 
   // Performance metrics
@@ -64,6 +70,7 @@ export interface InsightMetricsPayload {
     waLtv: number;
     waDti: number;
     highRiskLoanCount: number; // FICO<620 OR LTV>95 OR DTI>50
+    highRiskLoanIds: string[]; // Exact loan IDs meeting criteria
   };
 
   // Lost opportunity
@@ -73,6 +80,8 @@ export interface InsightMetricsPayload {
     withdrawnProformaRevenue: number;
     deniedUnits: number;
     deniedVolume: number;
+    withdrawnLoanIds: string[];
+    deniedLoanIds: string[];
   };
 
   // Funnel metrics
@@ -238,16 +247,16 @@ async function fetchAtRiskVolume(
 }
 
 /**
- * Fetch credit risk metrics (high risk loan count)
+ * Fetch credit risk metrics (high risk loan count AND loan IDs)
  */
-async function fetchCreditRiskCount(
+async function fetchCreditRiskLoans(
   tenantPool: pg.Pool,
   channelGroup?: string
-): Promise<number> {
+): Promise<{ count: number; loanIds: string[] }> {
   try {
     const channelClause = buildChannelWhereClause(channelGroup);
     const result = await tenantPool.query(`
-      SELECT COUNT(*) as count
+      SELECT loan_id
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
         AND (
@@ -258,10 +267,11 @@ async function fetchCreditRiskCount(
         ${channelClause}
     `);
 
-    return parseInt(result.rows[0]?.count) || 0;
+    const loanIds = result.rows.map((r: any) => r.loan_id);
+    return { count: loanIds.length, loanIds };
   } catch (error) {
-    console.error("[InsightMetrics] Error fetching credit risk count:", error);
-    return 0;
+    console.error("[InsightMetrics] Error fetching credit risk loans:", error);
+    return { count: 0, loanIds: [] };
   }
 }
 
@@ -305,7 +315,7 @@ async function calculateRolling90DPullThrough(
 }
 
 /**
- * Fetch lost opportunity metrics (withdrawn and denied loans)
+ * Fetch lost opportunity metrics (withdrawn and denied loans) WITH loan IDs
  */
 async function fetchLostOpportunity(
   tenantPool: pg.Pool,
@@ -317,33 +327,49 @@ async function fetchLostOpportunity(
   withdrawnProformaRevenue: number;
   deniedUnits: number;
   deniedVolume: number;
+  withdrawnLoanIds: string[];
+  deniedLoanIds: string[];
 }> {
   try {
     const channelClause = buildChannelWhereClause(channelGroup);
+
+    // Fetch individual rows so we get both aggregates AND loan IDs
     const result = await tenantPool.query(
       `
-      SELECT
-        COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled', 'Withdrawn') THEN 1 END) as withdrawn_units,
-        COALESCE(SUM(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled', 'Withdrawn') THEN loan_amount END), 0) as withdrawn_volume,
-        COUNT(CASE WHEN current_loan_status IN ('denied', 'declined', 'Denied') THEN 1 END) as denied_units,
-        COALESCE(SUM(CASE WHEN current_loan_status IN ('denied', 'declined', 'Denied') THEN loan_amount END), 0) as denied_volume
+      SELECT loan_id, current_loan_status, COALESCE(loan_amount, 0) as loan_amount
       FROM public.loans
-      WHERE application_date >= $1
+      WHERE current_loan_status IN ('withdrawn', 'cancelled', 'Withdrawn', 'denied', 'declined', 'Denied')
+        AND application_date >= $1
         AND application_date <= $2
         ${channelClause}
     `,
       [dateRange.start, dateRange.end]
     );
 
-    const row = result.rows[0];
-    const withdrawnVolume = parseFloat(row?.withdrawn_volume) || 0;
+    const withdrawn = result.rows.filter((r: any) =>
+      ["withdrawn", "cancelled", "Withdrawn"].includes(r.current_loan_status)
+    );
+    const denied = result.rows.filter((r: any) =>
+      ["denied", "declined", "Denied"].includes(r.current_loan_status)
+    );
+
+    const withdrawnVolume = withdrawn.reduce(
+      (sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0),
+      0
+    );
+    const deniedVolume = denied.reduce(
+      (sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0),
+      0
+    );
 
     return {
-      withdrawnUnits: parseInt(row?.withdrawn_units) || 0,
+      withdrawnUnits: withdrawn.length,
       withdrawnVolume,
-      withdrawnProformaRevenue: withdrawnVolume * 0.01, // Estimate 1% revenue
-      deniedUnits: parseInt(row?.denied_units) || 0,
-      deniedVolume: parseFloat(row?.denied_volume) || 0,
+      withdrawnProformaRevenue: withdrawnVolume * 0.01,
+      deniedUnits: denied.length,
+      deniedVolume,
+      withdrawnLoanIds: withdrawn.map((r: any) => r.loan_id),
+      deniedLoanIds: denied.map((r: any) => r.loan_id),
     };
   } catch (error) {
     console.error("[InsightMetrics] Error fetching lost opportunity:", error);
@@ -353,6 +379,8 @@ async function fetchLostOpportunity(
       withdrawnProformaRevenue: 0,
       deniedUnits: 0,
       deniedVolume: 0,
+      withdrawnLoanIds: [],
+      deniedLoanIds: [],
     };
   }
 }
@@ -532,8 +560,8 @@ export async function collectInsightMetrics(
     lostOpportunity,
     // Funnel
     funnel,
-    // Credit risk
-    highRiskCount,
+    // Credit risk (now returns { count, loanIds })
+    creditRiskResult,
   ] = await Promise.all([
     // YTD metrics
     queryMetrics(
@@ -578,8 +606,8 @@ export async function collectInsightMetrics(
     // Funnel YTD (channel filter applied within function)
     fetchFunnelMetrics(tenantPool, dateRanges.ytd, channelGroup),
 
-    // High risk loan count (channel filter applied within function)
-    fetchCreditRiskCount(tenantPool, channelGroup),
+    // High risk loans with IDs (channel filter applied within function)
+    fetchCreditRiskLoans(tenantPool, channelGroup),
   ]);
 
   // Process predictions
@@ -593,7 +621,13 @@ export async function collectInsightMetrics(
     (p) => p.predictedOutcome === "originate"
   );
 
-  // High-risk loans (confidence > 70% for withdraw or deny)
+  // ALL at-risk loan IDs (any confidence, withdraw or deny)
+  const allAtRiskPredictions = predictions.filter(
+    (p) => p.predictedOutcome === "withdraw" || p.predictedOutcome === "deny"
+  );
+  const allAtRiskLoanIds = allAtRiskPredictions.map((p) => p.loanId);
+
+  // High-risk loans (confidence >= 70% for withdraw or deny)
   const highRiskLoans = predictions
     .filter(
       (p) =>
@@ -608,12 +642,12 @@ export async function collectInsightMetrics(
       riskFactors: p.riskFactors || [],
     }));
 
-  // Fetch at-risk volume
+  // Fetch volumes for BOTH groups in parallel
   const highRiskLoanIds = highRiskLoans.map((l) => l.loanId);
-  const totalAtRiskVolume = await fetchAtRiskVolume(
-    tenantPool,
-    highRiskLoanIds
-  );
+  const [allAtRiskVolume, highRiskVolume] = await Promise.all([
+    fetchAtRiskVolume(tenantPool, allAtRiskLoanIds),
+    fetchAtRiskVolume(tenantPool, highRiskLoanIds),
+  ]);
 
   // Calculate comparisons
   const comparisons = await calculateComparisons(
@@ -644,8 +678,10 @@ export async function collectInsightMetrics(
       likelyWithdraw: withdrawPredictions.length,
       likelyDeny: denyPredictions.length,
       likelyOriginate: originatePredictions.length,
+      allAtRiskLoanIds,
+      allAtRiskVolume,
       highRiskLoans,
-      totalAtRiskVolume,
+      highRiskVolume,
     },
 
     performance: {
@@ -665,7 +701,8 @@ export async function collectInsightMetrics(
       waFico: Number(ytdMetrics.wa_fico?.value || 0),
       waLtv: Number(ytdMetrics.wa_ltv?.value || 0),
       waDti: Number(ytdMetrics.wa_dti?.value || 0),
-      highRiskLoanCount: highRiskCount,
+      highRiskLoanCount: creditRiskResult.count,
+      highRiskLoanIds: creditRiskResult.loanIds,
     },
 
     lostOpportunity,
@@ -681,7 +718,10 @@ export async function collectInsightMetrics(
       withdraw: payload.predictions.likelyWithdraw,
       deny: payload.predictions.likelyDeny,
       originate: payload.predictions.likelyOriginate,
+      allAtRisk: payload.predictions.allAtRiskLoanIds.length,
+      allAtRiskVolume: payload.predictions.allAtRiskVolume,
       highRisk: payload.predictions.highRiskLoans.length,
+      highRiskVolume: payload.predictions.highRiskVolume,
     },
     pullThrough: payload.performance.pullThroughRolling90D,
     cycleTime: payload.performance.avgCycleTime,

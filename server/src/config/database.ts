@@ -259,6 +259,18 @@ export async function initDatabase(): Promise<void> {
       console.warn('⚠️ Migration warnings (server will continue):', migrationError);
       // Don't throw - allow server to start even with migration warnings
     }
+    
+    // Seed default AI prompt configs if table exists but is empty
+    try {
+      const { seedDefaultPrompts } = await import('../services/promptConfigService.js');
+      const seeded = await seedDefaultPrompts();
+      if (seeded > 0) {
+        console.log(`✅ Seeded ${seeded} default AI prompt configuration(s)`);
+      }
+    } catch (seedError: any) {
+      // Non-critical - prompts will fall back to hardcoded defaults
+      console.warn('⚠️ AI prompt seed skipped:', seedError.message);
+    }
   } catch (error) {
     console.error('❌ Database connection failed:', error);
     throw error;

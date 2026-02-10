@@ -129,7 +129,12 @@ function ActionCard({
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
             {labelMap[action.type]}
-            {'widgetId' in action && action.type === 'add_existing_widget' && (
+            {'title' in action && action.title && (
+              <span className="ml-1 text-slate-500 font-normal">
+                — {action.title}
+              </span>
+            )}
+            {'widgetId' in action && action.type === 'add_existing_widget' && !('title' in action && action.title) && (
               <span className="ml-1 text-slate-500 font-normal">
                 ({action.widgetId})
               </span>
@@ -146,15 +151,10 @@ function ActionCard({
         </div>
       </div>
       {isExecutable && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-full h-7 text-xs"
-          onClick={() => onExecute(action)}
-        >
-          {iconMap[action.type]}
-          <span className="ml-1">{labelMap[action.type]}</span>
-        </Button>
+        <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+          Applied to canvas
+        </div>
       )}
     </div>
   );
@@ -442,15 +442,15 @@ export function WorkbenchCohiPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
-              <Sparkles className="h-7 w-7 text-indigo-500" />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md">
+              <Sparkles className="h-7 w-7 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Ask Cohi anything about your data
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                What would you like to review?
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Add widgets, create charts, explore schema, or get explanations.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                Tell me what you need — executive briefings, performance analysis, dashboards, or presentations. I&apos;ll prepare it.
               </p>
             </div>
             {/* Suggested questions */}
@@ -459,7 +459,7 @@ export function WorkbenchCohiPanel({
                 <button
                   key={q}
                   onClick={() => onSendMessage(q)}
-                  className="w-full text-left text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
+                  className="w-full text-left text-xs px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:border-violet-300 dark:hover:border-violet-600 text-slate-600 dark:text-slate-400 hover:text-violet-700 dark:hover:text-violet-300 transition-all"
                 >
                   {q}
                 </button>
@@ -499,7 +499,7 @@ export function WorkbenchCohiPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Cohi to add, create, or explain..."
+            placeholder="Ask Cohi — prepare a briefing, analyze trends, build a deck..."
             rows={1}
             className="flex-1 resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 min-h-[36px] max-h-[100px]"
             style={{ height: 'auto', overflow: 'hidden' }}

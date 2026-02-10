@@ -7,6 +7,7 @@
  */
 
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
+import type { ReportDefinition } from '@/types/reportTypes';
 
 // ---------------------------------------------------------------------------
 // Action union
@@ -21,7 +22,8 @@ export type WidgetAction =
   | SuggestDashboardAction
   | ExplainWidgetAction
   | ExplainSchemaAction
-  | QueryDataAction;
+  | QueryDataAction
+  | GenerateReportAction;
 
 export interface AddExistingWidgetAction {
   type: 'add_existing_widget';
@@ -105,6 +107,16 @@ export interface QueryDataAction {
   explanation: string;
   /** Query results (populated by backend before returning to frontend) */
   results?: unknown[];
+}
+
+export interface GenerateReportAction {
+  type: 'generate_report';
+  /** Full report definition with slides, elements, and data sources */
+  reportDefinition: Omit<ReportDefinition, 'id' | 'metadata'>;
+  /** Requested output format */
+  format?: 'pptx' | 'pdf';
+  /** LLM-generated explanation of the report structure */
+  explanation: string;
 }
 
 // ---------------------------------------------------------------------------
