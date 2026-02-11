@@ -328,9 +328,8 @@ export class ApiClient {
     } else {
     }
 
-    // Request timeouts — generous defaults so deployed environments (CloudFront, ALB)
-    // don't get killed prematurely. The server/infrastructure is the real timeout authority.
-    // CloudFront OriginReadTimeout = 240s, Node server keepAlive = 300s.
+    // Request timeouts — must exceed CloudFront OriginReadTimeout (180s max).
+    // The frontend should never be the layer that kills a request.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
@@ -339,7 +338,7 @@ export class ApiClient {
         ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
         ? 300000   // 5 minutes for AI chat (streaming)
-        : 240000;  // 4 minutes for all API requests
+        : 200000;  // 3 min 20s — above CloudFront's 180s max
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();
