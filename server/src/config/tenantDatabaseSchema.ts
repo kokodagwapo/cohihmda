@@ -659,14 +659,15 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       await pool.query(`
         DO $$
         BEGIN
-          -- Drop columns that are not in CoheusDataDictionary.xml
-          ALTER TABLE public.loans DROP COLUMN IF EXISTS borrower_name;
-          ALTER TABLE public.loans DROP COLUMN IF EXISTS status;
-          ALTER TABLE public.loans DROP COLUMN IF EXISTS fund_date;
-          ALTER TABLE public.loans DROP COLUMN IF EXISTS pi_payment;
-          ALTER TABLE public.loans DROP COLUMN IF EXISTS encompass_instance;
-          ALTER TABLE public.loans DROP COLUMN IF EXISTS cycle_time_days;
-          RAISE NOTICE 'Orphaned columns cleanup completed';
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'loans') THEN
+            ALTER TABLE public.loans DROP COLUMN IF EXISTS borrower_name;
+            ALTER TABLE public.loans DROP COLUMN IF EXISTS status;
+            ALTER TABLE public.loans DROP COLUMN IF EXISTS fund_date;
+            ALTER TABLE public.loans DROP COLUMN IF EXISTS pi_payment;
+            ALTER TABLE public.loans DROP COLUMN IF EXISTS encompass_instance;
+            ALTER TABLE public.loans DROP COLUMN IF EXISTS cycle_time_days;
+            RAISE NOTICE 'Orphaned columns cleanup completed';
+          END IF;
         END $$;
       `);
       console.log(
@@ -762,6 +763,9 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       await pool.query(`
         DO $$
         BEGIN
+          IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'loans') THEN
+            RETURN;
+          END IF;
           -- Drop date columns not in common-aliases-list.txt
           ALTER TABLE public.loans DROP COLUMN IF EXISTS gfe_application_date;
           ALTER TABLE public.loans DROP COLUMN IF EXISTS pre_approval_date;

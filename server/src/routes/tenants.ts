@@ -197,9 +197,21 @@ router.delete(
   }
 );
 
+// ── Duplication job tracking (in-memory) ─────────────────────────────
+interface DuplicationJob {
+  slug: string;
+  status: 'running' | 'completed' | 'failed';
+  startedAt: Date;
+  completedAt?: Date;
+  result?: any;
+  error?: string;
+}
+const duplicationJobs = new Map<string, DuplicationJob>();
+
 /**
  * POST /api/tenants/:id/duplicate
- * Duplicate a tenant with anonymized personnel data (super_admin only)
+ * Start an async tenant duplication with anonymized personnel data (super_admin only).
+ * Returns 202 Accepted immediately with a job slug that can be polled.
  */
 router.post(
   '/:id/duplicate',
@@ -217,28 +229,95 @@ router.post(
 
       const validated = schema.parse(req.body);
 
+      // Check for an existing running job for this slug
+      const existingJob = duplicationJobs.get(validated.slug);
+      if (existingJob?.status === 'running') {
+        return res.status(429).json({
+          error: `A duplication to slug "${validated.slug}" is already in progress`,
+          jobSlug: validated.slug,
+        });
+      }
+
       console.log(
-        `[Tenants] Duplicating tenant ${sourceId} -> "${validated.name}" (${validated.slug})`
+        `[Tenants] Starting async duplication: ${sourceId} -> "${validated.name}" (${validated.slug})`
       );
 
-      const result = await duplicateTenantAnonymized(
-        sourceId,
-        validated.name,
-        validated.slug
-      );
+      // Track the job
+      const job: DuplicationJob = {
+        slug: validated.slug,
+        status: 'running',
+        startedAt: new Date(),
+      };
+      duplicationJobs.set(validated.slug, job);
 
-      res.status(201).json(result);
+      // Fire-and-forget: run duplication in the background
+      duplicateTenantAnonymized(sourceId, validated.name, validated.slug)
+        .then((result) => {
+          job.status = 'completed';
+          job.completedAt = new Date();
+          job.result = result;
+          console.log(`[Tenants] Async duplication completed: "${validated.slug}"`);
+        })
+        .catch((err) => {
+          job.status = 'failed';
+          job.completedAt = new Date();
+          job.error = err.message || 'Unknown error';
+          console.error(`[Tenants] Async duplication failed: "${validated.slug}":`, err.message);
+        });
+
+      // Return immediately — the client polls GET /api/tenants/duplication-status/:slug
+      res.status(202).json({
+        message: 'Duplication started',
+        jobSlug: validated.slug,
+        pollUrl: `/api/tenants/duplication-status/${validated.slug}`,
+      });
     } catch (error: any) {
-      console.error('[Tenants] Error duplicating tenant:', error);
+      console.error('[Tenants] Error starting duplication:', error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Validation error', details: error.errors });
       }
-      // Return 409 Conflict for duplicate slug errors instead of 500
       if (error.message?.includes('already exists')) {
         return res.status(409).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message || 'Failed to duplicate tenant' });
+      if (error.message?.includes('already in progress')) {
+        return res.status(429).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to start duplication' });
     }
+  }
+);
+
+/**
+ * GET /api/tenants/duplication-status/:slug
+ * Poll the status of an async duplication job.
+ */
+router.get(
+  '/duplication-status/:slug',
+  authenticateToken,
+  requireRole('super_admin'),
+  async (req: AuthRequest, res) => {
+    const slug = req.params.slug as string;
+    const job = duplicationJobs.get(slug);
+
+    if (!job) {
+      return res.status(404).json({ error: 'No duplication job found for this slug' });
+    }
+
+    const elapsed = Math.round((Date.now() - job.startedAt.getTime()) / 1000);
+
+    if (job.status === 'running') {
+      return res.json({ status: 'running', elapsedSeconds: elapsed });
+    }
+
+    if (job.status === 'completed') {
+      // Clean up after returning the result
+      duplicationJobs.delete(slug);
+      return res.json({ status: 'completed', elapsedSeconds: elapsed, result: job.result });
+    }
+
+    // Failed
+    duplicationJobs.delete(slug);
+    return res.json({ status: 'failed', elapsedSeconds: elapsed, error: job.error });
   }
 );
 
