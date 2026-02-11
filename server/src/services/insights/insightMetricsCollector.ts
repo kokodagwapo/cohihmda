@@ -163,6 +163,8 @@ function getDateRanges(): {
   rolling90D: DateRange;
   lastMonth: DateRange;
   lastYear: DateRange;
+  trailing30: DateRange;
+  prior30: DateRange;
 } {
   const now = new Date();
   const today = now.toISOString().split("T")[0];
@@ -182,7 +184,7 @@ function getDateRanges(): {
     .toISOString()
     .split("T")[0];
 
-  // Last month
+  // Last month (calendar)
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
     .toISOString()
     .split("T")[0];
@@ -202,6 +204,19 @@ function getDateRanges(): {
     .toISOString()
     .split("T")[0];
 
+  // Trailing 30 days (today back 30 days) — always apples-to-apples
+  const trailing30Start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
+
+  // Prior 30 days (31-60 days ago) — the period before trailing 30
+  const prior30Start = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
+  const prior30End = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
+
   return {
     today: { start: today, end: today },
     mtd: { start: startOfMonth, end: today },
@@ -209,6 +224,8 @@ function getDateRanges(): {
     rolling90D: { start: rolling90Start, end: today },
     lastMonth: { start: lastMonthStart, end: lastMonthEnd },
     lastYear: { start: lastYearStart, end: lastYearEnd },
+    trailing30: { start: trailing30Start, end: today },
+    prior30: { start: prior30Start, end: prior30End },
   };
 }
 
@@ -493,7 +510,9 @@ async function calculateComparisons(
   volumeVsLastYear: number;
   cycleTimeVsLastMonth: number;
   pullThroughVsLastMonth: number;
+  /** Trailing 30 days funded volume (apples-to-apples) */
   currentMtdVolume: number;
+  /** Prior 30 days funded volume (the 30-day window before trailing 30) */
   lastMonthVolume: number;
   currentYtdVolume: number;
   lastYearVolume: number;
@@ -501,50 +520,58 @@ async function calculateComparisons(
   lastMonthCycleTime: number;
 }> {
   try {
-    // Get last month's metrics
-    const lastMonthMetrics = await queryMetrics(
+    // -------- TRAILING 30 vs PRIOR 30 (apples-to-apples) --------
+    // This avoids the "10 days vs 31 days" problem when comparing
+    // partial-month MTD against a full prior month.
+    const trailing30Metrics = await queryMetrics(
       tenantPool,
       ["funded_volume", "avg_cycle_time", "pull_through_rate"],
-      { dateRange: dateRanges.lastMonth }
+      { dateRange: dateRanges.trailing30 }
     );
 
-    // Get last year same period metrics
+    const prior30Metrics = await queryMetrics(
+      tenantPool,
+      ["funded_volume", "avg_cycle_time", "pull_through_rate"],
+      { dateRange: dateRanges.prior30 }
+    );
+
+    // Get last year same YTD period metrics
     const lastYearMetrics = await queryMetrics(tenantPool, ["funded_volume"], {
       dateRange: dateRanges.lastYear,
     });
 
-    const currentVolume = Number(currentMtdMetrics.funded_volume?.value || 0);
-    const lastMonthVolume = Number(lastMonthMetrics.funded_volume?.value || 0);
+    const trailing30Volume = Number(trailing30Metrics.funded_volume?.value || 0);
+    const prior30Volume = Number(prior30Metrics.funded_volume?.value || 0);
     const lastYearVolume = Number(lastYearMetrics.funded_volume?.value || 0);
     const currentYtdVolume = Number(currentYtdMetrics.funded_volume?.value || 0);
 
-    const currentCycleTime = Number(
-      currentMtdMetrics.avg_cycle_time?.value || 0
+    const trailing30CycleTime = Number(
+      trailing30Metrics.avg_cycle_time?.value || 0
     );
-    const lastMonthCycleTime = Number(
-      lastMonthMetrics.avg_cycle_time?.value || 0
+    const prior30CycleTime = Number(
+      prior30Metrics.avg_cycle_time?.value || 0
     );
 
     return {
       volumeVsLastMonth:
-        lastMonthVolume > 0
-          ? ((currentVolume - lastMonthVolume) / lastMonthVolume) * 100
+        prior30Volume > 0
+          ? ((trailing30Volume - prior30Volume) / prior30Volume) * 100
           : 0,
       volumeVsLastYear:
         lastYearVolume > 0
           ? ((currentYtdVolume - lastYearVolume) / lastYearVolume) * 100
           : 0,
       cycleTimeVsLastMonth:
-        lastMonthCycleTime > 0
-          ? ((currentCycleTime - lastMonthCycleTime) / lastMonthCycleTime) * 100
+        prior30CycleTime > 0
+          ? ((trailing30CycleTime - prior30CycleTime) / prior30CycleTime) * 100
           : 0,
-      pullThroughVsLastMonth: 0, // Will be calculated separately with rolling 90D methodology
-      currentMtdVolume: currentVolume,
-      lastMonthVolume,
+      pullThroughVsLastMonth: 0, // Calculated separately with rolling 90D methodology
+      currentMtdVolume: trailing30Volume,
+      lastMonthVolume: prior30Volume,
       currentYtdVolume,
       lastYearVolume,
-      currentCycleTime,
-      lastMonthCycleTime,
+      currentCycleTime: trailing30CycleTime,
+      lastMonthCycleTime: prior30CycleTime,
     };
   } catch (error) {
     console.error("[InsightMetrics] Error calculating comparisons:", error);

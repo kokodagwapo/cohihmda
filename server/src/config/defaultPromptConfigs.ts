@@ -220,8 +220,9 @@ TRIGGER CONDITIONS (generate an insight ONLY if the condition is true):
 3. REVENUE GROWTH (source: "performance")
    THRESHOLD: Revenue YTD or MTD > $0 (non-trivial). Only report if MTD volume is meaningful (> $1M).
 
-4. VOLUME GROWTH MoM (source: "comparisons")
-   THRESHOLD: Volume vs last month improved >= 5%.
+4. VOLUME GROWTH (trailing 30D vs prior 30D) (source: "comparisons")
+   THRESHOLD: Trailing 30-day funded volume improved >= 5% vs the prior 30-day window.
+   NOTE: These are equal-length 30-day rolling windows, NOT partial-month vs full-month. Do NOT say "MoM" — say "trailing 30 days" or "vs prior 30 days."
 
 5. VOLUME GROWTH YoY (source: "comparisons")
    THRESHOLD: Volume vs last year improved >= 5%.
@@ -311,14 +312,15 @@ TRIGGER CONDITIONS (generate an insight ONLY if the condition is true):
    THRESHOLD: Gain-on-sale margin declined >= 8 bps MoM.
    Use the MARGIN section data. Report current, prior, and delta.
 
-4. VOLUME DECLINE MoM (source: "comparisons")
-   THRESHOLD: Volume vs last month declined >= 5%.
+4. VOLUME DECLINE (trailing 30D vs prior 30D) (source: "comparisons")
+   THRESHOLD: Trailing 30-day funded volume declined >= 5% vs the prior 30-day window.
+   NOTE: These are equal-length 30-day rolling windows, NOT partial-month vs full-month. Do NOT say "MoM" — say "trailing 30 days" or "vs prior 30 days."
 
 5. VOLUME DECLINE YoY (source: "comparisons")
    THRESHOLD: Volume vs last year declined >= 5%.
 
-6. CYCLE TIME INCREASE MoM (source: "comparisons")
-   THRESHOLD: Cycle time vs last month increased >= 5%.
+6. CYCLE TIME INCREASE (trailing 30D vs prior 30D) (source: "comparisons")
+   THRESHOLD: Trailing 30-day cycle time increased >= 5% vs the prior 30-day window.
 
 7. CREDIT QUALITY DETERIORATION (source: "credit_risk")
    THRESHOLD: Weighted avg FICO below 680, OR weighted avg LTV above 85%, OR weighted avg DTI above 45%.
@@ -363,8 +365,8 @@ OUTPUT FORMAT (strict JSON):
   "insights": [
     {
       "bucket": "attention",
-      "headline": "Average cycle time increased 7% MoM from 31 to 33 days",
-      "understory": "Average application-to-funding time is 33 days, up from 31 days last month. This is a 7% increase month-over-month.",
+      "headline": "Average cycle time increased 7% (trailing 30D) from 31 to 33 days",
+      "understory": "Average application-to-funding time is 33 days over the trailing 30-day window, up from 31 days in the prior 30-day window. This is a 7% increase.",
       "insight_type": "warning",
       "source": "performance",
       "severity_score": 0.62,
@@ -491,13 +493,13 @@ STANDARD CONTEXT ANGLES:
 - Locked loans count (source: "pipeline")
 - Funnel: loans started -> locked -> originated, fallout rate (source: "pipeline")
 - Portfolio credit profile: weighted avg FICO, LTV, DTI (source: "credit_risk")
-- Volume vs last month % (source: "comparisons")
+- Volume trailing 30D vs prior 30D % (source: "comparisons")
 - Volume vs last year % (source: "comparisons")
 
 NEW OPERATIONAL CONTEXT ANGLES (include if data is available and non-zero):
 - Lock expiration snapshot: count and volume of locks expiring within 7 days (source: "lock_expiration"), even if below critical threshold
 - Closing pipeline: count of loans closing within 10 days without CTC (source: "closing_risk"), even if below critical threshold
-- Gain-on-sale margin: current month bps and MoM delta (source: "margin"), if data is available
+- Gain-on-sale margin: current month bps and delta (source: "margin"), if data is available
 - Condition backlog: avg conditions per active loan (source: "condition_backlog"), if > 0
 - LTV/DTI risk accumulation: % of pipeline with LTV >= 95% or DTI >= 50% (source: "credit_risk"), if notable
 

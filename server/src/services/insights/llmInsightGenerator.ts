@@ -200,10 +200,10 @@ IMPORTANT: Do NOT mix these two groups. If you cite the number of all withdraw/d
 - Loans Originated: ${metrics.funnel.loansOriginated}
 - Fallout Rate: ${fmtPct(metrics.funnel.falloutRate)}
 
-=== TRENDS ===
-Volume MoM:
-- Current MTD funded volume: ${fmt$(metrics.comparisons.currentMtdVolume)}
-- Last month funded volume: ${fmt$(metrics.comparisons.lastMonthVolume)}
+=== TRENDS (Trailing 30-Day Windows — Apples-to-Apples) ===
+Volume (Trailing 30D vs Prior 30D):
+- Trailing 30-day funded volume: ${fmt$(metrics.comparisons.currentMtdVolume)}
+- Prior 30-day funded volume: ${fmt$(metrics.comparisons.lastMonthVolume)}
 - Change: ${metrics.comparisons.volumeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastMonth)}
 
 Volume YoY:
@@ -211,12 +211,13 @@ Volume YoY:
 - Last year same period funded volume: ${fmt$(metrics.comparisons.lastYearVolume)}
 - Change: ${metrics.comparisons.volumeVsLastYear > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastYear)}
 
-Cycle Time MoM:
-- Current cycle time: ${Math.round(metrics.comparisons.currentCycleTime)} days
-- Last month cycle time: ${Math.round(metrics.comparisons.lastMonthCycleTime)} days
+Cycle Time (Trailing 30D vs Prior 30D):
+- Trailing 30-day cycle time: ${Math.round(metrics.comparisons.currentCycleTime)} days
+- Prior 30-day cycle time: ${Math.round(metrics.comparisons.lastMonthCycleTime)} days
 - Change: ${metrics.comparisons.cycleTimeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.cycleTimeVsLastMonth)}
 
-IMPORTANT: When citing volume changes, use the EXACT dollar amounts above. Do not reverse-calculate from percentages. State "funded volume declined from {lastMonth} to {currentMTD}" with the actual numbers.
+IMPORTANT: These comparisons use equal-length 30-day rolling windows, NOT partial-month vs full-month.
+When citing volume changes, use the EXACT dollar amounts above. Do not reverse-calculate from percentages. Say "funded volume moved from {prior30D} to {trailing30D}" with the actual numbers. Do NOT say "MoM" — say "trailing 30D" or "vs prior 30 days".
 
 === CLOSING RISK (B3) ===
 - Loans closing within 10 days without CTC: ${metrics.closingRisk.atRiskCount}
