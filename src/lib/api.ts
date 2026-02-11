@@ -328,26 +328,18 @@ export class ApiClient {
     } else {
     }
 
-    // Use longer timeout for file uploads (5 minutes for large CSV files)
-    // Increased timeout to 60 seconds to match CloudFront origin timeout and handle slow backend responses
-    // Some endpoints like /api/loans/funnel can take 30-60 seconds with complex database queries
+    // Request timeouts — generous defaults so deployed environments (CloudFront, ALB)
+    // don't get killed prematurely. The server/infrastructure is the real timeout authority.
+    // CloudFront OriginReadTimeout = 240s, Node server keepAlive = 300s.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
-    const isSlowEndpoint =
-      endpoint.includes("/loans/funnel") ||
-      endpoint.includes("/dashboard/analytics") ||
-      endpoint.includes("/dashboard/insights") ||
-      endpoint.includes("/predictions");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
-        ? 600000
+        ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
-        ? 120000
-        : isSlowEndpoint
-        ? 60000
-        : 30000;
-    // 10 minutes for imports/uploads, 2 minutes for AI chat, 60 seconds for slow endpoints, 30 seconds for regular requests
+        ? 300000   // 5 minutes for AI chat (streaming)
+        : 240000;  // 4 minutes for all API requests
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();

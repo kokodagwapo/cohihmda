@@ -299,9 +299,9 @@ const startServer = () => {
   setupWebSocket(wss);
 
   // Increase server timeouts to handle long-running API requests (predictions, insights, etc.)
-  // CloudFront origin timeout should also be set to >=120s in the distribution settings
-  server.keepAliveTimeout = 120_000;   // 120s — must exceed ALB/CloudFront idle timeout
-  server.headersTimeout = 125_000;     // slightly above keepAliveTimeout per Node docs
+  // CloudFront OriginReadTimeout is set to 240s in the CloudFormation stack
+  server.keepAliveTimeout = 300_000;   // 5 min — must exceed ALB/CloudFront idle timeout (240s)
+  server.headersTimeout = 305_000;     // slightly above keepAliveTimeout per Node docs
 
   server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
