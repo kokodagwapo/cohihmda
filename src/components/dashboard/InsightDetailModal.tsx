@@ -147,7 +147,7 @@ export const InsightDetailModal = ({
       );
       setData(result);
     } catch (err: any) {
-      console.error('Error fetching insight details:', err);
+      console.error('Error fetching insight details see:', err);
       setError(err.message || 'Failed to load details');
     } finally {
       setLoading(false);
