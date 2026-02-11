@@ -17,6 +17,9 @@ import {
 
 const { Pool } = pg;
 
+// ── In-progress lock to prevent concurrent duplications of the same slug ──
+const inProgressSlugs = new Set<string>();
+
 // ── Name pools (matches anonymization migration) ──────────────────────
 
 const FAKE_FIRST_NAMES = [
@@ -621,93 +624,124 @@ export async function duplicateTenantAnonymized(
 ): Promise<DuplicateTenantResult> {
   console.log(`[TenantDuplication] Starting duplication of tenant ${sourceId} -> "${newName}" (${newSlug})`);
 
-  // 0. Check if slug already exists (guards against double-submit)
+  // 0a. In-progress lock — reject if a duplication for this slug is already running
+  if (inProgressSlugs.has(newSlug)) {
+    throw new Error(`A duplication to slug "${newSlug}" is already in progress`);
+  }
+
+  // 0b. Check if slug already exists
   const existingSlug = await managementPool.query(
-    `SELECT id FROM coheus_tenants WHERE slug = $1`,
+    `SELECT id, status FROM coheus_tenants WHERE slug = $1`,
     [newSlug]
   );
   if (existingSlug.rows.length > 0) {
-    throw new Error(`A tenant with slug "${newSlug}" already exists`);
+    const existing = existingSlug.rows[0];
+    // If a previous duplication left a stale "provisioning" tenant, clean it up automatically
+    if (existing.status === "provisioning") {
+      console.log(`[TenantDuplication] Cleaning up stale provisioning tenant with slug "${newSlug}" (id: ${existing.id})`);
+      await managementPool.query(
+        `DELETE FROM coheus_tenants WHERE id = $1`,
+        [existing.id]
+      );
+      // Also drop the orphan database if it exists
+      try {
+        const dbName = `coheus_tenant_${newSlug.replace(/-/g, "_")}`;
+        await managementPool.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+        console.log(`[TenantDuplication] Dropped orphan database "${dbName}"`);
+      } catch (dropErr: any) {
+        console.warn(`[TenantDuplication] Could not drop orphan database: ${dropErr.message}`);
+      }
+    } else {
+      throw new Error(`A tenant with slug "${newSlug}" already exists`);
+    }
   }
 
-  // 1. Verify source tenant exists
-  const sourceTenant = await getTenant(sourceId);
-  if (!sourceTenant) {
-    throw new Error(`Source tenant ${sourceId} not found`);
-  }
-  if (sourceTenant.status === "deleted") {
-    throw new Error(`Cannot duplicate a deleted tenant`);
-  }
-
-  console.log(`[TenantDuplication] Source tenant: "${sourceTenant.name}" (${sourceTenant.database_name})`);
-
-  // 2. Create the new tenant (this creates the database + schema + runs migrations)
-  let newTenant: TenantInfo;
-  try {
-    newTenant = await createTenant({
-      name: newName,
-      slug: newSlug,
-      deployment_type: sourceTenant.deployment_type as "cloud" | "on_premise" | "per_lender_aws",
-    });
-    console.log(`[TenantDuplication] New tenant created: "${newTenant.name}" (${newTenant.database_name})`);
-  } catch (err: any) {
-    throw new Error(`Failed to create new tenant: ${err.message}`);
-  }
-
-  // 3. Get pools for both databases
-  const src = await getTenantPoolById(sourceId);
-  const dst = await getTenantPoolById(newTenant.id);
+  // 0c. Acquire the lock
+  inProgressSlugs.add(newSlug);
 
   try {
-    // Set new tenant back to provisioning while we copy data
-    await updateTenantStatus(newTenant.id, "provisioning");
+    // 1. Verify source tenant exists
+    const sourceTenant = await getTenant(sourceId);
+    if (!sourceTenant) {
+      throw new Error(`Source tenant ${sourceId} not found`);
+    }
+    if (sourceTenant.status === "deleted") {
+      throw new Error(`Cannot duplicate a deleted tenant`);
+    }
 
-    // 4. Build anonymization mappings from source data
-    console.log("[TenantDuplication] Building anonymization mappings...");
-    const mappings = await buildAnonymizationMappings(src.pool);
+    console.log(`[TenantDuplication] Source tenant: "${sourceTenant.name}" (${sourceTenant.database_name})`);
 
-    // 5. Copy config tables verbatim
-    console.log("[TenantDuplication] Copying config tables...");
-    await copyConfigTables(src.pool, dst.pool);
+    // 2. Create the new tenant (this creates the database + schema + runs migrations)
+    let newTenant: TenantInfo;
+    try {
+      newTenant = await createTenant({
+        name: newName,
+        slug: newSlug,
+        deployment_type: sourceTenant.deployment_type as "cloud" | "on_premise" | "per_lender_aws",
+      });
+      console.log(`[TenantDuplication] New tenant created: "${newTenant.name}" (${newTenant.database_name})`);
+    } catch (err: any) {
+      throw new Error(`Failed to create new tenant: ${err.message}`);
+    }
 
-    // 6. Copy employees with anonymization
-    console.log("[TenantDuplication] Copying employees (anonymized)...");
-    const employeesCopied = await copyEmployeesAnonymized(src.pool, dst.pool, mappings);
+    // 3. Get pools for both databases
+    const src = await getTenantPoolById(sourceId);
+    const dst = await getTenantPoolById(newTenant.id);
 
-    // 7. Copy loans with anonymization
-    console.log("[TenantDuplication] Copying loans (anonymized)...");
-    const loansCopied = await copyLoansAnonymized(src.pool, dst.pool, mappings);
+    try {
+      // Set new tenant back to provisioning while we copy data
+      await updateTenantStatus(newTenant.id, "provisioning");
 
-    // 8. Copy loan-related data tables
-    console.log("[TenantDuplication] Copying loan-related data tables...");
-    await copyLoanRelatedData(src.pool, dst.pool);
+      // 4. Build anonymization mappings from source data
+      console.log("[TenantDuplication] Building anonymization mappings...");
+      const mappings = await buildAnonymizationMappings(src.pool);
 
-    // 9. Mark new tenant as active
-    await updateTenantStatus(newTenant.id, "active");
-    console.log(`[TenantDuplication] Duplication complete! New tenant "${newName}" is active.`);
+      // 5. Copy config tables verbatim
+      console.log("[TenantDuplication] Copying config tables...");
+      await copyConfigTables(src.pool, dst.pool);
 
-    return {
-      newTenant: { ...newTenant, status: "active" },
-      stats: {
-        configTablesCopied: CONFIG_TABLES.length,
-        employeesCopied,
-        loansCopied,
-        loanDataTablesCopied: LOAN_DATA_TABLES.length,
-        anonymizationMappings: {
-          names: mappings.nameMap.size,
-          branches: mappings.branchMap.size,
-          orgIds: mappings.orgIdMap.size,
-          employeeIds: mappings.employeeIdMap.size,
-          personnelIds: mappings.personnelIdMap.size,
+      // 6. Copy employees with anonymization
+      console.log("[TenantDuplication] Copying employees (anonymized)...");
+      const employeesCopied = await copyEmployeesAnonymized(src.pool, dst.pool, mappings);
+
+      // 7. Copy loans with anonymization
+      console.log("[TenantDuplication] Copying loans (anonymized)...");
+      const loansCopied = await copyLoansAnonymized(src.pool, dst.pool, mappings);
+
+      // 8. Copy loan-related data tables
+      console.log("[TenantDuplication] Copying loan-related data tables...");
+      await copyLoanRelatedData(src.pool, dst.pool);
+
+      // 9. Mark new tenant as active
+      await updateTenantStatus(newTenant.id, "active");
+      console.log(`[TenantDuplication] Duplication complete! New tenant "${newName}" is active.`);
+
+      return {
+        newTenant: { ...newTenant, status: "active" },
+        stats: {
+          configTablesCopied: CONFIG_TABLES.length,
+          employeesCopied,
+          loansCopied,
+          loanDataTablesCopied: LOAN_DATA_TABLES.length,
+          anonymizationMappings: {
+            names: mappings.nameMap.size,
+            branches: mappings.branchMap.size,
+            orgIds: mappings.orgIdMap.size,
+            employeeIds: mappings.employeeIdMap.size,
+            personnelIds: mappings.personnelIdMap.size,
+          },
         },
-      },
-    };
-  } catch (err: any) {
-    console.error(`[TenantDuplication] Error during data copy:`, err);
-    // Leave tenant in provisioning status so admin can clean up
-    throw new Error(`Tenant duplication failed during data copy: ${err.message}`);
+      };
+    } catch (err: any) {
+      console.error(`[TenantDuplication] Error during data copy:`, err);
+      // Leave tenant in provisioning status so admin can clean up
+      throw new Error(`Tenant duplication failed during data copy: ${err.message}`);
+    } finally {
+      await src.cleanup();
+      await dst.cleanup();
+    }
   } finally {
-    await src.cleanup();
-    await dst.cleanup();
+    // Always release the slug lock
+    inProgressSlugs.delete(newSlug);
   }
 }

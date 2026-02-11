@@ -43,6 +43,7 @@ interface TenantsSectionProps {
   onDeleteTenant: (id: string) => Promise<void>;
   onDuplicateTenant?: (id: string, name: string, slug: string) => Promise<any>;
   duplicating?: boolean;
+  duplicationProgress?: string | null;
   onRefresh: () => Promise<void>;
 }
 
@@ -55,6 +56,7 @@ export const TenantsSection = ({
   onDeleteTenant,
   onDuplicateTenant,
   duplicating = false,
+  duplicationProgress,
   onRefresh,
 }: TenantsSectionProps) => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -386,8 +388,12 @@ export const TenantsSection = ({
       </AlertDialog>
 
       {/* Duplicate & Anonymize Dialog */}
-      <Dialog open={isDuplicateDialogOpen} onOpenChange={setIsDuplicateDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+      <Dialog open={isDuplicateDialogOpen} onOpenChange={(open) => {
+        // Prevent closing while duplication is in progress
+        if (!open && isSubmitting) return;
+        setIsDuplicateDialogOpen(open);
+      }}>
+        <DialogContent className="sm:max-w-[500px]" onPointerDownOutside={(e) => { if (isSubmitting) e.preventDefault(); }}>
           <DialogHeader>
             <DialogTitle>Duplicate & Anonymize Tenant</DialogTitle>
             <DialogDescription>
@@ -405,6 +411,7 @@ export const TenantsSection = ({
                 onChange={(e) => handleDuplicateNameChange(e.target.value)}
                 placeholder="e.g. Acme Lending (Demo)"
                 className="text-base font-extralight"
+                disabled={isSubmitting}
               />
             </div>
             <div className="grid gap-2">
@@ -415,18 +422,28 @@ export const TenantsSection = ({
                 onChange={(e) => setDuplicateFormData(prev => ({ ...prev, slug: e.target.value }))}
                 placeholder="e.g. acme-lending-demo"
                 className="text-base font-extralight font-mono"
+                disabled={isSubmitting}
               />
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Lowercase letters, numbers, and hyphens only. Used for the database name.
               </p>
             </div>
-            <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3">
-              <p className="text-sm text-amber-800 dark:text-amber-200">
-                This operation copies all loans, employees, and configuration from the source tenant.
-                Personnel names, employee IDs, branches, and org IDs will be anonymized. 
-                This may take a few minutes for large datasets.
-              </p>
-            </div>
+            {isSubmitting && duplicationProgress ? (
+              <div className="rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 flex items-center gap-3">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <p className="text-sm text-blue-800 dark:text-blue-200 font-medium">
+                  {duplicationProgress}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3">
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  This operation copies all loans, employees, and configuration from the source tenant.
+                  Personnel names, employee IDs, branches, and org IDs will be anonymized. 
+                  This may take a few minutes for large datasets.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

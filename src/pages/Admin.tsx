@@ -96,6 +96,7 @@ export const Admin = () => {
     tenants,
     loading: tenantsLoading,
     duplicating,
+    duplicationProgress,
     loadTenants,
     createTenant,
     updateTenant,
@@ -492,6 +493,7 @@ export const Admin = () => {
                   onDeleteTenant={deleteTenant}
                   onDuplicateTenant={duplicateTenant}
                   duplicating={duplicating}
+                  duplicationProgress={duplicationProgress}
                   onRefresh={loadTenants}
                 />
               )}
