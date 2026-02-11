@@ -276,7 +276,7 @@ router.get(
   attachTenantContext,
   async (req: AuthRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Check if it's a builtin template
       const builtin = getBuiltinTemplate(id);

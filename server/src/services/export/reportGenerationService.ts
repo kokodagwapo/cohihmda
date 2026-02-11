@@ -198,8 +198,8 @@ async function resolveDataSource(
       };
       if (ds.options?.dateRange) {
         opts.dateRange = {
-          start: new Date(ds.options.dateRange.start),
-          end: new Date(ds.options.dateRange.end),
+          start: ds.options.dateRange.start ?? null,
+          end: ds.options.dateRange.end ?? null,
         };
       }
       if (ds.options?.dateField) {
@@ -410,7 +410,7 @@ function renderSlideByLayout(
     default:
       // Standard content slide: add title bar
       if (slideDef.title) {
-        slide.addShape(pres.ShapeType ? "rect" : ("rect" as any), {
+        slide.addShape("rect" as any, {
           x: 0,
           y: 0,
           w: 10,

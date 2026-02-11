@@ -891,6 +891,7 @@ export default {
   restoreVersion,
   buildPrompt,
   seedDefaultPrompts,
+  forceSeedDefaultPrompts,
   exportAllPrompts,
   importPrompts,
   getCategories,
