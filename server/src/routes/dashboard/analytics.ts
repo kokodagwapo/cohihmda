@@ -11,6 +11,7 @@ import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
   getLeaderboardData,
   getInsights,
+  refreshInsights,
   getClosingFalloutForecast,
   getDashboardOverview,
   getFinancialModelingBaseline,
@@ -195,6 +196,62 @@ router.get(
 
       res.status(500).json({
         error: "Failed to generate insights",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/refresh
+ * Triggers fresh insight generation: collects metrics → 4 parallel LLM calls → persists to DB → returns new insights.
+ * Query params:
+ * - dateFilter: 'today' | 'mtd' | 'ytd' (default: 'ytd')
+ * - channel_group: optional channel filter
+ */
+router.post(
+  "/insights/refresh",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { dateFilter = "ytd", channel_group } = req.query;
+
+      // Get user's loan access context
+      const accessCtx = await getLoanAccessContext(
+        req,
+        tenantContext.tenantPool
+      );
+
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          insights: [],
+          metrics: {},
+          accessFiltered: true,
+          noAccess: true,
+        });
+      }
+
+      const result = await refreshInsights(
+        tenantContext.tenantPool,
+        dateFilter as string,
+        {
+          tenantId: tenantContext.tenantId,
+          channelGroup: channel_group as string | undefined,
+        }
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error refreshing insights:", error);
+
+      if (handleDatabaseError(error, res, "Failed to refresh insights")) {
+        return;
+      }
+
+      res.status(500).json({
+        error: "Failed to refresh insights",
         details:
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });

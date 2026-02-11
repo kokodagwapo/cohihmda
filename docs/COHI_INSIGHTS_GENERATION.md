@@ -40,9 +40,10 @@ The system has **two insight generation tracks**:
 2. **Rule-Based** (fallback): Uses hardcoded business logic with thresholds/benchmarks to generate insights from the same data, used when LLM is disabled or unavailable.
 
 **Key design decisions:**
-- The frontend currently requests with `useLLM=false` (hardcoded in the hook), meaning **rule-based insights are the default** in production.
-- LLM insights can be enabled by changing this parameter or removing it (defaults to `true` on the server).
+- The frontend requests with `useLLM=true`, meaning **LLM-powered insights are the default** when an OpenAI API key is configured.
+- If LLM fails (no API key, network error, etc.), the system automatically falls back to rule-based insights.
 - Both tracks share the same `Insight` interface and are interchangeable from the frontend's perspective.
+- **Prompts are editable via the Admin UI** (`AIPromptManager`). The LLM insight generator reads the system prompt, model, temperature, and max_tokens from the `ai_prompt_configs` database table (prompt ID: `insights.executive_briefing`). Changes made in the admin panel take effect on the next insight generation (after cache expires or force refresh).
 
 ---
 
@@ -340,17 +341,23 @@ After parallel fetches, it also:
 
 **File:** `server/src/services/insights/llmInsightGenerator.ts`
 
-**Model:** OpenAI `gpt-4o-mini`
-**Temperature:** 0.7
-**Max Tokens:** 2000
+**Prompt Config Source:** Database table `ai_prompt_configs` (prompt ID: `insights.executive_briefing`)
+**Editable via:** Admin Panel → AI Prompts → Insights category
+**Default Model:** OpenAI `gpt-4o-mini` (configurable via admin panel)
+**Default Temperature:** 0.7 (configurable via admin panel)
+**Default Max Tokens:** 2000 (configurable via admin panel)
 **Response Format:** JSON mode (`response_format: { type: 'json_object' }`)
+
+**Prompt Loading Priority:**
+1. **Database** (`ai_prompt_configs` table) — loads system_prompt, model, temperature, max_tokens from the `insights.executive_briefing` row
+2. **Hardcoded fallback** (`buildSystemPrompt()` in `llmInsightGenerator.ts`) — used only if database lookup fails
 
 **API Key Resolution Order:**
 1. Tenant-specific: `rag_settings.openai_api_key` in tenant database (decrypted via `decryptAPIKeys`)
 2. Environment variable: `process.env.OPENAI_API_KEY`
 3. Throws error if neither available
 
-**System Prompt (buildSystemPrompt):**
+**System Prompt (from database `insights.executive_briefing` config):**
 Defines Cohi as "an AI assistant for mortgage executives" with these critical rules:
 - Generate 8-12 insights covering different business aspects
 - Only include NOTABLE observations (not obvious status updates)
@@ -572,31 +579,40 @@ if (lockedLoansCount > 0 && activeLoansCount > 0) {
 
 ### Modifying the LLM System Prompt
 
-**Where:** `server/src/services/insights/llmInsightGenerator.ts`, `buildSystemPrompt()` function (line 76).
+**Preferred method: Admin UI (no code changes needed)**
 
-The system prompt controls the AI's personality, rules, and output format. To change how insights are generated:
+1. Go to the **Admin Panel** → **AI Prompts** section.
+2. Find the **"LLM Executive Insights"** prompt under the **Insights** category (ID: `insights.executive_briefing`).
+3. Click to edit — you can modify:
+   - **System Prompt** tab: The main persona, rules, output format
+   - **User Template** tab: The metrics layout sent to the LLM (uses `{{metricsPayload}}` variable)
+   - **Settings** tab: Model (gpt-4o, gpt-4o-mini, etc.), temperature, max tokens, JSON mode
+4. Add a **change summary** and click **Save Changes**.
+5. **Force refresh** insights on the dashboard (click the refresh icon) or wait for the 1-hour cache to expire.
 
-1. **Tone/Style:** Modify the opening sentence: `"You are Cohi, an AI assistant for mortgage executives."`
-2. **Number of insights:** Change `"Generate 8-12 insights"` to your desired range.
-3. **Focus areas:** Add or modify rules in the `CRITICAL RULES` section.
-4. **New insight types:** Add to the `INSIGHT TYPES` section (must also update validation in `parseAndValidateLLMResponse`).
-5. **New sources:** Add to the `SOURCES` section (must also update validation).
+**Important:** The prompt config service has a **5-minute in-memory cache**. After saving in the admin panel, insights will use the new prompt within 5 minutes (or immediately on force refresh, which also clears the insight cache).
+
+**Version history** is tracked — you can view previous versions and restore any version from the History panel.
+
+**Alternative method: Code changes (fallback)**
+
+If the database is unavailable, the system falls back to `buildSystemPrompt()` in `server/src/services/insights/llmInsightGenerator.ts` (line 76). You can also edit the hardcoded defaults in `server/src/config/defaultPromptConfigs.ts` under the `insights.executive_briefing` entry.
 
 **Example — Adding a "compliance" source:**
 
-In `buildSystemPrompt()`:
+In the admin panel, edit the system prompt and add to the SOURCES section:
 ```
 SOURCES (use the most relevant):
 ...existing sources...
 - "compliance": Regulatory compliance, deadline tracking
 ```
 
-In `parseAndValidateLLMResponse()` (line 256):
+Then in `parseAndValidateLLMResponse()` in `llmInsightGenerator.ts` (line 256), add the new source to validation:
 ```typescript
 const validSources = ['predictions', 'performance', 'pipeline', 'credit_risk', 'lost_opportunity', 'comparisons', 'compliance'];
 ```
 
-In `llmInsightGenerator.ts` `GeneratedInsight` interface:
+And in the `GeneratedInsight` interface:
 ```typescript
 source: 'predictions' | 'performance' | 'pipeline' | 'credit_risk' | 'lost_opportunity' | 'comparisons' | 'compliance';
 ```
@@ -741,27 +757,28 @@ const payload: InsightMetricsPayload = {
 | `server/src/services/insights/index.ts` | Barrel exports for insights module | Re-exports from collector + generator |
 | `server/src/services/insights/insightMetricsCollector.ts` | Aggregates all metrics for LLM | `collectInsightMetrics`, `InsightMetricsPayload` |
 | `server/src/services/insights/llmInsightGenerator.ts` | OpenAI integration, prompts, caching | `generateLLMInsights`, `GeneratedInsight`, `clearCache` |
+| `server/src/services/promptConfigService.ts` | Database prompt CRUD, caching, versioning | `getPromptConfig`, `updatePromptConfig`, `buildPrompt` |
+| `server/src/config/defaultPromptConfigs.ts` | Hardcoded default prompts (seeded to DB) | `DEFAULT_PROMPT_CONFIGS`, `PromptConfig` |
+| `src/components/admin/AIPromptManager.tsx` | Admin UI for editing prompts | `AIPromptManager` |
+| `src/hooks/admin/useAIPrompts.ts` | Hook for admin prompt management | `useAIPrompts` |
+| `server/src/routes/admin/aiPrompts.ts` | Admin API for prompt CRUD | Express router |
 
 ---
 
-## Quick-Reference: How to Enable LLM Insights
+## Quick-Reference: How Insights Work Now
 
-Currently, the frontend hardcodes `useLLM=false`. To switch to LLM-generated insights:
+LLM-powered insights are **enabled by default** (`useLLM=true`). The system automatically falls back to rule-based insights if the LLM is unavailable.
 
-1. **In `src/hooks/useAletheiaData.ts` (line 123)**, change:
-   ```typescript
-   // Current (rule-based):
-   `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=false${tenantParam}${forceRefreshParam}${channelParam}`
-   
-   // LLM-powered:
-   `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${forceRefreshParam}${channelParam}`
-   
-   // Or remove useLLM entirely (defaults to true on server):
-   `/api/dashboard/insights?dateFilter=${dateFilter}${tenantParam}${forceRefreshParam}${channelParam}`
-   ```
+**To edit the insight prompt:**
+1. Go to Admin Panel → AI Prompts → Insights → "LLM Executive Insights"
+2. Edit the system prompt, model, temperature, etc.
+3. Save with a change summary
+4. Force refresh insights on the dashboard (or wait for cache expiry)
 
-2. **Ensure an OpenAI API key is configured:**
-   - Per-tenant: Insert into `rag_settings.openai_api_key` (encrypted) in the tenant database
-   - Global fallback: Set `OPENAI_API_KEY` environment variable in `server/.env`
+**Ensure an OpenAI API key is configured:**
+- Per-tenant: Insert into `rag_settings.openai_api_key` (encrypted) in the tenant database
+- Global fallback: Set `OPENAI_API_KEY` environment variable in `server/.env`
 
-3. **Test:** Refresh the dashboard. The "AI" badge should appear next to "Executive briefing" if LLM insights are being used.
+**To force rule-based insights only** (disable LLM), change `useLLM=true` to `useLLM=false` in `src/hooks/useAletheiaData.ts` (line 123).
+
+**Verification:** When LLM insights are active, an "AI" badge appears next to "Executive briefing" in the insights card header.

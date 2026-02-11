@@ -74,6 +74,8 @@ export interface UseWorkbenchCohiOptions {
   /** Canvas ID for conversation persistence */
   canvasId?: string | null;
   onError?: (error: Error) => void;
+  /** Called when the AI returns executable actions — auto-executes them on the canvas */
+  onAutoExecuteActions?: (actions: WidgetAction[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,16 +83,16 @@ export interface UseWorkbenchCohiOptions {
 // ---------------------------------------------------------------------------
 
 export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
-  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, onError } = options;
+  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, onError, onAutoExecuteActions } = options;
 
   const [messages, setMessages] = useState<WorkbenchChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([
-    'What dashboards are available?',
-    'Add the Company Scorecard',
-    'Show me loan volume by branch',
-    'Explain pull-through rate',
+    'Prepare a board-ready overview of this month\'s performance',
+    'Summarize pipeline health and pull-through trends',
+    'What needs my attention right now?',
+    'Build an executive dashboard with key KPIs',
   ]);
 
   const messageIdCounter = useRef(0);
@@ -268,6 +270,18 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
         setMessages((prev) =>
           prev.map((m) => (m.id === loadingId ? assistantMessage : m))
         );
+
+        // Auto-execute canvas-modifying actions so widgets appear immediately
+        if (response.actions?.length && onAutoExecuteActions) {
+          const executableTypes = new Set([
+            'add_existing_widget', 'create_widget', 'create_canvas',
+            'suggest_dashboard', 'modify_widget', 'delete_widget',
+          ]);
+          const autoActions = response.actions.filter((a) => executableTypes.has(a.type));
+          if (autoActions.length > 0) {
+            onAutoExecuteActions(autoActions);
+          }
+        }
 
         if (response.suggestedQuestions?.length) {
           setSuggestedQuestions(response.suggestedQuestions);

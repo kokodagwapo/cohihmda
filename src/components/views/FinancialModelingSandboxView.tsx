@@ -225,8 +225,201 @@ export function FinancialModelingSandboxView({ selectedTenantId }: FinancialMode
     setOtherSupport(t?.other ?? DEFAULT_TARGET_OTHER);
   };
 
+  /**
+   * Print results using a dedicated print window with clean, print-optimized tables.
+   * Mirrors the Qlik extension's react-to-print approach: renders a dedicated print layout
+   * (Productivity Improvement, Estimated Count, Additional Profit Improvements, Total)
+   * in a new window with proper CSS, then triggers the browser print dialog.
+   */
   const printResults = () => {
-    window.print();
+    const productivity = calculateProductivityData();
+    const totalProductivitySavings = productivity.reduce(
+      (sum, r) => sum + r.productivityImprovement,
+      0
+    );
+
+    const profitRows: ProfitImprovementData[] = [
+      {
+        metric: "MLO Improvement",
+        actual: baseMloActual.toFixed(1),
+        valueSelected: mlo.toFixed(1),
+        profitImprovement: mloImprovementDollars,
+      },
+      {
+        metric: "Pull Through Increase",
+        actual: `${basePullThroughActual.toFixed(2)}%`,
+        valueSelected: `${pullThroughPercent.toFixed(2)}%`,
+        profitImprovement: pullThroughImprovementDollars,
+      },
+      {
+        metric: "Margin Improvement",
+        actual: `${baseMarginActualBp} BP`,
+        valueSelected: `${baseMarginActualBp + marginIncreaseBP} BP`,
+        profitImprovement: Math.round(
+          marginIncreaseBP > 0 ? marginIncreaseBP * marginProfitPerBp : 0
+        ),
+      },
+    ];
+
+    const totalRevenueIncrease = profitRows.reduce(
+      (sum, r) => sum + r.profitImprovement,
+      0
+    );
+    const totalProfitImprovement = totalProductivitySavings + totalRevenueIncrease;
+
+    const fmtCurrency = (v: number) =>
+      new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(v);
+
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) return;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Proforma Slider Results</title>
+  <style>
+    @page { margin: 12mm; }
+    body {
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      color: #1e293b;
+      margin: 0;
+      padding: 24px;
+      -webkit-print-color-adjust: exact;
+      color-adjust: exact;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .subtitle { font-size: 11px; color: #64748b; margin-bottom: 20px; }
+    h2 { font-size: 14px; margin: 18px 0 6px; color: #334155; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+    th, td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; font-size: 12px; }
+    th { background-color: #f8fafc; font-weight: 600; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
+    td { color: #334155; }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-green { color: #059669; font-weight: 600; }
+    .text-red { color: #dc2626; }
+    .total-row td { background-color: #f1f5f9; font-weight: 700; font-size: 13px; }
+    .section-header td { background-color: #f8fafc; font-weight: 600; }
+    .kpi-row { display: flex; gap: 24px; margin-bottom: 16px; }
+    .kpi-box { flex: 1; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; }
+    .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 2px; }
+    .kpi-value { font-size: 20px; font-weight: 700; color: #0f172a; }
+    .kpi-sub { font-size: 10px; color: #94a3b8; }
+    @media print {
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Financial Modeling — Proforma Results</h1>
+  <div class="subtitle">Generated ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
+
+  <div class="kpi-row">
+    <div class="kpi-box">
+      <div class="kpi-label">Total Units Closed</div>
+      <div class="kpi-value">${(totalClosedUnits ?? 0).toLocaleString()}</div>
+      <div class="kpi-sub">Rolling 12 months${baseline?.dateRange?.start && baseline?.dateRange?.end ? ` · ${baseline.dateRange.start} – ${baseline.dateRange.end}` : ""}</div>
+    </div>
+    <div class="kpi-box">
+      <div class="kpi-label">Total Dollars Closed</div>
+      <div class="kpi-value">${fmtCurrency(totalClosedVolume ?? 0)}</div>
+      <div class="kpi-sub">Rolling 12 months${baseline?.dateRange?.start && baseline?.dateRange?.end ? ` · ${baseline.dateRange.start} – ${baseline.dateRange.end}` : ""}</div>
+    </div>
+  </div>
+
+  <h2>Productivity Improvement</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>User Role</th>
+        <th class="text-center">Actual</th>
+        <th class="text-center">Target</th>
+        <th class="text-center">Delta</th>
+        <th class="text-center">Actual Cost</th>
+        <th class="text-center">Target Cost</th>
+        <th class="text-center">Savings/Unit</th>
+        <th class="text-center">Productivity Improvement</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${productivity
+        .map(
+          (r) => `<tr>
+        <td>${r.role}</td>
+        <td class="text-center">${r.actual}</td>
+        <td class="text-center">${r.target}</td>
+        <td class="text-center">${r.delta}</td>
+        <td class="text-center">${fmtCurrency(r.actualCost)}</td>
+        <td class="text-center">${fmtCurrency(r.targetCost)}</td>
+        <td class="text-center text-green">${fmtCurrency(r.savingsPerUnit)}</td>
+        <td class="text-center text-green">${fmtCurrency(r.productivityImprovement)}</td>
+      </tr>`
+        )
+        .join("\n")}
+      <tr class="total-row">
+        <td colspan="7">Total Productivity Savings</td>
+        <td class="text-center text-green">${fmtCurrency(totalProductivitySavings)}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Estimated Headcount</h2>
+  <table style="width: auto; min-width: 220px;">
+    <thead>
+      <tr><th>Role</th><th class="text-center">Estimated Count</th></tr>
+    </thead>
+    <tbody>
+      ${estimatedCountData
+        .map(
+          (r) => `<tr><td>${r.role}</td><td class="text-center">${r.estimatedCount}</td></tr>`
+        )
+        .join("\n")}
+    </tbody>
+  </table>
+
+  <h2>Additional Profit Improvements</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Metric</th>
+        <th class="text-center">Actual</th>
+        <th class="text-center">Value Selected</th>
+        <th class="text-center">Profit Improvement</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${profitRows
+        .map(
+          (r) => `<tr>
+        <td>${r.metric}</td>
+        <td class="text-center">${r.actual}</td>
+        <td class="text-center">${r.valueSelected}</td>
+        <td class="text-center text-green">${r.profitImprovement > 0 ? fmtCurrency(r.profitImprovement) : "$0"}</td>
+      </tr>`
+        )
+        .join("\n")}
+      <tr class="total-row">
+        <td colspan="3">Total Profit Improvements</td>
+        <td class="text-center text-green">${fmtCurrency(totalProfitImprovement)}</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    // Wait for content to render before triggering print
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+      printWindow.onafterprint = () => printWindow.close();
+    };
   };
 
   /**

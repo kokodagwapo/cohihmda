@@ -132,7 +132,7 @@ router.post(
 );
 
 // ============================================================================
-// POST /api/admin/ai-prompts/seed - Seed default prompts
+// POST /api/admin/ai-prompts/seed - Seed default prompts (insert only)
 // ============================================================================
 router.post(
   "/seed",
@@ -151,6 +151,30 @@ router.post(
       res
         .status(500)
         .json({ error: error.message || "Failed to seed prompts" });
+    }
+  }
+);
+
+// ============================================================================
+// POST /api/admin/ai-prompts/force-seed - Force re-seed (upsert all defaults)
+// ============================================================================
+router.post(
+  "/force-seed",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const upserted = await promptConfigService.forceSeedDefaultPrompts();
+      res.json({
+        success: true,
+        upserted,
+        message: `Force-seeded ${upserted} prompt configurations (upsert)`,
+      });
+    } catch (error: any) {
+      console.error("[AI Prompts] Error force-seeding prompts:", error);
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to force-seed prompts" });
     }
   }
 );

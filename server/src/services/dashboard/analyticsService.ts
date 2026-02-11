@@ -8,9 +8,15 @@ import type { LoanAccessFilter } from "../userLoanAccessService.js";
 import {
   collectInsightMetrics,
   generateLLMInsights,
+  generateCategorizedInsights,
+  loadStoredInsights,
   clearCache as clearInsightsCache,
 } from "../insights/index.js";
-import type { GeneratedInsight } from "../insights/index.js";
+import type {
+  GeneratedInsight,
+  CategorizedInsight,
+  CategorizedInsightsResponse,
+} from "../insights/index.js";
 import {
   REVENUE_SQL_EXPRESSION,
   getTenantRevenueExpression,
@@ -102,12 +108,22 @@ export interface BusinessOverviewMetrics {
 }
 
 export interface Insight {
+  /** DB row id from generated_insights — used for exact drill-down queries */
+  id?: number;
   type: string;
   message: string;
   priority: string;
   reasoning?: string;
   source?: string;
   forPodcast?: boolean;
+  // Enriched categorized insight fields
+  bucket?: string;
+  headline?: string;
+  understory?: string;
+  severity_score?: number;
+  bucketPriority?: string;
+  impact?: { type?: string; estimated_dollars?: number | null; units_affected?: number | null };
+  evidence?: { metrics?: string[]; comparisons?: string[] };
 }
 
 /**
@@ -1171,6 +1187,7 @@ export async function getInsights(
   usedLLM?: boolean;
   channelGroup?: string;
   summaryForPodcast?: string;
+  needsGeneration?: boolean;
   summary: {
     totalLoans: number;
     revenue: number;
@@ -1193,81 +1210,102 @@ export async function getInsights(
     channelGroup,
   } = options;
 
-  // Try LLM-based insights first if enabled
+  // Try reading persisted insights from the database first (fast path)
   if (useLLM) {
     try {
-      console.log(
-        `[Insights] Attempting LLM-based insight generation (dateFilter: ${dateFilter}, tenantId: ${
-          tenantId || "default"
-        }, channelGroup: ${channelGroup || "all"})`
-      );
+      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup);
 
-      // Clear cache if force refresh
-      if (forceRefresh) {
-        clearInsightsCache(tenantId);
+      if (stored && stored.insights.length > 0) {
+        console.log(
+          `[Insights] Found ${stored.insights.length} stored insights (batch: ${stored.generationBatch})`
+        );
+
+        // Map categorized insights to the API response format
+        const insights: Insight[] = stored.insights.map(
+          (ins: CategorizedInsight) => ({
+            id: (ins as any).id,
+            type: ins.insight_type,
+            message: ins.headline,
+            priority:
+              ins.severity_score >= 0.8
+                ? "critical"
+                : ins.severity_score >= 0.55
+                  ? "high"
+                  : ins.severity_score >= 0.3
+                    ? "medium"
+                    : "low",
+            reasoning: ins.understory,
+            source: ins.source as Insight["source"],
+            forPodcast: ins.for_podcast,
+            // Enriched fields
+            bucket: ins.bucket,
+            headline: ins.headline,
+            understory: ins.understory,
+            severity_score: ins.severity_score,
+            bucketPriority: ins.priority,
+            impact: ins.impact,
+            evidence: ins.evidence,
+          })
+        );
+
+        return {
+          insights,
+          generatedAt: stored.generatedAt,
+          dateFilter,
+          usedLLM: true,
+          summaryForPodcast: stored.summaryForPodcast,
+          needsGeneration: false,
+          summary: {
+            totalLoans: 0,
+            revenue: 0,
+            pullThroughRate: "0",
+            avgCycleTime: 0,
+            totalInsights: insights.length,
+            bySource: {
+              business_overview: insights.filter((i) =>
+                ["performance", "pipeline"].includes(i.source)
+              ).length,
+              leaderboard: 0,
+              industry_news: 0,
+              loan_funnel: insights.filter(
+                (i) => i.source === "lost_opportunity"
+              ).length,
+              predictions: insights.filter((i) => i.source === "predictions")
+                .length,
+            },
+          },
+        };
       }
 
-      // Collect metrics from all sources with optional channel filter
-      const metricsPayload = await collectInsightMetrics(
-        tenantPool,
-        dateFilter,
-        { channelGroup }
-      );
-
-      // Generate insights via LLM
-      const llmResult = await generateLLMInsights(metricsPayload, tenantId, {
-        useCache: !forceRefresh,
-        cacheTtlSeconds: 3600, // 1 hour cache
-      });
-
-      // Convert LLM insights to the expected Insight format
-      const insights: Insight[] = llmResult.insights.map(
-        (insight: GeneratedInsight) => ({
-          type: insight.type,
-          message: insight.message,
-          priority: insight.priority,
-          reasoning: insight.reasoning,
-          source: insight.source as Insight["source"],
-          forPodcast: insight.forPodcast,
-        })
-      );
-
+      // No stored insights — return empty with needsGeneration flag
       console.log(
-        `[Insights] LLM generated ${insights.length} insights successfully`
+        `[Insights] No stored insights found for dateFilter=${dateFilter}, returning needsGeneration=true`
       );
-
       return {
-        insights,
+        insights: [],
         generatedAt: new Date().toISOString(),
         dateFilter,
-        usedLLM: true,
-        summaryForPodcast: llmResult.summaryForPodcast,
+        usedLLM: false,
+        needsGeneration: true,
         summary: {
-          totalLoans:
-            metricsPayload.pipeline.activeLoans +
-            metricsPayload.pipeline.closedLoans,
-          revenue: metricsPayload.performance.revenueYTD,
-          pullThroughRate:
-            metricsPayload.performance.pullThroughRolling90D.toFixed(1),
-          avgCycleTime: Math.round(metricsPayload.performance.avgCycleTime),
-          totalInsights: insights.length,
+          totalLoans: 0,
+          revenue: 0,
+          pullThroughRate: "0",
+          avgCycleTime: 0,
+          totalInsights: 0,
           bySource: {
-            business_overview: insights.filter((i) =>
-              ["performance", "pipeline"].includes(i.source)
-            ).length,
+            business_overview: 0,
             leaderboard: 0,
             industry_news: 0,
-            loan_funnel: insights.filter((i) => i.source === "lost_opportunity")
-              .length,
-            predictions: insights.filter((i) => i.source === "predictions")
-              .length,
+            loan_funnel: 0,
+            predictions: 0,
           },
         },
       };
-    } catch (llmError) {
+    } catch (dbError) {
       console.error(
-        "[Insights] LLM insight generation failed, falling back to rule-based:",
-        llmError
+        "[Insights] Error reading stored insights, falling back to rule-based:",
+        dbError
       );
       // Continue to rule-based fallback below
     }
@@ -2143,6 +2181,120 @@ export interface DashboardOverview {
     likelyWithdraw: number;
     likelyDecline: number;
     predictedFalloutTotal: number;
+  };
+}
+
+/**
+ * Refresh insights — always triggers fresh generation (metrics + 4 parallel LLM calls + DB persist).
+ * Called by POST /api/dashboard/insights/refresh
+ */
+export async function refreshInsights(
+  tenantPool: pg.Pool,
+  dateFilter: string = "ytd",
+  options: {
+    tenantId?: string;
+    channelGroup?: string;
+  } = {}
+): Promise<{
+  insights: Insight[];
+  generatedAt: string;
+  dateFilter: string;
+  usedLLM: boolean;
+  summaryForPodcast?: string;
+  needsGeneration: boolean;
+  summary: {
+    totalLoans: number;
+    revenue: number;
+    pullThroughRate: string;
+    avgCycleTime: number;
+    totalInsights: number;
+    bySource: {
+      business_overview: number;
+      leaderboard: number;
+      industry_news: number;
+      loan_funnel: number;
+      predictions?: number;
+    };
+  };
+}> {
+  const { tenantId, channelGroup } = options;
+
+  console.log(
+    `[Insights] Refreshing insights (dateFilter: ${dateFilter}, tenant: ${tenantId || "default"}, channel: ${channelGroup || "all"})`
+  );
+
+  // Collect metrics from all sources
+  const metricsPayload = await collectInsightMetrics(tenantPool, dateFilter, {
+    channelGroup,
+  });
+
+  // Generate categorized insights (4 parallel LLM calls → persist to DB)
+  const result = await generateCategorizedInsights(
+    metricsPayload,
+    tenantPool,
+    tenantId,
+    { channelGroup }
+  );
+
+  // Re-read from DB so we get the DB-assigned IDs (needed for drill-down)
+  const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup);
+  const insightsSource = stored?.insights ?? result.insights;
+
+  // Map to API response format
+  const insights: Insight[] = insightsSource.map(
+    (ins: CategorizedInsight) => ({
+      id: (ins as any).id,
+      type: ins.insight_type,
+      message: ins.headline,
+      priority:
+        ins.severity_score >= 0.8
+          ? "critical"
+          : ins.severity_score >= 0.55
+            ? "high"
+            : ins.severity_score >= 0.3
+              ? "medium"
+              : "low",
+      reasoning: ins.understory,
+      source: ins.source as Insight["source"],
+      forPodcast: ins.for_podcast,
+      // Enriched fields
+      bucket: ins.bucket,
+      headline: ins.headline,
+      understory: ins.understory,
+      severity_score: ins.severity_score,
+      bucketPriority: ins.priority,
+      impact: ins.impact,
+      evidence: ins.evidence,
+    })
+  );
+
+  return {
+    insights,
+    generatedAt: result.generatedAt,
+    dateFilter,
+    usedLLM: true,
+    summaryForPodcast: result.summaryForPodcast,
+    needsGeneration: false,
+    summary: {
+      totalLoans:
+        metricsPayload.pipeline.activeLoans +
+        metricsPayload.pipeline.closedLoans,
+      revenue: metricsPayload.performance.revenueYTD,
+      pullThroughRate:
+        metricsPayload.performance.pullThroughRolling90D.toFixed(1),
+      avgCycleTime: Math.round(metricsPayload.performance.avgCycleTime),
+      totalInsights: insights.length,
+      bySource: {
+        business_overview: insights.filter((i) =>
+          ["performance", "pipeline"].includes(i.source)
+        ).length,
+        leaderboard: 0,
+        industry_news: 0,
+        loan_funnel: insights.filter((i) => i.source === "lost_opportunity")
+          .length,
+        predictions: insights.filter((i) => i.source === "predictions").length,
+      },
+    },
   };
 }
 

@@ -86,10 +86,36 @@ import { WidgetDataProvider } from '@/components/widgets/data';
 import { WorkbenchCohiPanel } from '@/components/workbench/WorkbenchCohiPanel';
 import { useWorkbenchCohi } from '@/hooks/useWorkbenchCohi';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
+import { ReportBuilder } from '@/components/workbench/report/ReportBuilder';
 import { serializeWidgetCatalog } from '@/utils/widgetCatalogSerializer';
 import type { WidgetAction } from '@/types/widgetActions';
 import { ImageToDashboardDialog } from '@/components/workbench/ImageToDashboardDialog';
 import { Camera } from 'lucide-react';
+
+/**
+ * Helper: make an authenticated POST that returns a Blob (for PPTX/PDF downloads).
+ * api.request() always parses JSON, so we use fetch directly for binary responses.
+ */
+async function fetchBlob(endpoint: string, body: object): Promise<Blob> {
+  const token = localStorage.getItem('auth_token');
+  const baseUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
+  const url = baseUrl ? `${baseUrl}${endpoint}` : endpoint;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => 'Unknown error');
+    let errMsg = `Report generation failed (${res.status})`;
+    try { errMsg = JSON.parse(errText).error || errMsg; } catch { /* use default */ }
+    throw new Error(errMsg);
+  }
+  return res.blob();
+}
 
 const UPLOAD_ALLOWED_TYPES = [
   'text/csv',
@@ -565,6 +591,10 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
 
   // --- Cohi Workbench Intelligence ---
   const widgetCatalog = React.useMemo(() => serializeWidgetCatalog(), []);
+
+  // Ref to hold the latest handleCohiAction for auto-execution (avoids circular dep with hook)
+  const cohiActionRef = useRef<(action: WidgetAction) => void>(() => {});
+
   const {
     messages: cohiMessages,
     isLoading: cohiLoading,
@@ -575,6 +605,106 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
     tenantId,
     canvasItems: items,
     widgetCatalog,
+    onAutoExecuteActions: useCallback((actions: WidgetAction[]) => {
+      // Batch-execute all canvas actions to avoid stale-state issues
+      // Separate create_widget actions (need intelligent layout) from others
+      const createWidgetActions = actions.filter((a) => a.type === 'create_widget');
+      const otherActions = actions.filter((a) => a.type !== 'create_widget');
+
+      // Execute non-create_widget actions normally (one at a time)
+      for (const action of otherActions) {
+        cohiActionRef.current(action);
+      }
+
+      // Batch all create_widget actions into a SINGLE widget_group (or add to existing)
+      if (createWidgetActions.length > 0) {
+        setItemsWithHistory((prev) => {
+          // Build all cohi widget items
+          const cohiItems = createWidgetActions.map((action, idx) => ({
+            kind: 'cohi' as const,
+            id: `cohi-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+            sql: action.sql,
+            title: action.title,
+            vizConfig: action.config,
+            explanation: action.explanation,
+          }));
+
+          // Check if there's an existing widget_group we can append to
+          const existingGroupIdx = prev.findIndex(
+            (it) => it.type === 'widget_group' && it.payload.type === 'widget_group'
+          );
+
+          if (existingGroupIdx !== -1) {
+            // Add to existing group
+            const existingGroup = prev[existingGroupIdx];
+            const groupPayload = existingGroup.payload;
+            const currentItems = groupPayload.items || groupPayload.widgetIds.map((id: string) => ({ kind: 'registry' as const, defId: id }));
+            const mergedItems = [...currentItems, ...cohiItems];
+
+            // Grow the group height to accommodate new widgets
+            const newChartCount = createWidgetActions.length;
+            const extraH = Math.ceil(newChartCount / 2) * 280;
+
+            const updated = prev.map((it, i) =>
+              i === existingGroupIdx
+                ? {
+                    ...it,
+                    h: it.h + extraH,
+                    payload: {
+                      ...groupPayload,
+                      items: mergedItems,
+                      widgetIds: mergedItems.filter((item: any) => item.kind === 'registry').map((item: any) => item.defId),
+                    },
+                  }
+                : it
+            );
+            return updated;
+          }
+
+          // No existing group — create a new one
+          const newItems = [...prev];
+          let yOffset = 20;
+          for (const item of prev) {
+            const bottom = item.y + item.h;
+            if (bottom + 20 > yOffset) yOffset = bottom + 20;
+          }
+
+          // Determine a good title for the group
+          const groupTitle = createWidgetActions.length === 1
+            ? (createWidgetActions[0].title || 'Cohi Widget')
+            : 'Cohi Dashboard';
+
+          // Size: taller for more widgets (KPIs are short, charts need ~250px each)
+          const kpiCount = createWidgetActions.filter((a) => a.config?.type === 'kpi').length;
+          const chartCount = createWidgetActions.length - kpiCount;
+          const kpiRows = Math.ceil(kpiCount / 4);
+          const chartRows = Math.ceil(chartCount / 2);
+          const groupH = Math.max(350, 110 + kpiRows * 100 + chartRows * 280);
+          const groupW = Math.max(width - 40, 600);
+
+          const groupId = `canvas-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const groupItem = createLayoutItem(
+            groupId,
+            'widget_group',
+            {
+              type: 'widget_group' as const,
+              groupId,
+              title: groupTitle,
+              sectionType: 'company-scorecard' as SectionType,
+              widgetIds: [],
+              items: cohiItems,
+            },
+            { x: 0, y: yOffset, w: groupW, h: groupH }
+          );
+          newItems.push(groupItem);
+          return newItems;
+        });
+        toast({
+          title: `${createWidgetActions.length} widget${createWidgetActions.length > 1 ? 's' : ''} added`,
+          description: createWidgetActions.map((a) => a.title).filter(Boolean).join(', '),
+        });
+      }
+    }, [width, setItemsWithHistory, toast]),
   });
 
   const handleCohiAction = useCallback(
@@ -796,13 +926,59 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           }
           break;
         }
+        case 'generate_report': {
+          // AI-generated report: send the report definition to the backend for PPTX generation
+          const reportAction = action as import('@/types/widgetActions').GenerateReportAction;
+          const reportDef = reportAction.reportDefinition;
+          if (!reportDef || !reportDef.slides?.length) {
+            toast({ title: 'Invalid report', description: 'Report has no slides', variant: 'destructive' });
+            break;
+          }
+          toast({ title: 'Generating report...', description: `Building ${reportDef.slides.length}-slide presentation` });
+          // Call backend to generate PPTX
+          (async () => {
+            try {
+              const tenantParam = tenantId ? `?tenant_id=${tenantId}` : '';
+              const fmt = reportAction.format || 'pptx';
+              const blob = await fetchBlob(
+                `/api/workbench/reports/generate${tenantParam}`,
+                {
+                  definition: {
+                    id: `report-${Date.now()}`,
+                    ...reportDef,
+                    metadata: {
+                      createdAt: new Date().toISOString(),
+                      dataAsOf: new Date().toISOString(),
+                      generatedBy: 'ai',
+                    },
+                  },
+                  format: fmt,
+                }
+              );
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${(reportDef.title || 'report').replace(/[^a-z0-9]/gi, '_')}.${fmt}`;
+              a.click();
+              URL.revokeObjectURL(url);
+              toast({ title: 'Report downloaded', description: `${reportDef.title || 'Report'} saved as ${fmt.toUpperCase()}` });
+            } catch (err: any) {
+              console.error('[Report] Generation failed:', err);
+              toast({ title: 'Report failed', description: err.message || 'Failed to generate report', variant: 'destructive' });
+            }
+          })();
+          break;
+        }
         default:
           // explain_widget, explain_schema, modify_widget – handled in chat only
           break;
       }
     },
-    [items, setItemsWithHistory, toast, width]
+    [items, setItemsWithHistory, toast, width, tenantId]
   );
+
+  // Keep the ref in sync so auto-execute callback always uses latest handler
+  cohiActionRef.current = handleCohiAction;
 
   // ---- Image-to-Dashboard: handle generated groups ----
   const handleDashboardGenerated = useCallback(
@@ -918,32 +1094,42 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
     return () => { cancelled = true; };
   }, [loadCanvasId, onLoaded, toast, width, tenantQs]);
 
-  /* ─── Auto-insights: ask Cohi to analyze canvas data on first load ─── */
+  /* ─── Proactive AI: auto-analyze canvas data on load (opens panel automatically) ─── */
   const autoInsightsFiredRef = useRef(false);
   useEffect(() => {
-    // Fire once when a canvas loads with items and the Cohi panel is open
+    // Fire once when a loaded canvas has items — no need for panel to already be open
     if (autoInsightsFiredRef.current) return;
-    if (!canvasId || items.length === 0 || !showCohiPanel) return;
+    if (!canvasId || items.length === 0) return;
     // Only fire for loaded canvases (not brand-new ones)
     if (!loadCanvasId) return;
 
     autoInsightsFiredRef.current = true;
-    // Delay slightly to let the canvas and data settle
+    // Delay to let the canvas and widget data settle
     const timer = setTimeout(() => {
       const sectionNames = items
         .filter((it) => it.payload.type === 'widget_group')
         .map((it) => (it.payload as any).title || 'Unknown')
         .join(', ');
-      cohiSendMessage(
-        `I just opened this canvas which contains: ${sectionNames || 'some widgets'}. ` +
-        `Give me 2-3 quick key insights or observations based on the dashboard sections visible. ` +
-        `Focus on what might need attention or interesting trends. Keep it concise.`
-      );
-    }, 2000);
+
+      // Auto-open the Cohi panel so the user sees insights immediately
+      setShowCohiPanel(true);
+
+      // Give the panel a moment to mount before sending
+      setTimeout(() => {
+        cohiSendMessage(
+          `I just opened a canvas containing: ${sectionNames || 'some dashboard widgets'}. ` +
+          `As a senior mortgage analyst, give me a brief executive briefing:\n` +
+          `1. What stands out — any metrics that need attention?\n` +
+          `2. Any trends or patterns worth watching?\n` +
+          `3. One recommended action or focus area.\n` +
+          `Keep it concise and in mortgage executive language.`
+        );
+      }, 400);
+    }, 2500);
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasId, items.length, showCohiPanel, loadCanvasId]);
+  }, [canvasId, items.length, loadCanvasId]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1271,6 +1457,8 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
     window.addEventListener('add-canvas-widget', handler);
     return () => window.removeEventListener('add-canvas-widget', handler);
   }, [addWidget, toast]);
+
+  // (Sidebar report builder links removed — reports are generated from canvas via the header button)
 
   const handleUploadClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -1730,6 +1918,182 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
     }
   }, [items, saveTitle, toast]);
 
+  // ---- Report Generation: Quick Report from Canvas ----
+  const handleQuickReport = useCallback(async (format: 'pptx' | 'pdf' = 'pptx') => {
+    const snapshot = useCanvasDataStore.getState().getSnapshot();
+    if (!snapshot.length && !items.length) {
+      toast({ title: 'Nothing to report', description: 'Add widgets to the canvas first.', variant: 'destructive' });
+      return;
+    }
+    toast({ title: 'Generating report...', description: 'Building multi-slide presentation from canvas data.' });
+    try {
+      const widgetData = snapshot.map((w) => ({
+        itemId: w.itemId,
+        widgetName: w.widgetName,
+        category: w.category,
+        data: w.data,
+      }));
+      const tenantParam = tenantId ? `?tenant_id=${tenantId}` : '';
+      const blob = await fetchBlob(
+        `/api/workbench/reports/from-canvas${tenantParam}`,
+        {
+          widgetData,
+          format,
+          options: { title: saveTitle || 'Canvas Report' },
+        }
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(saveTitle || 'canvas_report').replace(/[^a-z0-9]/gi, '_')}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Report downloaded', description: `Report saved as ${format.toUpperCase()}.` });
+    } catch (err: any) {
+      console.error('[QuickReport] Error:', err);
+      toast({
+        title: 'Report generation failed',
+        description: err.response?.data?.error || err.message || 'Could not generate report.',
+        variant: 'destructive',
+      });
+    }
+  }, [items, saveTitle, tenantId, toast]);
+
+  // ---- AI-Enhanced Report from Canvas ----
+  const [isGeneratingAiReport, setIsGeneratingAiReport] = useState(false);
+  const handleAiReport = useCallback(async (format: 'pptx' | 'pdf' = 'pptx') => {
+    const snapshot = useCanvasDataStore.getState().getSnapshot();
+    if (!snapshot.length && !items.length) {
+      toast({ title: 'Nothing to report', description: 'Add widgets to the canvas first.', variant: 'destructive' });
+      return;
+    }
+
+    setIsGeneratingAiReport(true);
+    toast({ title: 'Preparing your executive briefing...', description: 'Cohi is analyzing your data and writing a board-ready presentation.' });
+
+    try {
+      // Build canvas state snapshot (mirrors the logic from useWorkbenchCohi)
+      const sectionState = (await import('@/stores/widgetSectionStore')).useWidgetSectionStore.getState().sections;
+      const groups: any[] = [];
+      const standaloneWidgets: any[] = [];
+
+      for (const item of items) {
+        if (item.payload.type === 'widget_group') {
+          const sectionFilters = sectionState[item.payload.groupId];
+          groups.push({
+            groupId: item.payload.groupId,
+            title: item.payload.title,
+            sectionType: item.payload.sectionType,
+            widgetIds: item.payload.widgetIds,
+            filters: sectionFilters ? {
+              dateRange: sectionFilters.periodSelection?.preset
+                || (sectionFilters.dateRange
+                  ? `${sectionFilters.dateRange.start} to ${sectionFilters.dateRange.end}`
+                  : `${sectionFilters.year}`),
+              dateField: sectionFilters.dateField || undefined,
+              branch: sectionFilters.branch !== 'all' ? sectionFilters.branch : undefined,
+              loanOfficer: sectionFilters.loanOfficer !== 'all' ? sectionFilters.loanOfficer : undefined,
+            } : undefined,
+          });
+        } else {
+          standaloneWidgets.push({
+            id: item.i,
+            type: item.payload.type,
+            title: 'title' in item.payload ? (item.payload as any).title : undefined,
+          });
+        }
+      }
+
+      const widgetData = snapshot.map((entry) => ({
+        itemId: entry.itemId,
+        widgetName: entry.widgetName,
+        category: entry.category,
+        data: entry.data,
+      }));
+
+      const canvasState = {
+        groups,
+        standaloneWidgets,
+        totalItems: items.length,
+        widgetData: widgetData.length > 0 ? widgetData : undefined,
+      };
+
+      // Call the Cohi workbench API directly with a report-generation prompt
+      const tenantParam = tenantId ? `?tenant_id=${tenantId}` : '';
+      const aiResponse = await api.request<{
+        message?: string;
+        actions?: Array<{ type: string; reportDefinition?: any; format?: string }>;
+      }>(
+        `/api/cohi-chat/workbench${tenantParam}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            question: `Prepare a board-ready executive presentation from everything on this canvas. Use ALL the live data currently visible — KPI values, charts, tables — and embed the actual numbers into the report.
+
+Structure it as a narrative-first executive briefing:
+- Slide 1: Title slide with "${saveTitle || 'Executive Performance Summary'}" and today's date
+- Slide 2: Executive Summary — write a full 3-5 sentence narrative paragraph summarizing what happened, why it matters, and what requires attention. Include 4-6 top KPIs.
+- Slides 3-N: One topic per slide, each LEADING with a narrative paragraph explaining the insight, followed by a supporting chart or table. Write like a senior analyst preparing a board memo.
+- Final Slide: "Executive Focus & Recommendations" — 3-5 specific, data-driven recommendations with context.
+- Add detailed speaker notes with talking points on every slide.
+- Use mortgage industry language: "pull-through resilience", "margin compression", "pipeline velocity", "fallout pressure", "lock-to-close efficiency".
+- Cite specific numbers throughout: "$842M (+2% MoM)" not "volume increased".
+- Make it immediately exportable — no rework needed. This must be defensible in a board meeting.`,
+            canvasState,
+            widgetCatalog: '',
+            conversationHistory: [],
+          }),
+        }
+      );
+
+      // Extract the generate_report action from the AI response
+      const reportAction = aiResponse.actions?.find(
+        (a) => a.type === 'generate_report'
+      );
+
+      if (!reportAction?.reportDefinition?.slides?.length) {
+        // Fallback: if AI didn't produce a report action, use the structural conversion
+        toast({ title: 'Falling back to structured report', description: 'AI couldn\'t generate a custom report. Opening Report Builder with canvas data.' });
+        setShowReportBuilder(true);
+        return;
+      }
+
+      // Open the Report Builder with the AI-generated definition so the user
+      // can preview, edit, and then export — instead of downloading directly.
+      const reportDef = reportAction.reportDefinition;
+      const fullDef = {
+        id: `ai-report-${Date.now()}`,
+        ...reportDef,
+        metadata: {
+          createdAt: new Date().toISOString(),
+          dataAsOf: new Date().toISOString(),
+          generatedBy: 'ai' as const,
+        },
+      };
+
+      setAiReportDefinition(fullDef);
+      setShowReportBuilder(true);
+
+      toast({
+        title: 'Executive briefing ready',
+        description: `"${reportDef.title || 'Report'}" is ready to review. Export to PowerPoint when satisfied.`,
+      });
+    } catch (err: any) {
+      console.error('[AiReport] Error:', err);
+      toast({
+        title: 'AI report generation failed',
+        description: err.response?.data?.error || err.message || 'Could not generate AI report.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsGeneratingAiReport(false);
+    }
+  }, [items, saveTitle, tenantId, toast, handleQuickReport]);
+
+  // ---- Report Builder mode toggle ----
+  const [showReportBuilder, setShowReportBuilder] = useState(false);
+  const [aiReportDefinition, setAiReportDefinition] = useState<any | null>(null);
+
   const handleEmailScreenshot = useCallback(async () => {
     const blob = await captureCanvasAsBlob();
     if (!blob) {
@@ -1961,6 +2325,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         {/* Toolbar — sticky at top of canvas, always visible */}
         <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20">
           <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
+            {!showReportBuilder && (<>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={() => undo()} disabled={!canUndo}>
@@ -2012,6 +2377,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
             {saveStatus === 'unsaved' && canvasId && isDirty && (
               <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Unsaved changes</span>
             )}
+            {/* Share button hidden – not ready for release
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={handleShareClick}>
@@ -2020,6 +2386,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               </TooltipTrigger>
               <TooltipContent side="bottom">Share</TooltipContent>
             </Tooltip>
+            */}
             <input ref={backgroundImageInputRef} type="file" accept="image/*" onChange={handleBackgroundImageChange} className="hidden" aria-hidden />
             <DropdownMenu>
               <Tooltip>
@@ -2054,6 +2421,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
             </DropdownMenu>
             <input ref={fileInputRef} type="file" accept={UPLOAD_ALLOWED_TYPES.join(',') + ',.csv,.xlsx,.xls,.pptx,.ppt'} onChange={handleFileChange} className="hidden" aria-hidden />
             <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoChange} className="hidden" aria-hidden />
+            {/* Upload file button hidden – not ready for release
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2087,6 +2455,8 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            */}
+            {/* Image-to-Dashboard button hidden until feature is ready for release
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2100,6 +2470,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               </TooltipTrigger>
               <TooltipContent side="bottom">Create dashboard from image</TooltipContent>
             </Tooltip>
+            */}
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
             <DropdownMenu>
               <Tooltip>
@@ -2181,6 +2552,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {/* Logo button hidden – not ready for release
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2195,6 +2567,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               </TooltipTrigger>
               <TooltipContent side="bottom">Add logo</TooltipContent>
             </Tooltip>
+            */}
             {selectedWidgetId && (
               <>
                 <Tooltip>
@@ -2215,6 +2588,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
                 </Tooltip>
               </>
             )}
+            {/* Arrange button hidden – not ready for release
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2250,6 +2624,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={addRichTextBlock}>
@@ -2272,6 +2647,9 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               </TooltipTrigger>
               <TooltipContent side="bottom">Clear canvas</TooltipContent>
             </Tooltip>
+            </>)}
+            {/* --- End canvas-only tools --- */}
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -2291,7 +2669,65 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               </TooltipTrigger>
               <TooltipContent side="bottom">Toggle Cohi Assistant</TooltipContent>
             </Tooltip>
+
+            {/* Primary: Generate Report — one-click, AI-powered */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  className={cn(
+                    'h-8 gap-1.5 text-xs px-3 font-semibold shrink-0 shadow-sm',
+                    isGeneratingAiReport
+                      ? 'bg-indigo-400 text-white cursor-wait'
+                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white'
+                  )}
+                  onClick={() => handleAiReport('pptx')}
+                  disabled={isGeneratingAiReport}
+                >
+                  {isGeneratingAiReport ? (
+                    <><svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" /></svg> Preparing...</>
+                  ) : (
+                    <><Sparkles className="h-3.5 w-3.5" /> {showReportBuilder ? 'Regenerate Report' : 'Generate Report'}</>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Cohi prepares an executive presentation from your canvas data</TooltipContent>
+            </Tooltip>
+
+            {/* Report / Canvas view toggle */}
+            {showReportBuilder ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700"
+                    onClick={() => setShowReportBuilder(false)}
+                  >
+                    <LayoutDashboard className="h-3.5 w-3.5" />
+                    Back to Canvas
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Switch back to canvas view</TooltipContent>
+              </Tooltip>
+            ) : aiReportDefinition ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs px-2.5 font-medium shrink-0 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border-violet-300 dark:border-violet-700"
+                    onClick={() => setShowReportBuilder(true)}
+                  >
+                    <Presentation className="h-3.5 w-3.5" />
+                    View Report
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Return to your generated report</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
+          {!showReportBuilder && (
           <div className="flex items-center gap-1 shrink-0">
             <DropdownMenu>
               <Tooltip>
@@ -2304,35 +2740,48 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Export</TooltipContent>
               </Tooltip>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Export</DropdownMenuLabel>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Export Canvas</DropdownMenuLabel>
                 <DropdownMenuItem onClick={handleExportPng} className="gap-2">
-                  <Download className="h-4 w-4" /> Infographic (PNG)
+                  <Download className="h-4 w-4" /> Image (PNG)
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleExportPdf} className="gap-2">
-                  <FileText className="h-4 w-4" /> Infographic / Slide (PDF)
+                  <FileText className="h-4 w-4" /> PDF
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleExportPptx} className="gap-2">
-                  <Presentation className="h-4 w-4" /> Slide deck (PowerPoint)
+                  <Presentation className="h-4 w-4" /> PowerPoint
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleExportExcel} className="gap-2">
-                  <FileSpreadsheet className="h-4 w-4" /> Data (Excel)
+                  <FileSpreadsheet className="h-4 w-4" /> Excel
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Email</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-xs font-medium text-slate-500 dark:text-slate-400">Share</DropdownMenuLabel>
                 <DropdownMenuItem onClick={handleEmailScreenshot} className="gap-2">
-                  <Mail className="h-4 w-4" /> Screenshot in body
+                  <Mail className="h-4 w-4" /> Email screenshot
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleEmailLink} className="gap-2">
-                  <LinkIcon className="h-4 w-4" /> Link to canvas
+                  <LinkIcon className="h-4 w-4" /> Email link
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+          )}
+        </div>
+
+        {/* Inline Report Builder — always mounted, hidden when inactive to preserve state */}
+        <div className={cn("flex-1 min-h-0 overflow-hidden", !showReportBuilder && "hidden")}>
+          <ReportBuilder
+            onClose={() => setShowReportBuilder(false)}
+            canvasWidgetData={useCanvasDataStore.getState().getSnapshot()}
+            canvasTitle={saveTitle || 'Untitled Canvas'}
+            tenantId={tenantId}
+            initialDefinition={aiReportDefinition ?? undefined}
+            inline
+          />
         </div>
 
         {/* Canvas surface: freeform or empty state + annotations overlay */}
-        <div className="flex-1 p-2 min-h-0 overflow-auto canvas-freeform">
+        <div className={cn("flex-1 p-2 min-h-0 overflow-auto canvas-freeform", showReportBuilder && "hidden")}>
           <style>{`
             .canvas-freeform .react-resizable-handle {
               opacity: 0;
@@ -2561,23 +3010,70 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               })
             ) : (
               <div className="flex items-center justify-center p-8 min-h-[400px]">
-                <div className="text-center max-w-lg">
-                  <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
-                    <Sparkles className="w-8 h-8 text-white" />
+                <div className="text-center max-w-2xl w-full">
+                  <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-200/60 dark:shadow-violet-900/40">
+                    <Sparkles className="w-7 h-7 text-white" />
                   </div>
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-                    What would you like to build?
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+                    What would you like to review?
                   </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
-                    Add a dashboard section from the library, ask Cohi to create one for you, or upload a screenshot of a dashboard to recreate.
+                  <p className="text-sm text-slate-400 dark:text-slate-500 mb-6">
+                    Ask Cohi to prepare dashboards, analyze performance, or build executive presentations.
                   </p>
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+
+                  {/* Primary: Natural language input */}
+                  <div className="max-w-lg mx-auto mb-6">
+                    <button
+                      type="button"
+                      onClick={() => setShowCohiPanel(true)}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-lg transition-all group text-left"
+                    >
+                      <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
+                        <Sparkles className="h-4 w-4 text-white" />
+                      </div>
+                      <span className="flex-1 text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
+                        &ldquo;Prepare a board-ready overview of monthly performance&rdquo;
+                      </span>
+                      <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 shrink-0 group-hover:text-violet-500 transition-colors" />
+                    </button>
+                  </div>
+
+                  {/* Quick executive prompts */}
+                  <div className="flex flex-wrap gap-2 justify-center mb-6">
+                    {[
+                      { label: 'Executive Dashboard', prompt: 'Build me a comprehensive executive dashboard with key KPIs, production trends, and pull-through analysis' },
+                      { label: 'Monthly Performance', prompt: 'Prepare a monthly performance overview with funded volume, pull-through, turn times, and highlights' },
+                      { label: 'Pipeline Review', prompt: 'Show me a pipeline review dashboard with active loans by stage, aging analysis, and fallout risk' },
+                      { label: 'Board Presentation', prompt: 'Create a board-ready presentation with executive summary, key metrics, trends, and recommendations' },
+                    ].map((q) => (
+                      <button
+                        key={q.label}
+                        type="button"
+                        onClick={() => {
+                          setShowCohiPanel(true);
+                          // Small delay to let the panel open before sending the message
+                          setTimeout(() => cohiSendMessage(q.prompt), 300);
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-violet-300 dark:hover:border-violet-600 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
+                      >
+                        {q.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Secondary: Browse library */}
+                  <div className="flex items-center justify-center gap-4">
+                    <div className="h-px flex-1 max-w-[60px] bg-slate-200 dark:bg-slate-700" />
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">or browse templates</span>
+                    <div className="h-px flex-1 max-w-[60px] bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                  <div className="flex gap-2 justify-center mt-3">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="gap-2">
-                          <LayoutDashboard className="h-4 w-4" />
-                          Add Content
-                          <ChevronDown className="h-4 w-4" />
+                        <Button variant="ghost" size="sm" className="gap-2 text-slate-500 dark:text-slate-400 text-xs">
+                          <LayoutDashboard className="h-3.5 w-3.5" />
+                          Dashboard Library
+                          <ChevronDown className="h-3 w-3" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="center" className="w-72 max-h-80 overflow-y-auto">
@@ -2598,14 +3094,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
                         ))}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowCohiPanel(true)}>
-                      <Sparkles className="h-4 w-4 text-violet-500" />
-                      Ask Cohi
-                    </Button>
-                    <Button variant="outline" size="sm" className="gap-2" onClick={() => setImageToDashboardOpen(true)}>
-                      <Upload className="h-4 w-4" />
-                      Upload Screenshot
-                    </Button>
                   </div>
                 </div>
               </div>
@@ -2714,26 +3202,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           </div>
         </div>
 
-        {/* Floating "Ask Cohi" prompt bar — always visible at bottom of canvas */}
-        {!showCohiPanel && (
-          <div className="sticky bottom-0 z-10 px-4 pb-3 pt-1 pointer-events-none">
-            <div className="pointer-events-auto max-w-xl mx-auto">
-              <button
-                type="button"
-                onClick={() => setShowCohiPanel(true)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-slate-200/70 dark:border-slate-700/50 shadow-lg shadow-slate-200/40 dark:shadow-black/20 hover:border-violet-300 dark:hover:border-violet-600 hover:shadow-violet-100/30 dark:hover:shadow-violet-900/20 transition-all group"
-              >
-                <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0">
-                  <Sparkles className="h-3.5 w-3.5 text-white" />
-                </div>
-                <span className="text-sm text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                  Ask Cohi to build a dashboard, analyze data, or answer questions…
-                </span>
-                <MessageSquare className="h-4 w-4 text-slate-300 dark:text-slate-600 ml-auto shrink-0 group-hover:text-violet-500 transition-colors" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Cohi Assistant Panel (docks right) */}
@@ -2915,6 +3383,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         tenantId={tenantId}
         onDashboardGenerated={handleDashboardGenerated}
       />
+      {/* Report Builder is now rendered inline above the canvas surface */}
     </div>
     </WidgetDataProvider>
   );

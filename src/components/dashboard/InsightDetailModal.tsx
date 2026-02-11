@@ -8,7 +8,9 @@ interface InsightDetailModalProps {
   onClose: () => void;
   insightSource: string;
   insightMessage: string;
+  insightId?: number;
   dateFilter: string;
+  selectedTenantId?: string | null;
 }
 
 interface LoanRow {
@@ -16,6 +18,8 @@ interface LoanRow {
   loanAmount: number;
   loanType?: string;
   status?: string;
+  milestone?: string | null;
+  interestRate?: number | null;
   ficoScore?: number | null;
   ltv?: number | null;
   dti?: number | null;
@@ -27,6 +31,16 @@ interface LoanRow {
   riskReason?: string;
   daysInPipeline?: number;
   lockDate?: string;
+  // New trigger fields
+  estimatedClosingDate?: string;
+  ctcDate?: string;
+  daysToClose?: number;
+  lockExpirationDate?: string;
+  lockDays?: number | null;
+  daysToExpiry?: number;
+  closingDisclosureSentDate?: string;
+  closingDisclosureReceivedDate?: string;
+  conditions?: number;
 }
 
 interface OfficerRow {
@@ -58,7 +72,8 @@ interface DetailData {
   months?: MonthRow[];
 }
 
-const formatCurrency = (value: number) => {
+const formatCurrency = (value: number | undefined | null) => {
+  if (value == null || isNaN(value)) return '$0';
   if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
   if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
   return `$${value.toFixed(0)}`;
@@ -104,7 +119,9 @@ export const InsightDetailModal = ({
   onClose, 
   insightSource, 
   insightMessage,
-  dateFilter 
+  insightId,
+  dateFilter,
+  selectedTenantId,
 }: InsightDetailModalProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,15 +132,18 @@ export const InsightDetailModal = ({
     if (isOpen && insightSource) {
       fetchDetails();
     }
-  }, [isOpen, insightSource, dateFilter]);
+  }, [isOpen, insightSource, insightId, dateFilter]);
 
   const fetchDetails = async () => {
     setLoading(true);
     setError(null);
     
     try {
+      const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+      const idParam = insightId ? `&insightId=${insightId}` : '';
+      const headlineParam = !insightId && insightMessage ? `&headline=${encodeURIComponent(insightMessage)}` : '';
       const result = await api.request<DetailData>(
-        `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}`
+        `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}${tenantParam}${idParam}${headlineParam}`
       );
       setData(result);
     } catch (err: any) {
@@ -252,6 +272,41 @@ export const InsightDetailModal = ({
                       <SummaryCard label="Total Funded" value={data.summary.totalFunded} color="green" />
                     </>
                   )}
+                  {insightSource === 'closing_risk' && (
+                    <>
+                      <SummaryCard label="Loans at Risk" value={data.summary.totalAtRisk} icon={AlertTriangle} color="red" />
+                      <SummaryCard label="At-Risk Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
+                      <SummaryCard label="Avg Days to Close" value={`${data.summary.avgDaysToClose}d`} icon={Clock} color="amber" />
+                    </>
+                  )}
+                  {insightSource === 'lock_expiration' && (
+                    <>
+                      <SummaryCard label="Locks Expiring" value={data.summary.totalExpiring} icon={AlertTriangle} color="red" />
+                      <SummaryCard label="Expiring Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
+                      <SummaryCard label="Avg Days to Expiry" value={`${data.summary.avgDaysToExpiry}d`} icon={Clock} color="amber" />
+                    </>
+                  )}
+                  {insightSource === 'trid' && (
+                    <>
+                      <SummaryCard label="TRID At Risk" value={data.summary.totalAtRisk} icon={AlertTriangle} color="red" />
+                      <SummaryCard label="At-Risk Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
+                      <SummaryCard label="Avg Days to Close" value={`${data.summary.avgDaysToClose}d`} icon={Clock} color="amber" />
+                    </>
+                  )}
+                  {insightSource === 'margin' && (
+                    <>
+                      <SummaryCard label="Current Month" value={`${data.summary.currentMonthBps} bps`} icon={TrendingUp} color="blue" />
+                      <SummaryCard label="Prior Month" value={`${data.summary.priorMonthBps} bps`} icon={TrendingUp} color="blue" />
+                      <SummaryCard label="Delta" value={`${data.summary.deltaBps > 0 ? '+' : ''}${data.summary.deltaBps} bps`} icon={DollarSign} color={data.summary.deltaBps < 0 ? 'red' : 'green'} />
+                    </>
+                  )}
+                  {insightSource === 'condition_backlog' && (
+                    <>
+                      <SummaryCard label="Loans with High Conditions" value={data.summary.totalLoans} icon={AlertTriangle} color="amber" />
+                      <SummaryCard label="Avg Conditions" value={data.summary.avgConditions} icon={Clock} color="blue" />
+                      <SummaryCard label="Total Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
+                    </>
+                  )}
                 </div>
 
                 {/* Data Table */}
@@ -266,6 +321,8 @@ export const InsightDetailModal = ({
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Outcome</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Confidence</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Rate</th>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
                             <th className="text-center py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Details</th>
                           </>
@@ -279,6 +336,8 @@ export const InsightDetailModal = ({
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">LTV</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">DTI</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Rate</th>
                           </>
                         )}
                         {/* Lost opportunity table headers */}
@@ -288,8 +347,9 @@ export const InsightDetailModal = ({
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Status</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Type</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Rate</th>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">App Date</th>
                           </>
                         )}
                         {/* Pipeline table headers */}
@@ -298,6 +358,8 @@ export const InsightDetailModal = ({
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Type</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Rate</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Days</th>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Locked</th>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
@@ -318,11 +380,66 @@ export const InsightDetailModal = ({
                         {insightSource === 'comparisons' && (
                           <>
                             <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Month</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Started</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loans</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Funded</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Pull-Through</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Volume</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Funded Volume</th>
                             <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Cycle Time</th>
+                          </>
+                        )}
+                        {/* Closing risk table headers */}
+                        {insightSource === 'closing_risk' && (
+                          <>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Est. Close</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Days to Close</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">CTC Date</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
+                          </>
+                        )}
+                        {/* Lock expiration table headers */}
+                        {insightSource === 'lock_expiration' && (
+                          <>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Rate</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Lock Expiry</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Days Left</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Lock Days</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
+                          </>
+                        )}
+                        {/* TRID exposure table headers */}
+                        {insightSource === 'trid' && (
+                          <>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Est. Close</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Days to Close</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">CD Sent</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
+                          </>
+                        )}
+                        {/* Condition backlog table headers */}
+                        {insightSource === 'condition_backlog' && (
+                          <>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Conditions</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Milestone</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Type</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Status</th>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
+                          </>
+                        )}
+                        {/* Margin — aggregate metric, no table columns needed */}
+                        {insightSource === 'margin' && (
+                          <>
+                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Details</th>
                           </>
                         )}
                       </tr>
@@ -346,6 +463,8 @@ export const InsightDetailModal = ({
                           </td>
                           <td className="py-3 px-2 text-right font-semibold">{loan.confidence}%</td>
                           <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2 text-right">{loan.interestRate ? `${loan.interestRate.toFixed(3)}%` : '-'}</td>
                           <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
                           <td className="py-3 px-2 text-center">
                             <button
@@ -379,6 +498,8 @@ export const InsightDetailModal = ({
                             {loan.dti ? `${loan.dti.toFixed(1)}%` : '-'}
                           </td>
                           <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2 text-right">{loan.interestRate ? `${loan.interestRate.toFixed(3)}%` : '-'}</td>
                         </tr>
                       ))}
                       {/* Lost opportunity rows */}
@@ -391,8 +512,9 @@ export const InsightDetailModal = ({
                           <td className="py-3 px-2">{loan.status}</td>
                           <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
                           <td className="py-3 px-2">{loan.loanType || '-'}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2 text-right">{loan.interestRate ? `${loan.interestRate.toFixed(3)}%` : '-'}</td>
                           <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
-                          <td className="py-3 px-2">{formatDate(loan.applicationDate)}</td>
                         </tr>
                       ))}
                       {/* Pipeline rows */}
@@ -404,6 +526,8 @@ export const InsightDetailModal = ({
                           <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
                           <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
                           <td className="py-3 px-2">{loan.loanType || '-'}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2 text-right">{loan.interestRate ? `${loan.interestRate.toFixed(3)}%` : '-'}</td>
                           <td className={`py-3 px-2 text-right ${loan.daysInPipeline && loan.daysInPipeline > 45 ? 'text-rose-600 font-semibold' : ''}`}>
                             {loan.daysInPipeline || '-'}
                           </td>
@@ -455,6 +579,91 @@ export const InsightDetailModal = ({
                           <td className="py-3 px-2 text-right">{month.avgCycleTime ? `${month.avgCycleTime}d` : '-'}</td>
                         </tr>
                       ))}
+                      {/* Closing risk rows */}
+                      {insightSource === 'closing_risk' && data.loans?.map((loan, idx) => (
+                        <tr 
+                          key={loan.loanId || idx}
+                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                        >
+                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
+                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2">{formatDate(loan.estimatedClosingDate)}</td>
+                          <td className={`py-3 px-2 text-right font-semibold ${
+                            loan.daysToClose != null && loan.daysToClose <= 3 ? 'text-rose-600' : 'text-amber-600'
+                          }`}>
+                            {loan.daysToClose != null ? `${loan.daysToClose}d` : '-'}
+                          </td>
+                          <td className="py-3 px-2 text-slate-400">Not cleared</td>
+                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
+                        </tr>
+                      ))}
+                      {/* Lock expiration rows */}
+                      {insightSource === 'lock_expiration' && data.loans?.map((loan, idx) => (
+                        <tr 
+                          key={loan.loanId || idx}
+                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                        >
+                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
+                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2 text-right">{loan.interestRate ? `${loan.interestRate.toFixed(3)}%` : '-'}</td>
+                          <td className="py-3 px-2">{formatDate(loan.lockExpirationDate)}</td>
+                          <td className={`py-3 px-2 text-right font-semibold ${
+                            loan.daysToExpiry != null && loan.daysToExpiry <= 2 ? 'text-rose-600' : 'text-amber-600'
+                          }`}>
+                            {loan.daysToExpiry != null ? `${loan.daysToExpiry}d` : '-'}
+                          </td>
+                          <td className="py-3 px-2 text-right">{loan.lockDays != null ? `${loan.lockDays}d` : '-'}</td>
+                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
+                        </tr>
+                      ))}
+                      {/* TRID exposure rows */}
+                      {insightSource === 'trid' && data.loans?.map((loan, idx) => (
+                        <tr 
+                          key={loan.loanId || idx}
+                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                        >
+                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
+                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2">{formatDate(loan.estimatedClosingDate)}</td>
+                          <td className={`py-3 px-2 text-right font-semibold ${
+                            loan.daysToClose != null && loan.daysToClose <= 3 ? 'text-rose-600' : 'text-amber-600'
+                          }`}>
+                            {loan.daysToClose != null ? `${loan.daysToClose}d` : '-'}
+                          </td>
+                          <td className="py-3 px-2 text-rose-500">Not sent</td>
+                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
+                        </tr>
+                      ))}
+                      {/* Condition backlog rows */}
+                      {insightSource === 'condition_backlog' && data.loans?.map((loan, idx) => (
+                        <tr 
+                          key={loan.loanId || idx}
+                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                        >
+                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
+                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
+                          <td className={`py-3 px-2 text-right font-semibold ${
+                            loan.conditions && loan.conditions > 10 ? 'text-rose-600' : 'text-amber-600'
+                          }`}>
+                            {loan.conditions ?? '-'}
+                          </td>
+                          <td className="py-3 px-2 text-xs">{loan.milestone || '-'}</td>
+                          <td className="py-3 px-2">{loan.loanType || '-'}</td>
+                          <td className="py-3 px-2">{loan.status || '-'}</td>
+                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
+                        </tr>
+                      ))}
+                      {/* Margin — no loan-level rows, show message */}
+                      {insightSource === 'margin' && (
+                        <tr>
+                          <td colSpan={3} className="py-8 text-center text-slate-500">
+                            Margin is an aggregate metric. See summary cards above for current and prior month comparison.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                   

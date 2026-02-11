@@ -67,7 +67,7 @@ interface AnonymizationMappings {
 const CONFIG_TABLES = [
   "personas",
   "custom_fields",
-  "range_rules",
+  // "range_rules" removed – dropped by migration 010_remove_range_rules
   "scoring_weights",
   "staffing_unit_targets",
   "tenant_calculations",
@@ -88,13 +88,19 @@ const BATCH_SIZE = 1000;
 
 // ── Helper: get columns that exist in both source and destination ─────
 
+interface CommonColumnsResult {
+  columns: string[];
+  /** Set of column names that are json/jsonb type (need JSON.stringify before insert) */
+  jsonbColumns: Set<string>;
+}
+
 async function getCommonColumns(
   srcPool: pg.Pool,
   dstPool: pg.Pool,
   table: string
-): Promise<string[]> {
+): Promise<CommonColumnsResult> {
   const colQuery = `
-    SELECT column_name FROM information_schema.columns
+    SELECT column_name, data_type FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = $1
     ORDER BY ordinal_position
   `;
@@ -106,8 +112,21 @@ async function getCommonColumns(
   const srcCols = new Set(srcResult.rows.map((r: any) => r.column_name as string));
   const dstCols = new Set(dstResult.rows.map((r: any) => r.column_name as string));
 
+  // Build a map of destination column types for the common columns
+  const dstTypeMap = new Map<string, string>(
+    dstResult.rows.map((r: any) => [r.column_name as string, r.data_type as string])
+  );
+
   // Intersection: only columns present in both
-  const common = [...srcCols].filter((c) => dstCols.has(c));
+  const columns = [...srcCols].filter((c) => dstCols.has(c));
+
+  // Identify json/jsonb columns (these need JSON.stringify; Postgres array columns do NOT)
+  const jsonbColumns = new Set<string>(
+    columns.filter((c) => {
+      const dt = dstTypeMap.get(c) || "";
+      return dt === "jsonb" || dt === "json";
+    })
+  );
 
   if (srcCols.size !== dstCols.size) {
     const srcOnly = [...srcCols].filter((c) => !dstCols.has(c));
@@ -120,7 +139,16 @@ async function getCommonColumns(
     }
   }
 
-  return common;
+  return { columns, jsonbColumns };
+}
+
+/** Serialize a row value for insertion. JSONB columns need JSON.stringify; everything else is passed as-is. */
+function serializeValue(value: any, colName: string, jsonbColumns: Set<string>): any {
+  if (value === null || value === undefined) return value;
+  if (jsonbColumns.has(colName) && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return value;
 }
 
 // ── Helper: get a pool to a tenant's database ─────────────────────────
@@ -160,13 +188,14 @@ async function getTenantPoolById(tenantId: string): Promise<{ pool: pg.Pool; cle
 // ── Pseudonym generation ──────────────────────────────────────────────
 
 function generatePseudonym(index: number): { first: string; last: string; full: string } {
+  // Cycle through all first/last combinations (50×50 = 2,500 unique names)
+  // before any repetition occurs
   const first = FAKE_FIRST_NAMES[index % FAKE_FIRST_NAMES.length];
-  const last = FAKE_LAST_NAMES[index % FAKE_LAST_NAMES.length];
-  const seq = index + 1;
+  const last = FAKE_LAST_NAMES[Math.floor(index / FAKE_FIRST_NAMES.length) % FAKE_LAST_NAMES.length];
   return {
     first,
-    last: `${last} ${seq}`,
-    full: `${first} ${last} ${seq}`,
+    last,
+    full: `${first} ${last}`,
   };
 }
 
@@ -310,7 +339,7 @@ async function copyConfigTables(
   for (const table of CONFIG_TABLES) {
     try {
       // Get columns common to both source and destination
-      const columns = await getCommonColumns(srcPool, dstPool, table);
+      const { columns, jsonbColumns } = await getCommonColumns(srcPool, dstPool, table);
       if (columns.length === 0) {
         console.log(`[TenantDuplication] ${table}: no common columns (skipped)`);
         continue;
@@ -328,7 +357,7 @@ async function copyConfigTables(
       // Insert each row
       let inserted = 0;
       for (const row of rows) {
-        const values = columns.map((c) => row[c]);
+        const values = columns.map((c) => serializeValue(row[c], c, jsonbColumns));
         try {
           await dstPool.query(
             `INSERT INTO public."${table}" (${colList}) VALUES (${placeholders})
@@ -356,7 +385,7 @@ async function copyEmployeesAnonymized(
   mappings: AnonymizationMappings
 ): Promise<number> {
   // Get columns common to both source and destination
-  const columns = await getCommonColumns(srcPool, dstPool, "employees");
+  const { columns, jsonbColumns } = await getCommonColumns(srcPool, dstPool, "employees");
   if (columns.length === 0) return 0;
 
   const colList = columns.map((c) => `"${c}"`).join(", ");
@@ -385,7 +414,7 @@ async function copyEmployeesAnonymized(
       `EMP-${String(inserted + 1).padStart(3, "0")}`;
     row.branch = row.branch ? (mappings.branchMap.get(row.branch) || row.branch) : null;
 
-    const values = columns.map((c) => row[c]);
+    const values = columns.map((c) => serializeValue(row[c], c, jsonbColumns));
 
     try {
       await dstPool.query(
@@ -412,7 +441,7 @@ async function copyLoansAnonymized(
 ): Promise<number> {
   // Get columns common to both source and destination
   // This handles dynamic columns (additional fields) that exist in source but not destination
-  const columns = await getCommonColumns(srcPool, dstPool, "loans");
+  const { columns, jsonbColumns } = await getCommonColumns(srcPool, dstPool, "loans");
   if (columns.length === 0) return 0;
 
   const colList = columns.map((c) => `"${c}"`).join(", ");
@@ -478,7 +507,7 @@ async function copyLoansAnonymized(
       }
 
       // Insert into destination using only common columns
-      const values = columns.map((c) => row[c]);
+      const values = columns.map((c) => serializeValue(row[c], c, jsonbColumns));
 
       try {
         await dstPool.query(
@@ -515,7 +544,7 @@ async function copyLoanRelatedData(
   for (const table of LOAN_DATA_TABLES) {
     try {
       // Get columns common to both source and destination
-      const columns = await getCommonColumns(srcPool, dstPool, table);
+      const { columns, jsonbColumns } = await getCommonColumns(srcPool, dstPool, table);
       if (columns.length === 0) {
         console.log(`[TenantDuplication] ${table}: no common columns (skipped)`);
         continue;
@@ -542,7 +571,7 @@ async function copyLoanRelatedData(
         if (rows.length === 0) break;
 
         for (const row of rows) {
-          const values = columns.map((c) => row[c]);
+          const values = columns.map((c) => serializeValue(row[c], c, jsonbColumns));
 
           try {
             await dstPool.query(
@@ -591,6 +620,15 @@ export async function duplicateTenantAnonymized(
   newSlug: string
 ): Promise<DuplicateTenantResult> {
   console.log(`[TenantDuplication] Starting duplication of tenant ${sourceId} -> "${newName}" (${newSlug})`);
+
+  // 0. Check if slug already exists (guards against double-submit)
+  const existingSlug = await managementPool.query(
+    `SELECT id FROM coheus_tenants WHERE slug = $1`,
+    [newSlug]
+  );
+  if (existingSlug.rows.length > 0) {
+    throw new Error(`A tenant with slug "${newSlug}" already exists`);
+  }
 
   // 1. Verify source tenant exists
   const sourceTenant = await getTenant(sourceId);
