@@ -113,14 +113,14 @@ app.use(
         return callback(null, true);
       }
       // Log and block in production
-      console.warn(`CORS blocked origin: ${origin}`);
+      console.warn(`CORS blocked origins: ${origin}`);
       console.log("Allowed origins:", allowedOrigins);
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-  })
+  }),
 );
 
 // Request logging
@@ -136,7 +136,7 @@ app.use(
       // Store raw body for debugging
       req.rawBody = buf.toString("utf8");
     },
-  })
+  }),
 );
 app.use(express.urlencoded({ extended: true, limit: "500mb" }));
 
@@ -192,19 +192,19 @@ const validateEnvironment = () => {
       const trimmed = value.trim();
       if (trimmed.length < 32) {
         console.error(
-          `❌ ${varName} must be at least 32 characters long (current: ${trimmed.length})`
+          `❌ ${varName} must be at least 32 characters long (current: ${trimmed.length})`,
         );
         missing.push(varName);
       } else {
         // Check for common issues
         if (value.length !== trimmed.length) {
           warnings.push(
-            `${varName} has leading/trailing whitespace (will be trimmed)`
+            `${varName} has leading/trailing whitespace (will be trimmed)`,
           );
         }
         if (/\s/.test(trimmed)) {
           warnings.push(
-            `${varName} contains internal whitespace - this may cause issues`
+            `${varName} contains internal whitespace - this may cause issues`,
           );
         }
         // Check if it looks like a placeholder
@@ -214,7 +214,7 @@ const validateEnvironment = () => {
           trimmed === "your_jwt_secret_min_32_chars"
         ) {
           warnings.push(
-            `${varName} appears to be a placeholder value - please set a real secret`
+            `${varName} appears to be a placeholder value - please set a real secret`,
           );
         }
       }
@@ -231,10 +231,10 @@ const validateEnvironment = () => {
     missing.forEach((v) => console.error(`   - ${v}`));
     console.error("\n⚠️  Server will start but authentication will fail.");
     console.error(
-      "   Please set these variables in your Elastic Beanstalk environment configuration."
+      "   Please set these variables in your Elastic Beanstalk environment configuration.",
     );
     console.error(
-      "   In AWS: Go to Elastic Beanstalk → Environment → Configuration → Software → Environment properties"
+      "   In AWS: Go to Elastic Beanstalk → Environment → Configuration → Software → Environment properties",
     );
     return false;
   }
@@ -248,7 +248,7 @@ const startServer = () => {
   const envValid = validateEnvironment();
   if (!envValid) {
     console.error(
-      "⚠️  Continuing with invalid environment - authentication will fail"
+      "⚠️  Continuing with invalid environment - authentication will fail",
     );
   }
 
@@ -300,14 +300,14 @@ const startServer = () => {
 
   // Increase server timeouts to handle long-running API requests (predictions, insights, etc.)
   // CloudFront OriginReadTimeout is set to 240s in the CloudFormation stack
-  server.keepAliveTimeout = 300_000;   // 5 min — must exceed ALB/CloudFront idle timeout (240s)
-  server.headersTimeout = 305_000;     // slightly above keepAliveTimeout per Node docs
+  server.keepAliveTimeout = 300_000; // 5 min — must exceed ALB/CloudFront idle timeout (240s)
+  server.headersTimeout = 305_000; // slightly above keepAliveTimeout per Node docs
 
   server.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`📡 WebSocket server ready`);
     console.log(
-      `🔗 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:8080"}`
+      `🔗 Frontend URL: ${process.env.FRONTEND_URL || "http://localhost:8080"}`,
     );
     console.log(`🌍 Environment: ${NODE_ENV}`);
     if (SKIP_DB) {
@@ -329,9 +329,8 @@ if (SKIP_DB) {
       // Start LOS sync scheduler if not in test mode
       if (NODE_ENV !== "test") {
         try {
-          const { startSyncScheduler } = await import(
-            "./services/losSyncScheduler.js"
-          );
+          const { startSyncScheduler } =
+            await import("./services/losSyncScheduler.js");
           startSyncScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start LOS sync scheduler:", error);
@@ -339,9 +338,8 @@ if (SKIP_DB) {
 
         // Start vendor sync scheduler (reads from loans table)
         try {
-          const { startVendorSyncScheduler } = await import(
-            "./services/vendorSyncScheduler.js"
-          );
+          const { startVendorSyncScheduler } =
+            await import("./services/vendorSyncScheduler.js");
           startVendorSyncScheduler();
         } catch (error) {
           console.warn("⚠️ Failed to start vendor sync scheduler:", error);
@@ -351,7 +349,7 @@ if (SKIP_DB) {
     .catch((error) => {
       console.error("❌ Failed to initialize database:", error);
       console.error(
-        "⚠️ Starting server without database (some features may be unavailable)"
+        "⚠️ Starting server without database (some features may be unavailable)",
       );
       // Don't exit - start server anyway so health check and basic routes work
       startServer();
