@@ -336,7 +336,8 @@ export class ApiClient {
     const isSlowEndpoint =
       endpoint.includes("/loans/funnel") ||
       endpoint.includes("/dashboard/analytics") ||
-      endpoint.includes("/dashboard/insights");
+      endpoint.includes("/dashboard/insights") ||
+      endpoint.includes("/predictions");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint

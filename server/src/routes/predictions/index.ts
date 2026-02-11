@@ -500,9 +500,8 @@ router.get(
       // Calculate date range for period filter
       const dateRange = period ? getPeriodDateRange(period) : null;
 
-      // Query most recent prediction per loan, joining with loans table for date filtering
-      // Use a subquery to get distinct predictions first, then join with loans
-      // Include loan_data JSONB which contains signal strengths, loan_purpose, channel, etc.
+      // Single query: get latest prediction per loan AND join loans table in one round trip
+      // The composite index idx_loan_predictions_loan_created covers DISTINCT ON efficiently
       let query = `
       WITH latest_predictions AS (
         SELECT DISTINCT ON (loan_id)
@@ -537,18 +536,22 @@ router.get(
 
       query += ` ORDER BY loan_id, created_at DESC
       )
-      SELECT lp.*
+      SELECT lp.*,
+        l.loan_number, l.loan_officer, l.loan_amount AS l_loan_amount, l.loan_type AS l_loan_type,
+        l.current_milestone AS l_current_milestone, l.fico_score AS l_fico_score,
+        l.ltv_ratio AS l_ltv_ratio, l.be_dti_ratio AS l_be_dti_ratio,
+        l.interest_rate AS l_interest_rate, l.application_date AS l_application_date,
+        l.lock_date AS l_lock_date, l.lock_expiration_date AS l_lock_expiration_date,
+        l.estimated_closing_date AS l_estimated_closing_date, l.channel AS l_channel,
+        l.property_type AS l_property_type, l.loan_purpose AS l_loan_purpose,
+        l.underwriter AS l_underwriter, l.closer AS l_closer, l.processor AS l_processor,
+        l.current_loan_status AS l_current_loan_status
       FROM latest_predictions lp
+      LEFT JOIN public.loans l ON l.loan_id = lp.loan_id
     `;
 
-      // Join with loans table if period filter is specified
-      // Match the EXACT same filter used in /api/loans/active-loans-count for consistency:
-      // - current_loan_status = 'Active Loan' (exact match, not ILIKE)
-      // - application_date IS NOT NULL AND != ''
-      // - application_date >= startDate AND < endDate (exclusive end to match active-loans-count)
       if (dateRange) {
         query += `
-        INNER JOIN public.loans l ON l.loan_id = lp.loan_id
         WHERE l.current_loan_status = 'Active Loan'
           AND l.application_date IS NOT NULL
           AND l.application_date::text != ''
@@ -563,38 +566,37 @@ router.get(
       query += ` LIMIT $${paramIndex}`;
       params.push(limit);
 
-      // First, get total predictions count (unfiltered) for debugging
-      const totalPredictionsResult = await tenantPool.query(
-        `SELECT COUNT(*) as total FROM public.loan_predictions`
-      );
-      const totalPredictionsCount = parseInt(
-        totalPredictionsResult.rows[0]?.total || "0",
-        10
-      );
-
       const result = await tenantPool.query(query, params);
 
-      // Get loan IDs from predictions to fetch loan data for signal strengths
-      const predictionLoanIds = result.rows.map((r) => r.loan_id);
-
-      // Fetch loan data with signal strengths for the critical loan cards
-      let loanDataMap: Record<string, any> = {};
-      if (predictionLoanIds.length > 0) {
-        const loanDataResult = await tenantPool.query(
-          `SELECT 
-            loan_id, loan_number, loan_officer, loan_amount, loan_type,
-            current_milestone, fico_score, ltv_ratio, be_dti_ratio,
-            interest_rate, application_date, lock_date, lock_expiration_date,
-            estimated_closing_date, channel, property_type, loan_purpose,
-            underwriter, closer, processor, current_loan_status
-          FROM public.loans 
-          WHERE loan_id = ANY($1)`,
-          [predictionLoanIds]
-        );
-        loanDataResult.rows.forEach((row) => {
-          loanDataMap[row.loan_id] = row;
-        });
-      }
+      // Build loanDataMap from the joined result (no second query needed)
+      const loanDataMap: Record<string, any> = {};
+      result.rows.forEach((row) => {
+        if (row.loan_number != null || row.l_fico_score != null) {
+          loanDataMap[row.loan_id] = {
+            loan_id: row.loan_id,
+            loan_number: row.loan_number,
+            loan_officer: row.loan_officer,
+            loan_amount: row.l_loan_amount,
+            loan_type: row.l_loan_type,
+            current_milestone: row.l_current_milestone,
+            fico_score: row.l_fico_score,
+            ltv_ratio: row.l_ltv_ratio,
+            be_dti_ratio: row.l_be_dti_ratio,
+            interest_rate: row.l_interest_rate,
+            application_date: row.l_application_date,
+            lock_date: row.l_lock_date,
+            lock_expiration_date: row.l_lock_expiration_date,
+            estimated_closing_date: row.l_estimated_closing_date,
+            channel: row.l_channel,
+            property_type: row.l_property_type,
+            loan_purpose: row.l_loan_purpose,
+            underwriter: row.l_underwriter,
+            closer: row.l_closer,
+            processor: row.l_processor,
+            current_loan_status: row.l_current_loan_status,
+          };
+        }
+      });
 
       // Calculate signal strengths from loan data (since loan_prediction_buckets table may not exist)
       // These are simplified calculations based on the prediction service logic
@@ -871,23 +873,8 @@ router.get(
 
       // Log for debugging
       logInfo("[Predictions GET] Results", {
-        totalPredictionsInTable: totalPredictionsCount,
         filteredCount: predictions.length,
         period,
-        dateRange: dateRange
-          ? {
-              start: dateRange.startDate.toISOString().split("T")[0],
-              end: dateRange.endDate.toISOString().split("T")[0],
-            }
-          : null,
-        summary: {
-          withdraw: predictions.filter((p) => p.predictedOutcome === "withdraw")
-            .length,
-          deny: predictions.filter((p) => p.predictedOutcome === "deny").length,
-          originate: predictions.filter(
-            (p) => p.predictedOutcome === "originate"
-          ).length,
-        },
       });
 
       // Count close-late risk from stored loan data
@@ -914,9 +901,7 @@ router.get(
               period,
             }
           : null,
-        // Include debug info to help diagnose filtering
         debug: {
-          totalPredictionsInTable: totalPredictionsCount,
           filteredCount: predictions.length,
         },
       });
