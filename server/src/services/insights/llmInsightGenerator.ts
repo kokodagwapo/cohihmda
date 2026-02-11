@@ -201,9 +201,50 @@ IMPORTANT: Do NOT mix these two groups. If you cite the number of all withdraw/d
 - Fallout Rate: ${fmtPct(metrics.funnel.falloutRate)}
 
 === TRENDS ===
-- Volume vs Last Month: ${metrics.comparisons.volumeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastMonth)}
-- Volume vs Last Year: ${metrics.comparisons.volumeVsLastYear > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastYear)}
-- Cycle Time vs Last Month: ${metrics.comparisons.cycleTimeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.cycleTimeVsLastMonth)}
+Volume MoM:
+- Current MTD funded volume: ${fmt$(metrics.comparisons.currentMtdVolume)}
+- Last month funded volume: ${fmt$(metrics.comparisons.lastMonthVolume)}
+- Change: ${metrics.comparisons.volumeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastMonth)}
+
+Volume YoY:
+- Current YTD funded volume: ${fmt$(metrics.comparisons.currentYtdVolume)}
+- Last year same period funded volume: ${fmt$(metrics.comparisons.lastYearVolume)}
+- Change: ${metrics.comparisons.volumeVsLastYear > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastYear)}
+
+Cycle Time MoM:
+- Current cycle time: ${Math.round(metrics.comparisons.currentCycleTime)} days
+- Last month cycle time: ${Math.round(metrics.comparisons.lastMonthCycleTime)} days
+- Change: ${metrics.comparisons.cycleTimeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.cycleTimeVsLastMonth)}
+
+IMPORTANT: When citing volume changes, use the EXACT dollar amounts above. Do not reverse-calculate from percentages. State "funded volume declined from {lastMonth} to {currentMTD}" with the actual numbers.
+
+=== CLOSING RISK (B3) ===
+- Loans closing within 10 days without CTC: ${metrics.closingRisk.atRiskCount}
+- At-risk closing volume: ${fmt$(metrics.closingRisk.atRiskVolume)}
+- Avg days to close: ${metrics.closingRisk.avgDaysToClose}
+
+=== LOCK EXPIRATION (C1) ===
+- Locked loans expiring within 7 days without CTC: ${metrics.lockExpiration.expiringCount}
+- Expiring volume: ${fmt$(metrics.lockExpiration.expiringVolume)}
+- Avg days to expiry: ${metrics.lockExpiration.avgDaysToExpiry}
+
+=== TRID EXPOSURE (G1) ===
+- Loans closing within 5 days without CD sent: ${metrics.tridExposure.atRiskCount}
+- Avg days to close: ${metrics.tridExposure.avgDaysToClose}
+
+=== MARGIN (C2) ===
+- Current month avg gain-on-sale margin: ${metrics.marginData.currentMonthBps} bps
+- Prior month avg gain-on-sale margin: ${metrics.marginData.priorMonthBps} bps
+- Delta: ${metrics.marginData.deltaBps > 0 ? "+" : ""}${metrics.marginData.deltaBps} bps
+
+=== CONDITION BACKLOG (D2) ===
+- Avg conditions per active loan: ${metrics.conditionBacklog.avgConditions}
+- Loans with >10 outstanding conditions: ${metrics.conditionBacklog.highConditionCount}
+
+=== BASELINES (for threshold comparison) ===
+- Pull-Through 90D Rolling: ${fmtPct(metrics.performance.pullThroughRolling90D)}
+- Cycle Time Current: ${Math.round(metrics.performance.avgCycleTime)} days
+- Active Pipeline Size: ${metrics.pipeline.activeLoans} loans
 
 Generate insights for your designated category now. Only output insights supported by this data. If a metric is 0 or N/A, do not generate an insight about it.`;
 }
@@ -373,6 +414,42 @@ function buildDetailFilters(
       return { type: "comparisons" };
     }
 
+    case "closing_risk": {
+      const ids = metrics.closingRisk.loanIds;
+      if (!ids || ids.length === 0) return null;
+      return { type: "closing_risk", loan_ids: ids };
+    }
+
+    case "lock_expiration": {
+      const ids = metrics.lockExpiration.loanIds;
+      if (!ids || ids.length === 0) return null;
+      return { type: "lock_expiration", loan_ids: ids };
+    }
+
+    case "trid": {
+      const ids = metrics.tridExposure.loanIds;
+      if (!ids || ids.length === 0) return null;
+      return { type: "trid", loan_ids: ids };
+    }
+
+    case "margin": {
+      return {
+        type: "margin",
+        currentMonthBps: metrics.marginData.currentMonthBps,
+        priorMonthBps: metrics.marginData.priorMonthBps,
+        deltaBps: metrics.marginData.deltaBps,
+      };
+    }
+
+    case "condition_backlog": {
+      const ids = metrics.conditionBacklog.highConditionLoanIds;
+      return {
+        type: "condition_backlog",
+        loan_ids: ids,
+        avgConditions: metrics.conditionBacklog.avgConditions,
+      };
+    }
+
     default:
       return null;
   }
@@ -401,6 +478,11 @@ function parseBucketResponse(
       "credit_risk",
       "lost_opportunity",
       "comparisons",
+      "closing_risk",
+      "lock_expiration",
+      "trid",
+      "margin",
+      "condition_backlog",
     ];
 
     return parsed.insights.map((ins: any) => ({

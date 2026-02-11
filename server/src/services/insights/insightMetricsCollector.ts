@@ -98,6 +98,13 @@ export interface InsightMetricsPayload {
     volumeVsLastYear: number;
     cycleTimeVsLastMonth: number;
     pullThroughVsLastMonth: number;
+    /** Actual dollar amounts used in the comparison */
+    currentMtdVolume: number;
+    lastMonthVolume: number;
+    currentYtdVolume: number;
+    lastYearVolume: number;
+    currentCycleTime: number;
+    lastMonthCycleTime: number;
   };
 
   // Scorecard summary (if available)
@@ -106,6 +113,43 @@ export interface InsightMetricsPayload {
     secondTierCount: number;
     bottomTierCount: number;
     avgTtsScore: number;
+  };
+
+  // B3 — Closing risk: loans closing within 10 days without CTC
+  closingRisk: {
+    atRiskCount: number;
+    atRiskVolume: number;
+    loanIds: string[];
+    avgDaysToClose: number;
+  };
+
+  // C1 — Lock expiration: locked loans expiring within 7 days without CTC
+  lockExpiration: {
+    expiringCount: number;
+    expiringVolume: number;
+    loanIds: string[];
+    avgDaysToExpiry: number;
+  };
+
+  // G1 — TRID timing exposure: loans closing soon without CD sent
+  tridExposure: {
+    atRiskCount: number;
+    loanIds: string[];
+    avgDaysToClose: number;
+  };
+
+  // C2 — Margin data: gain-on-sale margin current vs prior month (bps)
+  marginData: {
+    currentMonthBps: number;
+    priorMonthBps: number;
+    deltaBps: number;
+  };
+
+  // D2 — Condition backlog: average conditions per active loan
+  conditionBacklog: {
+    avgConditions: number;
+    highConditionCount: number;
+    highConditionLoanIds: string[];
   };
 }
 
@@ -449,6 +493,12 @@ async function calculateComparisons(
   volumeVsLastYear: number;
   cycleTimeVsLastMonth: number;
   pullThroughVsLastMonth: number;
+  currentMtdVolume: number;
+  lastMonthVolume: number;
+  currentYtdVolume: number;
+  lastYearVolume: number;
+  currentCycleTime: number;
+  lastMonthCycleTime: number;
 }> {
   try {
     // Get last month's metrics
@@ -466,6 +516,7 @@ async function calculateComparisons(
     const currentVolume = Number(currentMtdMetrics.funded_volume?.value || 0);
     const lastMonthVolume = Number(lastMonthMetrics.funded_volume?.value || 0);
     const lastYearVolume = Number(lastYearMetrics.funded_volume?.value || 0);
+    const currentYtdVolume = Number(currentYtdMetrics.funded_volume?.value || 0);
 
     const currentCycleTime = Number(
       currentMtdMetrics.avg_cycle_time?.value || 0
@@ -481,16 +532,19 @@ async function calculateComparisons(
           : 0,
       volumeVsLastYear:
         lastYearVolume > 0
-          ? ((Number(currentYtdMetrics.funded_volume?.value || 0) -
-              lastYearVolume) /
-              lastYearVolume) *
-            100
+          ? ((currentYtdVolume - lastYearVolume) / lastYearVolume) * 100
           : 0,
       cycleTimeVsLastMonth:
         lastMonthCycleTime > 0
           ? ((currentCycleTime - lastMonthCycleTime) / lastMonthCycleTime) * 100
           : 0,
       pullThroughVsLastMonth: 0, // Will be calculated separately with rolling 90D methodology
+      currentMtdVolume: currentVolume,
+      lastMonthVolume,
+      currentYtdVolume,
+      lastYearVolume,
+      currentCycleTime,
+      lastMonthCycleTime,
     };
   } catch (error) {
     console.error("[InsightMetrics] Error calculating comparisons:", error);
@@ -499,7 +553,212 @@ async function calculateComparisons(
       volumeVsLastYear: 0,
       cycleTimeVsLastMonth: 0,
       pullThroughVsLastMonth: 0,
+      currentMtdVolume: 0,
+      lastMonthVolume: 0,
+      currentYtdVolume: 0,
+      lastYearVolume: 0,
+      currentCycleTime: 0,
+      lastMonthCycleTime: 0,
     };
+  }
+}
+
+// ============================================================================
+// B3 — Closing-Late Risk
+// Loans with estimated_closing_date within 10 days that have NOT reached CTC
+// ============================================================================
+
+async function fetchClosingLateRisk(
+  tenantPool: pg.Pool,
+  channelGroup?: string
+): Promise<{ atRiskCount: number; atRiskVolume: number; loanIds: string[]; avgDaysToClose: number }> {
+  try {
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const result = await tenantPool.query(`
+      SELECT loan_id, COALESCE(loan_amount, 0) as loan_amount,
+             estimated_closing_date,
+             (estimated_closing_date - CURRENT_DATE) as days_to_close
+      FROM public.loans
+      WHERE current_loan_status = 'Active Loan'
+        AND estimated_closing_date IS NOT NULL
+        AND estimated_closing_date <= CURRENT_DATE + INTERVAL '10 days'
+        AND estimated_closing_date >= CURRENT_DATE
+        AND ctc_date IS NULL
+        ${channelClause}
+    `);
+
+    const loanIds = result.rows.map((r: any) => r.loan_id);
+    const volume = result.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0), 0);
+    const avgDays = result.rows.length > 0
+      ? result.rows.reduce((sum: number, r: any) => sum + (parseInt(r.days_to_close) || 0), 0) / result.rows.length
+      : 0;
+
+    return { atRiskCount: loanIds.length, atRiskVolume: volume, loanIds, avgDaysToClose: Math.round(avgDays) };
+  } catch (error) {
+    console.error("[InsightMetrics] Error fetching closing-late risk:", error);
+    return { atRiskCount: 0, atRiskVolume: 0, loanIds: [], avgDaysToClose: 0 };
+  }
+}
+
+// ============================================================================
+// C1 — Lock Expiration Exposure
+// Locked loans with lock_expiration_date within 7 days that have NOT reached CTC
+// ============================================================================
+
+async function fetchLockExpirationExposure(
+  tenantPool: pg.Pool,
+  channelGroup?: string
+): Promise<{ expiringCount: number; expiringVolume: number; loanIds: string[]; avgDaysToExpiry: number }> {
+  try {
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const result = await tenantPool.query(`
+      SELECT loan_id, COALESCE(loan_amount, 0) as loan_amount,
+             lock_expiration_date,
+             (lock_expiration_date - CURRENT_DATE) as days_to_expiry
+      FROM public.loans
+      WHERE current_loan_status = 'Active Loan'
+        AND lock_date IS NOT NULL
+        AND lock_expiration_date IS NOT NULL
+        AND lock_expiration_date <= CURRENT_DATE + INTERVAL '7 days'
+        AND lock_expiration_date >= CURRENT_DATE
+        AND ctc_date IS NULL
+        ${channelClause}
+    `);
+
+    const loanIds = result.rows.map((r: any) => r.loan_id);
+    const volume = result.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0), 0);
+    const avgDays = result.rows.length > 0
+      ? result.rows.reduce((sum: number, r: any) => sum + (parseInt(r.days_to_expiry) || 0), 0) / result.rows.length
+      : 0;
+
+    return { expiringCount: loanIds.length, expiringVolume: volume, loanIds, avgDaysToExpiry: Math.round(avgDays) };
+  } catch (error) {
+    console.error("[InsightMetrics] Error fetching lock expiration exposure:", error);
+    return { expiringCount: 0, expiringVolume: 0, loanIds: [], avgDaysToExpiry: 0 };
+  }
+}
+
+// ============================================================================
+// G1 — TRID Timing Exposure
+// Loans closing within 5 calendar days where Closing Disclosure has NOT been sent
+// (TRID requires CD at least 3 business days before closing)
+// ============================================================================
+
+async function fetchTridExposure(
+  tenantPool: pg.Pool,
+  channelGroup?: string
+): Promise<{ atRiskCount: number; loanIds: string[]; avgDaysToClose: number }> {
+  try {
+    const channelClause = buildChannelWhereClause(channelGroup);
+    const result = await tenantPool.query(`
+      SELECT loan_id, estimated_closing_date,
+             (estimated_closing_date - CURRENT_DATE) as days_to_close
+      FROM public.loans
+      WHERE current_loan_status = 'Active Loan'
+        AND estimated_closing_date IS NOT NULL
+        AND estimated_closing_date <= CURRENT_DATE + INTERVAL '5 days'
+        AND estimated_closing_date >= CURRENT_DATE
+        AND closing_disclosure_sent_date IS NULL
+        ${channelClause}
+    `);
+
+    const loanIds = result.rows.map((r: any) => r.loan_id);
+    const avgDays = result.rows.length > 0
+      ? result.rows.reduce((sum: number, r: any) => sum + (parseInt(r.days_to_close) || 0), 0) / result.rows.length
+      : 0;
+
+    return { atRiskCount: loanIds.length, loanIds, avgDaysToClose: Math.round(avgDays) };
+  } catch (error) {
+    console.error("[InsightMetrics] Error fetching TRID exposure:", error);
+    return { atRiskCount: 0, loanIds: [], avgDaysToClose: 0 };
+  }
+}
+
+// ============================================================================
+// C2 — Margin Compression
+// Gain-on-sale margin: (net_sell - net_buy) / loan_amount * 10000 (bps)
+// Compare current month funded loans vs prior month
+// ============================================================================
+
+async function fetchMarginData(
+  tenantPool: pg.Pool,
+  channelGroup?: string
+): Promise<{ currentMonthBps: number; priorMonthBps: number; deltaBps: number }> {
+  try {
+    const channelClause = buildChannelWhereClause(channelGroup);
+
+    // Current month
+    const currentResult = await tenantPool.query(`
+      SELECT AVG(
+        (COALESCE(net_sell, 0) - COALESCE(net_buy, 0)) / NULLIF(loan_amount, 0) * 10000
+      ) as avg_margin_bps
+      FROM public.loans
+      WHERE funding_date >= DATE_TRUNC('month', CURRENT_DATE)
+        AND loan_amount > 0
+        AND (net_sell IS NOT NULL OR net_buy IS NOT NULL)
+        ${channelClause}
+    `);
+
+    // Prior month
+    const priorResult = await tenantPool.query(`
+      SELECT AVG(
+        (COALESCE(net_sell, 0) - COALESCE(net_buy, 0)) / NULLIF(loan_amount, 0) * 10000
+      ) as avg_margin_bps
+      FROM public.loans
+      WHERE funding_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+        AND funding_date < DATE_TRUNC('month', CURRENT_DATE)
+        AND loan_amount > 0
+        AND (net_sell IS NOT NULL OR net_buy IS NOT NULL)
+        ${channelClause}
+    `);
+
+    const currentBps = parseFloat(currentResult.rows[0]?.avg_margin_bps) || 0;
+    const priorBps = parseFloat(priorResult.rows[0]?.avg_margin_bps) || 0;
+
+    return {
+      currentMonthBps: Math.round(currentBps * 100) / 100,
+      priorMonthBps: Math.round(priorBps * 100) / 100,
+      deltaBps: Math.round((currentBps - priorBps) * 100) / 100,
+    };
+  } catch (error) {
+    console.error("[InsightMetrics] Error fetching margin data:", error);
+    return { currentMonthBps: 0, priorMonthBps: 0, deltaBps: 0 };
+  }
+}
+
+// ============================================================================
+// D2 — Condition Backlog
+// Average number_of_conditions for active loans; flag loans with >10
+// ============================================================================
+
+async function fetchConditionBacklog(
+  tenantPool: pg.Pool,
+  channelGroup?: string
+): Promise<{ avgConditions: number; highConditionCount: number; highConditionLoanIds: string[] }> {
+  try {
+    const channelClause = buildChannelWhereClause(channelGroup);
+
+    const result = await tenantPool.query(`
+      SELECT loan_id, COALESCE(number_of_conditions, 0) as conditions
+      FROM public.loans
+      WHERE current_loan_status = 'Active Loan'
+        AND number_of_conditions IS NOT NULL
+        AND number_of_conditions > 0
+        ${channelClause}
+    `);
+
+    const totalConditions = result.rows.reduce((sum: number, r: any) => sum + (parseInt(r.conditions) || 0), 0);
+    const avgConditions = result.rows.length > 0 ? totalConditions / result.rows.length : 0;
+    const highConditionRows = result.rows.filter((r: any) => parseInt(r.conditions) > 10);
+
+    return {
+      avgConditions: Math.round(avgConditions * 10) / 10,
+      highConditionCount: highConditionRows.length,
+      highConditionLoanIds: highConditionRows.map((r: any) => r.loan_id),
+    };
+  } catch (error) {
+    console.error("[InsightMetrics] Error fetching condition backlog:", error);
+    return { avgConditions: 0, highConditionCount: 0, highConditionLoanIds: [] };
   }
 }
 
@@ -562,6 +821,12 @@ export async function collectInsightMetrics(
     funnel,
     // Credit risk (now returns { count, loanIds })
     creditRiskResult,
+    // New trigger metrics
+    closingRisk,
+    lockExpiration,
+    tridExposure,
+    marginData,
+    conditionBacklog,
   ] = await Promise.all([
     // YTD metrics
     queryMetrics(
@@ -608,6 +873,13 @@ export async function collectInsightMetrics(
 
     // High risk loans with IDs (channel filter applied within function)
     fetchCreditRiskLoans(tenantPool, channelGroup),
+
+    // New trigger metrics (B3, C1, G1, C2, D2)
+    fetchClosingLateRisk(tenantPool, channelGroup),
+    fetchLockExpirationExposure(tenantPool, channelGroup),
+    fetchTridExposure(tenantPool, channelGroup),
+    fetchMarginData(tenantPool, channelGroup),
+    fetchConditionBacklog(tenantPool, channelGroup),
   ]);
 
   // Process predictions
@@ -710,6 +982,12 @@ export async function collectInsightMetrics(
     funnel,
 
     comparisons,
+
+    closingRisk,
+    lockExpiration,
+    tridExposure,
+    marginData,
+    conditionBacklog,
   };
 
   console.log(`[InsightMetrics] Collected metrics payload:`, {
@@ -725,6 +1003,11 @@ export async function collectInsightMetrics(
     },
     pullThrough: payload.performance.pullThroughRolling90D,
     cycleTime: payload.performance.avgCycleTime,
+    closingRisk: payload.closingRisk.atRiskCount,
+    lockExpiration: payload.lockExpiration.expiringCount,
+    tridExposure: payload.tridExposure.atRiskCount,
+    marginBps: `${payload.marginData.currentMonthBps} (delta: ${payload.marginData.deltaBps})`,
+    conditionBacklog: `avg=${payload.conditionBacklog.avgConditions}, high=${payload.conditionBacklog.highConditionCount}`,
   });
 
   return payload;

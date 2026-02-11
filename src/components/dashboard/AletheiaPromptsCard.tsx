@@ -401,6 +401,11 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       "pipeline",
       "performance",
       "comparisons",
+      "closing_risk",
+      "lock_expiration",
+      "trid",
+      "margin",
+      "condition_backlog",
     ],
     []
   );
