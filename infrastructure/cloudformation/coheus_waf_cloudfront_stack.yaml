@@ -312,8 +312,8 @@ Resources:
                   - BackendOriginUseHTTPS
                   - - TLSv1.2
                   - !Ref AWS::NoValue
-                OriginReadTimeout: 60
-                OriginKeepaliveTimeout: 60
+                OriginReadTimeout: 240
+                OriginKeepaliveTimeout: 240
             - !Ref AWS::NoValue
 
         # Default cache behavior (S3 static assets)
