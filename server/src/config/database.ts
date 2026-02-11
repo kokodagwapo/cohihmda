@@ -260,12 +260,14 @@ export async function initDatabase(): Promise<void> {
       // Don't throw - allow server to start even with migration warnings
     }
     
-    // Seed default AI prompt configs if table exists but is empty
+    // Force-sync default AI prompt configs on every startup.
+    // This ensures code-level prompt changes (system_prompt, model, temperature, max_tokens)
+    // are applied to the database. Does NOT overwrite admin-customized user_prompt_template.
     try {
-      const { seedDefaultPrompts } = await import('../services/promptConfigService.js');
-      const seeded = await seedDefaultPrompts();
-      if (seeded > 0) {
-        console.log(`✅ Seeded ${seeded} default AI prompt configuration(s)`);
+      const { forceSeedDefaultPrompts } = await import('../services/promptConfigService.js');
+      const upserted = await forceSeedDefaultPrompts();
+      if (upserted > 0) {
+        console.log(`✅ Synced ${upserted} default AI prompt configuration(s)`);
       }
     } catch (seedError: any) {
       // Non-critical - prompts will fall back to hardcoded defaults

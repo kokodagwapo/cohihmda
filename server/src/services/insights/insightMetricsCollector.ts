@@ -71,6 +71,7 @@ export interface InsightMetricsPayload {
     waDti: number;
     highRiskLoanCount: number; // FICO<620 OR LTV>95 OR DTI>50
     highRiskLoanIds: string[]; // Exact loan IDs meeting criteria
+    highRiskVolume: number; // Total volume of high-risk credit loans
   };
 
   // Lost opportunity
@@ -308,16 +309,16 @@ async function fetchAtRiskVolume(
 }
 
 /**
- * Fetch credit risk metrics (high risk loan count AND loan IDs)
+ * Fetch credit risk metrics (high risk loan count, loan IDs, and total volume)
  */
 async function fetchCreditRiskLoans(
   tenantPool: pg.Pool,
   channelGroup?: string
-): Promise<{ count: number; loanIds: string[] }> {
+): Promise<{ count: number; loanIds: string[]; volume: number }> {
   try {
     const channelClause = buildChannelWhereClause(channelGroup);
     const result = await tenantPool.query(`
-      SELECT loan_id
+      SELECT loan_id, COALESCE(loan_amount, 0) as loan_amount
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
         AND (
@@ -329,10 +330,11 @@ async function fetchCreditRiskLoans(
     `);
 
     const loanIds = result.rows.map((r: any) => r.loan_id);
-    return { count: loanIds.length, loanIds };
+    const volume = result.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0), 0);
+    return { count: loanIds.length, loanIds, volume };
   } catch (error) {
     console.error("[InsightMetrics] Error fetching credit risk loans:", error);
-    return { count: 0, loanIds: [] };
+    return { count: 0, loanIds: [], volume: 0 };
   }
 }
 
@@ -1002,6 +1004,7 @@ export async function collectInsightMetrics(
       waDti: Number(ytdMetrics.wa_dti?.value || 0),
       highRiskLoanCount: creditRiskResult.count,
       highRiskLoanIds: creditRiskResult.loanIds,
+      highRiskVolume: creditRiskResult.volume,
     },
 
     lostOpportunity,

@@ -309,7 +309,7 @@ TRIGGER CONDITIONS (generate an insight ONLY if the condition is true):
    Compare current cycle time to the BASELINES section value.
 
 3. MARGIN COMPRESSION (source: "margin")
-   THRESHOLD: Gain-on-sale margin declined >= 8 bps MoM.
+   THRESHOLD: Gain-on-sale margin declined >= 5 bps MoM.
    Use the MARGIN section data. Report current, prior, and delta.
 
 4. VOLUME DECLINE (trailing 30D vs prior 30D) (source: "comparisons")
@@ -323,31 +323,37 @@ TRIGGER CONDITIONS (generate an insight ONLY if the condition is true):
    THRESHOLD: Trailing 30-day cycle time increased >= 5% vs the prior 30-day window.
 
 7. CREDIT QUALITY DETERIORATION (source: "credit_risk")
-   THRESHOLD: Weighted avg FICO below 680, OR weighted avg LTV above 85%, OR weighted avg DTI above 45%.
+   THRESHOLD: Weighted avg FICO below 700, OR weighted avg LTV above 80%, OR weighted avg DTI above 43%.
    Only flag if the value crosses these thresholds.
 
 8. CONDITION BACKLOG (source: "condition_backlog")
-   THRESHOLD: Avg conditions per active loan > 8 OR loans with >10 conditions exceeds 10% of active pipeline.
+   THRESHOLD: Avg conditions per active loan > 5 OR loans with >10 conditions exceeds 5% of active pipeline.
    Use the CONDITION BACKLOG section data.
 
 9. ELEVATED FALLOUT RATE (source: "pipeline")
-   THRESHOLD: Fallout rate exceeds 25%.
+   THRESHOLD: Fallout rate exceeds 20%.
 
 10. LOW LOCK RATIO (source: "pipeline")
-    THRESHOLD: Locked loans < 30% of active pipeline.
+    THRESHOLD: Locked loans < 35% of active pipeline.
 
 11. LOST OPPORTUNITY (source: "lost_opportunity")
-    THRESHOLD: Withdrawn count > 0 AND (withdrawn volume > $200K OR withdrawn count >= 5).
-    Only flag if below the critical threshold but still material.
+    THRESHOLD: Withdrawn count > 0 AND (withdrawn volume > $100K OR withdrawn count >= 3).
+
+12. PREDICTED FALLOUT SUMMARY (source: "predictions")
+    THRESHOLD: Total at-risk loans (withdraw + deny) > 0
+    Report: summary of predicted withdrawals and denials — counts and total at-risk volume.
+    This is a monitoring-level summary; the critical bucket covers the high-confidence subset.
+
+13. LOCK EXPIRATION MONITORING (source: "lock_expiration")
+    THRESHOLD: Any locked loans expiring within 7 days (count > 0)
+    Report: count and volume of expiring locks. Flag for monitoring even if below critical threshold.
 
 DO NOT REPORT:
-- Minor KPI movement: changes < 1 percentage point or < 2% are noise, not signal
 - Any metric that is 0, null, or N/A
 - Stable metrics with no measurable negative delta
-- Items that already qualify as CRITICAL (those belong in the red bucket)
 
 RULES:
-1. Generate 5-10 insights. Only angles where the threshold is met. If nothing is trending negatively, return {"insights": []}.
+1. Generate 6-12 insights. Cover EVERY angle where the threshold is met. More is better — executives want comprehensive monitoring visibility.
 2. Include specific numbers: current value, prior value, and the delta.
 3. Rank by severity — largest financial exposure or steepest decline first.
 4. Write each headline in max 45 words — state the metric, the value, and the change. Nothing else.
@@ -378,7 +384,7 @@ OUTPUT FORMAT (strict JSON):
 }`,
     model: "gpt-4o-mini",
     temperature: 0.5,
-    max_tokens: 2500,
+    max_tokens: 4000,
     json_mode: true,
     available_variables: ["metricsPayload"],
   },
@@ -393,24 +399,27 @@ OUTPUT FORMAT (strict JSON):
 
 YOUR FOCUS — "Critical" (Red bucket). Each angle below has a THRESHOLD GATE. Only generate an insight if the threshold is met.
 
-TRIGGER CONDITIONS (generate an insight ONLY if the condition is true):
+MANDATORY FALLOUT INSIGHTS — ALWAYS generate these if ANY prediction data exists (non-zero counts):
 
 1. HIGH-CONFIDENCE FALLOUT (source: "predictions")
-   THRESHOLD: High-confidence at-risk loans > 0 AND high-confidence at-risk volume > $500K
+   THRESHOLD: High-confidence at-risk loans > 0
    Report: count, volume, top risk factors for the >70% confidence subset ONLY.
    Never mix high-confidence count with all-confidence volume or vice versa.
 
 2. ALL PREDICTED FALLOUT (source: "predictions")
-   THRESHOLD: Total at-risk loans > 5% of active pipeline
+   THRESHOLD: Total at-risk loans > 0
    Report: total predicted withdraw count + deny count, total at-risk volume.
    Use the ALL at-risk volume, not the high-confidence volume.
+   Break down withdraw vs deny counts separately.
+
+ADDITIONAL TRIGGER CONDITIONS (generate an insight if the condition is true):
 
 3. LOCK EXPIRATION EXPOSURE (source: "lock_expiration")
-   THRESHOLD: Expiring volume > $10M OR expiring count >= 15 loans
+   THRESHOLD: Expiring count > 0
    Report: count of locked loans expiring within 7 days without CTC, expiring volume, avg days to expiry.
 
 4. CLOSING-LATE RISK (source: "closing_risk")
-   THRESHOLD: At-risk count > 0 AND (at-risk count >= 10% of active pipeline OR at-risk volume > $5M)
+   THRESHOLD: At-risk count > 0
    Report: count of loans closing within 10 days without CTC, at-risk volume, avg days to close.
 
 5. TRID TIMING EXPOSURE (source: "trid")
@@ -418,31 +427,30 @@ TRIGGER CONDITIONS (generate an insight ONLY if the condition is true):
    Report: count of loans at TRID risk. This is a compliance issue — always flag if > 0.
 
 6. HIGH-RISK CREDIT LOANS (source: "credit_risk")
-   THRESHOLD: Count >= 5 loans meeting FICO<620 OR LTV>95% OR DTI>50%
-   Report: count of high-risk credit loans.
+   THRESHOLD: Count >= 3 loans meeting FICO<620 OR LTV>95% OR DTI>50%
+   Report: count and volume of high-risk credit loans.
 
 7. WITHDRAWN LOANS (source: "lost_opportunity")
-   THRESHOLD: Withdrawn volume > $500K OR withdrawn count >= 10
+   THRESHOLD: Withdrawn count > 0 AND (withdrawn volume > $100K OR withdrawn count >= 3)
    Report: withdrawn count and volume, lost proforma revenue.
 
 8. DENIED LOANS (source: "lost_opportunity")
-   THRESHOLD: Denied count >= 5
+   THRESHOLD: Denied count >= 3
    Report: denied count and volume.
 
 DO NOT REPORT:
 - Any metric that is 0, null, or N/A
-- Normal daily variance — a single loan is not "critical" unless its volume exceeds $1M
-- Do NOT manufacture urgency when numbers are small
 - If no data meets any threshold above, return {"insights": []}
 
 RULES:
-1. Generate 3-8 insights. Only angles where the threshold is met.
+1. Generate 5-12 insights. Cover EVERY angle where the threshold is met. More is better — executives want the full picture.
 2. State the numbers: count, dollar amount, percentage. That IS the insight.
 3. Rank by financial exposure — largest dollar amount at risk first.
 4. Write each headline in max 45 words — state what happened and the scale. No adjectives.
 5. Write an understory of 2-3 sentences with supporting numbers. No speculation.
 6. Assign severity_score: 0.80-0.94 for standard critical items. Reserve 0.95+ for issues impacting >$5M in volume.
 7. Zero hallucination: only use data from the provided metrics payload.
+8. Fallout predictions (triggers 1 & 2) MUST appear if the data is non-zero. Do NOT skip them.
 
 BANNED LANGUAGE — never use:
 "may", "might", "could", "should", "consider", "recommend", "look into", "potential", "possibly", "likely to lead", "suggests that", "indicates that", "poses", "significant challenges", "concerning", "troubling", "alarming", "opportunities", "nearing", "approaching"
@@ -467,7 +475,7 @@ OUTPUT FORMAT (strict JSON):
 }`,
     model: "gpt-4o-mini",
     temperature: 0.3,
-    max_tokens: 2500,
+    max_tokens: 4000,
     json_mode: true,
     available_variables: ["metricsPayload"],
   },

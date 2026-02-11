@@ -173,9 +173,6 @@ router.post(
         tenantApiKey
       );
 
-      // Limit response size
-      const LOANS_PER_BUCKET = 50;
-
       // Enrich bucketed loans with loan_purpose and channel from raw DB when missing
       // (avoids "--" in UI when values exist in DB but are lost in prepareLoanData/bucketLoanData)
       const rawByLoanId = new Map(activeLoans.map((l: any) => [l.loan_id, l]));
@@ -288,68 +285,62 @@ router.post(
         });
       }
       let firstStrippedBackfillLogged = false;
-      const bucketGroups: Record<string, any[]> = {};
+      const allStrippedLoans: Record<string, any>[] = [];
       if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
         result.bucketedLoans.forEach((loan: any) => {
-          const bucket = loan.bucket || "unknown";
-          if (!bucketGroups[bucket]) bucketGroups[bucket] = [];
-          if (bucketGroups[bucket].length < LOANS_PER_BUCKET) {
-            const stripped: Record<string, any> = {};
-            essentialFields.forEach((f) => {
-              if (loan[f] !== undefined) stripped[f] = loan[f];
-            });
-            const lid = loan.loan_id ?? loan.loanId;
-            let rawFound = false;
-            const backfillSet: Record<string, any> = {};
-            if (lid != null) {
-              const raw = rawByLoanIdPred.get(String(lid));
-              rawFound = !!raw;
-              if (raw) {
-                if (
-                  raw.loan_purpose != null &&
-                  String(raw.loan_purpose).trim() !== ""
-                ) {
-                  stripped.loan_purpose = raw.loan_purpose;
-                  stripped.loanPurpose = raw.loan_purpose;
-                  backfillSet.loan_purpose = raw.loan_purpose;
-                }
-                if (raw.channel != null && String(raw.channel).trim() !== "") {
-                  stripped.channel = raw.channel;
-                  backfillSet.channel = raw.channel;
-                }
-                if (raw.lock_expiration_date != null) {
-                  stripped.lock_expiration_date = raw.lock_expiration_date;
-                  backfillSet.lock_expiration_date = raw.lock_expiration_date;
-                }
-                if (raw.lock_date != null) {
-                  stripped.lock_date = raw.lock_date;
-                  backfillSet.lock_date = raw.lock_date;
-                }
+          const stripped: Record<string, any> = {};
+          essentialFields.forEach((f) => {
+            if (loan[f] !== undefined) stripped[f] = loan[f];
+          });
+          const lid = loan.loan_id ?? loan.loanId;
+          let rawFound = false;
+          const backfillSet: Record<string, any> = {};
+          if (lid != null) {
+            const raw = rawByLoanIdPred.get(String(lid));
+            rawFound = !!raw;
+            if (raw) {
+              if (
+                raw.loan_purpose != null &&
+                String(raw.loan_purpose).trim() !== ""
+              ) {
+                stripped.loan_purpose = raw.loan_purpose;
+                stripped.loanPurpose = raw.loan_purpose;
+                backfillSet.loan_purpose = raw.loan_purpose;
+              }
+              if (raw.channel != null && String(raw.channel).trim() !== "") {
+                stripped.channel = raw.channel;
+                backfillSet.channel = raw.channel;
+              }
+              if (raw.lock_expiration_date != null) {
+                stripped.lock_expiration_date = raw.lock_expiration_date;
+                backfillSet.lock_expiration_date = raw.lock_expiration_date;
+              }
+              if (raw.lock_date != null) {
+                stripped.lock_date = raw.lock_date;
+                backfillSet.lock_date = raw.lock_date;
               }
             }
-            if (!firstStrippedBackfillLogged) {
-              firstStrippedBackfillLogged = true;
-              logInfo("[PredictDebug] predictions first stripped backfill", {
-                loan_id: lid,
-                lookupKey: lid != null ? String(lid) : null,
-                rawFound,
-                backfillSet,
-                strippedBeforeBackfill_loan_purpose:
-                  loan.loan_purpose ?? loan.loanPurpose,
-                strippedBeforeBackfill_channel: loan.channel,
-                strippedBeforeBackfill_lock_date: loan.lock_date,
-              });
-            }
-            bucketGroups[bucket].push(stripped);
           }
+          if (!firstStrippedBackfillLogged) {
+            firstStrippedBackfillLogged = true;
+            logInfo("[PredictDebug] predictions first stripped backfill", {
+              loan_id: lid,
+              lookupKey: lid != null ? String(lid) : null,
+              rawFound,
+              backfillSet,
+              strippedBeforeBackfill_loan_purpose:
+                loan.loan_purpose ?? loan.loanPurpose,
+              strippedBeforeBackfill_channel: loan.channel,
+              strippedBeforeBackfill_lock_date: loan.lock_date,
+            });
+          }
+          allStrippedLoans.push(stripped);
         });
       }
 
-      const limitedLoans = Object.values(bucketGroups).flat();
-
       const slimResult = {
         predictions: result.predictions || [],
-        bucketedLoans: limitedLoans,
+        bucketedLoans: allStrippedLoans,
         bucketSummary,
         totalBucketedLoans: result.bucketedLoans?.length || 0,
         summary: result.summary,
@@ -358,8 +349,8 @@ router.post(
 
       const responseSize = JSON.stringify(slimResult).length;
       const outcomeCounts = { withdraw: 0, deny: 0, originate: 0, at_risk: 0 };
-      for (const loan of limitedLoans) {
-        const outcome = loan.ruleBasedSummary?.predictedOutcome || loan.predictedOutcome;
+      for (const loan of (result.bucketedLoans || [])) {
+        const outcome = loan.riskSummary?.predictedOutcome || loan.predictedOutcome;
         if (outcome && outcome in outcomeCounts) {
           outcomeCounts[outcome as keyof typeof outcomeCounts]++;
         }
