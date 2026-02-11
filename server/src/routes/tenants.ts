@@ -233,6 +233,10 @@ router.post(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Validation error', details: error.errors });
       }
+      // Return 409 Conflict for duplicate slug errors instead of 500
+      if (error.message?.includes('already exists')) {
+        return res.status(409).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message || 'Failed to duplicate tenant' });
     }
   }
