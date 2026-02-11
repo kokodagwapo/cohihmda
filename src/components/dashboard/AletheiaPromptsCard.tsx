@@ -17,6 +17,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   TrendingUp,
+  ChevronsDownUp,
+  ChevronsUpDown,
 } from "lucide-react";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
@@ -138,6 +140,10 @@ interface BucketLaneProps {
   insights: AletheiaInsight[];
   onInsightClick: (insight: AletheiaInsight) => void;
   isDrillable: (insight: AletheiaInsight) => boolean;
+  /** When non-null, overrides the local expanded state (driven by parent "Expand All / Collapse All"). */
+  globalExpanded?: boolean | null;
+  /** Bumped each time the global toggle fires, ensuring the effect re-runs even if the boolean value stays the same. */
+  expandToggleKey?: number;
 }
 
 function BucketLane({
@@ -145,6 +151,8 @@ function BucketLane({
   insights,
   onInsightClick,
   isDrillable,
+  globalExpanded,
+  expandToggleKey,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -152,6 +160,15 @@ function BucketLane({
     null
   );
   const [isPaused, setIsPaused] = useState(false);
+
+  // Sync local expanded state when parent toggles "Expand All / Collapse All"
+  useEffect(() => {
+    if (globalExpanded !== undefined && globalExpanded !== null) {
+      setIsExpanded(globalExpanded);
+      if (!globalExpanded) setSelectedInsightIdx(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalExpanded, expandToggleKey]);
 
   // Auto-rotate through insights every 8 seconds (only when collapsed & not paused)
   useEffect(() => {
@@ -351,6 +368,11 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] =
     useState<AletheiaInsight | null>(null);
+  // Global expand/collapse state: null = uncontrolled (each lane manages itself),
+  // true = all expanded, false = all collapsed. Resets to null on individual lane toggle.
+  const [globalExpanded, setGlobalExpanded] = useState<boolean | null>(null);
+  // Counter to force re-trigger the effect in BucketLane even when toggling the same value
+  const [expandToggleKey, setExpandToggleKey] = useState(0);
 
   // Data hook
   const {
@@ -496,6 +518,30 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
           {/* Controls */}
           <div className="flex items-center gap-2">
+            {/* Expand All / Collapse All toggle */}
+            {hasInsights && nonEmptyBuckets.length > 1 && (
+              <button
+                onClick={() => {
+                  const next = globalExpanded === true ? false : true;
+                  setGlobalExpanded(next);
+                  setExpandToggleKey((k) => k + 1);
+                }}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/60 dark:border-slate-700/50"
+                title={globalExpanded === true ? "Collapse all sections" : "Expand all sections"}
+              >
+                {globalExpanded === true ? (
+                  <>
+                    <ChevronsDownUp className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    Collapse All
+                  </>
+                ) : (
+                  <>
+                    <ChevronsUpDown className="w-3.5 h-3.5" strokeWidth={1.5} />
+                    Expand All
+                  </>
+                )}
+              </button>
+            )}
             <ExportShareMenu
               title="Cohi Insights"
               targetRef={sectionRef}
@@ -640,6 +686,8 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   insights={items}
                   onInsightClick={handleInsightClick}
                   isDrillable={isDrillable}
+                  globalExpanded={globalExpanded}
+                  expandToggleKey={expandToggleKey}
                 />
               );
             })}

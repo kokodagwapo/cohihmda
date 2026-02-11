@@ -186,6 +186,7 @@ IMPORTANT: Do NOT mix these two groups. If you cite the number of all withdraw/d
 - Weighted Avg LTV: ${fmtPct(metrics.creditRisk.waLtv)}
 - Weighted Avg DTI: ${fmtPct(metrics.creditRisk.waDti)}
 - Loans meeting high-risk criteria (FICO<620 OR LTV>95% OR DTI>50%): ${metrics.creditRisk.highRiskLoanCount}
+- High-risk credit loan volume: ${fmt$(metrics.creditRisk.highRiskVolume)}
 
 === LOST OPPORTUNITY ===
 - Withdrawn Loans: ${metrics.lostOpportunity.withdrawnUnits}
