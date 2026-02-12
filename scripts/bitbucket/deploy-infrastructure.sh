@@ -286,6 +286,142 @@ deploy_backend_stack() {
 }
 
 # ============================================================================
+# Deploy WAF/CloudFront Stack (always us-east-1 — CloudFront is global)
+# ============================================================================
+deploy_waf_cloudfront_stack() {
+    echo ""
+    echo "========================================="
+    echo "Deploying WAF/CloudFront CloudFormation Stack"
+    echo "========================================="
+
+    local stack_name="${CF_STACK_WAF_CLOUDFRONT:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-waf-cloudfront}"
+    local template_file="infrastructure/cloudformation/coheus_waf_cloudfront_stack.yaml"
+    # CloudFront/WAF stacks MUST be in us-east-1 regardless of backend region
+    local cf_region="us-east-1"
+
+    echo "Stack name: $stack_name"
+    echo "Template: $template_file"
+    echo "Region: $cf_region (CloudFront requires us-east-1)"
+    echo ""
+
+    # Check if stack exists
+    if ! aws cloudformation describe-stacks --stack-name "$stack_name" --region "$cf_region" > /dev/null 2>&1; then
+        echo "WARNING: WAF/CloudFront stack '$stack_name' does not exist in $cf_region."
+        echo "Skipping CloudFront deployment. Set CF_STACK_WAF_CLOUDFRONT to your stack name if it differs."
+        return 0
+    fi
+
+    # Get current stack status
+    STACK_STATUS=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$cf_region" \
+        --query 'Stacks[0].StackStatus' \
+        --output text)
+
+    echo "Current stack status: $STACK_STATUS"
+
+    if [[ ! "$STACK_STATUS" =~ ^(CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)$ ]]; then
+        echo "WARNING: CloudFront stack is not in a stable state ($STACK_STATUS). Skipping."
+        return 0
+    fi
+
+    # Create change set
+    CHANGE_SET_NAME="pipeline-cf-update-$(date +%Y%m%d%H%M%S)"
+    echo "Creating change set: $CHANGE_SET_NAME"
+
+    # Get existing parameters (use cf_region)
+    local existing_params
+    existing_params=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$cf_region" \
+        --query 'Stacks[0].Parameters[*].{ParameterKey:ParameterKey,UsePreviousValue:``}' \
+        --output json 2>/dev/null | jq -c '[.[] | {ParameterKey: .ParameterKey, UsePreviousValue: true}]' || echo "[]")
+
+    aws cloudformation create-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --template-body "file://$template_file" \
+        --use-previous-template false \
+        --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+        --parameters "$existing_params" \
+        --region "$cf_region" \
+        --output json > /dev/null
+
+    echo "Waiting for change set to be created..."
+
+    aws cloudformation wait change-set-create-complete \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$cf_region" 2>/dev/null || true
+
+    CHANGE_SET_STATUS=$(aws cloudformation describe-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$cf_region" \
+        --query 'Status' \
+        --output text)
+
+    echo "Change set status: $CHANGE_SET_STATUS"
+
+    if [ "$CHANGE_SET_STATUS" == "FAILED" ]; then
+        CHANGE_SET_REASON=$(aws cloudformation describe-change-set \
+            --stack-name "$stack_name" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$cf_region" \
+            --query 'StatusReason' \
+            --output text)
+
+        if [[ "$CHANGE_SET_REASON" == *"didn't contain changes"* ]] || [[ "$CHANGE_SET_REASON" == *"No updates"* ]]; then
+            echo "No CloudFront/WAF changes detected - stack is up to date."
+            aws cloudformation delete-change-set \
+                --stack-name "$stack_name" \
+                --change-set-name "$CHANGE_SET_NAME" \
+                --region "$cf_region" || true
+            return 0
+        else
+            echo "ERROR: CloudFront change set creation failed: $CHANGE_SET_REASON"
+            exit 1
+        fi
+    fi
+
+    echo ""
+    echo "Changes to be applied:"
+    aws cloudformation describe-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$cf_region" \
+        --query 'Changes[*].{Action:ResourceChange.Action,Resource:ResourceChange.LogicalResourceId,Type:ResourceChange.ResourceType}' \
+        --output table
+    echo ""
+
+    echo "Executing change set..."
+    aws cloudformation execute-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$cf_region"
+
+    echo "Waiting for CloudFront stack update to complete..."
+    echo "(CloudFront updates can take 5-15 minutes)"
+    echo ""
+
+    if aws cloudformation wait stack-update-complete \
+        --stack-name "$stack_name" \
+        --region "$cf_region"; then
+        echo ""
+        echo "✓ CloudFront/WAF stack update completed successfully!"
+    else
+        echo ""
+        echo "ERROR: CloudFront stack update failed or timed out."
+        aws cloudformation describe-stack-events \
+            --stack-name "$stack_name" \
+            --region "$cf_region" \
+            --query 'StackEvents[0:10].{Time:Timestamp,Status:ResourceStatus,Resource:LogicalResourceId,Reason:ResourceStatusReason}' \
+            --output table
+        exit 1
+    fi
+}
+
+# ============================================================================
 # Display Summary
 # ============================================================================
 display_summary() {
@@ -298,16 +434,17 @@ display_summary() {
     echo ""
     
     # Get final stack status
-    echo "Stack Status:"
+    echo "Backend Stack Status:"
     aws cloudformation describe-stacks \
         --stack-name "$stack_name" \
         --region "$AWS_DEFAULT_REGION" \
         --query 'Stacks[0].{StackName:StackName,Status:StackStatus,LastUpdated:LastUpdatedTime}' \
-        --output table
+        --output table 2>/dev/null || echo "(Stack not found in $AWS_DEFAULT_REGION)"
     
     echo ""
     echo "Deployment Environment: ${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-unknown}"
-    echo "Region: $AWS_DEFAULT_REGION"
+    echo "Backend Region: $AWS_DEFAULT_REGION"
+    echo "CloudFront Region: us-east-1 (global)"
     echo ""
 }
 
@@ -319,6 +456,7 @@ main() {
     verify_aws_credentials
     validate_templates
     deploy_backend_stack
+    deploy_waf_cloudfront_stack
     display_summary
     
     echo "Infrastructure deployment completed."

@@ -72,14 +72,14 @@ Parameters:
 
   ContainerCpu:
     Type: Number
-    Default: 512
+    Default: 1024
     AllowedValues:
       - 256
       - 512
       - 1024
       - 2048
       - 4096
-    Description: CPU units (256 = 0.25 vCPU)
+    Description: CPU units (256 = 0.25 vCPU, 1024 = 1 vCPU)
 
   ContainerMemory:
     Type: Number
@@ -661,7 +661,12 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+          Command:
+            - "npm"
+            - "start"
           Environment:
+            - Name: NODE_OPTIONS
+              Value: "--max-old-space-size=3584"
             - Name: NODE_ENV
               Value: production
             - Name: PORT

@@ -19,8 +19,12 @@ import {
   TrendingUp,
   ChevronsDownUp,
   ChevronsUpDown,
+  RotateCw,
+  Plus,
+  X,
 } from "lucide-react";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
+import { useAuth } from "@/contexts/AuthContext";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
@@ -144,6 +148,14 @@ interface BucketLaneProps {
   globalExpanded?: boolean | null;
   /** Bumped each time the global toggle fires, ensuring the effect re-runs even if the boolean value stays the same. */
   expandToggleKey?: number;
+  /** Admin-only: refresh this bucket */
+  onRefreshBucket?: () => Promise<void>;
+  /** Admin-only: generate more insights for this bucket (appends) */
+  onGenerateMore?: () => Promise<void>;
+  /** Admin-only: delete a single insight */
+  onDeleteInsight?: (insightId: number) => Promise<void>;
+  /** Whether the user is a platform admin */
+  isAdmin?: boolean;
 }
 
 function BucketLane({
@@ -153,6 +165,10 @@ function BucketLane({
   isDrillable,
   globalExpanded,
   expandToggleKey,
+  onRefreshBucket,
+  onGenerateMore,
+  onDeleteInsight,
+  isAdmin,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -160,6 +176,8 @@ function BucketLane({
     null
   );
   const [isPaused, setIsPaused] = useState(false);
+  const [isBucketRefreshing, setIsBucketRefreshing] = useState(false);
+  const [isGeneratingMore, setIsGeneratingMore] = useState(false);
 
   // Sync local expanded state when parent toggles "Expand All / Collapse All"
   useEffect(() => {
@@ -205,7 +223,7 @@ function BucketLane({
     return (
       <div
         key={idx}
-        className="cursor-pointer"
+        className="group/insight cursor-pointer relative"
         onClick={() => {
           if (isSelected && canDrill) {
             onInsightClick(insight);
@@ -216,9 +234,24 @@ function BucketLane({
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
-        <p className="text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
-          {insight.headline || insight.message}
-        </p>
+        <div className="flex items-start gap-2">
+          <p className="flex-1 text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
+            {insight.headline || insight.message}
+          </p>
+          {/* Admin delete button */}
+          {isAdmin && onDeleteInsight && insight.insightId && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteInsight(insight.insightId!);
+              }}
+              className="flex-shrink-0 p-1 rounded-md opacity-0 group-hover/insight:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
+              title="Remove this insight"
+            >
+              <X className="w-3.5 h-3.5 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-400" strokeWidth={2} />
+            </button>
+          )}
+        </div>
 
         <AnimatePresence>
           {isSelected && (insight.understory || insight.reasoning) && (
@@ -309,6 +342,61 @@ function BucketLane({
               {isExpanded ? "Collapse" : "Show all"}
             </button>
           )}
+          {/* Admin controls */}
+          {isAdmin && (
+            <div className="flex items-center gap-0.5 ml-1">
+              {/* Generate more (append) */}
+              {onGenerateMore && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (isGeneratingMore) return;
+                    setIsGeneratingMore(true);
+                    try {
+                      await onGenerateMore();
+                    } finally {
+                      setIsGeneratingMore(false);
+                    }
+                  }}
+                  disabled={isGeneratingMore || isBucketRefreshing}
+                  className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors disabled:opacity-50"
+                  title={`Generate additional ${config.label} insights`}
+                >
+                  <Plus
+                    className={`w-3.5 h-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 ${
+                      isGeneratingMore ? "animate-pulse" : ""
+                    }`}
+                    strokeWidth={2}
+                  />
+                </button>
+              )}
+              {/* Refresh (replace) */}
+              {onRefreshBucket && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (isBucketRefreshing) return;
+                    setIsBucketRefreshing(true);
+                    try {
+                      await onRefreshBucket();
+                    } finally {
+                      setIsBucketRefreshing(false);
+                    }
+                  }}
+                  disabled={isBucketRefreshing || isGeneratingMore}
+                  className="p-1 rounded-md hover:bg-white/60 dark:hover:bg-slate-800/60 transition-colors disabled:opacity-50"
+                  title={`Regenerate ${config.label} insights`}
+                >
+                  <RotateCw
+                    className={`w-3.5 h-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 ${
+                      isBucketRefreshing ? "animate-spin" : ""
+                    }`}
+                    strokeWidth={2}
+                  />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -374,6 +462,10 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   // Counter to force re-trigger the effect in BucketLane even when toggling the same value
   const [expandToggleKey, setExpandToggleKey] = useState(0);
 
+  // Auth context — admin controls only shown for platform staff
+  const { isPlatformStaff } = useAuth();
+  const isAdmin = isPlatformStaff();
+
   // Data hook
   const {
     allInsights,
@@ -383,6 +475,9 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     metadata,
     needsGeneration,
     refreshInsights,
+    refreshBucket,
+    generateMoreInsights,
+    deleteInsight,
   } = useAletheiaData(
     dateFilter,
     onDataAvailabilityChange,
@@ -428,6 +523,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       "trid",
       "margin",
       "condition_backlog",
+      "tiering",
     ],
     []
   );
@@ -688,6 +784,20 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   isDrillable={isDrillable}
                   globalExpanded={globalExpanded}
                   expandToggleKey={expandToggleKey}
+                  onRefreshBucket={
+                    isAdmin
+                      ? () => refreshBucket(bucket.id)
+                      : undefined
+                  }
+                  onGenerateMore={
+                    isAdmin
+                      ? () => generateMoreInsights(bucket.id)
+                      : undefined
+                  }
+                  onDeleteInsight={
+                    isAdmin ? deleteInsight : undefined
+                  }
+                  isAdmin={isAdmin}
                 />
               );
             })}

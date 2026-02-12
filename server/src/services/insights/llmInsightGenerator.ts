@@ -41,6 +41,10 @@ export interface CategorizedInsight {
     comparisons?: string[];
   };
   for_podcast: boolean;
+  /** LLM-chosen columns for the detail drill-down table. */
+  detail_columns?: string[];
+  /** LLM-chosen summary metrics for the detail drill-down cards. */
+  summary_metrics?: string[];
   /** Exact filter params for replaying the detail query at drill-down time. */
   detail_query?: Record<string, any> | null;
 }
@@ -243,6 +247,136 @@ When citing volume changes, use the EXACT dollar amounts above. Do not reverse-c
 - Avg conditions per active loan: ${metrics.conditionBacklog.avgConditions}
 - Loans with >10 outstanding conditions: ${metrics.conditionBacklog.highConditionCount}
 
+=== PERSONNEL TIERING (YTD, Revenue-Based Pareto Tiers: Top ≤50% cumulative rev, Second 50-80%, Bottom >80%) ===
+CRITICAL: "GOS" = Gain-On-Sale revenue (fees + margin, typically $2K-$20K per loan). "Vol" = Total funded loan amounts (typically $200K-$800K per loan). GOS revenue is ~1-3% of volume. NEVER label a value in the millions as "revenue" for an individual officer — that is almost certainly "volume".
+${metrics.tiering.byActorType.length > 0
+    ? metrics.tiering.byActorType.map(t => {
+        const topPct = t.totalActors > 0 ? Math.round((t.tierDistribution.top / t.totalActors) * 100) : 0;
+        const bottomPct = t.totalActors > 0 ? Math.round((t.tierDistribution.bottom / t.totalActors) * 100) : 0;
+        // Distinct label+format helpers so the LLM NEVER confuses gain-on-sale revenue with funded volume
+        // Revenue ≈ 1-3% of volume; both are $ but must be kept separate
+        const fmtRev = (v: number) => `GOS ${fmt$(v)}`;   // e.g. "GOS $94K"
+        const fmtVol = (v: number) => `Vol ${fmt$(v)}`;   // e.g. "Vol $6.17M"
+        const metricLabel = (m: string): string => {
+          switch (m) {
+            case "revenue": return "GOS Rev";
+            case "volume": return "Funded Vol";
+            case "pullThrough": return "PT";
+            case "revenueBps": return "BPS";
+            case "cycleTime": return "Cycle";
+            case "units": return "Units";
+            default: return m;
+          }
+        };
+        const fmtVal = (m: string, v: number) => {
+          switch (m) {
+            case "revenue": return fmtRev(v);
+            case "volume": return fmtVol(v);
+            case "pullThrough": return `${v}%`;
+            case "revenueBps": return `${v} bps`;
+            case "cycleTime": return `${v}d`;
+            default: return String(v);
+          }
+        };
+
+        // Build per-officer period change lookup: name → changes[]
+        const periodByName = new Map<string, typeof t.periodChanges>();
+        if (t.periodChanges) {
+          for (const c of t.periodChanges) {
+            const existing = periodByName.get(c.name) || [];
+            existing.push(c);
+            periodByName.set(c.name, existing);
+          }
+        }
+
+        // Format an officer with inline period data
+        const fmtOfficerFull = (p: typeof t.topPerformers[0]) => {
+          // YTD stats — skip zero metrics, use distinct labels
+          const stats: string[] = [];
+          if (p.revenue > 0) stats.push(fmtRev(p.revenue));       // "GOS $94K"
+          if (p.units > 0) stats.push(`${p.units} units`);
+          if (p.volume > 0) stats.push(fmtVol(p.volume));         // "Vol $5.42M"
+          if (p.revenueBps > 0) stats.push(`${p.revenueBps} bps`);
+          if (p.pullThrough > 0) stats.push(`PT ${p.pullThrough}%`);
+          if (p.avgCycleTime > 0) stats.push(`${p.avgCycleTime}d cycle`);
+          if (p.lostOpportunityUnits > 0) stats.push(`${p.lostOpportunityUnits} lost`);
+          if (p.deniedUnits > 0) stats.push(`${p.deniedUnits} denied`);
+          let line = `  - ${p.name} (YTD): ${stats.join(", ")}`;
+
+          // Inline period changes for this officer
+          const changes = periodByName.get(p.name);
+          if (changes && changes.length > 0) {
+            // Group by window
+            const byWindow = new Map<string, typeof changes>();
+            for (const c of changes) {
+              const w = c.window || "60d";
+              const arr = byWindow.get(w) || [];
+              arr.push(c);
+              byWindow.set(w, arr);
+            }
+            const windowParts: string[] = [];
+            for (const [w, wc] of byWindow) {
+              const wLabel = w === "30d" ? "30D" : w === "60d" ? "60D" : "90D";
+              const parts = wc.map(c => `${metricLabel(c.metric)} ${fmtVal(c.metric, c.prior)}→${fmtVal(c.metric, c.current)} (${c.direction})`);
+              windowParts.push(`${wLabel}: ${parts.join("; ")}`);
+            }
+            line += `\n    Period changes: ${windowParts.join(" | ")}`;
+          } else {
+            line += `\n    Period changes: (no notable changes across 30D/60D/90D windows)`;
+          }
+          return line;
+        };
+
+        const fmtTierAvg = (ta: typeof t.tierAverages.top) => {
+          const parts: string[] = [];
+          if (ta.avgRevenue > 0) parts.push(`avg GOS ${fmt$(ta.avgRevenue)}`);
+          if (ta.avgUnits > 0) parts.push(`${ta.avgUnits} avg units`);
+          if (ta.avgBps > 0) parts.push(`${ta.avgBps} avg bps`);
+          if (ta.avgPullThrough > 0) parts.push(`${ta.avgPullThrough}% avg PT`);
+          if (ta.avgCycleTime > 0) parts.push(`${ta.avgCycleTime}d avg cycle`);
+          return parts.join(", ") || "(no data)";
+        };
+
+        // Pre-compute rankings so the LLM doesn't have to sort
+        const allOfficers = [...t.topPerformers, ...t.bottomPerformers];
+        const byUnits = [...allOfficers].sort((a, b) => b.units - a.units).slice(0, 5);
+        const byVolume = [...allOfficers].sort((a, b) => b.volume - a.volume).slice(0, 5);
+        const byPT = [...allOfficers].filter(o => o.pullThrough > 0).sort((a, b) => b.pullThrough - a.pullThrough).slice(0, 5);
+
+        let block = `--- ${t.actorLabel} (${t.totalActors} total) ---
+Tier Distribution: Top: ${t.tierDistribution.top}, Second: ${t.tierDistribution.second}, Bottom: ${t.tierDistribution.bottom}
+
+PRE-COMPUTED RANKINGS (use these — do NOT re-sort):
+  BY GOS REVENUE (YTD): ${t.topPerformers.slice(0, 5).map((p, i) => `${i+1}. ${p.name} (${fmtRev(p.revenue)}, ${p.units} units)`).join(", ")}
+  BY UNITS (YTD): ${byUnits.map((p, i) => `${i+1}. ${p.name} (${p.units} units, ${fmtRev(p.revenue)})`).join(", ")}
+  BY FUNDED VOLUME (YTD): ${byVolume.map((p, i) => `${i+1}. ${p.name} (${fmtVol(p.volume)}, ${p.units} units)`).join(", ")}
+  BY PULL-THROUGH (YTD): ${byPT.map((p, i) => `${i+1}. ${p.name} (${p.pullThrough}%, ${p.units} units)`).join(", ")}
+
+Top Tier (${topPct}% of headcount, ≤50% cumulative revenue) — with inline period changes:
+${t.topPerformers.map(fmtOfficerFull).join("\n")}
+
+Bottom Tier (${bottomPct}% of headcount) — with inline period changes:
+${t.bottomPerformers.map(fmtOfficerFull).join("\n")}
+
+Tier Averages:
+  Top: ${fmtTierAvg(t.tierAverages.top)}
+  Second: ${fmtTierAvg(t.tierAverages.second)}
+  Bottom: ${fmtTierAvg(t.tierAverages.bottom)}`;
+
+        if (t.periodChanges && t.periodChanges.length > 0) {
+          block += `
+
+TREND ANALYSIS GUIDE: Compare each officer's period changes across 30D, 60D, 90D windows:
+- ACCELERATING: Larger % change in shorter window (30D > 60D > 90D)
+- SUSTAINED: Consistent direction across windows
+- DECELERATING: Larger change only in longer window
+- BLIP: Change in one window only
+When prior-period base is small (revenue < $25K, units ≤ 2), report ABSOLUTE change — do NOT lead with percentage.`;
+        }
+        return block;
+      }).join("\n\n")
+    : "No tiering data available."}
+
 === BASELINES (for threshold comparison) ===
 - Pull-Through 90D Rolling: ${fmtPct(metrics.performance.pullThroughRolling90D)}
 - Cycle Time Current: ${Math.round(metrics.performance.avgCycleTime)} days
@@ -264,7 +398,7 @@ async function callOpenAI(
   const {
     model = "gpt-4o-mini",
     temperature = 0.5,
-    maxTokens = 2500,
+    maxTokens = 4500,
   } = options;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -452,6 +586,38 @@ function buildDetailFilters(
       };
     }
 
+    case "tiering": {
+      // Determine which actor type(s) the insight covers
+      const hl = insight.headline.toLowerCase();
+      let actorType: "loan_officer" | "branch" = "loan_officer";
+      if (hl.includes("branch")) {
+        actorType = "branch";
+      }
+
+      // Extract officer names mentioned in the insight so the detail drilldown
+      // can filter to just those officers instead of showing all 39
+      const allTieringActors = metrics.tiering.byActorType.flatMap(t =>
+        [...t.topPerformers, ...t.bottomPerformers].map(p => p.name)
+      );
+      // Also include all actors from periodChanges
+      const periodActors = metrics.tiering.byActorType.flatMap(t =>
+        (t.periodChanges || []).map(c => c.name)
+      );
+      const allKnownNames = [...new Set([...allTieringActors, ...periodActors])];
+      // Match names that appear in headline or understory (case-insensitive)
+      const text = `${insight.headline} ${insight.understory}`;
+      const mentionedNames = allKnownNames.filter(name =>
+        text.toLowerCase().includes(name.toLowerCase())
+      );
+
+      return {
+        type: "tiering",
+        actorType,
+        // If specific officers are mentioned, pass their names for filtering
+        ...(mentionedNames.length > 0 ? { actorNames: mentionedNames } : {}),
+      };
+    }
+
     default:
       return null;
   }
@@ -485,6 +651,7 @@ function parseBucketResponse(
       "trid",
       "margin",
       "condition_backlog",
+      "tiering",
     ];
 
     return parsed.insights.map((ins: any) => ({
@@ -514,6 +681,8 @@ function parseBucketResponse(
           : [],
       },
       for_podcast: ins.for_podcast !== false,
+      detail_columns: Array.isArray(ins.detail_columns) ? ins.detail_columns : undefined,
+      summary_metrics: Array.isArray(ins.summary_metrics) ? ins.summary_metrics : undefined,
     }));
   } catch (error) {
     console.error(
@@ -533,12 +702,13 @@ async function generateBucket(
   promptId: string,
   bucketPriority: BucketPriority,
   metricsPayload: InsightMetricsPayload,
-  apiKey: string
+  apiKey: string,
+  existingHeadlines?: string[]
 ): Promise<CategorizedInsight[]> {
   let systemPrompt: string;
   let model = "gpt-4o-mini";
   let temperature = 0.5;
-  let maxTokens = 2500;
+  let maxTokens = 4500;
 
   try {
     const config = await getPromptConfig(promptId);
@@ -553,19 +723,50 @@ async function generateBucket(
     return [];
   }
 
+  // When generating MORE insights, tell the LLM what already exists so it doesn't duplicate
+  if (existingHeadlines && existingHeadlines.length > 0) {
+    systemPrompt += `\n\nALREADY GENERATED — do NOT repeat or rephrase any of these insights. Generate DIFFERENT insights covering OTHER topics, officers, or metrics:\n${existingHeadlines.map((h, i) => `${i + 1}. ${h}`).join("\n")}`;
+  }
+
   const userPrompt = buildMetricsUserPrompt(metricsPayload);
+
+  console.log(
+    `[LLMInsights] Bucket "${bucketId}" — system prompt: ${systemPrompt.length} chars, user prompt: ${userPrompt.length} chars, model: ${model}, maxTokens: ${maxTokens}`
+  );
+
   const responseText = await callOpenAI(systemPrompt, userPrompt, apiKey, {
     model,
     temperature,
     maxTokens,
   });
 
+  console.log(
+    `[LLMInsights] Bucket "${bucketId}" — raw LLM response (first 800 chars): ${responseText.substring(0, 800)}`
+  );
+
   const insights = parseBucketResponse(responseText, bucketId, bucketPriority);
+
+  // Log which sources are present
+  const sources = insights.map(i => i.source);
+  const hasTiering = sources.includes("tiering");
+  console.log(
+    `[LLMInsights] Bucket "${bucketId}" — ${insights.length} insights, sources: [${[...new Set(sources)].join(", ")}], hasTiering: ${hasTiering}`
+  );
 
   // Attach detail filters based on the metrics payload so drill-down
   // queries exactly match the data the insight was generated from.
+  // Also merge LLM-chosen display preferences (detail_columns, summary_metrics).
   for (const insight of insights) {
-    insight.detail_query = buildDetailFilters(insight, metricsPayload);
+    const filters = buildDetailFilters(insight, metricsPayload);
+    insight.detail_query = {
+      ...(filters || {}),
+      ...(insight.detail_columns ? { detail_columns: insight.detail_columns } : {}),
+      ...(insight.summary_metrics ? { summary_metrics: insight.summary_metrics } : {}),
+    };
+    // If filters was null and we only have display config, still store it
+    if (!filters && !insight.detail_columns && !insight.summary_metrics) {
+      insight.detail_query = null;
+    }
   }
 
   return insights;
@@ -860,10 +1061,208 @@ export function setCache(
   /* no-op */
 }
 
+// ============================================================================
+// Single-bucket refresh — regenerates one bucket without touching others
+// ============================================================================
+
+export async function refreshSingleBucket(
+  bucketId: string,
+  metricsPayload: InsightMetricsPayload,
+  tenantPool: pg.Pool,
+  tenantId?: string,
+  options: { channelGroup?: string } = {}
+): Promise<CategorizedInsight[]> {
+  const { channelGroup } = options;
+  const dateFilter = metricsPayload.period.dateFilter;
+
+  const bucket = BUCKETS.find((b) => b.id === bucketId);
+  if (!bucket) throw new Error(`Unknown bucket: ${bucketId}`);
+
+  const apiKey = await getOpenAIKey(tenantId);
+
+  console.log(`[LLMInsights] Single-bucket refresh: "${bucketId}"`);
+
+  const insights = await generateBucket(
+    bucket.id as BucketId,
+    bucket.promptId,
+    bucket.priority,
+    metricsPayload,
+    apiKey
+  );
+
+  // Delete only this bucket's insights, keep the rest
+  await tenantPool.query(
+    `DELETE FROM generated_insights
+     WHERE date_filter = $1
+       AND COALESCE(channel_group, '') = COALESCE($2, '')
+       AND bucket = $3`,
+    [dateFilter, channelGroup || null, bucketId]
+  );
+
+  // Insert the new ones
+  if (insights.length > 0) {
+    const generationBatch = crypto.randomUUID();
+    const values: any[] = [];
+    const placeholders: string[] = [];
+    let paramIdx = 1;
+
+    for (const ins of insights) {
+      placeholders.push(
+        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+      );
+      values.push(
+        ins.bucket,
+        ins.priority,
+        ins.headline,
+        ins.understory,
+        ins.insight_type,
+        ins.source,
+        ins.severity_score,
+        JSON.stringify(ins.impact),
+        JSON.stringify(ins.evidence),
+        ins.for_podcast,
+        dateFilter,
+        channelGroup || null,
+        generationBatch,
+        new Date().toISOString(),
+        ins.detail_query ? JSON.stringify(ins.detail_query) : null
+      );
+    }
+
+    await tenantPool.query(
+      `INSERT INTO generated_insights
+         (bucket, priority, headline, understory, insight_type, source,
+          severity_score, impact, evidence, for_podcast,
+          date_filter, channel_group, generation_batch, generated_at, detail_query)
+       VALUES ${placeholders.join(", ")}`,
+      values
+    );
+  }
+
+  console.log(`[LLMInsights] Single-bucket "${bucketId}" done — ${insights.length} insights`);
+
+  // Return ALL insights (from DB) so the frontend can replace its full list
+  const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup);
+  return stored?.insights ?? insights;
+}
+
+// ============================================================================
+// Generate MORE insights for a bucket — appends without removing existing ones
+// ============================================================================
+
+export async function generateMoreForBucket(
+  bucketId: string,
+  metricsPayload: InsightMetricsPayload,
+  tenantPool: pg.Pool,
+  tenantId?: string,
+  options: { channelGroup?: string } = {}
+): Promise<CategorizedInsight[]> {
+  const { channelGroup } = options;
+  const dateFilter = metricsPayload.period.dateFilter;
+
+  const bucket = BUCKETS.find((b) => b.id === bucketId);
+  if (!bucket) throw new Error(`Unknown bucket: ${bucketId}`);
+
+  const apiKey = await getOpenAIKey(tenantId);
+
+  // Fetch existing headlines for this bucket so we can tell the LLM to avoid duplicates
+  let existingHeadlines: string[] = [];
+  try {
+    const existing = await tenantPool.query(
+      `SELECT headline FROM generated_insights
+       WHERE date_filter = $1
+         AND COALESCE(channel_group, '') = COALESCE($2, '')
+         AND bucket = $3
+       ORDER BY generated_at DESC`,
+      [dateFilter, channelGroup || null, bucketId]
+    );
+    existingHeadlines = existing.rows.map((r: any) => r.headline).filter(Boolean);
+  } catch (err) {
+    console.warn(`[LLMInsights] Could not fetch existing headlines for dedup:`, err);
+  }
+
+  console.log(`[LLMInsights] Generate-more for bucket: "${bucketId}" (${existingHeadlines.length} existing headlines to avoid)`);
+
+  const insights = await generateBucket(
+    bucket.id as BucketId,
+    bucket.promptId,
+    bucket.priority,
+    metricsPayload,
+    apiKey,
+    existingHeadlines
+  );
+
+  // APPEND only — no delete. Insert the new ones alongside existing.
+  if (insights.length > 0) {
+    const generationBatch = crypto.randomUUID();
+    const values: any[] = [];
+    const placeholders: string[] = [];
+    let paramIdx = 1;
+
+    for (const ins of insights) {
+      placeholders.push(
+        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+      );
+      values.push(
+        ins.bucket,
+        ins.priority,
+        ins.headline,
+        ins.understory,
+        ins.insight_type,
+        ins.source,
+        ins.severity_score,
+        JSON.stringify(ins.impact),
+        JSON.stringify(ins.evidence),
+        ins.for_podcast,
+        dateFilter,
+        channelGroup || null,
+        generationBatch,
+        new Date().toISOString(),
+        ins.detail_query ? JSON.stringify(ins.detail_query) : null
+      );
+    }
+
+    await tenantPool.query(
+      `INSERT INTO generated_insights
+         (bucket, priority, headline, understory, insight_type, source,
+          severity_score, impact, evidence, for_podcast,
+          date_filter, channel_group, generation_batch, generated_at, detail_query)
+       VALUES ${placeholders.join(", ")}`,
+      values
+    );
+  }
+
+  console.log(`[LLMInsights] Generate-more "${bucketId}" done — appended ${insights.length} insights`);
+
+  // Return ALL insights (from DB) so the frontend gets the combined set
+  const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup);
+  return stored?.insights ?? insights;
+}
+
+// ============================================================================
+// Delete a single insight by DB id
+// ============================================================================
+
+export async function deleteInsightById(
+  tenantPool: pg.Pool,
+  insightId: number
+): Promise<boolean> {
+  const result = await tenantPool.query(
+    `DELETE FROM generated_insights WHERE id = $1`,
+    [insightId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export { BUCKETS };
+
 export default {
   generateLLMInsights,
   generateCategorizedInsights,
   loadStoredInsights,
+  refreshSingleBucket,
+  generateMoreForBucket,
+  deleteInsightById,
   clearCache,
   getFromCache,
   setCache,
