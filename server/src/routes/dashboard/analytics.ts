@@ -477,7 +477,7 @@ router.post(
           insightId,
           req.userId,
           req.userEmail || "",
-          req.userName || null,
+          req.userEmail || null,
           rating,
           tags,
           comment,
