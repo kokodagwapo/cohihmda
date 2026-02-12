@@ -430,6 +430,132 @@ router.post(
 );
 
 /**
+ * POST /api/dashboard/insights/:id/feedback
+ * Submit feedback (thumbs up/down, tags, comment) on a specific insight.
+ * Requires authentication. Stores user_id/email/name from JWT.
+ */
+router.post(
+  "/insights/:id/feedback",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const insightId = parseInt(req.params.id as string, 10);
+
+      if (isNaN(insightId)) {
+        return res.status(400).json({ error: "Invalid insight ID" });
+      }
+
+      const feedbackSchema = z.object({
+        rating: z.union([z.literal(-1), z.literal(1)]),
+        tags: z.array(z.string()).optional().default([]),
+        comment: z.string().optional().default(""),
+      });
+
+      const { rating, tags, comment } = feedbackSchema.parse(req.body);
+
+      // Fetch insight headline/bucket for denormalized storage
+      const insightResult = await tenantContext.tenantPool.query(
+        `SELECT headline, bucket FROM generated_insights WHERE id = $1`,
+        [insightId]
+      );
+
+      if (insightResult.rows.length === 0) {
+        return res.status(404).json({ error: "Insight not found" });
+      }
+
+      const { headline, bucket } = insightResult.rows[0];
+
+      // Upsert feedback (one rating per user per insight)
+      const result = await tenantContext.tenantPool.query(
+        `INSERT INTO insight_feedback (insight_id, user_id, user_email, user_name, rating, tags, comment, insight_headline, insight_bucket)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT ON CONSTRAINT insight_feedback_pkey DO NOTHING
+         RETURNING id`,
+        [
+          insightId,
+          req.userId,
+          req.userEmail || "",
+          req.userName || null,
+          rating,
+          tags,
+          comment,
+          headline,
+          bucket,
+        ]
+      );
+
+      // If the insert was a no-op because the user already rated, update instead
+      if (result.rows.length === 0) {
+        await tenantContext.tenantPool.query(
+          `UPDATE insight_feedback
+           SET rating = $1, tags = $2, comment = $3, created_at = NOW()
+           WHERE insight_id = $4 AND user_id = $5`,
+          [rating, tags, comment, insightId, req.userId]
+        );
+      }
+
+      res.json({ success: true, insightId, rating });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid feedback data", details: error.errors });
+      }
+      console.error("Error submitting insight feedback:", error);
+      if (handleDatabaseError(error, res, "Failed to submit feedback")) return;
+      res.status(500).json({
+        error: "Failed to submit feedback",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/insights/:id/feedback
+ * Get feedback for a specific insight. Returns all feedback entries.
+ */
+router.get(
+  "/insights/:id/feedback",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const insightId = parseInt(req.params.id as string, 10);
+
+      if (isNaN(insightId)) {
+        return res.status(400).json({ error: "Invalid insight ID" });
+      }
+
+      const result = await tenantContext.tenantPool.query(
+        `SELECT id, insight_id, user_id, user_email, user_name, rating, tags, comment, created_at
+         FROM insight_feedback
+         WHERE insight_id = $1
+         ORDER BY created_at DESC`,
+        [insightId]
+      );
+
+      // Also get the current user's feedback for this insight (for UI state)
+      const myFeedback = result.rows.find((r: any) => r.user_id === req.userId) || null;
+
+      res.json({
+        feedback: result.rows,
+        myFeedback,
+        total: result.rows.length,
+      });
+    } catch (error: any) {
+      console.error("Error fetching insight feedback:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch feedback")) return;
+      res.status(500).json({
+        error: "Failed to fetch feedback",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
  * DELETE /api/dashboard/insights/:id
  * Removes a single insight by its database ID.
  */

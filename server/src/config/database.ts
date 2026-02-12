@@ -1,13 +1,13 @@
-import pg from 'pg';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import pg from "pg";
+import dotenv from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Load environment variables from .env in server directory
-dotenv.config({ path: join(__dirname, '../.env') });
+dotenv.config({ path: join(__dirname, "../.env") });
 
 const { Pool } = pg;
 
@@ -17,9 +17,9 @@ let poolInstance: pg.Pool | null = null;
 // Function to reset the pool (close existing and create new)
 export function resetPool(): void {
   if (poolInstance) {
-    console.log('🔄 Resetting database connection pool...');
-    poolInstance.end().catch(err => {
-      console.error('Error closing old pool:', err);
+    console.log("Resetting database connection pool...");
+    poolInstance.end().catch((err) => {
+      console.error("Error closing old pool:", err);
     });
     poolInstance = null;
   }
@@ -27,71 +27,78 @@ export function resetPool(): void {
 
 function getPool(): pg.Pool {
   // Force reload of .env to ensure we have latest values
-  dotenv.config({ path: join(__dirname, '../.env') });
-  
+  dotenv.config({ path: join(__dirname, "../.env") });
+
   if (!poolInstance) {
-    const envTrim = (v: string | undefined) => (typeof v === 'string' ? v.trim() : v);
+    const envTrim = (v: string | undefined) =>
+      typeof v === "string" ? v.trim() : v;
 
     // Fix IPv6/IPv4 issue: Use 127.0.0.1 instead of localhost to avoid IPv6 resolution
     // On Windows, localhost can resolve to ::1 (IPv6) which may not be available
     // This only affects localhost - AWS RDS hostnames are used as-is
-    const rawHost = envTrim(process.env.DB_HOST) || 'localhost';
-    const dbHost = (rawHost === 'localhost' || rawHost === '127.0.0.1') ? '127.0.0.1' : rawHost;
-    
+    const rawHost = envTrim(process.env.DB_HOST) || "localhost";
+    const dbHost =
+      rawHost === "localhost" || rawHost === "127.0.0.1"
+        ? "127.0.0.1"
+        : rawHost;
+
     // Default database connection (for backward compatibility with existing shared DB)
     // Management DB uses a separate connection pool (see managementDatabase.ts)
-    const dbName = envTrim(process.env.DB_NAME) || 'coheus';
-    
+    const dbName = envTrim(process.env.DB_NAME) || "coheus";
+
     // Log database connection details (without password) for debugging
     const dbConfig = {
       host: dbHost,
-      port: parseInt(envTrim(process.env.DB_PORT) || '5432'),
+      port: parseInt(envTrim(process.env.DB_PORT) || "5432"),
       database: dbName,
-      user: envTrim(process.env.DB_USER) || 'postgres',
-      password: envTrim(process.env.DB_PASSWORD) || 'postgres',
+      user: envTrim(process.env.DB_USER) || "postgres",
+      password: envTrim(process.env.DB_PASSWORD) || "postgres",
     };
-    
+
     // Validate required database configuration
-    if (!dbConfig.password || dbConfig.password === 'postgres') {
-      console.warn('⚠️  Database password not set or using default - connection may fail');
+    if (!dbConfig.password || dbConfig.password === "postgres") {
+      console.warn(
+        "⚠️  Database password not set or using default - connection may fail",
+      );
     }
-    if (!dbConfig.host || dbConfig.host === 'localhost') {
-      console.warn('⚠️  Database host is localhost - ensure database is running locally');
+    if (!dbConfig.host || dbConfig.host === "localhost") {
+      console.warn(
+        "⚠️  Database host is localhost - ensure database is running locally",
+      );
     }
-    
-    console.log('🔌 Database connection config:', {
+
+    console.log("🔌 Database connection config:", {
       host: dbConfig.host,
       port: dbConfig.port,
       database: dbConfig.database,
       user: dbConfig.user,
-      password: dbConfig.password ? '***' : 'NOT SET',
+      password: dbConfig.password ? "***" : "NOT SET",
       hasPassword: !!dbConfig.password,
-      ssl: 'auto',
+      ssl: "auto",
     });
 
     // SSL handling:
     // - AWS RDS commonly requires SSL ("no pg_hba.conf entry ... no encryption" when ssl is off)
     // - Elastic Beanstalk may not set NODE_ENV=production by default
     // - Default: enable SSL for any non-local host, but allow override via DB_SSL
-    const dbSslEnv = (process.env.DB_SSL || '').trim().toLowerCase();
-    const isLocalHost = dbHost === '127.0.0.1' || dbHost === 'localhost';
+    const dbSslEnv = (process.env.DB_SSL || "").trim().toLowerCase();
+    const isLocalHost = dbHost === "127.0.0.1" || dbHost === "localhost";
     const sslEnabled =
-      dbSslEnv === 'true' || dbSslEnv === '1' || dbSslEnv === 'on'
+      dbSslEnv === "true" || dbSslEnv === "1" || dbSslEnv === "on"
         ? true
-        : dbSslEnv === 'false' || dbSslEnv === '0' || dbSslEnv === 'off'
+        : dbSslEnv === "false" || dbSslEnv === "0" || dbSslEnv === "off"
           ? false
           : !isLocalHost;
 
-    console.log('🔐 Database SSL:', {
+    console.log("🔐 Database SSL:", {
       enabled: sslEnabled,
-      reason:
-        dbSslEnv
-          ? `DB_SSL=${process.env.DB_SSL}`
-          : isLocalHost
-            ? 'local host'
-            : 'non-local host (default)',
+      reason: dbSslEnv
+        ? `DB_SSL=${process.env.DB_SSL}`
+        : isLocalHost
+          ? "local host"
+          : "non-local host (default)",
     });
-    
+
     poolInstance = new Pool({
       host: dbConfig.host,
       port: dbConfig.port,
@@ -108,8 +115,8 @@ function getPool(): pg.Pool {
     });
 
     // Handle connection errors
-    poolInstance.on('error', (err: any) => {
-      console.error('Unexpected database pool error:', {
+    poolInstance.on("error", (err: any) => {
+      console.error("Unexpected database pool error:", {
         message: err.message,
         code: err.code,
         errno: err.errno,
@@ -122,14 +129,14 @@ function getPool(): pg.Pool {
     });
 
     // Handle connect events - set timezone to UTC for each connection
-    poolInstance.on('connect', async (client) => {
-      console.log('✅ New database connection established');
+    poolInstance.on("connect", async (client) => {
+      console.log("✅ New database connection established");
       // Set timezone to UTC for this connection to ensure consistent timestamp handling
       try {
-        await client.query('SET timezone = UTC');
-        console.log('✅ Database connection timezone set to UTC');
+        await client.query("SET timezone = UTC");
+        console.log("✅ Database connection timezone set to UTC");
       } catch (err) {
-        console.warn('⚠️ Failed to set timezone to UTC:', err);
+        console.warn("⚠️ Failed to set timezone to UTC:", err);
       }
     });
   }
@@ -140,37 +147,39 @@ function getPool(): pg.Pool {
 export async function retryQuery<T>(
   queryFn: () => Promise<T>,
   maxRetries = 3,
-  delayMs = 1000
+  delayMs = 1000,
 ): Promise<T> {
   let lastError: Error | null = null;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await queryFn();
     } catch (error: any) {
       lastError = error;
-      const isConnectionError = 
-        error?.message?.includes('timeout') ||
-        error?.message?.includes('ECONNREFUSED') ||
-        error?.message?.includes('connection') ||
-        error?.code === 'ETIMEDOUT' ||
-        error?.code === 'ECONNREFUSED';
-      
+      const isConnectionError =
+        error?.message?.includes("timeout") ||
+        error?.message?.includes("ECONNREFUSED") ||
+        error?.message?.includes("connection") ||
+        error?.code === "ETIMEDOUT" ||
+        error?.code === "ECONNREFUSED";
+
       if (isConnectionError && attempt < maxRetries) {
-        console.warn(`⚠️ Database connection attempt ${attempt} failed, retrying in ${delayMs}ms...`);
+        console.warn(
+          `⚠️ Database connection attempt ${attempt} failed, retrying in ${delayMs}ms...`,
+        );
         // Reset pool on connection errors to force reconnection
         if (attempt === 1) {
           resetPool();
-          console.log('🔄 Reset database pool due to connection error');
+          console.log("🔄 Reset database pool due to connection error");
         }
-        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
         continue;
       }
       throw error;
     }
   }
-  
-  throw lastError || new Error('Database query failed after retries');
+
+  throw lastError || new Error("Database query failed after retries");
 }
 
 /**
@@ -180,20 +189,20 @@ export async function retryQuery<T>(
  */
 export function isDatabaseConnectionError(error: any): boolean {
   if (!error) return false;
-  
-  const errorMessage = error?.message?.toLowerCase() || '';
+
+  const errorMessage = error?.message?.toLowerCase() || "";
   const errorCode = error?.code;
-  
+
   return (
-    errorMessage.includes('econnrefused') ||
-    errorMessage.includes('etimedout') ||
-    errorMessage.includes('timeout') ||
-    errorMessage.includes('connection') ||
-    errorMessage.includes('connect econnrefused') ||
-    errorCode === 'ECONNREFUSED' ||
-    errorCode === 'ETIMEDOUT' ||
-    errorCode === 'ENOTFOUND' ||
-    errorCode === 'ECONNRESET'
+    errorMessage.includes("econnrefused") ||
+    errorMessage.includes("etimedout") ||
+    errorMessage.includes("timeout") ||
+    errorMessage.includes("connection") ||
+    errorMessage.includes("connect econnrefused") ||
+    errorCode === "ECONNREFUSED" ||
+    errorCode === "ETIMEDOUT" ||
+    errorCode === "ENOTFOUND" ||
+    errorCode === "ECONNRESET"
   );
 }
 
@@ -204,77 +213,91 @@ export function isDatabaseConnectionError(error: any): boolean {
  * @param defaultMessage - Default error message if not a connection error
  * @returns true if response was sent, false otherwise
  */
-export function handleDatabaseError(error: any, res: any, defaultMessage: string = 'Internal server error'): boolean {
+export function handleDatabaseError(
+  error: any,
+  res: any,
+  defaultMessage: string = "Internal server error",
+): boolean {
   if (isDatabaseConnectionError(error)) {
-    console.error('Database connection error:', error);
+    console.error("Database connection error:", error);
     res.status(503).json({
-      error: 'Service temporarily unavailable. Database connection failed.',
+      error: "Service temporarily unavailable. Database connection failed.",
       retry: true,
-      message: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
     return true;
   }
-  
+
   // Check for missing table/database errors
-  if (error?.message?.includes('does not exist') || error?.code === '42P01') {
-    console.error('Database table missing:', error);
+  if (error?.message?.includes("does not exist") || error?.code === "42P01") {
+    console.error("Database table missing:", error);
     res.status(503).json({
-      error: 'Database not initialized. Please restart the server to run migrations.',
-      retry: false
+      error:
+        "Database not initialized. Please restart the server to run migrations.",
+      retry: false,
     });
     return true;
   }
-  
+
   return false;
 }
 
 export const pool = new Proxy({} as pg.Pool, {
   get(_target, prop) {
     return getPool()[prop as keyof pg.Pool];
-  }
+  },
 }) as pg.Pool;
 
 export async function initDatabase(): Promise<void> {
   try {
     // Set timezone to UTC for the initial connection
-    await pool.query('SET timezone = UTC');
-    await pool.query('SELECT NOW()');
-    console.log('✅ Database connected (timezone: UTC)');
-    
+    await pool.query("SET timezone = UTC");
+    await pool.query("SELECT NOW()");
+    console.log("✅ Database connected (timezone: UTC)");
+
     // Initialize management database schema first
     try {
-      const { initManagementDatabase } = await import('./managementDatabase.js');
+      const { initManagementDatabase } =
+        await import("./managementDatabase.js");
       await initManagementDatabase();
     } catch (managementError: any) {
-      console.warn('⚠️ Management database initialization warning:', managementError.message);
+      console.warn(
+        "⚠️ Management database initialization warning:",
+        managementError.message,
+      );
       // Continue - management DB might not exist yet
     }
-    
+
     // Run migrations (don't block server startup on migration warnings)
     // Note: These migrations are for backward compatibility with existing shared database
     // New tenants will use tenant-specific databases created via provisioning
     try {
       await runMigrations();
     } catch (migrationError) {
-      console.warn('⚠️ Migration warnings (server will continue):', migrationError);
+      console.warn(
+        "⚠️ Migration warnings (server will continue):",
+        migrationError,
+      );
       // Don't throw - allow server to start even with migration warnings
     }
-    
+
     // Force-sync default AI prompt configs on every startup.
     // This ensures code-level prompt changes (system_prompt, model, temperature, max_tokens)
     // are applied to the database. Does NOT overwrite admin-customized user_prompt_template.
     try {
-      const { forceSeedDefaultPrompts } = await import('../services/promptConfigService.js');
+      const { forceSeedDefaultPrompts } =
+        await import("../services/promptConfigService.js");
       const upserted = await forceSeedDefaultPrompts();
       if (upserted > 0) {
         console.log(`✅ Synced ${upserted} default AI prompt configuration(s)`);
       }
     } catch (seedError: any) {
       // Non-critical - prompts will fall back to hardcoded defaults
-      console.warn('⚠️ AI prompt seed skipped:', seedError.message);
+      console.warn("⚠️ AI prompt seed skipped:", seedError.message);
     }
   } catch (error) {
-    console.error('❌ Database connection failed:', error);
+    console.error("❌ Database connection failed:", error);
     throw error;
   }
 }
@@ -285,7 +308,9 @@ export async function initDatabase(): Promise<void> {
 async function createDerivedFieldFunctions() {
   try {
     // Revenue calculation function
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE OR REPLACE FUNCTION calculate_revenue(p_loan_id UUID)
       RETURNS DECIMAL(12,2) AS $$
       DECLARE
@@ -309,12 +334,19 @@ async function createDerivedFieldFunctions() {
         RETURN COALESCE(v_revenue, 0);
       END;
       $$ LANGUAGE plpgsql;
-    `).catch((err) => {
-      console.warn('[Database] Error creating calculate_revenue function:', err.message);
-    });
+    `,
+      )
+      .catch((err) => {
+        console.warn(
+          "[Database] Error creating calculate_revenue function:",
+          err.message,
+        );
+      });
 
     // Turn time calculation function
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE OR REPLACE FUNCTION calculate_turn_time(
         p_start_date DATE,
         p_end_date DATE
@@ -328,12 +360,19 @@ async function createDerivedFieldFunctions() {
         RETURN p_end_date - p_start_date;
       END;
       $$ LANGUAGE plpgsql;
-    `).catch((err) => {
-      console.warn('[Database] Error creating calculate_turn_time function:', err.message);
-    });
+    `,
+      )
+      .catch((err) => {
+        console.warn(
+          "[Database] Error creating calculate_turn_time function:",
+          err.message,
+        );
+      });
 
     // Margin (BPS) calculation function
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE OR REPLACE FUNCTION calculate_margin_bps(p_loan_id UUID)
       RETURNS DECIMAL(12,2) AS $$
       DECLARE
@@ -354,12 +393,19 @@ async function createDerivedFieldFunctions() {
         RETURN v_margin_bps;
       END;
       $$ LANGUAGE plpgsql;
-    `).catch((err) => {
-      console.warn('[Database] Error creating calculate_margin_bps function:', err.message);
-    });
+    `,
+      )
+      .catch((err) => {
+        console.warn(
+          "[Database] Error creating calculate_margin_bps function:",
+          err.message,
+        );
+      });
 
     // Get loans for YTD period
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE OR REPLACE FUNCTION get_loans_ytd(
         p_tenant_id UUID,
         p_date_field TEXT DEFAULT 'application_date'
@@ -390,12 +436,19 @@ async function createDerivedFieldFunctions() {
         USING p_tenant_id;
       END;
       $$ LANGUAGE plpgsql;
-    `).catch((err) => {
-      console.warn('[Database] Error creating get_loans_ytd function:', err.message);
-    });
+    `,
+      )
+      .catch((err) => {
+        console.warn(
+          "[Database] Error creating get_loans_ytd function:",
+          err.message,
+        );
+      });
 
     // Get loans for MTD period
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE OR REPLACE FUNCTION get_loans_mtd(
         p_tenant_id UUID,
         p_date_field TEXT DEFAULT 'application_date'
@@ -426,21 +479,29 @@ async function createDerivedFieldFunctions() {
         USING p_tenant_id;
       END;
       $$ LANGUAGE plpgsql;
-    `).catch((err) => {
-      console.warn('[Database] Error creating get_loans_mtd function:', err.message);
-    });
+    `,
+      )
+      .catch((err) => {
+        console.warn(
+          "[Database] Error creating get_loans_mtd function:",
+          err.message,
+        );
+      });
 
-    console.log('✅ Derived field functions created');
+    console.log("✅ Derived field functions created");
   } catch (error: any) {
-    console.warn('⚠️  Derived field functions creation warning:', error.message);
+    console.warn(
+      "⚠️  Derived field functions creation warning:",
+      error.message,
+    );
   }
 }
 
 async function runMigrations() {
   try {
     // Create auth schema if it doesn't exist
-    await pool.query('CREATE SCHEMA IF NOT EXISTS auth');
-    
+    await pool.query("CREATE SCHEMA IF NOT EXISTS auth");
+
     // Create users table if it doesn't exist
     await pool.query(`
       CREATE TABLE IF NOT EXISTS auth.users (
@@ -452,7 +513,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create tenants table FIRST (no dependencies)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.tenants (
@@ -462,7 +523,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create public.users table BEFORE profiles (profiles references users)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.users (
@@ -478,9 +539,11 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    
+
     // Add missing columns if table already exists (migration)
-    await pool.query(`
+    await pool
+      .query(
+        `
       DO $$
       BEGIN
         -- Add role column if it doesn't exist
@@ -555,21 +618,33 @@ async function runMigrations() {
           ALTER TABLE public.users ADD COLUMN full_name TEXT;
         END IF;
       END $$;
-    `).catch((err) => {
-      console.warn('⚠️  Error adding columns to users table:', err.message);
-    });
-    
+    `,
+      )
+      .catch((err) => {
+        console.warn("⚠️  Error adding columns to users table:", err.message);
+      });
+
     // Create indexes for users table
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON public.users(tenant_id)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Migrate password_hash to encrypted_password if needed
-    await pool.query(`
+    await pool
+      .query(
+        `
       DO $$
       BEGIN
         IF EXISTS (
@@ -586,10 +661,14 @@ async function runMigrations() {
           ALTER TABLE public.users RENAME COLUMN password_hash TO encrypted_password;
         END IF;
       END $$;
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Update role constraint to allow all valid roles
-    await pool.query(`
+    await pool
+      .query(
+        `
       DO $$
       BEGIN
         -- Drop existing constraint if it exists
@@ -606,10 +685,12 @@ async function runMigrations() {
         ALTER TABLE public.users ADD CONSTRAINT users_role_check 
           CHECK (role IN ('admin', 'user', 'viewer', 'super_admin', 'tenant_admin', 'loan_officer', 'processor'));
       END $$;
-    `).catch((err) => {
-      console.warn('⚠️  Error updating role constraint:', err.message);
-    });
-    
+    `,
+      )
+      .catch((err) => {
+        console.warn("⚠️  Error updating role constraint:", err.message);
+      });
+
     // Create profiles table AFTER users exists
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.profiles (
@@ -622,7 +703,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create default tenant if it doesn't exist
     try {
       const defaultTenantResult = await pool.query(`
@@ -634,12 +715,15 @@ async function runMigrations() {
         RETURNING id, name
       `);
       if (defaultTenantResult.rows.length > 0) {
-        console.log('✅ Default tenant created:', defaultTenantResult.rows[0].name);
+        console.log(
+          "✅ Default tenant created:",
+          defaultTenantResult.rows[0].name,
+        );
       }
     } catch (err: any) {
-      console.warn('⚠️  Error creating default tenant:', err.message);
+      console.warn("⚠️  Error creating default tenant:", err.message);
     }
-    
+
     // Create contacts table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.contacts (
@@ -656,7 +740,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create call_sessions table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.call_sessions (
@@ -672,7 +756,7 @@ async function runMigrations() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create documents table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.documents (
@@ -689,7 +773,7 @@ async function runMigrations() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create LOS connections table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.los_connections (
@@ -737,7 +821,7 @@ async function runMigrations() {
         created_by UUID
       )
     `);
-    
+
     // Create LOS sync logs table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.los_sync_logs (
@@ -754,7 +838,7 @@ async function runMigrations() {
         metadata JSONB
       )
     `);
-    
+
     // Create loans table (single source of truth for LOS-synced data)
     // Includes all source fields from CoheusDataDictionary.xml
     await pool.query(`
@@ -1120,7 +1204,7 @@ async function runMigrations() {
         UNIQUE(tenant_id, loan_id)
       )
     `);
-    
+
     // Create vendor connections table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.vendor_connections (
@@ -1148,7 +1232,7 @@ async function runMigrations() {
         created_by UUID
       )
     `);
-    
+
     // Create vendor sync logs table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.vendor_sync_logs (
@@ -1165,7 +1249,7 @@ async function runMigrations() {
         metadata JSONB
       )
     `);
-    
+
     // Create tenant field mappings table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.tenant_field_mappings (
@@ -1176,7 +1260,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create Encompass field swaps table (for client-specific field mappings)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.encompass_field_swaps (
@@ -1192,19 +1276,31 @@ async function runMigrations() {
         UNIQUE(tenant_id, los_connection_id, coheus_alias, swap_type)
       )
     `);
-    
-    await pool.query(`
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_tenant ON public.encompass_field_swaps(tenant_id)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_connection ON public.encompass_field_swaps(los_connection_id)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_encompass_field_swaps_alias ON public.encompass_field_swaps(coheus_alias)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Create Encompass token cache table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.encompass_token_cache (
@@ -1215,11 +1311,15 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
-    await pool.query(`
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_encompass_token_cache_expires ON public.encompass_token_cache(expires_at)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Create Encompass concurrency metrics table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.encompass_concurrency_metrics (
@@ -1234,43 +1334,75 @@ async function runMigrations() {
         timestamp TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
-    await pool.query(`
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_encompass_concurrency_tenant ON public.encompass_concurrency_metrics(tenant_id, timestamp)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_encompass_concurrency_connection ON public.encompass_concurrency_metrics(los_connection_id, timestamp)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Add indexes for frequently queried loan fields
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_loans_application_date ON public.loans(application_date) WHERE application_date IS NOT NULL
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_loans_closing_date ON public.loans(closing_date) WHERE closing_date IS NOT NULL
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_loans_funding_date ON public.loans(funding_date) WHERE funding_date IS NOT NULL
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_loans_loan_type ON public.loans(loan_type) WHERE loan_type IS NOT NULL
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_loans_current_loan_status ON public.loans(current_loan_status) WHERE current_loan_status IS NOT NULL
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_loans_branch ON public.loans(branch) WHERE branch IS NOT NULL
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Create derived field calculation functions
     await createDerivedFieldFunctions();
-    
+
     // Create subscription plans table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.subscription_plans (
@@ -1286,7 +1418,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create tenant subscriptions table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.tenant_subscriptions (
@@ -1304,7 +1436,7 @@ async function runMigrations() {
         UNIQUE(tenant_id)
       )
     `);
-    
+
     // Create deployment instances table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.deployment_instances (
@@ -1325,7 +1457,7 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create AWS deployments table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.aws_deployments (
@@ -1341,7 +1473,7 @@ async function runMigrations() {
         UNIQUE(tenant_id)
       )
     `);
-    
+
     // Create AWS billing history table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.aws_billing_history (
@@ -1358,34 +1490,60 @@ async function runMigrations() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    
+
     // Create indexes for better performance
-    await pool.query(`
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_tenant_subscriptions_tenant ON public.tenant_subscriptions(tenant_id)
-    `).catch(() => {}); // Ignore if index already exists
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {}); // Ignore if index already exists
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_deployment_instances_tenant ON public.deployment_instances(tenant_id)
-    `).catch(() => {}); // Ignore if index already exists
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {}); // Ignore if index already exists
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_deployment_instances_status ON public.deployment_instances(status)
-    `).catch(() => {}); // Ignore if index already exists
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {}); // Ignore if index already exists
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_aws_deployments_tenant ON public.aws_deployments(tenant_id)
-    `).catch(() => {}); // Ignore if index already exists
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {}); // Ignore if index already exists
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_aws_billing_history_tenant ON public.aws_billing_history(tenant_id)
-    `).catch(() => {}); // Ignore if index already exists
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {}); // Ignore if index already exists
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_aws_billing_history_period ON public.aws_billing_history(billing_period_start, billing_period_end)
-    `).catch(() => {}); // Ignore if index already exists
-    
+    `,
+      )
+      .catch(() => {}); // Ignore if index already exists
+
     // Insert default subscription plans if they don't exist
-    await pool.query(`
+    await pool
+      .query(
+        `
       INSERT INTO public.subscription_plans (name, display_name, price_monthly, price_yearly, features, deployment_options, is_active)
       VALUES 
         ('starter', 'Starter', 499.00, 4990.00, 
@@ -1401,13 +1559,17 @@ async function runMigrations() {
          ARRAY['on_premise', 'hybrid', 'per_lender_aws']::text[],
          true)
       ON CONFLICT (name) DO NOTHING
-    `).catch((err) => {
-      // Ignore errors if plans already exist or if there's a constraint issue
-      console.log('ℹ️  Default subscription plans already exist or could not be created');
-    });
-    
+    `,
+      )
+      .catch((err) => {
+        // Ignore errors if plans already exist or if there's a constraint issue
+        console.log(
+          "ℹ️  Default subscription plans already exist or could not be created",
+        );
+      });
+
     // Note: public.users table, indexes, and migrations are created earlier (before profiles)
-    
+
     // Create audit logging tables
     // Note: user_id does NOT have a foreign key because users can be in management DB (coheus_users)
     // or tenant DBs (tenant_*.users). We store the user_id as a UUID for reference but don't enforce FK.
@@ -1432,28 +1594,44 @@ async function runMigrations() {
         timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    
+
     // Drop foreign key constraints if they exist (for migration from older schema)
-    await pool.query(`
+    await pool
+      .query(
+        `
       DO $$ BEGIN
         ALTER TABLE public.audit_logs DROP CONSTRAINT IF EXISTS audit_logs_user_id_fkey;
         ALTER TABLE public.audit_logs DROP CONSTRAINT IF EXISTS audit_logs_tenant_id_fkey;
       EXCEPTION WHEN OTHERS THEN NULL;
       END $$;
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON public.audit_logs(user_id)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON public.audit_logs(tenant_id)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON public.audit_logs(timestamp)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.user_sessions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1470,15 +1648,23 @@ async function runMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    
-    await pool.query(`
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON public.user_sessions(user_id)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON public.user_sessions(token_hash)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.failed_login_attempts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1490,15 +1676,23 @@ async function runMigrations() {
         attempted_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    
-    await pool.query(`
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_failed_login_attempts_email ON public.failed_login_attempts(email)
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_failed_login_attempts_attempted_at ON public.failed_login_attempts(attempted_at)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.data_access_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1516,11 +1710,15 @@ async function runMigrations() {
         accessed_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    
-    await pool.query(`
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_data_access_logs_user_id ON public.data_access_logs(user_id)
-    `).catch(() => {});
-    
+    `,
+      )
+      .catch(() => {});
+
     // Create default admin user if it doesn't exist
     try {
       const adminResult = await pool.query(`
@@ -1540,12 +1738,15 @@ async function runMigrations() {
         RETURNING id, email
       `);
       if (adminResult.rows.length > 0) {
-        console.log('✅ Admin user created/updated:', adminResult.rows[0].email);
+        console.log(
+          "✅ Admin user created/updated:",
+          adminResult.rows[0].email,
+        );
       }
     } catch (err: any) {
-      console.warn('⚠️  Error creating admin user:', err.message);
+      console.warn("⚠️  Error creating admin user:", err.message);
     }
-    
+
     // Create user_preferences table
     // Note: No FK to users table since users are now in coheus_users
     await pool.query(`
@@ -1559,19 +1760,27 @@ async function runMigrations() {
         UNIQUE(user_id, preference_key)
       )
     `);
-    
+
     // Drop old FK constraint if it exists (migration from old schema)
-    await pool.query(`
+    await pool
+      .query(
+        `
       ALTER TABLE public.user_preferences 
       DROP CONSTRAINT IF EXISTS user_preferences_user_id_fkey
-    `).catch(() => {});
-    
-    await pool.query(`
+    `,
+      )
+      .catch(() => {});
+
+    await pool
+      .query(
+        `
       CREATE INDEX IF NOT EXISTS idx_user_preferences_user_key ON public.user_preferences(user_id, preference_key)
-    `).catch(() => {});
-    
-    console.log('✅ Core tables created');
-    
+    `,
+      )
+      .catch(() => {});
+
+    console.log("✅ Core tables created");
+
     // Create RAG tables if they don't exist
     try {
       await pool.query(`
@@ -1622,11 +1831,15 @@ async function runMigrations() {
           UNIQUE(tenant_id)
         )
       `);
-      
-      await pool.query(`
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_settings_tenant_id ON public.rag_settings(tenant_id)
-      `).catch(() => {});
-      
+      `,
+        )
+        .catch(() => {});
+
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.rag_document_sources (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1645,11 +1858,15 @@ async function runMigrations() {
           updated_at TIMESTAMPTZ DEFAULT NOW()
         )
       `);
-      
-      await pool.query(`
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_document_sources_tenant ON public.rag_document_sources(tenant_id)
-      `).catch(() => {});
-      
+      `,
+        )
+        .catch(() => {});
+
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.rag_documents (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1669,20 +1886,34 @@ async function runMigrations() {
           updated_at TIMESTAMPTZ DEFAULT NOW()
         )
       `);
-      
-      await pool.query(`
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_documents_source ON public.rag_documents(source_id)
-      `).catch(() => {});
-      
-      await pool.query(`
+      `,
+        )
+        .catch(() => {});
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_documents_tenant ON public.rag_documents(tenant_id)
-      `).catch(() => {});
-      
-      await pool.query(`
+      `,
+        )
+        .catch(() => {});
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_documents_status ON public.rag_documents(status)
-      `).catch(() => {});
-      
-      await pool.query(`
+      `,
+        )
+        .catch(() => {});
+
+      await pool
+        .query(
+          `
         CREATE TABLE IF NOT EXISTS public.rag_embeddings (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           document_id UUID NOT NULL REFERENCES public.rag_documents(id) ON DELETE CASCADE,
@@ -1694,26 +1925,36 @@ async function runMigrations() {
           metadata JSONB DEFAULT '{}',
           created_at TIMESTAMPTZ DEFAULT NOW()
         )
-      `).catch(() => {}); // pgvector extension might not be available
-      
-      await pool.query(`
+      `,
+        )
+        .catch(() => {}); // pgvector extension might not be available
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_embeddings_document ON public.rag_embeddings(document_id)
-      `).catch(() => {});
-      
-      await pool.query(`
+      `,
+        )
+        .catch(() => {});
+
+      await pool
+        .query(
+          `
         CREATE INDEX IF NOT EXISTS idx_rag_embeddings_tenant ON public.rag_embeddings(tenant_id)
-      `).catch(() => {});
-      
-      console.log('✅ RAG tables created');
+      `,
+        )
+        .catch(() => {});
+
+      console.log("✅ RAG tables created");
     } catch (ragError) {
-      console.warn('⚠️  RAG tables creation warning:', ragError);
+      console.warn("⚠️  RAG tables creation warning:", ragError);
     }
-    
+
     // Skip file-based migrations for now to avoid connection pool issues
     // They can be run manually later if needed
-    console.log('ℹ️  File-based migrations skipped (run manually if needed)');
+    console.log("ℹ️  File-based migrations skipped (run manually if needed)");
   } catch (error) {
-    console.error('❌ Migration error:', error);
+    console.error("❌ Migration error:", error);
     // Don't throw - allow server to start even if migrations fail
   }
 }
@@ -1725,52 +1966,60 @@ async function runMigrations() {
  */
 async function runFileMigration(filename: string, migrationName: string) {
   try {
-    const { readFileSync } = await import('fs');
-    const { join, dirname } = await import('path');
-    const { fileURLToPath } = await import('url');
-    
+    const { readFileSync } = await import("fs");
+    const { join, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const migrationPath = join(__dirname, '../../../supabase/migrations', filename);
-    
+    const migrationPath = join(
+      __dirname,
+      "../../../supabase/migrations",
+      filename,
+    );
+
     // Read migration file
-    const migrationSQL = readFileSync(migrationPath, 'utf-8');
-    
+    const migrationSQL = readFileSync(migrationPath, "utf-8");
+
     // Execute migration (split by semicolon and execute each statement)
     // Note: This is a simple approach. For production, consider using a proper migration tool
     const statements = migrationSQL
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('--') && !s.startsWith('COMMENT'));
-    
+      .split(";")
+      .map((s) => s.trim())
+      .filter(
+        (s) => s.length > 0 && !s.startsWith("--") && !s.startsWith("COMMENT"),
+      );
+
     for (const statement of statements) {
       if (statement.length > 0) {
         try {
           await pool.query(statement);
         } catch (error: any) {
           // Ignore "already exists" errors and constraint violations for idempotency
-          const errorMsg = error.message?.toLowerCase() || '';
+          const errorMsg = error.message?.toLowerCase() || "";
           if (
-            !errorMsg.includes('already exists') &&
-            !errorMsg.includes('duplicate') &&
-            !errorMsg.includes('relation') &&
-            !errorMsg.includes('constraint') &&
-            !errorMsg.includes('trigger')
+            !errorMsg.includes("already exists") &&
+            !errorMsg.includes("duplicate") &&
+            !errorMsg.includes("relation") &&
+            !errorMsg.includes("constraint") &&
+            !errorMsg.includes("trigger")
           ) {
-            console.warn(`⚠️  ${migrationName} migration statement warning:`, error.message);
+            console.warn(
+              `⚠️  ${migrationName} migration statement warning:`,
+              error.message,
+            );
           }
         }
       }
     }
-    
+
     console.log(`✅ ${migrationName} migration completed`);
   } catch (error: any) {
     // Migration file might not exist in all environments
-    if (error.code === 'ENOENT') {
+    if (error.code === "ENOENT") {
       console.log(`ℹ️  ${migrationName} migration file not found, skipping`);
     } else {
       console.warn(`⚠️  ${migrationName} migration error:`, error.message);
     }
   }
 }
-

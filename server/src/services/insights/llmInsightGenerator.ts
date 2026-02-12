@@ -14,8 +14,9 @@
 import pg from "pg";
 import crypto from "crypto";
 import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
+import { pool as managementPool } from "../../config/managementDatabase.js";
 import { decryptAPIKeys } from "../encryption.js";
-import { InsightMetricsPayload } from "./insightMetricsCollector.js";
+import { InsightMetricsPayload, PeriodSnapshot } from "./insightMetricsCollector.js";
 import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 
 // ============================================================================
@@ -139,20 +140,63 @@ function buildMetricsUserPrompt(metrics: InsightMetricsPayload): string {
   };
   const fmtPct = (v: number) => `${v.toFixed(1)}%`;
 
+  // Helper: format a snapshot row with period-over-period comparison
+  const fmtSnap = (label: string, cur: PeriodSnapshot, prior?: PeriodSnapshot): string => {
+    const parts = [
+      `${label}: ${cur.totalApplications} apps, ${cur.completed} completed, ${cur.funded} funded`,
+      `  PT: ${fmtPct(cur.pullThroughRate)}  |  Fallout: ${fmtPct(cur.falloutRate)}  |  Cycle: ${cur.avgCycleTime}d`,
+      `  Volume: ${fmt$(cur.fundedVolume)}  |  GOS Revenue: ${fmt$(cur.fundedRevenue)}`,
+    ];
+    if (prior && prior.completed > 0) {
+      const volDelta = prior.fundedVolume > 0 ? ((cur.fundedVolume - prior.fundedVolume) / prior.fundedVolume * 100) : 0;
+      const ptDelta = cur.pullThroughRate - prior.pullThroughRate;
+      const cycleDelta = cur.avgCycleTime - prior.avgCycleTime;
+      parts.push(
+        `  vs Prior: Vol ${fmt$(prior.fundedVolume)}→${fmt$(cur.fundedVolume)} (${volDelta > 0 ? "+" : ""}${fmtPct(volDelta)})` +
+        ` | PT ${fmtPct(prior.pullThroughRate)}→${fmtPct(cur.pullThroughRate)} (${ptDelta > 0 ? "+" : ""}${ptDelta.toFixed(1)}pp)` +
+        ` | Cycle ${prior.avgCycleTime}d→${cur.avgCycleTime}d (${cycleDelta > 0 ? "+" : ""}${cycleDelta}d)`
+      );
+    }
+    return parts.join("\n");
+  };
+
+  const snaps = metrics.periodSnapshots;
+
   return `Analyze these mortgage business metrics for your designated insight category.
 
 === PERIOD ===
 Date Filter: ${metrics.period.dateFilter.toUpperCase()}
 Range: ${metrics.period.start || "N/A"} to ${metrics.period.end || "N/A"}
 
-=== PIPELINE ===
+=== PIPELINE (Current Active Loans) ===
 - Active Loans: ${metrics.pipeline.activeLoans}
 - Active Volume: ${fmt$(metrics.pipeline.activeVolume)}
 - Locked Loans: ${metrics.pipeline.lockedLoans}
 - Closed Loans: ${metrics.pipeline.closedLoans}
 - Closed Volume: ${fmt$(metrics.pipeline.closedVolume)}
 
-=== FALLOUT PREDICTIONS ===
+=== CONVERSION METRICS — Unified (Pull-Through + Fallout = 100% in every row) ===
+IMPORTANT: These metrics are computed from the SAME population in each row.
+Pull-Through = funded loans / completed loans. Fallout = non-funded completed / completed loans.
+They ALWAYS sum to 100%. When citing a rate, ALWAYS include its timeframe.
+
+${fmtSnap("YTD", snaps.ytd, snaps.priorYtd)}
+
+${fmtSnap("Rolling 90D", snaps.rolling90d, snaps.prior90d)}
+
+${fmtSnap("Rolling 60D", snaps.rolling60d, snaps.prior60d)}
+
+${fmtSnap("Rolling 30D", snaps.rolling30d, snaps.prior30d)}
+
+${fmtSnap("MTD", snaps.mtd, snaps.priorMtd)}
+
+RULES FOR CONVERSION METRICS:
+1. ALWAYS state the timeframe when citing PT or Fallout (e.g. "PT 56.7% YTD", not just "PT 56.7%")
+2. NEVER mix timeframes (e.g. "PT is 56.7% but Fallout is 43.3%" must come from the SAME row)
+3. Use the "vs Prior" deltas above — do NOT compute your own from rounded numbers
+4. When comparing trends, look at 30D vs 60D vs 90D to identify acceleration/deceleration
+
+=== FALLOUT PREDICTIONS (AI Model) ===
 ALL predicted withdraw/deny (any confidence):
 - Predicted Withdraw: ${metrics.predictions.likelyWithdraw} loans
 - Predicted Deny: ${metrics.predictions.likelyDeny} loans
@@ -177,14 +221,6 @@ ${
 
 IMPORTANT: Do NOT mix these two groups. If you cite the number of all withdraw/deny loans, use the "all" volume. If you cite the >70% subset, use the "high-confidence" volume. Never pair one group's count with the other group's volume.
 
-=== PERFORMANCE ===
-- Pull-Through Rate (Rolling 90D): ${fmtPct(metrics.performance.pullThroughRolling90D)}
-- Average Cycle Time: ${Math.round(metrics.performance.avgCycleTime)} days
-- Revenue YTD: ${fmt$(metrics.performance.revenueYTD)}
-- Revenue MTD: ${fmt$(metrics.performance.revenueMTD)}
-- Volume YTD: ${fmt$(metrics.performance.volumeYTD)}
-- Volume MTD: ${fmt$(metrics.performance.volumeMTD)}
-
 === CREDIT RISK PROFILE ===
 - Weighted Avg FICO: ${Math.round(metrics.creditRisk.waFico)}
 - Weighted Avg LTV: ${fmtPct(metrics.creditRisk.waLtv)}
@@ -192,37 +228,12 @@ IMPORTANT: Do NOT mix these two groups. If you cite the number of all withdraw/d
 - Loans meeting high-risk criteria (FICO<620 OR LTV>95% OR DTI>50%): ${metrics.creditRisk.highRiskLoanCount}
 - High-risk credit loan volume: ${fmt$(metrics.creditRisk.highRiskVolume)}
 
-=== LOST OPPORTUNITY ===
+=== LOST OPPORTUNITY (YTD) ===
 - Withdrawn Loans: ${metrics.lostOpportunity.withdrawnUnits}
 - Withdrawn Volume: ${fmt$(metrics.lostOpportunity.withdrawnVolume)}
 - Lost Proforma Revenue: ${fmt$(metrics.lostOpportunity.withdrawnProformaRevenue)}
 - Denied Loans: ${metrics.lostOpportunity.deniedUnits}
 - Denied Volume: ${fmt$(metrics.lostOpportunity.deniedVolume)}
-
-=== FUNNEL ===
-- Loans Started: ${metrics.funnel.loansStarted}
-- Loans Locked: ${metrics.funnel.loansLocked}
-- Loans Originated: ${metrics.funnel.loansOriginated}
-- Fallout Rate: ${fmtPct(metrics.funnel.falloutRate)}
-
-=== TRENDS (Trailing 30-Day Windows — Apples-to-Apples) ===
-Volume (Trailing 30D vs Prior 30D):
-- Trailing 30-day funded volume: ${fmt$(metrics.comparisons.currentMtdVolume)}
-- Prior 30-day funded volume: ${fmt$(metrics.comparisons.lastMonthVolume)}
-- Change: ${metrics.comparisons.volumeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastMonth)}
-
-Volume YoY:
-- Current YTD funded volume: ${fmt$(metrics.comparisons.currentYtdVolume)}
-- Last year same period funded volume: ${fmt$(metrics.comparisons.lastYearVolume)}
-- Change: ${metrics.comparisons.volumeVsLastYear > 0 ? "+" : ""}${fmtPct(metrics.comparisons.volumeVsLastYear)}
-
-Cycle Time (Trailing 30D vs Prior 30D):
-- Trailing 30-day cycle time: ${Math.round(metrics.comparisons.currentCycleTime)} days
-- Prior 30-day cycle time: ${Math.round(metrics.comparisons.lastMonthCycleTime)} days
-- Change: ${metrics.comparisons.cycleTimeVsLastMonth > 0 ? "+" : ""}${fmtPct(metrics.comparisons.cycleTimeVsLastMonth)}
-
-IMPORTANT: These comparisons use equal-length 30-day rolling windows, NOT partial-month vs full-month.
-When citing volume changes, use the EXACT dollar amounts above. Do not reverse-calculate from percentages. Say "funded volume moved from {prior30D} to {trailing30D}" with the actual numbers. Do NOT say "MoM" — say "trailing 30D" or "vs prior 30 days".
 
 === CLOSING RISK (B3) ===
 - Loans closing within 10 days without CTC: ${metrics.closingRisk.atRiskCount}
@@ -254,9 +265,8 @@ ${metrics.tiering.byActorType.length > 0
         const topPct = t.totalActors > 0 ? Math.round((t.tierDistribution.top / t.totalActors) * 100) : 0;
         const bottomPct = t.totalActors > 0 ? Math.round((t.tierDistribution.bottom / t.totalActors) * 100) : 0;
         // Distinct label+format helpers so the LLM NEVER confuses gain-on-sale revenue with funded volume
-        // Revenue ≈ 1-3% of volume; both are $ but must be kept separate
-        const fmtRev = (v: number) => `GOS ${fmt$(v)}`;   // e.g. "GOS $94K"
-        const fmtVol = (v: number) => `Vol ${fmt$(v)}`;   // e.g. "Vol $6.17M"
+        const fmtRev = (v: number) => `GOS ${fmt$(v)}`;
+        const fmtVol = (v: number) => `Vol ${fmt$(v)}`;
         const metricLabel = (m: string): string => {
           switch (m) {
             case "revenue": return "GOS Rev";
@@ -291,11 +301,10 @@ ${metrics.tiering.byActorType.length > 0
 
         // Format an officer with inline period data
         const fmtOfficerFull = (p: typeof t.topPerformers[0]) => {
-          // YTD stats — skip zero metrics, use distinct labels
           const stats: string[] = [];
-          if (p.revenue > 0) stats.push(fmtRev(p.revenue));       // "GOS $94K"
+          if (p.revenue > 0) stats.push(fmtRev(p.revenue));
           if (p.units > 0) stats.push(`${p.units} units`);
-          if (p.volume > 0) stats.push(fmtVol(p.volume));         // "Vol $5.42M"
+          if (p.volume > 0) stats.push(fmtVol(p.volume));
           if (p.revenueBps > 0) stats.push(`${p.revenueBps} bps`);
           if (p.pullThrough > 0) stats.push(`PT ${p.pullThrough}%`);
           if (p.avgCycleTime > 0) stats.push(`${p.avgCycleTime}d cycle`);
@@ -303,10 +312,8 @@ ${metrics.tiering.byActorType.length > 0
           if (p.deniedUnits > 0) stats.push(`${p.deniedUnits} denied`);
           let line = `  - ${p.name} (YTD): ${stats.join(", ")}`;
 
-          // Inline period changes for this officer
           const changes = periodByName.get(p.name);
           if (changes && changes.length > 0) {
-            // Group by window
             const byWindow = new Map<string, typeof changes>();
             for (const c of changes) {
               const w = c.window || "60d";
@@ -337,7 +344,6 @@ ${metrics.tiering.byActorType.length > 0
           return parts.join(", ") || "(no data)";
         };
 
-        // Pre-compute rankings so the LLM doesn't have to sort
         const allOfficers = [...t.topPerformers, ...t.bottomPerformers];
         const byUnits = [...allOfficers].sort((a, b) => b.units - a.units).slice(0, 5);
         const byVolume = [...allOfficers].sort((a, b) => b.volume - a.volume).slice(0, 5);
@@ -378,8 +384,10 @@ When prior-period base is small (revenue < $25K, units ≤ 2), report ABSOLUTE c
     : "No tiering data available."}
 
 === BASELINES (for threshold comparison) ===
-- Pull-Through 90D Rolling: ${fmtPct(metrics.performance.pullThroughRolling90D)}
-- Cycle Time Current: ${Math.round(metrics.performance.avgCycleTime)} days
+- Pull-Through YTD: ${fmtPct(snaps.ytd.pullThroughRate)}
+- Pull-Through 90D Rolling: ${fmtPct(snaps.rolling90d.pullThroughRate)}
+- Fallout YTD: ${fmtPct(snaps.ytd.falloutRate)}
+- Cycle Time YTD: ${snaps.ytd.avgCycleTime} days
 - Active Pipeline Size: ${metrics.pipeline.activeLoans} loans
 
 Generate insights for your designated category now. Only output insights supported by this data. If a metric is 0 or N/A, do not generate an insight about it.`;
@@ -697,30 +705,106 @@ function parseBucketResponse(
 // Generate a single bucket
 // ============================================================================
 
+/**
+ * Fetch active training examples for a given prompt from the management DB.
+ * Returns up to 3 positive and 2 negative examples for few-shot injection.
+ */
+async function fetchTrainingExamples(promptId: string): Promise<{
+  positive: Array<{ headline: string; admin_note?: string }>;
+  negative: Array<{ headline: string; admin_note?: string }>;
+}> {
+  try {
+    if (!managementPool) return { positive: [], negative: [] };
+
+    // Check if the table exists (graceful handling for pre-migration environments)
+    const tableCheck = await managementPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'insight_training_examples'
+      ) as exists
+    `);
+    if (!tableCheck.rows[0]?.exists) return { positive: [], negative: [] };
+
+    const result = await managementPool.query(
+      `SELECT example_type, headline, admin_note
+       FROM insight_training_examples
+       WHERE prompt_id = $1 AND is_active = true
+       ORDER BY created_at DESC`,
+      [promptId]
+    );
+
+    const positive = result.rows
+      .filter((r: any) => r.example_type === "positive")
+      .slice(0, 3)
+      .map((r: any) => ({ headline: r.headline, admin_note: r.admin_note }));
+
+    const negative = result.rows
+      .filter((r: any) => r.example_type === "negative")
+      .slice(0, 2)
+      .map((r: any) => ({ headline: r.headline, admin_note: r.admin_note }));
+
+    return { positive, negative };
+  } catch (error) {
+    console.warn("[LLMInsights] Failed to fetch training examples:", error);
+    return { positive: [], negative: [] };
+  }
+}
+
 async function generateBucket(
   bucketId: BucketId,
   promptId: string,
   bucketPriority: BucketPriority,
   metricsPayload: InsightMetricsPayload,
   apiKey: string,
-  existingHeadlines?: string[]
+  existingHeadlines?: string[],
+  experimentOverrides?: { systemPrompt?: string; model?: string; temperature?: number; maxTokens?: number; experimentId?: string }
 ): Promise<CategorizedInsight[]> {
   let systemPrompt: string;
   let model = "gpt-4o-mini";
   let temperature = 0.5;
   let maxTokens = 4500;
 
-  try {
-    const config = await getPromptConfig(promptId);
-    systemPrompt = config.system_prompt;
-    model = config.model || model;
-    temperature = config.temperature ?? temperature;
-    maxTokens = config.max_tokens || maxTokens;
-  } catch {
-    console.warn(
-      `[LLMInsights] Prompt config "${promptId}" not found in DB, skipping bucket "${bucketId}"`
-    );
-    return [];
+  // If experiment overrides are provided, use them instead of the default prompt config
+  if (experimentOverrides?.systemPrompt) {
+    systemPrompt = experimentOverrides.systemPrompt;
+    model = experimentOverrides.model || model;
+    temperature = experimentOverrides.temperature ?? temperature;
+    maxTokens = experimentOverrides.maxTokens || maxTokens;
+  } else {
+    try {
+      const config = await getPromptConfig(promptId);
+      systemPrompt = config.system_prompt;
+      model = config.model || model;
+      temperature = config.temperature ?? temperature;
+      maxTokens = config.max_tokens || maxTokens;
+    } catch {
+      console.warn(
+        `[LLMInsights] Prompt config "${promptId}" not found in DB, skipping bucket "${bucketId}"`
+      );
+      return [];
+    }
+  }
+
+  // Inject training examples (few-shot) from the management DB
+  const trainingExamples = await fetchTrainingExamples(promptId);
+  if (trainingExamples.positive.length > 0 || trainingExamples.negative.length > 0) {
+    let trainingSection = "\n\nLEARN FROM THESE EXAMPLES:";
+    if (trainingExamples.positive.length > 0) {
+      trainingSection += "\nGOOD (generate more like these):";
+      for (const ex of trainingExamples.positive) {
+        trainingSection += `\n- "${ex.headline}"`;
+        if (ex.admin_note) trainingSection += ` — ${ex.admin_note}`;
+      }
+    }
+    if (trainingExamples.negative.length > 0) {
+      trainingSection += "\nBAD (avoid these patterns):";
+      for (const ex of trainingExamples.negative) {
+        trainingSection += `\n- "${ex.headline}"`;
+        if (ex.admin_note) trainingSection += ` — ${ex.admin_note}`;
+      }
+    }
+    systemPrompt += trainingSection;
+    console.log(`[LLMInsights] Bucket "${bucketId}" — injected ${trainingExamples.positive.length} positive + ${trainingExamples.negative.length} negative training examples`);
   }
 
   // When generating MORE insights, tell the LLM what already exists so it doesn't duplicate
@@ -781,7 +865,8 @@ async function persistInsights(
   insights: CategorizedInsight[],
   generationBatch: string,
   dateFilter: string,
-  channelGroup?: string
+  channelGroup?: string,
+  experimentIdMap?: Record<string, string | undefined>
 ): Promise<void> {
   if (insights.length === 0) return;
 
@@ -791,39 +876,79 @@ async function persistInsights(
     [dateFilter, channelGroup || null]
   );
 
+  // Check if experiment_id column exists (graceful for pre-migration tenants)
+  let hasExperimentCol = false;
+  try {
+    const colCheck = await tenantPool.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'generated_insights' AND column_name = 'experiment_id'
+    `);
+    hasExperimentCol = colCheck.rows.length > 0;
+  } catch { /* ignore */ }
+
   // Batch insert
   const values: any[] = [];
   const placeholders: string[] = [];
   let paramIdx = 1;
 
   for (const ins of insights) {
-    placeholders.push(
-      `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
-    );
-    values.push(
-      ins.bucket,
-      ins.priority,
-      ins.headline,
-      ins.understory,
-      ins.insight_type,
-      ins.source,
-      ins.severity_score,
-      JSON.stringify(ins.impact),
-      JSON.stringify(ins.evidence),
-      ins.for_podcast,
-      dateFilter,
-      channelGroup || null,
-      generationBatch,
-      new Date().toISOString(),
-      ins.detail_query ? JSON.stringify(ins.detail_query) : null
-    );
+    const expId = experimentIdMap?.[ins.bucket] || null;
+    if (hasExperimentCol) {
+      placeholders.push(
+        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+      );
+      values.push(
+        ins.bucket,
+        ins.priority,
+        ins.headline,
+        ins.understory,
+        ins.insight_type,
+        ins.source,
+        ins.severity_score,
+        JSON.stringify(ins.impact),
+        JSON.stringify(ins.evidence),
+        ins.for_podcast,
+        dateFilter,
+        channelGroup || null,
+        generationBatch,
+        new Date().toISOString(),
+        ins.detail_query ? JSON.stringify(ins.detail_query) : null,
+        expId
+      );
+    } else {
+      placeholders.push(
+        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+      );
+      values.push(
+        ins.bucket,
+        ins.priority,
+        ins.headline,
+        ins.understory,
+        ins.insight_type,
+        ins.source,
+        ins.severity_score,
+        JSON.stringify(ins.impact),
+        JSON.stringify(ins.evidence),
+        ins.for_podcast,
+        dateFilter,
+        channelGroup || null,
+        generationBatch,
+        new Date().toISOString(),
+        ins.detail_query ? JSON.stringify(ins.detail_query) : null
+      );
+    }
   }
 
+  const columns = hasExperimentCol
+    ? `(bucket, priority, headline, understory, insight_type, source,
+       severity_score, impact, evidence, for_podcast,
+       date_filter, channel_group, generation_batch, generated_at, detail_query, experiment_id)`
+    : `(bucket, priority, headline, understory, insight_type, source,
+       severity_score, impact, evidence, for_podcast,
+       date_filter, channel_group, generation_batch, generated_at, detail_query)`;
+
   await tenantPool.query(
-    `INSERT INTO generated_insights
-       (bucket, priority, headline, understory, insight_type, source,
-        severity_score, impact, evidence, for_podcast,
-        date_filter, channel_group, generation_batch, generated_at, detail_query)
+    `INSERT INTO generated_insights ${columns}
      VALUES ${placeholders.join(", ")}`,
     values
   );
@@ -896,6 +1021,67 @@ export async function loadStoredInsights(
 }
 
 // ============================================================================
+// Experiment selection — check for active A/B experiments for a prompt
+// ============================================================================
+
+interface ExperimentOverrides {
+  systemPrompt?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  experimentId?: string;
+}
+
+async function selectExperiment(promptId: string): Promise<ExperimentOverrides | null> {
+  try {
+    if (!managementPool) return null;
+
+    // Check if the table exists
+    const tableCheck = await managementPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'prompt_experiments'
+      ) as exists
+    `);
+    if (!tableCheck.rows[0]?.exists) return null;
+
+    const result = await managementPool.query(
+      `SELECT id, variant_system_prompt, variant_model, variant_temperature, variant_max_tokens, traffic_pct
+       FROM prompt_experiments
+       WHERE prompt_id = $1 AND status = 'active'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [promptId]
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const exp = result.rows[0];
+    const trafficPct = parseInt(exp.traffic_pct, 10);
+
+    // Weighted random: if random value is within the experiment's traffic %, use the variant
+    const roll = Math.random() * 100;
+    if (roll < trafficPct) {
+      console.log(
+        `[LLMInsights] Experiment "${exp.id}" selected for prompt "${promptId}" (roll: ${roll.toFixed(1)}, threshold: ${trafficPct}%)`
+      );
+      return {
+        systemPrompt: exp.variant_system_prompt,
+        model: exp.variant_model || undefined,
+        temperature: exp.variant_temperature != null ? parseFloat(exp.variant_temperature) : undefined,
+        maxTokens: exp.variant_max_tokens || undefined,
+        experimentId: exp.id,
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.warn("[LLMInsights] Failed to check experiments:", error);
+    return null;
+  }
+}
+
+// ============================================================================
 // Main entry point — generate categorized insights (4 parallel LLM calls)
 // ============================================================================
 
@@ -916,15 +1102,22 @@ export async function generateCategorizedInsights(
   const apiKey = await getOpenAIKey(tenantId);
   const startTime = Date.now();
 
-  // Call all 4 buckets in parallel
+  // Check for active experiments per bucket (parallel)
+  const experimentSelections = await Promise.all(
+    BUCKETS.map((bucket) => selectExperiment(bucket.promptId))
+  );
+
+  // Call all 4 buckets in parallel, passing experiment overrides if selected
   const results = await Promise.allSettled(
-    BUCKETS.map((bucket) =>
+    BUCKETS.map((bucket, idx) =>
       generateBucket(
         bucket.id as BucketId,
         bucket.promptId,
         bucket.priority,
         metricsPayload,
-        apiKey
+        apiKey,
+        undefined,
+        experimentSelections[idx] || undefined
       )
     )
   );
@@ -952,6 +1145,15 @@ export async function generateCategorizedInsights(
     `[LLMInsights] All buckets completed in ${elapsed}ms — ${allInsights.length} total insights`
   );
 
+  // Build experiment ID map: bucket -> experimentId (if an experiment was used)
+  const experimentIdMap: Record<string, string | undefined> = {};
+  for (let i = 0; i < BUCKETS.length; i++) {
+    const expSel = experimentSelections[i];
+    if (expSel?.experimentId) {
+      experimentIdMap[BUCKETS[i].id] = expSel.experimentId;
+    }
+  }
+
   // Persist to tenant DB
   try {
     await persistInsights(
@@ -959,7 +1161,8 @@ export async function generateCategorizedInsights(
       allInsights,
       generationBatch,
       dateFilter,
-      channelGroup
+      channelGroup,
+      Object.keys(experimentIdMap).length > 0 ? experimentIdMap : undefined
     );
   } catch (persistError: any) {
     console.error(

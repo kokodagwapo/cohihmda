@@ -226,6 +226,53 @@ export const useAletheiaData = (
     [dateFilter, selectedTenantId, selectedChannel]
   );
 
+  // Submit feedback (thumbs up/down + optional tags/comment) for a specific insight
+  const submitFeedback = useCallback(
+    async (
+      insightId: number,
+      rating: -1 | 1,
+      tags?: string[],
+      comment?: string
+    ) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${selectedTenantId}`
+          : "";
+        await api.request<any>(
+          `/api/dashboard/insights/${insightId}/feedback${tenantParam}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ rating, tags: tags || [], comment: comment || "" }),
+          }
+        );
+        return true;
+      } catch (error: any) {
+        console.error("Error submitting feedback:", error);
+        return false;
+      }
+    },
+    [selectedTenantId]
+  );
+
+  // Fetch feedback for a specific insight (used in detail views)
+  const getFeedback = useCallback(
+    async (insightId: number) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${selectedTenantId}`
+          : "";
+        const data = await api.request<any>(
+          `/api/dashboard/insights/${insightId}/feedback${tenantParam}`
+        );
+        return data;
+      } catch (error: any) {
+        console.error("Error fetching feedback:", error);
+        return null;
+      }
+    },
+    [selectedTenantId]
+  );
+
   // Delete a single insight by ID (optimistic removal from local state)
   const deleteInsight = useCallback(
     async (insightId: number) => {
@@ -411,5 +458,7 @@ export const useAletheiaData = (
     refreshBucket,
     generateMoreInsights,
     deleteInsight,
+    submitFeedback,
+    getFeedback,
   };
 };
