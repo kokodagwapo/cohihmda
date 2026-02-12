@@ -619,7 +619,6 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         `);
         console.log(
           "[TenantSchema] Ratio fields migration check completed with error:",
-          error.message,
         );
       }
     } catch (error: any) {
@@ -1959,6 +1958,15 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       )
       .catch(() => {});
 
+    // Composite index for DISTINCT ON (loan_id) ORDER BY loan_id, created_at DESC pattern
+    await pool
+      .query(
+        `
+      CREATE INDEX IF NOT EXISTS idx_loan_predictions_loan_created ON public.loan_predictions(loan_id, created_at DESC)
+    `,
+      )
+      .catch(() => {});
+
     // AI Pattern Learnings table - stores AI-extracted patterns (NO tenant_id)
     await pool
       .query(
@@ -2014,17 +2022,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
     await pool
       .query(
         `
-      CREATE INDEX IF NOT EXISTS idx_historical_loan_bucket_cache_loan ON public.historical_loan_bucket_cache(loan_id)
-    `,
-      )
-      .catch(() => {});
-
-    // RAG Knowledge Base table - admin-managed knowledge entries (NO tenant_id)
-    await pool
-      .query(
-        `
-      CREATE TABLE IF NOT EXISTS public.rag_knowledge_base (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      CREATE INDEX IF NOT EXISTS idx_historical_loan_bucket_cache_loan ON public.historicuid(),
         title TEXT NOT NULL,
         content TEXT NOT NULL,
         category TEXT,
