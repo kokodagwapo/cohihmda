@@ -440,7 +440,7 @@ router.delete(
   async (req: AuthRequest, res) => {
     try {
       const tenantContext = getTenantContext(req);
-      const insightId = parseInt(req.params.id, 10);
+      const insightId = parseInt(req.params.id as string, 10);
 
       if (isNaN(insightId)) {
         return res.status(400).json({ error: "Invalid insight ID" });
