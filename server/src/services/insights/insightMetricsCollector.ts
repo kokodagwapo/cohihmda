@@ -207,6 +207,38 @@ export interface InsightMetricsPayload {
       }>;
     }>;
   };
+
+  // Pre-computed period snapshots — consistent metrics per time window
+  // Pull-Through + Fallout = 100% guaranteed within each snapshot
+  periodSnapshots: {
+    ytd: PeriodSnapshot;
+    rolling90d: PeriodSnapshot;
+    rolling60d: PeriodSnapshot;
+    rolling30d: PeriodSnapshot;
+    mtd: PeriodSnapshot;
+    priorYtd: PeriodSnapshot;
+    prior90d: PeriodSnapshot;
+    prior60d: PeriodSnapshot;
+    prior30d: PeriodSnapshot;
+    priorMtd: PeriodSnapshot;
+  };
+}
+
+// Unified period snapshot — all key metrics from a single query for one time window
+// Guarantees: pullThroughRate + falloutRate = 100% (both use same population)
+export interface PeriodSnapshot {
+  window: string;        // "ytd" | "90d" | "60d" | "30d" | "mtd"
+  start: string;
+  end: string;
+  totalApplications: number;
+  completed: number;     // loans that have finished lifecycle (non-active)
+  funded: number;        // subset of completed that were funded/closed
+  locked: number;
+  fundedVolume: number;
+  fundedRevenue: number;
+  avgCycleTime: number;
+  pullThroughRate: number;  // funded / completed * 100
+  falloutRate: number;      // (completed - funded) / completed * 100
 }
 
 /**
@@ -217,72 +249,140 @@ function getDateRanges(): {
   mtd: DateRange;
   ytd: DateRange;
   rolling90D: DateRange;
+  rolling60D: DateRange;
+  trailing30: DateRange;
   lastMonth: DateRange;
   lastYear: DateRange;
-  trailing30: DateRange;
   prior30: DateRange;
+  prior60: DateRange;
+  prior90: DateRange;
 } {
   const now = new Date();
   const today = now.toISOString().split("T")[0];
+  const DAY = 24 * 60 * 60 * 1000;
+  const toDate = (d: Date) => d.toISOString().split("T")[0];
 
   // Start of month
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .split("T")[0];
+  const startOfMonth = toDate(new Date(now.getFullYear(), now.getMonth(), 1));
 
   // Start of year
-  const startOfYear = new Date(now.getFullYear(), 0, 1)
-    .toISOString()
-    .split("T")[0];
+  const startOfYear = toDate(new Date(now.getFullYear(), 0, 1));
 
-  // Rolling 90 days
-  const rolling90Start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
+  // Rolling windows
+  const rolling90Start = toDate(new Date(now.getTime() - 90 * DAY));
+  const rolling60Start = toDate(new Date(now.getTime() - 60 * DAY));
+  const trailing30Start = toDate(new Date(now.getTime() - 30 * DAY));
+
+  // Prior matching windows (for apples-to-apples comparison)
+  const prior30Start = toDate(new Date(now.getTime() - 60 * DAY));
+  const prior30End = toDate(new Date(now.getTime() - 31 * DAY));
+  const prior60Start = toDate(new Date(now.getTime() - 120 * DAY));
+  const prior60End = toDate(new Date(now.getTime() - 61 * DAY));
+  const prior90Start = toDate(new Date(now.getTime() - 180 * DAY));
+  const prior90End = toDate(new Date(now.getTime() - 91 * DAY));
 
   // Last month (calendar)
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
-    .toISOString()
-    .split("T")[0];
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    .toISOString()
-    .split("T")[0];
+  const lastMonthEnd = toDate(new Date(now.getFullYear(), now.getMonth(), 0));
+  const lastMonthStart = toDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
 
-  // Last year same period
-  const lastYearStart = new Date(now.getFullYear() - 1, 0, 1)
-    .toISOString()
-    .split("T")[0];
-  const lastYearEnd = new Date(
-    now.getFullYear() - 1,
-    now.getMonth(),
-    now.getDate()
-  )
-    .toISOString()
-    .split("T")[0];
-
-  // Trailing 30 days (today back 30 days) — always apples-to-apples
-  const trailing30Start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
-
-  // Prior 30 days (31-60 days ago) — the period before trailing 30
-  const prior30Start = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
-  const prior30End = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
+  // Last year same YTD period
+  const lastYearStart = toDate(new Date(now.getFullYear() - 1, 0, 1));
+  const lastYearEnd = toDate(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()));
 
   return {
     today: { start: today, end: today },
     mtd: { start: startOfMonth, end: today },
     ytd: { start: startOfYear, end: today },
     rolling90D: { start: rolling90Start, end: today },
+    rolling60D: { start: rolling60Start, end: today },
+    trailing30: { start: trailing30Start, end: today },
     lastMonth: { start: lastMonthStart, end: lastMonthEnd },
     lastYear: { start: lastYearStart, end: lastYearEnd },
-    trailing30: { start: trailing30Start, end: today },
     prior30: { start: prior30Start, end: prior30End },
+    prior60: { start: prior60Start, end: prior60End },
+    prior90: { start: prior90Start, end: prior90End },
   };
+}
+
+// ============================================================================
+// Unified Period Snapshot — single SQL query for all key metrics in one window
+// Guarantees pullThroughRate + falloutRate = 100%
+// ============================================================================
+
+async function computePeriodSnapshot(
+  tenantPool: pg.Pool,
+  windowName: string,
+  start: string,
+  end: string,
+  revenueExpr: string,
+  channelGroup?: string
+): Promise<PeriodSnapshot> {
+  const channelClause = buildChannelWhereClause(channelGroup);
+  const closeDateExpr = "COALESCE(funding_date::date, closing_date)";
+
+  try {
+    const result = await tenantPool.query(
+      `SELECT
+        COUNT(*) as total_apps,
+        -- Completed = not still in-flight (matches scorecard denominator)
+        COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+          THEN 1 END) as completed,
+        -- Funded = completed AND has a close/funding date (the positive outcome)
+        COUNT(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL OR investor_purchase_date IS NOT NULL)
+          AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+          THEN 1 END) as funded,
+        -- Volume & revenue from funded loans only
+        SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+          THEN loan_amount ELSE 0 END) as funded_volume,
+        SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+          THEN (${revenueExpr}) ELSE 0 END) as funded_revenue,
+        -- Cycle time from funded loans only
+        AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+          THEN ${closeDateExpr} - application_date END) as avg_cycle_days,
+        COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked
+      FROM public.loans
+      WHERE application_date >= $1 AND application_date <= $2
+        ${channelClause}`,
+      [start, end]
+    );
+
+    const row = result.rows[0];
+    const completed = parseInt(row?.completed) || 0;
+    const funded = parseInt(row?.funded) || 0;
+
+    const snapshot: PeriodSnapshot = {
+      window: windowName,
+      start,
+      end,
+      totalApplications: parseInt(row?.total_apps) || 0,
+      completed,
+      funded,
+      locked: parseInt(row?.locked) || 0,
+      fundedVolume: parseFloat(row?.funded_volume) || 0,
+      fundedRevenue: parseFloat(row?.funded_revenue) || 0,
+      avgCycleTime: Math.round(parseFloat(row?.avg_cycle_days) || 0),
+      pullThroughRate: completed > 0 ? Math.round((funded / completed) * 1000) / 10 : 0,
+      falloutRate: completed > 0 ? Math.round(((completed - funded) / completed) * 1000) / 10 : 0,
+    };
+
+    console.log(
+      `[InsightMetrics] Snapshot "${windowName}" (${start}→${end}): ` +
+      `apps=${snapshot.totalApplications}, completed=${completed}, funded=${funded}, ` +
+      `PT=${snapshot.pullThroughRate}%, Fallout=${snapshot.falloutRate}%, ` +
+      `Vol=$${Math.round(snapshot.fundedVolume)}, Rev=$${Math.round(snapshot.fundedRevenue)}, ` +
+      `Cycle=${snapshot.avgCycleTime}d`
+    );
+
+    return snapshot;
+  } catch (error) {
+    console.error(`[InsightMetrics] Error computing period snapshot for ${windowName}:`, error);
+    return {
+      window: windowName, start, end,
+      totalApplications: 0, completed: 0, funded: 0, locked: 0,
+      fundedVolume: 0, fundedRevenue: 0, avgCycleTime: 0,
+      pullThroughRate: 0, falloutRate: 0,
+    };
+  }
 }
 
 /**
@@ -396,46 +496,8 @@ async function fetchCreditRiskLoans(
 }
 
 /**
- * Calculate Rolling 90-Day Pull-Through Rate
- */
-async function calculateRolling90DPullThrough(
-  tenantPool: pg.Pool,
-  channelGroup?: string
-): Promise<number> {
-  const endDate = new Date();
-  const startDate = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
-  const channelClause = buildChannelWhereClause(channelGroup);
-
-  try {
-    const result = await tenantPool.query(
-      `
-      SELECT 
-        COUNT(CASE 
-          WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
-          AND (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-          THEN 1 
-        END)::float / 
-        NULLIF(COUNT(CASE 
-          WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
-          THEN 1 
-        END), 0) * 100 as pull_through_rate
-      FROM public.loans l
-      WHERE l.application_date >= $1
-        AND l.application_date <= $2
-        ${channelClause}
-    `,
-      [startDate, endDate]
-    );
-
-    return parseFloat(result.rows[0]?.pull_through_rate) || 0;
-  } catch (error) {
-    console.error("[InsightMetrics] Error calculating pull-through:", error);
-    return 0;
-  }
-}
-
-/**
  * Fetch lost opportunity metrics (withdrawn and denied loans) WITH loan IDs
+ * Uses ILIKE patterns to match all status variants (e.g. "Withdrawn - by Borrower", "Denied - Credit")
  */
 async function fetchLostOpportunity(
   tenantPool: pg.Pool,
@@ -453,12 +515,21 @@ async function fetchLostOpportunity(
   try {
     const channelClause = buildChannelWhereClause(channelGroup);
 
-    // Fetch individual rows so we get both aggregates AND loan IDs
+    // Use ILIKE patterns to match all status variants — same patterns used in the
+    // snapshot fallout definition and the old fetchFunnelMetrics
     const result = await tenantPool.query(
       `
       SELECT loan_id, current_loan_status, COALESCE(loan_amount, 0) as loan_amount
       FROM public.loans
-      WHERE current_loan_status IN ('withdrawn', 'cancelled', 'Withdrawn', 'denied', 'declined', 'Denied')
+      WHERE (
+          current_loan_status ILIKE '%withdraw%'
+          OR current_loan_status ILIKE '%cancelled%'
+          OR current_loan_status ILIKE '%canceled%'
+          OR current_loan_status ILIKE '%not accepted%'
+          OR current_loan_status ILIKE '%incomplete%'
+          OR current_loan_status ILIKE '%denied%'
+          OR current_loan_status ILIKE '%declined%'
+        )
         AND application_date >= $1
         AND application_date <= $2
         ${channelClause}
@@ -466,12 +537,15 @@ async function fetchLostOpportunity(
       [dateRange.start, dateRange.end]
     );
 
-    const withdrawn = result.rows.filter((r: any) =>
-      ["withdrawn", "cancelled", "Withdrawn"].includes(r.current_loan_status)
-    );
-    const denied = result.rows.filter((r: any) =>
-      ["denied", "declined", "Denied"].includes(r.current_loan_status)
-    );
+    const statusLower = (r: any) => (r.current_loan_status || "").toLowerCase();
+    const withdrawn = result.rows.filter((r: any) => {
+      const s = statusLower(r);
+      return s.includes("withdraw") || s.includes("cancel") || s.includes("not accepted") || s.includes("incomplete");
+    });
+    const denied = result.rows.filter((r: any) => {
+      const s = statusLower(r);
+      return s.includes("denied") || s.includes("declined");
+    });
 
     const withdrawnVolume = withdrawn.reduce(
       (sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0),
@@ -506,160 +580,25 @@ async function fetchLostOpportunity(
 }
 
 /**
- * Fetch funnel metrics
- */
-async function fetchFunnelMetrics(
-  tenantPool: pg.Pool,
-  dateRange: DateRange,
-  channelGroup?: string
-): Promise<{
-  loansStarted: number;
-  loansLocked: number;
-  loansOriginated: number;
-  falloutRate: number;
-}> {
-  try {
-    const channelClause = buildChannelWhereClause(channelGroup);
-    const result = await tenantPool.query(
-      `
-      SELECT
-        COUNT(*) as total,
-        COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked,
-        COUNT(CASE WHEN funding_date IS NOT NULL
-          OR current_loan_status ILIKE '%funded%' OR current_loan_status ILIKE '%closed%' OR current_loan_status ILIKE '%originated%'
-          THEN 1 END) as originated,
-        COUNT(CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
-          OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
-          OR current_loan_status ILIKE '%incomplete%' OR current_loan_status ILIKE '%denied%'
-          OR current_loan_status ILIKE '%declined%'
-          THEN 1 END) as fallout,
-        -- Loans that have completed their lifecycle (not still active in pipeline)
-        -- This matches the pull-through denominator so PT + Fallout ≈ 100%
-        COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
-          THEN 1 END) as completed
-      FROM public.loans
-      WHERE application_date >= $1
-        AND application_date <= $2
-        ${channelClause}
-    `,
-      [dateRange.start, dateRange.end]
-    );
-
-    const row = result.rows[0];
-    const total = parseInt(row?.total) || 0;
-    const fallout = parseInt(row?.fallout) || 0;
-    const completed = parseInt(row?.completed) || 0;
-
-    return {
-      loansStarted: total,
-      loansLocked: parseInt(row?.locked) || 0,
-      loansOriginated: parseInt(row?.originated) || 0,
-      // Use completed (non-active) as denominator — same population as pull-through
-      // so that pullThrough + falloutRate ≈ 100%
-      falloutRate: completed > 0 ? (fallout / completed) * 100 : 0,
-    };
-  } catch (error) {
-    console.error("[InsightMetrics] Error fetching funnel metrics:", error);
-    return {
-      loansStarted: 0,
-      loansLocked: 0,
-      loansOriginated: 0,
-      falloutRate: 0,
-    };
-  }
-}
-
-/**
  * Calculate comparison metrics (month-over-month, year-over-year)
+ * Now derived from pre-computed period snapshots for consistency.
  */
-async function calculateComparisons(
-  tenantPool: pg.Pool,
-  currentMtdMetrics: Record<string, any>,
-  currentYtdMetrics: Record<string, any>,
-  dateRanges: ReturnType<typeof getDateRanges>
-): Promise<{
-  volumeVsLastMonth: number;
-  volumeVsLastYear: number;
-  cycleTimeVsLastMonth: number;
-  pullThroughVsLastMonth: number;
-  /** Trailing 30 days funded volume (apples-to-apples) */
-  currentMtdVolume: number;
-  /** Prior 30 days funded volume (the 30-day window before trailing 30) */
-  lastMonthVolume: number;
-  currentYtdVolume: number;
-  lastYearVolume: number;
-  currentCycleTime: number;
-  lastMonthCycleTime: number;
-}> {
-  try {
-    // -------- TRAILING 30 vs PRIOR 30 (apples-to-apples) --------
-    // This avoids the "10 days vs 31 days" problem when comparing
-    // partial-month MTD against a full prior month.
-    const trailing30Metrics = await queryMetrics(
-      tenantPool,
-      ["funded_volume", "avg_cycle_time", "pull_through_rate"],
-      { dateRange: dateRanges.trailing30 }
-    );
+function deriveComparisons(snapshots: InsightMetricsPayload["periodSnapshots"]): InsightMetricsPayload["comparisons"] {
+  const pctDelta = (cur: number, prior: number) =>
+    prior > 0 ? ((cur - prior) / prior) * 100 : 0;
 
-    const prior30Metrics = await queryMetrics(
-      tenantPool,
-      ["funded_volume", "avg_cycle_time", "pull_through_rate"],
-      { dateRange: dateRanges.prior30 }
-    );
-
-    // Get last year same YTD period metrics
-    const lastYearMetrics = await queryMetrics(tenantPool, ["funded_volume"], {
-      dateRange: dateRanges.lastYear,
-    });
-
-    const trailing30Volume = Number(trailing30Metrics.funded_volume?.value || 0);
-    const prior30Volume = Number(prior30Metrics.funded_volume?.value || 0);
-    const lastYearVolume = Number(lastYearMetrics.funded_volume?.value || 0);
-    const currentYtdVolume = Number(currentYtdMetrics.funded_volume?.value || 0);
-
-    const trailing30CycleTime = Number(
-      trailing30Metrics.avg_cycle_time?.value || 0
-    );
-    const prior30CycleTime = Number(
-      prior30Metrics.avg_cycle_time?.value || 0
-    );
-
-    return {
-      volumeVsLastMonth:
-        prior30Volume > 0
-          ? ((trailing30Volume - prior30Volume) / prior30Volume) * 100
-          : 0,
-      volumeVsLastYear:
-        lastYearVolume > 0
-          ? ((currentYtdVolume - lastYearVolume) / lastYearVolume) * 100
-          : 0,
-      cycleTimeVsLastMonth:
-        prior30CycleTime > 0
-          ? ((trailing30CycleTime - prior30CycleTime) / prior30CycleTime) * 100
-          : 0,
-      pullThroughVsLastMonth: 0, // Calculated separately with rolling 90D methodology
-      currentMtdVolume: trailing30Volume,
-      lastMonthVolume: prior30Volume,
-      currentYtdVolume,
-      lastYearVolume,
-      currentCycleTime: trailing30CycleTime,
-      lastMonthCycleTime: prior30CycleTime,
-    };
-  } catch (error) {
-    console.error("[InsightMetrics] Error calculating comparisons:", error);
-    return {
-      volumeVsLastMonth: 0,
-      volumeVsLastYear: 0,
-      cycleTimeVsLastMonth: 0,
-      pullThroughVsLastMonth: 0,
-      currentMtdVolume: 0,
-      lastMonthVolume: 0,
-      currentYtdVolume: 0,
-      lastYearVolume: 0,
-      currentCycleTime: 0,
-      lastMonthCycleTime: 0,
-    };
-  }
+  return {
+    volumeVsLastMonth: pctDelta(snapshots.rolling30d.fundedVolume, snapshots.prior30d.fundedVolume),
+    volumeVsLastYear: pctDelta(snapshots.ytd.fundedVolume, snapshots.priorYtd.fundedVolume),
+    cycleTimeVsLastMonth: pctDelta(snapshots.rolling30d.avgCycleTime, snapshots.prior30d.avgCycleTime),
+    pullThroughVsLastMonth: pctDelta(snapshots.rolling30d.pullThroughRate, snapshots.prior30d.pullThroughRate),
+    currentMtdVolume: snapshots.rolling30d.fundedVolume,
+    lastMonthVolume: snapshots.prior30d.fundedVolume,
+    currentYtdVolume: snapshots.ytd.fundedVolume,
+    lastYearVolume: snapshots.priorYtd.fundedVolume,
+    currentCycleTime: snapshots.rolling30d.avgCycleTime,
+    lastMonthCycleTime: snapshots.prior30d.avgCycleTime,
+  };
 }
 
 // ============================================================================
@@ -903,13 +842,12 @@ function tierAverages(actors: TieringActorRow[], tier: string) {
 
 async function fetchPersonnelTiering(
   tenantPool: pg.Pool,
+  revenueExpr: string,
   channelGroup?: string
 ): Promise<InsightMetricsPayload["tiering"]> {
   const result: InsightMetricsPayload["tiering"] = { byActorType: [] };
 
   try {
-    const revenueExpr = await getTenantRevenueExpression(tenantPool);
-    console.log(`[InsightMetrics] Revenue expression (first 200 chars): ${revenueExpr.substring(0, 200)}`);
     const channelClause = buildChannelWhereClause(channelGroup);
 
     // Date ranges: YTD + multi-window period-over-period (30D, 60D, 90D)
@@ -970,11 +908,14 @@ async function fetchPersonnelTiering(
           ORDER BY revenue DESC
         `;
 
-        // Query 2: All applications — started, lost, denied per actor (YTD by application_date)
+        // Query 2: All applications — started, completed (non-active), lost, denied per actor (YTD by application_date)
+        // completed excludes active-in-pipeline loans, matching the org-level PT denominator
         const appQuery = `
           SELECT
             ${cfg.actorColumn} AS actor_name,
             COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS started,
+            COUNT(DISTINCT CASE WHEN current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+              THEN COALESCE(loan_number, loan_id::text) END) AS completed,
             COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
               OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
               OR current_loan_status ILIKE '%incomplete%' THEN COALESCE(loan_number, loan_id::text) END) AS lost,
@@ -993,11 +934,12 @@ async function fetchPersonnelTiering(
         ]);
 
         // Build lookup from application query
-        const appMap = new Map<string, { started: number; lost: number; denied: number }>();
+        const appMap = new Map<string, { started: number; completed: number; lost: number; denied: number }>();
         for (const r of appRes.rows) {
           if (!isActorMissing(r.actor_name)) {
             appMap.set(r.actor_name, {
               started: parseInt(r.started) || 0,
+              completed: parseInt(r.completed) || 0,
               lost: parseInt(r.lost) || 0,
               denied: parseInt(r.denied) || 0,
             });
@@ -1009,15 +951,17 @@ async function fetchPersonnelTiering(
           .map((r: any) => {
             const name = r.actor_name || "Unknown";
             const units = parseInt(r.units) || 0;
-            const appData = appMap.get(r.actor_name) || { started: 0, lost: 0, denied: 0 };
-            const started = Math.max(appData.started, units); // started should be >= funded
+            const appData = appMap.get(r.actor_name) || { started: 0, completed: 0, lost: 0, denied: 0 };
+            // Use completed (non-active) as denominator — matches org-level PT calc
+            // so per-actor PT + per-actor fallout = 100%
+            const completedForActor = Math.max(appData.completed, units); // completed should be >= funded
             return {
               name,
               revenue: parseFloat(r.revenue) || 0,
               units,
               volume: parseFloat(r.volume) || 0,
               revenueBps: Math.round(parseFloat(r.revenue_bps) || 0),
-              pullThrough: started > 0 ? Math.round((units / started) * 1000) / 10 : 0,
+              pullThrough: completedForActor > 0 ? Math.round((units / completedForActor) * 1000) / 10 : 0,
               avgCycleTime: Math.round(parseFloat(r.avg_cycle_days) || 0),
               lostOpportunityUnits: appData.lost,
               deniedUnits: appData.denied,
@@ -1038,13 +982,17 @@ async function fetchPersonnelTiering(
             SELECT
               ${cfg.actorColumn} AS actor_name,
               COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN COALESCE(loan_number, loan_id::text) END) AS funded_cur,
-              COUNT(DISTINCT CASE WHEN application_date >= $1 AND application_date <= $2 THEN COALESCE(loan_number, loan_id::text) END) AS started_cur,
+              COUNT(DISTINCT CASE WHEN application_date >= $1 AND application_date <= $2
+                AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+                THEN COALESCE(loan_number, loan_id::text) END) AS completed_cur,
               SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN (${revenueExpr}) ELSE 0 END) AS revenue_cur,
               SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN loan_amount ELSE 0 END) AS volume_cur,
               AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2
                   THEN (${closeDateExpr} - application_date) END) AS cycle_cur,
               COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN COALESCE(loan_number, loan_id::text) END) AS funded_prior,
-              COUNT(DISTINCT CASE WHEN application_date >= $3 AND application_date <= $4 THEN COALESCE(loan_number, loan_id::text) END) AS started_prior,
+              COUNT(DISTINCT CASE WHEN application_date >= $3 AND application_date <= $4
+                AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+                THEN COALESCE(loan_number, loan_id::text) END) AS completed_prior,
               SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN (${revenueExpr}) ELSE 0 END) AS revenue_prior,
               SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN loan_amount ELSE 0 END) AS volume_prior,
               AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4
@@ -1066,9 +1014,9 @@ async function fetchPersonnelTiering(
             for (const r of periodRes.rows) {
               if (isActorMissing(r.actor_name)) continue;
               const fundedCur = parseInt(r.funded_cur) || 0;
-              const startedCur = parseInt(r.started_cur) || 0;
+              const completedCur = parseInt(r.completed_cur) || 0;
               const fundedPrior = parseInt(r.funded_prior) || 0;
-              const startedPrior = parseInt(r.started_prior) || 0;
+              const completedPrior = parseInt(r.completed_prior) || 0;
               const revenueCur = parseFloat(r.revenue_cur) || 0;
               const volumeCur = parseFloat(r.volume_cur) || 0;
               const revenuePrior = parseFloat(r.revenue_prior) || 0;
@@ -1078,8 +1026,9 @@ async function fetchPersonnelTiering(
               if (fundedCur >= 5 || fundedPrior >= 5) {
                 console.log(`[InsightMetrics] Period ${pw.window} actor="${r.actor_name}": rev_cur=$${Math.round(revenueCur)} vol_cur=$${Math.round(volumeCur)} rev_prior=$${Math.round(revenuePrior)} vol_prior=$${Math.round(volumePrior)} units_cur=${fundedCur} units_prior=${fundedPrior}`);
               }
-              const pullCur = startedCur > 0 ? (fundedCur / startedCur) * 100 : 0;
-              const pullPrior = startedPrior > 0 ? (fundedPrior / startedPrior) * 100 : 0;
+              // Use completed (non-active) as denominator — matches org-level PT
+              const pullCur = completedCur > 0 ? (fundedCur / completedCur) * 100 : 0;
+              const pullPrior = completedPrior > 0 ? (fundedPrior / completedPrior) * 100 : 0;
               const bpsCur = volumeCur > 0 ? (revenueCur / volumeCur) * 10000 : 0;
               const bpsPrior = volumePrior > 0 ? (revenuePrior / volumePrior) * 10000 : 0;
               const unitsCur = fundedCur;
@@ -1212,32 +1161,51 @@ export async function collectInsightMetrics(
       break;
   }
 
-  // Fetch all data in parallel, applying channel filter to all queries
+  // Get the revenue expression FIRST so it can be shared across snapshots and tiering
+  const revenueExpr = await getTenantRevenueExpression(tenantPool);
+  console.log(`[InsightMetrics] Revenue expression (first 200 chars): ${revenueExpr.substring(0, 200)}`);
+
+  // ====================================================================
+  // Phase 1: Compute unified period snapshots + other independent queries
+  // All snapshots use the SAME SQL formula so PT + Fallout = 100% always
+  // ====================================================================
   const [
-    // Core metrics for different periods
+    // 10 period snapshots (current + prior windows)
+    snapYtd,
+    snapRolling90d,
+    snapRolling60d,
+    snapRolling30d,
+    snapMtd,
+    snapPriorYtd,
+    snapPrior90d,
+    snapPrior60d,
+    snapPrior30d,
+    snapPriorMtd,
+    // Other independent queries
     ytdMetrics,
-    mtdMetrics,
-    rolling90DMetrics,
-    // Predictions
     predictions,
-    // Rolling 90D pull-through
-    pullThroughRolling90D,
-    // Lost opportunity
     lostOpportunity,
-    // Funnel
-    funnel,
-    // Credit risk (now returns { count, loanIds })
     creditRiskResult,
-    // New trigger metrics
     closingRisk,
     lockExpiration,
     tridExposure,
     marginData,
     conditionBacklog,
-    // Personnel tiering
     tiering,
   ] = await Promise.all([
-    // YTD metrics
+    // --- Period snapshots (all use computePeriodSnapshot with same formula) ---
+    computePeriodSnapshot(tenantPool, "ytd", dateRanges.ytd.start, dateRanges.ytd.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "90d", dateRanges.rolling90D.start, dateRanges.rolling90D.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "60d", dateRanges.rolling60D.start, dateRanges.rolling60D.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "30d", dateRanges.trailing30.start, dateRanges.trailing30.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "mtd", dateRanges.mtd.start, dateRanges.mtd.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "prior_ytd", dateRanges.lastYear.start, dateRanges.lastYear.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "prior_90d", dateRanges.prior90.start, dateRanges.prior90.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "prior_60d", dateRanges.prior60.start, dateRanges.prior60.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "prior_30d", dateRanges.prior30.start, dateRanges.prior30.end, revenueExpr, channelGroup),
+    computePeriodSnapshot(tenantPool, "prior_mtd", dateRanges.lastMonth.start, dateRanges.lastMonth.end, revenueExpr, channelGroup),
+
+    // --- Pipeline & credit risk (these use queryMetrics for active loan counts, FICO, etc.) ---
     queryMetrics(
       tenantPool,
       [
@@ -1255,46 +1223,51 @@ export async function collectInsightMetrics(
       { dateRange: dateRanges.ytd, additionalFilters }
     ),
 
-    // MTD metrics
-    queryMetrics(
-      tenantPool,
-      ["funded_volume", "total_revenue", "avg_cycle_time"],
-      { dateRange: dateRanges.mtd, additionalFilters }
-    ),
-
-    // Rolling 90D metrics (for comparison)
-    queryMetrics(tenantPool, ["funded_volume", "avg_cycle_time"], {
-      dateRange: dateRanges.rolling90D,
-      additionalFilters,
-    }),
-
-    // Predictions (channel filter applied within function)
+    // --- Predictions ---
     fetchPredictions(tenantPool, channelGroup),
 
-    // Rolling 90D pull-through (channel filter applied within function)
-    calculateRolling90DPullThrough(tenantPool, channelGroup),
-
-    // Lost opportunity YTD (channel filter applied within function)
+    // --- Lost opportunity YTD ---
     fetchLostOpportunity(tenantPool, dateRanges.ytd, channelGroup),
 
-    // Funnel YTD (channel filter applied within function)
-    fetchFunnelMetrics(tenantPool, dateRanges.ytd, channelGroup),
-
-    // High risk loans with IDs (channel filter applied within function)
+    // --- Credit risk ---
     fetchCreditRiskLoans(tenantPool, channelGroup),
 
-    // New trigger metrics (B3, C1, G1, C2, D2)
+    // --- Trigger metrics (B3, C1, G1, C2, D2) ---
     fetchClosingLateRisk(tenantPool, channelGroup),
     fetchLockExpirationExposure(tenantPool, channelGroup),
     fetchTridExposure(tenantPool, channelGroup),
     fetchMarginData(tenantPool, channelGroup),
     fetchConditionBacklog(tenantPool, channelGroup),
 
-    // Personnel tiering
-    fetchPersonnelTiering(tenantPool, channelGroup),
+    // --- Personnel tiering (now receives revenueExpr to avoid duplicate fetch) ---
+    fetchPersonnelTiering(tenantPool, revenueExpr, channelGroup),
   ]);
 
-  // Process predictions
+  // Assemble the period snapshots object
+  const periodSnapshots: InsightMetricsPayload["periodSnapshots"] = {
+    ytd: snapYtd,
+    rolling90d: snapRolling90d,
+    rolling60d: snapRolling60d,
+    rolling30d: snapRolling30d,
+    mtd: snapMtd,
+    priorYtd: snapPriorYtd,
+    prior90d: snapPrior90d,
+    prior60d: snapPrior60d,
+    prior30d: snapPrior30d,
+    priorMtd: snapPriorMtd,
+  };
+
+  // Log the consistency check: PT + Fallout should always = 100%
+  for (const [key, snap] of Object.entries(periodSnapshots)) {
+    const sum = snap.pullThroughRate + snap.falloutRate;
+    if (snap.completed > 0 && Math.abs(sum - 100) > 0.2) {
+      console.warn(`[InsightMetrics] CONSISTENCY WARNING: ${key} PT(${snap.pullThroughRate}) + Fallout(${snap.falloutRate}) = ${sum} (expected 100)`);
+    }
+  }
+
+  // ====================================================================
+  // Phase 2: Process predictions
+  // ====================================================================
   const withdrawPredictions = predictions.filter(
     (p) => p.predictedOutcome === "withdraw"
   );
@@ -1305,20 +1278,18 @@ export async function collectInsightMetrics(
     (p) => p.predictedOutcome === "originate"
   );
 
-  // ALL at-risk loan IDs (any confidence, withdraw or deny)
   const allAtRiskPredictions = predictions.filter(
     (p) => p.predictedOutcome === "withdraw" || p.predictedOutcome === "deny"
   );
   const allAtRiskLoanIds = allAtRiskPredictions.map((p) => p.loanId);
 
-  // High-risk loans (confidence >= 70% for withdraw or deny)
   const highRiskLoans = predictions
     .filter(
       (p) =>
         (p.predictedOutcome === "withdraw" || p.predictedOutcome === "deny") &&
         p.confidence >= 70
     )
-    .slice(0, 20) // Top 20 high risk
+    .slice(0, 20)
     .map((p) => ({
       loanId: p.loanId,
       confidence: p.confidence,
@@ -1326,20 +1297,16 @@ export async function collectInsightMetrics(
       riskFactors: p.riskFactors || [],
     }));
 
-  // Fetch volumes for BOTH groups in parallel
   const highRiskLoanIds = highRiskLoans.map((l) => l.loanId);
   const [allAtRiskVolume, highRiskVolume] = await Promise.all([
     fetchAtRiskVolume(tenantPool, allAtRiskLoanIds),
     fetchAtRiskVolume(tenantPool, highRiskLoanIds),
   ]);
 
-  // Calculate comparisons
-  const comparisons = await calculateComparisons(
-    tenantPool,
-    mtdMetrics,
-    ytdMetrics,
-    dateRanges
-  );
+  // ====================================================================
+  // Phase 3: Derive legacy fields from snapshots (backward compatibility)
+  // ====================================================================
+  const comparisons = deriveComparisons(periodSnapshots);
 
   // Build the payload
   const payload: InsightMetricsPayload = {
@@ -1368,17 +1335,14 @@ export async function collectInsightMetrics(
       highRiskVolume,
     },
 
+    // Derived from snapshots — guaranteed consistent with funnel metrics
     performance: {
-      pullThroughRolling90D,
-      avgCycleTime: Number(ytdMetrics.avg_cycle_time?.value || 0),
-      revenueYTD:
-        Number(ytdMetrics.total_revenue?.value || 0) ||
-        Number(ytdMetrics.funded_volume?.value || 0) * 0.01,
-      revenueMTD:
-        Number(mtdMetrics.total_revenue?.value || 0) ||
-        Number(mtdMetrics.funded_volume?.value || 0) * 0.01,
-      volumeYTD: Number(ytdMetrics.funded_volume?.value || 0),
-      volumeMTD: Number(mtdMetrics.funded_volume?.value || 0),
+      pullThroughRolling90D: snapRolling90d.pullThroughRate,
+      avgCycleTime: snapYtd.avgCycleTime,
+      revenueYTD: snapYtd.fundedRevenue || Number(ytdMetrics.total_revenue?.value || 0),
+      revenueMTD: snapMtd.fundedRevenue,
+      volumeYTD: snapYtd.fundedVolume,
+      volumeMTD: snapMtd.fundedVolume,
     },
 
     creditRisk: {
@@ -1392,7 +1356,13 @@ export async function collectInsightMetrics(
 
     lostOpportunity,
 
-    funnel,
+    // Derived from YTD snapshot — guaranteed consistent with performance.pullThrough
+    funnel: {
+      loansStarted: snapYtd.totalApplications,
+      loansLocked: snapYtd.locked,
+      loansOriginated: snapYtd.funded,
+      falloutRate: snapYtd.falloutRate,
+    },
 
     comparisons,
 
@@ -1402,6 +1372,7 @@ export async function collectInsightMetrics(
     marginData,
     conditionBacklog,
     tiering,
+    periodSnapshots,
   };
 
   console.log(`[InsightMetrics] Collected metrics payload:`, {
@@ -1415,8 +1386,9 @@ export async function collectInsightMetrics(
       highRisk: payload.predictions.highRiskLoans.length,
       highRiskVolume: payload.predictions.highRiskVolume,
     },
-    pullThrough: payload.performance.pullThroughRolling90D,
-    cycleTime: payload.performance.avgCycleTime,
+    snapshots: Object.entries(periodSnapshots).map(([k, s]) =>
+      `${k}: PT=${s.pullThroughRate}% Fallout=${s.falloutRate}% Vol=$${Math.round(s.fundedVolume)} Rev=$${Math.round(s.fundedRevenue)} Cycle=${s.avgCycleTime}d`
+    ).join(' | '),
     closingRisk: payload.closingRisk.atRiskCount,
     lockExpiration: payload.lockExpiration.expiringCount,
     tridExposure: payload.tridExposure.atRiskCount,

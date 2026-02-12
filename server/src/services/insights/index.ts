@@ -4,7 +4,7 @@
  */
 
 export { collectInsightMetrics } from './insightMetricsCollector.js';
-export type { InsightMetricsPayload, PredictionData } from './insightMetricsCollector.js';
+export type { InsightMetricsPayload, PredictionData, PeriodSnapshot } from './insightMetricsCollector.js';
 
 export {
   generateLLMInsights,

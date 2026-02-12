@@ -27,6 +27,7 @@ import { TenantSelectorCard } from "@/components/admin/TenantSelectorCard";
 import { GlobalKnowledgeLibrary } from "@/components/admin/GlobalKnowledgeLibrary";
 import { KnowledgeCenterSection } from "@/components/admin/KnowledgeCenterSection";
 import { AIPromptManager } from "@/components/admin/AIPromptManager";
+import { InsightFeedbackSection } from "@/components/admin/InsightFeedbackSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
@@ -297,6 +298,7 @@ export const Admin = () => {
       { id: "metrics-catalog", label: "Metrics Catalog" },
       { id: "dev-tools", label: "Developer Tools" },
       { id: "ai-prompts", label: "AI Prompts" },
+      { id: "insight-feedback", label: "Insight Feedback" },
       { id: "platform-settings", label: "Platform Settings" },
     ];
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
@@ -713,6 +715,17 @@ export const Admin = () => {
                   transition={{ duration: 0.3 }}
                 >
                   <AIPromptManager />
+                </motion.div>
+              )}
+
+              {/* Insight Feedback Section (Platform Admin) */}
+              {activeSection === "insight-feedback" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <InsightFeedbackSection />
                 </motion.div>
               )}
 

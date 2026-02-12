@@ -23,6 +23,7 @@ export type AdminSection =
   | "knowledge-library" // Global knowledge library (platform admin)
   | "knowledge-center" // Tenant knowledge center
   | "ai-prompts" // AI prompt configuration (platform admin)
+  | "insight-feedback" // Insight feedback review & training (platform admin)
   | "platform-settings"; // Platform API keys and settings (platform admin)
 
 // Admin mode: platform (Cohi internal management) vs tenant (tenant context/impersonation)

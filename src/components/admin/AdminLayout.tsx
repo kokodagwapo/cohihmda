@@ -28,6 +28,7 @@ import {
   Briefcase,
   Code2,
   BookOpen,
+  MessageSquareHeart,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -161,6 +162,16 @@ const allAdminSections: AdminSectionDef[] = [
     icon: Brain,
     description: "Manage system prompts for all AI features",
     color: "text-violet-300 dark:text-violet-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Developer",
+    mode: "platform",
+  },
+  {
+    id: "insight-feedback" as AdminSection,
+    label: "Insight Feedback",
+    icon: MessageSquareHeart,
+    description: "Review feedback, manage training examples, run experiments",
+    color: "text-emerald-300 dark:text-emerald-400/70",
     allowedRoles: ["super_admin", "platform_admin"],
     category: "Developer",
     mode: "platform",
