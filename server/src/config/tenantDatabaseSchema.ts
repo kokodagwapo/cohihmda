@@ -617,7 +617,10 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
             END IF;
           END $$;
         `);
-        console.log("[TenantSchema] Ratio fields migration check completed");
+        console.log(
+          "[TenantSchema] Ratio fields migration check completed with error:",
+          error.message,
+        );
       }
     } catch (error: any) {
       console.error(
