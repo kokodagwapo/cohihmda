@@ -1947,6 +1947,15 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       )
       .catch(() => {});
 
+    // Composite index for DISTINCT ON (loan_id) ORDER BY loan_id, created_at DESC pattern
+    await pool
+      .query(
+        `
+      CREATE INDEX IF NOT EXISTS idx_loan_predictions_loan_created ON public.loan_predictions(loan_id, created_at DESC)
+    `,
+      )
+      .catch(() => {});
+
     // AI Pattern Learnings table - stores AI-extracted patterns (NO tenant_id)
     await pool
       .query(

@@ -5,7 +5,13 @@
 
 import pg from "pg";
 import { queryMetrics, DateRange } from "../metrics/metricsService.js";
-import { buildChannelWhereClause } from "../../utils/scorecard-utils.js";
+import {
+  buildChannelWhereClause,
+  getTenantRevenueExpression,
+  getActorColumnForChannel,
+  getActorLabelForChannel,
+  isActorMissing,
+} from "../../utils/scorecard-utils.js";
 
 // Prediction data structure
 export interface PredictionData {
@@ -152,6 +158,55 @@ export interface InsightMetricsPayload {
     highConditionCount: number;
     highConditionLoanIds: string[];
   };
+
+  // Personnel tiering — revenue-based Pareto tiers per actor type
+  tiering: {
+    byActorType: Array<{
+      actorType: "loan_officer" | "branch";
+      actorLabel: string;
+      totalActors: number;
+      tierDistribution: { top: number; second: number; bottom: number };
+      topPerformers: Array<{
+        name: string;
+        revenue: number;
+        units: number;
+        volume: number;
+        revenueBps: number;
+        pullThrough: number;
+        avgCycleTime: number;
+        lostOpportunityUnits: number;
+        deniedUnits: number;
+        tier: string;
+      }>;
+      bottomPerformers: Array<{
+        name: string;
+        revenue: number;
+        units: number;
+        volume: number;
+        revenueBps: number;
+        pullThrough: number;
+        avgCycleTime: number;
+        lostOpportunityUnits: number;
+        deniedUnits: number;
+        tier: string;
+      }>;
+      tierAverages: {
+        top: { avgRevenue: number; avgUnits: number; avgBps: number; avgPullThrough: number; avgCycleTime: number };
+        second: { avgRevenue: number; avgUnits: number; avgBps: number; avgPullThrough: number; avgCycleTime: number };
+        bottom: { avgRevenue: number; avgUnits: number; avgBps: number; avgPullThrough: number; avgCycleTime: number };
+      };
+      /** Multi-window period-over-period changes; officers with notable improvement or decline */
+      periodChanges?: Array<{
+        name: string;
+        metric: "revenue" | "units" | "volume" | "pullThrough" | "revenueBps" | "cycleTime";
+        current: number;
+        prior: number;
+        deltaPct: number;
+        direction: "improved" | "declined";
+        window: "30d" | "60d" | "90d";
+      }>;
+    }>;
+  };
 }
 
 /**
@@ -252,7 +307,9 @@ async function fetchPredictions(
       return [];
     }
 
-    // Get most recent prediction per loan, optionally filtered by channel
+    // Get most recent prediction per loan — ONLY for currently active loans.
+    // Predictions for withdrawn / denied / funded loans are stale and should not
+    // be surfaced as fallout risk.
     const channelClause = buildChannelWhereClause(channelGroup);
     const result = await tenantPool.query(`
       SELECT DISTINCT ON (p.loan_id)
@@ -262,8 +319,8 @@ async function fetchPredictions(
         p.reasoning,
         p.risk_factors
       FROM public.loan_predictions p
-      ${channelGroup ? "JOIN public.loans l ON p.loan_id = l.loan_id" : ""}
-      WHERE 1=1
+      JOIN public.loans l ON p.loan_id = l.loan_id
+      WHERE l.current_loan_status = 'Active Loan'
         ${channelGroup ? channelClause : ""}
       ORDER BY p.loan_id, p.created_at DESC
       LIMIT 5000
@@ -468,8 +525,18 @@ async function fetchFunnelMetrics(
       SELECT
         COUNT(*) as total,
         COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked,
-        COUNT(CASE WHEN funding_date IS NOT NULL OR current_loan_status IN ('funded', 'closed', 'originated') THEN 1 END) as originated,
-        COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined') THEN 1 END) as fallout
+        COUNT(CASE WHEN funding_date IS NOT NULL
+          OR current_loan_status ILIKE '%funded%' OR current_loan_status ILIKE '%closed%' OR current_loan_status ILIKE '%originated%'
+          THEN 1 END) as originated,
+        COUNT(CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
+          OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
+          OR current_loan_status ILIKE '%incomplete%' OR current_loan_status ILIKE '%denied%'
+          OR current_loan_status ILIKE '%declined%'
+          THEN 1 END) as fallout,
+        -- Loans that have completed their lifecycle (not still active in pipeline)
+        -- This matches the pull-through denominator so PT + Fallout ≈ 100%
+        COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+          THEN 1 END) as completed
       FROM public.loans
       WHERE application_date >= $1
         AND application_date <= $2
@@ -481,12 +548,15 @@ async function fetchFunnelMetrics(
     const row = result.rows[0];
     const total = parseInt(row?.total) || 0;
     const fallout = parseInt(row?.fallout) || 0;
+    const completed = parseInt(row?.completed) || 0;
 
     return {
       loansStarted: total,
       loansLocked: parseInt(row?.locked) || 0,
       loansOriginated: parseInt(row?.originated) || 0,
-      falloutRate: total > 0 ? (fallout / total) * 100 : 0,
+      // Use completed (non-active) as denominator — same population as pull-through
+      // so that pullThrough + falloutRate ≈ 100%
+      falloutRate: completed > 0 ? (fallout / completed) * 100 : 0,
     };
   } catch (error) {
     console.error("[InsightMetrics] Error fetching funnel metrics:", error);
@@ -791,6 +861,314 @@ async function fetchConditionBacklog(
   }
 }
 
+// ============================================================================
+// Personnel Tiering — Revenue-based Pareto tiers
+// ============================================================================
+
+interface TieringActorRow {
+  name: string;
+  revenue: number;
+  units: number;
+  volume: number;
+  revenueBps: number;
+  pullThrough: number;
+  avgCycleTime: number;
+  lostOpportunityUnits: number;
+  deniedUnits: number;
+  tier: "top" | "second" | "bottom";
+}
+
+function computeTiers(rawActors: Array<{ name: string; revenue: number; units: number; volume: number; revenueBps: number; pullThrough: number; avgCycleTime: number; lostOpportunityUnits: number; deniedUnits: number }>): TieringActorRow[] {
+  const totalRevenue = rawActors.reduce((s, a) => s + a.revenue, 0);
+  let cumRev = 0;
+  return rawActors.map(a => {
+    cumRev += a.revenue;
+    const pct = totalRevenue > 0 ? (cumRev / totalRevenue) * 100 : 0;
+    const tier: "top" | "second" | "bottom" = pct <= 50 ? "top" : pct <= 80 ? "second" : "bottom";
+    return { ...a, tier };
+  });
+}
+
+function tierAverages(actors: TieringActorRow[], tier: string) {
+  const subset = actors.filter(a => a.tier === tier);
+  if (subset.length === 0) return { avgRevenue: 0, avgUnits: 0, avgBps: 0, avgPullThrough: 0, avgCycleTime: 0 };
+  return {
+    avgRevenue: Math.round(subset.reduce((s, a) => s + a.revenue, 0) / subset.length),
+    avgUnits: Math.round(subset.reduce((s, a) => s + a.units, 0) / subset.length * 10) / 10,
+    avgBps: Math.round(subset.reduce((s, a) => s + a.revenueBps, 0) / subset.length),
+    avgPullThrough: Math.round(subset.reduce((s, a) => s + a.pullThrough, 0) / subset.length * 10) / 10,
+    avgCycleTime: Math.round(subset.reduce((s, a) => s + a.avgCycleTime, 0) / subset.length),
+  };
+}
+
+async function fetchPersonnelTiering(
+  tenantPool: pg.Pool,
+  channelGroup?: string
+): Promise<InsightMetricsPayload["tiering"]> {
+  const result: InsightMetricsPayload["tiering"] = { byActorType: [] };
+
+  try {
+    const revenueExpr = await getTenantRevenueExpression(tenantPool);
+    console.log(`[InsightMetrics] Revenue expression (first 200 chars): ${revenueExpr.substring(0, 200)}`);
+    const channelClause = buildChannelWhereClause(channelGroup);
+
+    // Date ranges: YTD + multi-window period-over-period (30D, 60D, 90D)
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString().split("T")[0];
+    const DAY = 24 * 60 * 60 * 1000;
+    const periodWindows: Array<{ window: "30d" | "60d" | "90d"; curStart: string; curEnd: string; priorStart: string; priorEnd: string }> = [
+      { window: "30d", curStart: new Date(now.getTime() - 30 * DAY).toISOString().split("T")[0], curEnd: today, priorStart: new Date(now.getTime() - 60 * DAY).toISOString().split("T")[0], priorEnd: new Date(now.getTime() - 31 * DAY).toISOString().split("T")[0] },
+      { window: "60d", curStart: new Date(now.getTime() - 60 * DAY).toISOString().split("T")[0], curEnd: today, priorStart: new Date(now.getTime() - 120 * DAY).toISOString().split("T")[0], priorEnd: new Date(now.getTime() - 61 * DAY).toISOString().split("T")[0] },
+      { window: "90d", curStart: new Date(now.getTime() - 90 * DAY).toISOString().split("T")[0], curEnd: today, priorStart: new Date(now.getTime() - 180 * DAY).toISOString().split("T")[0], priorEnd: new Date(now.getTime() - 91 * DAY).toISOString().split("T")[0] },
+    ];
+
+    // Actor configs: use channel-aware column for loan officers (TPO → account_executive)
+    // When channel is "All", use COALESCE(loan_officer, account_executive) to capture both Retail and TPO
+    const actorExpr =
+      !channelGroup || channelGroup === "All"
+        ? "COALESCE(NULLIF(TRIM(loan_officer), ''), NULLIF(TRIM(account_executive), ''))"
+        : getActorColumnForChannel(channelGroup);
+    const actorConfigs: Array<{
+      actorType: "loan_officer" | "branch";
+      actorLabel: string;
+      actorColumn: string;
+    }> = [
+      {
+        actorType: "loan_officer",
+        actorLabel: getActorLabelForChannel(channelGroup),
+        actorColumn: actorExpr,
+      },
+      { actorType: "branch", actorLabel: "Branches", actorColumn: "branch" },
+    ];
+
+    // Use COALESCE(funding_date, closing_date) to match toptiering—include loans closed via either field
+    // Cast to DATE because funding_date is TIMESTAMPTZ — subtraction with DATE application_date needs matching types
+    const closeDateExpr = "COALESCE(funding_date::date, closing_date)";
+
+    for (const cfg of actorConfigs) {
+      try {
+        // Query 1: Funded loans — revenue, volume, units, BPS, cycle time per actor
+        const fundedQuery = `
+          SELECT
+            ${cfg.actorColumn} AS actor_name,
+            COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS units,
+            SUM(loan_amount) AS volume,
+            SUM(${revenueExpr}) AS revenue,
+            CASE WHEN SUM(loan_amount) > 0
+              THEN (SUM(${revenueExpr}) / SUM(loan_amount)) * 10000
+              ELSE 0
+            END AS revenue_bps,
+            AVG(${closeDateExpr} - application_date) AS avg_cycle_days
+          FROM public.loans
+          WHERE (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+            AND ${closeDateExpr} >= $1
+            AND ${closeDateExpr} <= $2
+            ${channelClause}
+          GROUP BY ${cfg.actorColumn}
+          HAVING SUM(${revenueExpr}) > 0
+          ORDER BY revenue DESC
+        `;
+
+        // Query 2: All applications — started, lost, denied per actor (YTD by application_date)
+        const appQuery = `
+          SELECT
+            ${cfg.actorColumn} AS actor_name,
+            COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS started,
+            COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
+              OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
+              OR current_loan_status ILIKE '%incomplete%' THEN COALESCE(loan_number, loan_id::text) END) AS lost,
+            COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%denied%'
+              OR current_loan_status ILIKE '%declined%' THEN COALESCE(loan_number, loan_id::text) END) AS denied
+          FROM public.loans
+          WHERE application_date >= $1
+            AND application_date <= $2
+            ${channelClause}
+          GROUP BY ${cfg.actorColumn}
+        `;
+
+        const [fundedRes, appRes] = await Promise.all([
+          tenantPool.query(fundedQuery, [startOfYear, today]),
+          tenantPool.query(appQuery, [startOfYear, today]),
+        ]);
+
+        // Build lookup from application query
+        const appMap = new Map<string, { started: number; lost: number; denied: number }>();
+        for (const r of appRes.rows) {
+          if (!isActorMissing(r.actor_name)) {
+            appMap.set(r.actor_name, {
+              started: parseInt(r.started) || 0,
+              lost: parseInt(r.lost) || 0,
+              denied: parseInt(r.denied) || 0,
+            });
+          }
+        }
+
+        const rawActors = fundedRes.rows
+          .filter((r: any) => !isActorMissing(r.actor_name))
+          .map((r: any) => {
+            const name = r.actor_name || "Unknown";
+            const units = parseInt(r.units) || 0;
+            const appData = appMap.get(r.actor_name) || { started: 0, lost: 0, denied: 0 };
+            const started = Math.max(appData.started, units); // started should be >= funded
+            return {
+              name,
+              revenue: parseFloat(r.revenue) || 0,
+              units,
+              volume: parseFloat(r.volume) || 0,
+              revenueBps: Math.round(parseFloat(r.revenue_bps) || 0),
+              pullThrough: started > 0 ? Math.round((units / started) * 1000) / 10 : 0,
+              avgCycleTime: Math.round(parseFloat(r.avg_cycle_days) || 0),
+              lostOpportunityUnits: appData.lost,
+              deniedUnits: appData.denied,
+            };
+          });
+
+        if (rawActors.length === 0) continue;
+
+        const tieredActors = computeTiers(rawActors);
+        const topCount = tieredActors.filter(a => a.tier === "top").length;
+        const secondCount = tieredActors.filter(a => a.tier === "second").length;
+        const bottomCount = tieredActors.filter(a => a.tier === "bottom").length;
+
+        // Multi-window period-over-period: 30D, 60D, 90D each vs their prior equivalent period
+        let periodChanges: InsightMetricsPayload["tiering"]["byActorType"][0]["periodChanges"] = [];
+        try {
+          const periodQuery = `
+            SELECT
+              ${cfg.actorColumn} AS actor_name,
+              COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN COALESCE(loan_number, loan_id::text) END) AS funded_cur,
+              COUNT(DISTINCT CASE WHEN application_date >= $1 AND application_date <= $2 THEN COALESCE(loan_number, loan_id::text) END) AS started_cur,
+              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN (${revenueExpr}) ELSE 0 END) AS revenue_cur,
+              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN loan_amount ELSE 0 END) AS volume_cur,
+              AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2
+                  THEN (${closeDateExpr} - application_date) END) AS cycle_cur,
+              COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN COALESCE(loan_number, loan_id::text) END) AS funded_prior,
+              COUNT(DISTINCT CASE WHEN application_date >= $3 AND application_date <= $4 THEN COALESCE(loan_number, loan_id::text) END) AS started_prior,
+              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN (${revenueExpr}) ELSE 0 END) AS revenue_prior,
+              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN loan_amount ELSE 0 END) AS volume_prior,
+              AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4
+                  THEN (${closeDateExpr} - application_date) END) AS cycle_prior
+            FROM public.loans
+            WHERE (application_date >= $1 AND application_date <= $2) OR (application_date >= $3 AND application_date <= $4)
+              OR ((${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2) OR (${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4))
+              ${channelClause}
+            GROUP BY ${cfg.actorColumn}
+          `;
+          const MIN_DELTA_PCT = 5;
+          const invertedMetrics = new Set<string>(["cycleTime"]);
+
+          // Run the same query across 30D, 60D, 90D windows
+          for (const pw of periodWindows) {
+            console.log(`[InsightMetrics] Running period query for ${pw.window}: cur=${pw.curStart}→${pw.curEnd}, prior=${pw.priorStart}→${pw.priorEnd}`);
+            const periodRes = await tenantPool.query(periodQuery, [pw.curStart, pw.curEnd, pw.priorStart, pw.priorEnd]);
+            console.log(`[InsightMetrics] Period ${pw.window} returned ${periodRes.rows.length} rows`);
+            for (const r of periodRes.rows) {
+              if (isActorMissing(r.actor_name)) continue;
+              const fundedCur = parseInt(r.funded_cur) || 0;
+              const startedCur = parseInt(r.started_cur) || 0;
+              const fundedPrior = parseInt(r.funded_prior) || 0;
+              const startedPrior = parseInt(r.started_prior) || 0;
+              const revenueCur = parseFloat(r.revenue_cur) || 0;
+              const volumeCur = parseFloat(r.volume_cur) || 0;
+              const revenuePrior = parseFloat(r.revenue_prior) || 0;
+              const volumePrior = parseFloat(r.volume_prior) || 0;
+
+              // Debug: log revenue vs volume for top actors to catch any mismatch
+              if (fundedCur >= 5 || fundedPrior >= 5) {
+                console.log(`[InsightMetrics] Period ${pw.window} actor="${r.actor_name}": rev_cur=$${Math.round(revenueCur)} vol_cur=$${Math.round(volumeCur)} rev_prior=$${Math.round(revenuePrior)} vol_prior=$${Math.round(volumePrior)} units_cur=${fundedCur} units_prior=${fundedPrior}`);
+              }
+              const pullCur = startedCur > 0 ? (fundedCur / startedCur) * 100 : 0;
+              const pullPrior = startedPrior > 0 ? (fundedPrior / startedPrior) * 100 : 0;
+              const bpsCur = volumeCur > 0 ? (revenueCur / volumeCur) * 10000 : 0;
+              const bpsPrior = volumePrior > 0 ? (revenuePrior / volumePrior) * 10000 : 0;
+              const unitsCur = fundedCur;
+              const unitsPrior = fundedPrior;
+              const cycleCur = parseFloat(r.cycle_cur) || 0;
+              const cyclePrior = parseFloat(r.cycle_prior) || 0;
+
+              const checkDelta = (
+                metric: "revenue" | "units" | "volume" | "pullThrough" | "revenueBps" | "cycleTime",
+                cur: number,
+                prior: number
+              ) => {
+                if (prior <= 0 || cur === prior) return;
+                const deltaPct = ((cur - prior) / prior) * 100;
+                if (Math.abs(deltaPct) >= MIN_DELTA_PCT) {
+                  const isInverted = invertedMetrics.has(metric);
+                  const needsDecimalRounding = metric === "pullThrough" || metric === "cycleTime";
+                  const roundedCur = needsDecimalRounding ? Math.round(cur * 10) / 10 : Math.round(cur);
+                  const roundedPrior = needsDecimalRounding ? Math.round(prior * 10) / 10 : Math.round(prior);
+                  // Skip if rounded values are identical (would display as e.g. "$163K→$163K")
+                  if (roundedCur === roundedPrior) return;
+                  periodChanges.push({
+                    name: r.actor_name || "Unknown",
+                    metric,
+                    current: roundedCur,
+                    prior: roundedPrior,
+                    deltaPct: Math.round(deltaPct * 10) / 10,
+                    direction: isInverted
+                      ? (deltaPct < 0 ? "improved" : "declined")
+                      : (deltaPct > 0 ? "improved" : "declined"),
+                    window: pw.window,
+                  });
+                }
+              };
+              checkDelta("revenue", revenueCur, revenuePrior);
+              checkDelta("units", unitsCur, unitsPrior);
+              checkDelta("volume", volumeCur, volumePrior);
+              if (pullPrior > 0 && pullCur > 0) checkDelta("pullThrough", pullCur, pullPrior);
+              if (bpsPrior > 0 && bpsCur > 0) checkDelta("revenueBps", bpsCur, bpsPrior);
+              if (cyclePrior > 0 && cycleCur > 0) checkDelta("cycleTime", cycleCur, cyclePrior);
+            }
+          }
+          // Keep top 30 most significant changes across all windows
+          periodChanges = periodChanges
+            .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))
+            .slice(0, 30);
+          if (periodChanges.length > 0) {
+            console.log(`[InsightMetrics] Tiering period changes (multi-window) for ${cfg.actorLabel}: ${periodChanges.length} entries`);
+            // Log sample for debugging
+            const sample = periodChanges.slice(0, 5).map(c => `${c.name}:${c.metric}(${c.window})=${c.deltaPct}%`).join(", ");
+            console.log(`[InsightMetrics] Period sample: ${sample}`);
+          } else {
+            console.log(`[InsightMetrics] Tiering period changes: NONE found for ${cfg.actorLabel}. Windows checked: ${periodWindows.map(w => w.window).join(",")}`);
+          }
+        } catch (periodErr) {
+          console.warn(`[InsightMetrics] Period comparison failed for ${cfg.actorType}:`, periodErr);
+        }
+
+        result.byActorType.push({
+          actorType: cfg.actorType,
+          actorLabel: cfg.actorLabel,
+          totalActors: tieredActors.length,
+          tierDistribution: { top: topCount, second: secondCount, bottom: bottomCount },
+          topPerformers: tieredActors.filter(a => a.tier === "top").slice(0, 5),
+          bottomPerformers: tieredActors.filter(a => a.tier === "bottom").slice(-5).reverse(),
+          tierAverages: {
+            top: tierAverages(tieredActors, "top"),
+            second: tierAverages(tieredActors, "second"),
+            bottom: tierAverages(tieredActors, "bottom"),
+          },
+          periodChanges: periodChanges.length > 0 ? periodChanges : undefined,
+        });
+      } catch (innerErr) {
+        console.warn(`[InsightMetrics] Tiering failed for ${cfg.actorType}:`, innerErr);
+      }
+    }
+
+    if (result.byActorType.length === 0) {
+      console.log("[InsightMetrics] Tiering: no actor data (no funded loans YTD, or all actors filtered as missing)");
+    } else {
+      console.log(`[InsightMetrics] Tiering: collected for ${result.byActorType.map((t) => `${t.actorLabel}=${t.totalActors}`).join(", ")}`);
+    }
+  } catch (error) {
+    console.error("[InsightMetrics] Error fetching personnel tiering:", error);
+  }
+
+  return result;
+}
+
 /**
  * Main function to collect all metrics for insights generation
  *
@@ -856,6 +1234,8 @@ export async function collectInsightMetrics(
     tridExposure,
     marginData,
     conditionBacklog,
+    // Personnel tiering
+    tiering,
   ] = await Promise.all([
     // YTD metrics
     queryMetrics(
@@ -909,6 +1289,9 @@ export async function collectInsightMetrics(
     fetchTridExposure(tenantPool, channelGroup),
     fetchMarginData(tenantPool, channelGroup),
     fetchConditionBacklog(tenantPool, channelGroup),
+
+    // Personnel tiering
+    fetchPersonnelTiering(tenantPool, channelGroup),
   ]);
 
   // Process predictions
@@ -1018,6 +1401,7 @@ export async function collectInsightMetrics(
     tridExposure,
     marginData,
     conditionBacklog,
+    tiering,
   };
 
   console.log(`[InsightMetrics] Collected metrics payload:`, {
@@ -1038,6 +1422,7 @@ export async function collectInsightMetrics(
     tridExposure: payload.tridExposure.atRiskCount,
     marginBps: `${payload.marginData.currentMonthBps} (delta: ${payload.marginData.deltaBps})`,
     conditionBacklog: `avg=${payload.conditionBacklog.avgConditions}, high=${payload.conditionBacklog.highConditionCount}`,
+    tiering: payload.tiering.byActorType.map(t => `${t.actorLabel}: ${t.totalActors} (${t.tierDistribution.top}/${t.tierDistribution.second}/${t.tierDistribution.bottom})`).join(', '),
   });
 
   return payload;

@@ -17,6 +17,7 @@ import { attachTenantContext, getTenantContext } from '../../middleware/tenantCo
 import { handleDatabaseError } from '../../config/database.js';
 import { apiLimiter } from '../../middleware/rateLimiter.js';
 import { createSchemaResolver } from '../../services/tenantSchemaResolver.js';
+import { getTenantRevenueExpression, isActorMissing } from '../../utils/scorecard-utils.js';
 
 const router = Router();
 
@@ -108,8 +109,8 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
 
         if (hasStoredLoanIds) {
           // EXACT match: only the loans the insight was generated from.
-          // LEFT JOIN to loans so predictions without a matching loan row
-          // still appear (avoids the 7→5 mismatch).
+          // JOIN to loans and filter for active status — predictions for
+          // loans that have since been withdrawn/denied/funded are stale.
           predictionsQuery = `
             SELECT 
               lp.loan_id,
@@ -128,9 +129,10 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               l.application_date,
               COALESCE(e.first_name || ' ' || e.last_name, ${loans.whereExpr('loan_officer', 'l')}) as loan_officer
             FROM public.loan_predictions lp
-            LEFT JOIN public.loans l ON l.loan_id = lp.loan_id
+            JOIN public.loans l ON l.loan_id = lp.loan_id
             LEFT JOIN public.employees e ON e.id::TEXT = ${loans.whereExpr('loan_officer_id', 'l')}
             WHERE lp.loan_id = ANY($1)
+              AND l.current_loan_status = 'Active Loan'
             ORDER BY lp.confidence DESC, COALESCE(l.loan_amount, 0) DESC
           `;
           queryParams = [filters!.loan_ids];
@@ -175,6 +177,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             LEFT JOIN public.employees e ON e.id::TEXT = ${loans.whereExpr('loan_officer_id', 'l')}
             WHERE lp.predicted_outcome IN ${outcomeFilter}
               AND lp.confidence >= $1
+              AND l.current_loan_status = 'Active Loan'
             ORDER BY lp.confidence DESC, l.loan_amount DESC
             LIMIT 200
           `;
@@ -567,6 +570,21 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
 
         const performance = await tenantPool.query(performanceQuery, [startDate]);
 
+        // Compute weighted average cycle time across all officers
+        let totalCycleWeightedSum = 0;
+        let totalCycleWeightCount = 0;
+        for (const row of performance.rows) {
+          const ct = parseFloat(row.avg_cycle_time);
+          const funded = parseInt(row.funded_loans);
+          if (!isNaN(ct) && funded > 0) {
+            totalCycleWeightedSum += ct * funded;
+            totalCycleWeightCount += funded;
+          }
+        }
+        const overallAvgCycleTime = totalCycleWeightCount > 0
+          ? Math.round(totalCycleWeightedSum / totalCycleWeightCount)
+          : null;
+
         result = {
           ...result,
           title: 'Performance by Loan Officer',
@@ -574,7 +592,8 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             totalOfficers: performance.rows.length,
             totalLoans: performance.rows.reduce((sum: number, r: any) => sum + parseInt(r.total_loans), 0),
             totalFunded: performance.rows.reduce((sum: number, r: any) => sum + parseInt(r.funded_loans), 0),
-            totalVolume: performance.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.total_volume) || 0), 0)
+            totalVolume: performance.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.total_volume) || 0), 0),
+            avgCycleTime: overallAvgCycleTime,
           },
           officers: performance.rows.map((row: any) => ({
             name: row.loan_officer,
@@ -620,13 +639,38 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
 
         const comparisons = await tenantPool.query(comparisonsQuery, [startDate]);
 
+        // Compute YTD vs prior year YTD for the summary
+        const currentYear = new Date().getFullYear().toString();
+        const priorYear = (new Date().getFullYear() - 1).toString();
+        const currentMonth = new Date().getMonth() + 1; // 1-12
+
+        const currentYtdRows = comparisons.rows.filter((r: any) => r.month?.startsWith(currentYear));
+        const priorYtdRows = comparisons.rows.filter((r: any) => {
+          if (!r.month?.startsWith(priorYear)) return false;
+          // Only include months up to the same month as current (for fair comparison)
+          const monthNum = parseInt(r.month.split('-')[1]);
+          return monthNum <= currentMonth;
+        });
+
+        const currentYtdVolume = currentYtdRows.reduce((s: number, r: any) => s + (parseFloat(r.funded_volume) || 0), 0);
+        const priorYtdVolume = priorYtdRows.reduce((s: number, r: any) => s + (parseFloat(r.funded_volume) || 0), 0);
+        const currentYtdFunded = currentYtdRows.reduce((s: number, r: any) => s + (parseInt(r.loans_funded) || 0), 0);
+        const priorYtdFunded = priorYtdRows.reduce((s: number, r: any) => s + (parseInt(r.loans_funded) || 0), 0);
+
         result = {
           ...result,
           title: 'Monthly Trends (by Funding Month)',
           summary: {
             monthsAnalyzed: comparisons.rows.length,
             totalLoans: comparisons.rows.reduce((sum: number, r: any) => sum + parseInt(r.loans_in_month), 0),
-            totalFunded: comparisons.rows.reduce((sum: number, r: any) => sum + parseInt(r.loans_funded), 0)
+            totalFunded: comparisons.rows.reduce((sum: number, r: any) => sum + parseInt(r.loans_funded), 0),
+            currentYtdVolume,
+            priorYtdVolume,
+            currentYtdFunded,
+            priorYtdFunded,
+            ytdVolumeDelta: priorYtdVolume > 0
+              ? Math.round(((currentYtdVolume - priorYtdVolume) / priorYtdVolume) * 1000) / 10
+              : null,
           },
           months: comparisons.rows.map((row: any) => ({
             month: row.month,
@@ -1004,10 +1048,223 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         break;
       }
 
+      // ====================================================================
+      // TIERING — Personnel revenue-based tier breakdown
+      // ====================================================================
+      case 'tiering': {
+        const actorType = filters?.actorType || 'loan_officer';
+        const actorColumn = actorType === 'branch' ? 'branch' : 'loan_officer';
+        const actorLabel = actorType === 'branch' ? 'Branch' : 'Loan Officer';
+
+        // YTD date range
+        const now = new Date();
+        const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+        const today = now.toISOString().split('T')[0];
+        const closeDateExpr = 'COALESCE(funding_date::date, closing_date)';
+
+        const revenueExpr = await getTenantRevenueExpression(tenantPool);
+
+        // Funded query: revenue, volume, units, BPS, cycle time, revenue per loan
+        const tierQuery = `
+          SELECT
+            ${actorColumn} AS actor_name,
+            COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS units,
+            SUM(loan_amount) AS volume,
+            SUM(${revenueExpr}) AS revenue,
+            CASE WHEN SUM(loan_amount) > 0
+              THEN (SUM(${revenueExpr}) / SUM(loan_amount)) * 10000
+              ELSE 0
+            END AS revenue_bps,
+            CASE WHEN COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) > 0
+              THEN SUM(${revenueExpr}) / COUNT(DISTINCT COALESCE(loan_number, loan_id::text))
+              ELSE 0
+            END AS revenue_per_loan,
+            AVG(${closeDateExpr} - application_date) AS avg_cycle_days
+          FROM public.loans
+          WHERE (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+            AND ${closeDateExpr} >= $1
+            AND ${closeDateExpr} <= $2
+          GROUP BY ${actorColumn}
+          HAVING SUM(${revenueExpr}) > 0
+          ORDER BY revenue DESC
+        `;
+
+        // Application query: started, lost, denied per actor
+        const appQuery = `
+          SELECT
+            ${actorColumn} AS actor_name,
+            COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS started,
+            COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
+              OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
+              OR current_loan_status ILIKE '%incomplete%' THEN COALESCE(loan_number, loan_id::text) END) AS lost,
+            COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%denied%'
+              OR current_loan_status ILIKE '%declined%' THEN COALESCE(loan_number, loan_id::text) END) AS denied
+          FROM public.loans
+          WHERE application_date >= $1 AND application_date <= $2
+          GROUP BY ${actorColumn}
+        `;
+
+        const [tierResult, appResult] = await Promise.all([
+          tenantPool.query(tierQuery, [startOfYear, today]),
+          tenantPool.query(appQuery, [startOfYear, today]),
+        ]);
+
+        // Build app data lookup
+        const appMap = new Map<string, { started: number; lost: number; denied: number }>();
+        for (const r of appResult.rows) {
+          if (!isActorMissing(r.actor_name)) {
+            appMap.set(r.actor_name, { started: parseInt(r.started) || 0, lost: parseInt(r.lost) || 0, denied: parseInt(r.denied) || 0 });
+          }
+        }
+
+        // Filter out missing actors and compute tiers
+        const rawActors = tierResult.rows
+          .filter((r: any) => !isActorMissing(r.actor_name))
+          .map((r: any) => {
+            const name = r.actor_name || 'Unknown';
+            const units = parseInt(r.units) || 0;
+            const appData = appMap.get(r.actor_name) || { started: 0, lost: 0, denied: 0 };
+            const started = Math.max(appData.started, units);
+            return {
+              name,
+              revenue: parseFloat(r.revenue) || 0,
+              units,
+              volume: parseFloat(r.volume) || 0,
+              revenueBps: Math.round(parseFloat(r.revenue_bps) || 0),
+              revenuePerLoan: Math.round(parseFloat(r.revenue_per_loan) || 0),
+              pullThrough: started > 0 ? Math.round((units / started) * 1000) / 10 : 0,
+              avgCycleTime: Math.round(parseFloat(r.avg_cycle_days) || 0),
+              lostOpportunityUnits: appData.lost,
+              deniedUnits: appData.denied,
+            };
+          });
+
+        // Assign tiers using cumulative revenue 50/80 thresholds
+        const totalRevenue = rawActors.reduce((s: number, a: any) => s + a.revenue, 0);
+        let cumRev = 0;
+        const tieredActors = rawActors.map((a: any) => {
+          cumRev += a.revenue;
+          const pct = totalRevenue > 0 ? (cumRev / totalRevenue) * 100 : 0;
+          const tier = pct <= 50 ? 'Top' : pct <= 80 ? 'Second' : 'Bottom';
+          return { ...a, tier };
+        });
+
+        const topCount = tieredActors.filter((a: any) => a.tier === 'Top').length;
+        const secondCount = tieredActors.filter((a: any) => a.tier === 'Second').length;
+        const bottomCount = tieredActors.filter((a: any) => a.tier === 'Bottom').length;
+
+        // If specific officer names were extracted from the insight, filter to just those officers
+        const actorNames: string[] | undefined = filters?.actorNames;
+        const isFiltered = actorNames && actorNames.length > 0;
+        const displayActors = isFiltered
+          ? tieredActors.filter((a: any) =>
+              actorNames!.some((n: string) => a.name.toLowerCase() === n.toLowerCase())
+            )
+          : tieredActors;
+
+        // When filtered to specific officers, compute officer-level summary
+        // When showing all officers, show tier distribution summary
+        let summary: Record<string, number>;
+        let overrideSummaryMetrics: string[] | null = null;
+
+        if (isFiltered && displayActors.length > 0 && displayActors.length <= 10) {
+          // Officer-specific summary: show their actual metrics
+          const totalUnits = displayActors.reduce((s: number, a: any) => s + a.units, 0);
+          const totalVol = displayActors.reduce((s: number, a: any) => s + a.volume, 0);
+          const totalRev = displayActors.reduce((s: number, a: any) => s + a.revenue, 0);
+          const avgPT = displayActors.length > 0
+            ? Math.round(displayActors.reduce((s: number, a: any) => s + a.pullThrough, 0) / displayActors.length * 10) / 10
+            : 0;
+          const avgCycle = displayActors.length > 0
+            ? Math.round(displayActors.reduce((s: number, a: any) => s + a.avgCycleTime, 0) / displayActors.length)
+            : 0;
+          const totalLost = displayActors.reduce((s: number, a: any) => s + a.lostOpportunityUnits, 0);
+          const totalDenied = displayActors.reduce((s: number, a: any) => s + a.deniedUnits, 0);
+
+          summary = {
+            officerUnits: totalUnits,
+            officerVolume: totalVol,
+            officerRevenue: totalRev,
+            officerPullThrough: avgPT,
+            ...(avgCycle > 0 ? { officerCycleTime: avgCycle } : {}),
+            ...(totalLost > 0 ? { officerLost: totalLost } : {}),
+            ...(totalDenied > 0 ? { officerDenied: totalDenied } : {}),
+          };
+          // Override LLM-specified summary metrics with officer-specific ones
+          overrideSummaryMetrics = Object.keys(summary);
+        } else {
+          summary = {
+            totalActors: tieredActors.length,
+            topCount,
+            secondCount,
+            bottomCount,
+            totalRevenue,
+            totalVolume: tieredActors.reduce((s: number, a: any) => s + a.volume, 0),
+          };
+        }
+
+        const titleSuffix = isFiltered ? ` — ${actorNames!.join(', ')}` : '';
+
+        result = {
+          ...result,
+          title: `${actorLabel} Tiering — Revenue-Based Pareto Tiers (YTD)${titleSuffix}`,
+          summary,
+          rows: displayActors.map((a: any) => ({
+            name: a.name,
+            tier: a.tier,
+            revenue: a.revenue,
+            units: a.units,
+            fundedVolume: a.volume,
+            revenueBps: a.revenueBps,
+            revenuePerLoan: a.revenuePerLoan,
+            pullThrough: a.pullThrough,
+            avgCycleTime: a.avgCycleTime,
+            lostOpportunityUnits: a.lostOpportunityUnits,
+            deniedUnits: a.deniedUnits,
+          })),
+          // Stash override so we can apply it after displayConfig is built
+          _overrideSummaryMetrics: overrideSummaryMetrics,
+        };
+        break;
+      }
+
       default:
         res.status(400).json({ error: `Unknown insight source: ${source}` });
         return;
     }
+
+    // ====================================================================
+    // Attach displayConfig from stored detail_query (or fallback defaults)
+    // ====================================================================
+    const displayConfig: { columns: string[]; summaryMetrics: string[] } = {
+      columns: filters?.detail_columns || [],
+      summaryMetrics: filters?.summary_metrics || [],
+    };
+    // When tiering is filtered to specific officers, override LLM summary metrics
+    // with officer-specific metrics instead of tier distribution counts
+    if (result._overrideSummaryMetrics) {
+      displayConfig.summaryMetrics = result._overrideSummaryMetrics;
+      delete result._overrideSummaryMetrics;
+    }
+    result.displayConfig = displayConfig;
+
+    // Unify loans/officers/months into a single "rows" array for the frontend
+    result.rows = result.loans || result.officers || result.months || [];
+
+    // ====================================================================
+    // Attach human-readable date range so the frontend can display it
+    // ====================================================================
+    const endDate = new Date();
+    const filterLabel: Record<string, string> = {
+      today: 'Today',
+      mtd: 'Month to Date',
+      ytd: 'Year to Date',
+    };
+    result.dateRange = {
+      label: filterLabel[String(dateFilter)] || 'Year to Date',
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+    };
 
     res.json(result);
 

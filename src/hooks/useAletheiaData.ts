@@ -166,6 +166,89 @@ export const useAletheiaData = (
     }
   }, [dateFilter, selectedTenantId, selectedChannel]);
 
+  // Refresh a single bucket (regenerates only that section)
+  const refreshBucket = useCallback(
+    async (bucket: string) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `&tenant_id=${selectedTenantId}`
+          : "";
+        const channelParam =
+          selectedChannel && selectedChannel !== "All"
+            ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+            : "";
+
+        const data = await api.request<any>(
+          `/api/dashboard/insights/refresh-bucket?dateFilter=${dateFilter}&bucket=${bucket}${tenantParam}${channelParam}`,
+          { method: "POST" }
+        );
+
+        const mapped = mapInsights(data);
+        if (mapped.length > 0) {
+          setAllInsights(mapped);
+        }
+        return data;
+      } catch (error: any) {
+        console.error(`Error refreshing bucket "${bucket}":`, error);
+        throw error;
+      }
+    },
+    [dateFilter, selectedTenantId, selectedChannel]
+  );
+
+  // Generate MORE insights for a bucket (appends, does not replace)
+  const generateMoreInsights = useCallback(
+    async (bucket: string) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `&tenant_id=${selectedTenantId}`
+          : "";
+        const channelParam =
+          selectedChannel && selectedChannel !== "All"
+            ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+            : "";
+
+        const data = await api.request<any>(
+          `/api/dashboard/insights/generate-more?dateFilter=${dateFilter}&bucket=${bucket}${tenantParam}${channelParam}`,
+          { method: "POST" }
+        );
+
+        const mapped = mapInsights(data);
+        if (mapped.length > 0) {
+          setAllInsights(mapped);
+        }
+        return data;
+      } catch (error: any) {
+        console.error(`Error generating more for bucket "${bucket}":`, error);
+        throw error;
+      }
+    },
+    [dateFilter, selectedTenantId, selectedChannel]
+  );
+
+  // Delete a single insight by ID (optimistic removal from local state)
+  const deleteInsight = useCallback(
+    async (insightId: number) => {
+      // Optimistic: remove from UI immediately
+      setAllInsights((prev) => prev.filter((i) => i.insightId !== insightId));
+
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${selectedTenantId}`
+          : "";
+        await api.request<any>(
+          `/api/dashboard/insights/${insightId}${tenantParam}`,
+          { method: "DELETE" }
+        );
+      } catch (error: any) {
+        console.error("Error deleting insight:", error);
+        // If the delete fails, re-fetch to restore state
+        throw error;
+      }
+    },
+    [selectedTenantId]
+  );
+
   // Initial load: GET reads from DB (fast, no LLM call)
   // Note: onDataAvailabilityChange is intentionally NOT in the dependency array
   // because it's a callback for reporting state, not for triggering fetches.
@@ -325,5 +408,8 @@ export const useAletheiaData = (
     metadata,
     needsGeneration,
     refreshInsights,
+    refreshBucket,
+    generateMoreInsights,
+    deleteInsight,
   };
 };

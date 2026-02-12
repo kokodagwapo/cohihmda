@@ -18,6 +18,13 @@ import {
   type FinancialModelingPeriod,
 } from "../../services/dashboard/analyticsService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
+import {
+  refreshSingleBucket,
+  generateMoreForBucket,
+  deleteInsightById,
+  loadStoredInsights,
+} from "../../services/insights/llmInsightGenerator.js";
+import { collectInsightMetrics } from "../../services/insights/insightMetricsCollector.js";
 
 const router = Router();
 
@@ -254,6 +261,204 @@ router.post(
         error: "Failed to refresh insights",
         details:
           process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/refresh-bucket
+ * Regenerates insights for a single bucket (working, attention, critical, context) without touching others.
+ * Query params:
+ * - dateFilter: 'today' | 'mtd' | 'ytd' (default: 'ytd')
+ * - bucket: 'working' | 'attention' | 'critical' | 'context'
+ * - channel_group: optional channel filter
+ */
+router.post(
+  "/insights/refresh-bucket",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { dateFilter = "ytd", bucket, channel_group } = req.query;
+
+      if (!bucket || !["working", "attention", "critical", "context"].includes(bucket as string)) {
+        return res.status(400).json({ error: "Invalid or missing 'bucket' param (working|attention|critical|context)" });
+      }
+
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ insights: [], accessFiltered: true, noAccess: true });
+      }
+
+      // Collect metrics (same as full refresh)
+      const metricsPayload = await collectInsightMetrics(
+        tenantContext.tenantPool,
+        dateFilter as string,
+        { channelGroup: channel_group as string | undefined }
+      );
+
+      // Regenerate just the requested bucket
+      const allInsights = await refreshSingleBucket(
+        bucket as string,
+        metricsPayload,
+        tenantContext.tenantPool,
+        tenantContext.tenantId,
+        { channelGroup: channel_group as string | undefined }
+      );
+
+      // Map to API response format (same mapping as getInsights)
+      const insights = allInsights.map((ins: any) => ({
+        id: ins.id,
+        type: ins.insight_type,
+        message: ins.headline,
+        priority:
+          ins.severity_score >= 0.8
+            ? "critical"
+            : ins.severity_score >= 0.55
+              ? "high"
+              : ins.severity_score >= 0.3
+                ? "medium"
+                : "low",
+        reasoning: ins.understory,
+        source: ins.source,
+        bucket: ins.bucket,
+        headline: ins.headline,
+        understory: ins.understory,
+        severity_score: ins.severity_score,
+        bucketPriority: ins.priority,
+        impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+        evidence: typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : ins.evidence,
+      }));
+
+      res.json({
+        insights,
+        refreshedBucket: bucket,
+        generatedAt: new Date().toISOString(),
+        usedLLM: true,
+      });
+    } catch (error: any) {
+      console.error("Error refreshing bucket:", error);
+      if (handleDatabaseError(error, res, "Failed to refresh bucket")) return;
+      res.status(500).json({
+        error: "Failed to refresh bucket",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/generate-more
+ * Generates additional insights for a single bucket and APPENDS them (does not remove existing).
+ * Query params:
+ * - dateFilter: 'today' | 'mtd' | 'ytd' (default: 'ytd')
+ * - bucket: 'working' | 'attention' | 'critical' | 'context'
+ * - channel_group: optional channel filter
+ */
+router.post(
+  "/insights/generate-more",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { dateFilter = "ytd", bucket, channel_group } = req.query;
+
+      if (!bucket || !["working", "attention", "critical", "context"].includes(bucket as string)) {
+        return res.status(400).json({ error: "Invalid or missing 'bucket' param (working|attention|critical|context)" });
+      }
+
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ insights: [], accessFiltered: true, noAccess: true });
+      }
+
+      const metricsPayload = await collectInsightMetrics(
+        tenantContext.tenantPool,
+        dateFilter as string,
+        { channelGroup: channel_group as string | undefined }
+      );
+
+      const allInsights = await generateMoreForBucket(
+        bucket as string,
+        metricsPayload,
+        tenantContext.tenantPool,
+        tenantContext.tenantId,
+        { channelGroup: channel_group as string | undefined }
+      );
+
+      const insights = allInsights.map((ins: any) => ({
+        id: ins.id,
+        type: ins.insight_type,
+        message: ins.headline,
+        priority:
+          ins.severity_score >= 0.8
+            ? "critical"
+            : ins.severity_score >= 0.55
+              ? "high"
+              : ins.severity_score >= 0.3
+                ? "medium"
+                : "low",
+        reasoning: ins.understory,
+        source: ins.source,
+        bucket: ins.bucket,
+        headline: ins.headline,
+        understory: ins.understory,
+        severity_score: ins.severity_score,
+        bucketPriority: ins.priority,
+        impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+        evidence: typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : ins.evidence,
+      }));
+
+      res.json({
+        insights,
+        appendedBucket: bucket,
+        generatedAt: new Date().toISOString(),
+        usedLLM: true,
+      });
+    } catch (error: any) {
+      console.error("Error generating more insights:", error);
+      if (handleDatabaseError(error, res, "Failed to generate more insights")) return;
+      res.status(500).json({
+        error: "Failed to generate more insights",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * DELETE /api/dashboard/insights/:id
+ * Removes a single insight by its database ID.
+ */
+router.delete(
+  "/insights/:id",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const insightId = parseInt(req.params.id as string, 10);
+
+      if (isNaN(insightId)) {
+        return res.status(400).json({ error: "Invalid insight ID" });
+      }
+
+      const deleted = await deleteInsightById(tenantContext.tenantPool, insightId);
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Insight not found" });
+      }
+
+      res.json({ success: true, deletedId: insightId });
+    } catch (error: any) {
+      console.error("Error deleting insight:", error);
+      if (handleDatabaseError(error, res, "Failed to delete insight")) return;
+      res.status(500).json({
+        error: "Failed to delete insight",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
   }
