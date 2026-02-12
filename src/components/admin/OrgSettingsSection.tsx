@@ -252,7 +252,7 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
 
       setSubscription(mockSubscription);
     } catch (error: any) {
-      console.error("Fail to load subscription:", error);
+      console.error("Failed to load subscription:", error);
     }
   };
 
