@@ -519,18 +519,16 @@ export function SSOConfigSection() {
   };
 
   const handleDownloadSPMetadata = () => {
-    // Generate and download SP metadata XML
+    // Generate and download SP metadata XML using Cognito's SAML endpoint values
     const metadata = `<?xml version="1.0"?>
 <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="${config?.sp_entity_id}">
-  <SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+  <SPSSODescriptor AuthnRequestsSigned="false" WantAssertionsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</NameIDFormat>
     <AssertionConsumerService 
       Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" 
       Location="${config?.sp_acs_url}" 
       index="0" 
       isDefault="true"/>
-    <SingleLogoutService 
-      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" 
-      Location="${config?.sp_slo_url}"/>
   </SPSSODescriptor>
 </EntityDescriptor>`;
 
@@ -970,12 +968,19 @@ export function SSOConfigSection() {
             <CardHeader>
               <CardTitle className="text-lg">Service Provider Information</CardTitle>
               <CardDescription>
-                Use these values when configuring Cohi as a service provider in your IdP
+                Provide these values to the client's IT team when they configure Cohi in their Identity Provider (Entra, CyberArk, etc.)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Alert>
+                <Shield className="h-4 w-4" />
+                <AlertDescription>
+                  These values point to your Cognito User Pool. They are the same for all tenants — each tenant is differentiated by their own IdP configuration within the pool.
+                </AlertDescription>
+              </Alert>
+
               <div className="space-y-2">
-                <Label>Entity ID (Issuer)</Label>
+                <Label>Entity ID / Audience URI (Identifier)</Label>
                 <div className="flex items-center gap-2">
                   <Input value={config?.sp_entity_id || ''} readOnly className="font-mono text-sm" />
                   <Button
@@ -986,10 +991,11 @@ export function SSOConfigSection() {
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-xs text-slate-500">In Entra: "Identifier (Entity ID)". In CyberArk: "SP Entity ID / Audience".</p>
               </div>
 
               <div className="space-y-2">
-                <Label>ACS URL (Assertion Consumer Service)</Label>
+                <Label>Reply URL / ACS URL (Assertion Consumer Service)</Label>
                 <div className="flex items-center gap-2">
                   <Input value={config?.sp_acs_url || ''} readOnly className="font-mono text-sm" />
                   <Button
@@ -1000,27 +1006,30 @@ export function SSOConfigSection() {
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-xs text-slate-500">In Entra: "Reply URL (Assertion Consumer Service URL)". In CyberArk: "SP ACS URL".</p>
               </div>
 
               <div className="space-y-2">
-                <Label>SLO URL (Single Logout)</Label>
+                <Label>Name ID Format</Label>
                 <div className="flex items-center gap-2">
-                  <Input value={config?.sp_slo_url || ''} readOnly className="font-mono text-sm" />
+                  <Input value="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" readOnly className="font-mono text-sm" />
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => copyToClipboard(config?.sp_slo_url || '', 'SLO URL')}
+                    onClick={() => copyToClipboard('urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', 'Name ID Format')}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-xs text-slate-500">The IdP should send the user's email address as the Name ID.</p>
               </div>
 
-              <div className="pt-4 border-t">
+              <div className="pt-4 border-t flex items-center gap-3">
                 <Button variant="outline" onClick={handleDownloadSPMetadata}>
                   <Download className="h-4 w-4 mr-2" />
-                  Download SP Metadata
+                  Download SP Metadata XML
                 </Button>
+                <p className="text-sm text-slate-500">Or provide the values above manually to the client's IT team.</p>
               </div>
             </CardContent>
           </Card>
