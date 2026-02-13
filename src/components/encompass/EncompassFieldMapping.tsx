@@ -31,7 +31,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -54,20 +53,15 @@ import {
   Edit2,
   Search,
   CheckCircle2,
-  XCircle,
-  Check,
   ChevronsUpDown,
   Sparkles,
   Loader2,
   TrendingUp,
   AlertTriangle,
   HelpCircle,
-  RefreshCw,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Upload,
-  FileJson,
   X,
   Calendar,
   Hash,
@@ -79,7 +73,6 @@ import {
   ChevronRight,
   Layers,
 } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Collapsible,
   CollapsibleContent,
@@ -181,36 +174,12 @@ interface EncompassRdbField {
 interface EncompassFieldMappingProps {
   losConnectionId: string;
   tenantId?: string;
-  onMappingChange?: () => void;
 }
 
-// Types for legacy config import
-interface LegacyFieldSwap {
-  coheusAlias: string;
-  defaultFieldId: string;
-  newFieldId: string;
-}
-
-interface LegacyImportData {
-  clientInfo: {
-    instanceId: string;
-    sourceFile: string;
-    migratedAt: string;
-  };
-  fieldSwaps: LegacyFieldSwap[];
-  additionalFields: Array<{ fieldId: string; alias: string }>;
-  summary: {
-    totalFieldsInLegacy: number;
-    matchingDefaults: number;
-    fieldSwaps: number;
-    additionalFields: number;
-  };
-}
 
 export function EncompassFieldMapping({
   losConnectionId,
   tenantId,
-  onMappingChange,
 }: EncompassFieldMappingProps) {
   const { toast } = useToast();
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
@@ -257,13 +226,6 @@ export function EncompassFieldMapping({
   const [filterMode, setFilterMode] = useState<"all" | "invalid">("all");
   const [fixPopoverOpen, setFixPopoverOpen] = useState<string | null>(null); // Track which field's popover is open
 
-  // Legacy config import state
-  const [showImportDialog, setShowImportDialog] = useState(false);
-  const [importData, setImportData] = useState<LegacyImportData | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [importJsonText, setImportJsonText] = useState("");
-  const [isApplyingImport, setIsApplyingImport] = useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Category state
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
@@ -274,17 +236,9 @@ export function EncompassFieldMapping({
     Set<FieldCategory>
   >(new Set());
 
-  // Load field mappings and swaps
-  useEffect(() => {
-    if (losConnectionId && tenantId) {
-      loadData();
-    }
-  }, [losConnectionId, tenantId]);
-
   // Focus the input when popover opens
   useEffect(() => {
     if (fieldPopoverOpen) {
-      // Focus the command input after popover opens
       const timer = setTimeout(() => {
         const input = document.querySelector(
           "[cmdk-input]"
@@ -298,7 +252,7 @@ export function EncompassFieldMapping({
     }
   }, [fieldPopoverOpen]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -420,7 +374,14 @@ export function EncompassFieldMapping({
     } finally {
       setLoading(false);
     }
-  };
+  }, [losConnectionId, tenantId, toast]);
+
+  // Load field mappings and swaps on mount / when connection or tenant changes
+  useEffect(() => {
+    if (losConnectionId && tenantId) {
+      loadData();
+    }
+  }, [loadData]);
 
   const handleSaveSwap = async (alias: string, fieldId: string) => {
     try {
@@ -443,19 +404,36 @@ export function EncompassFieldMapping({
         }),
       });
 
+      // Update local state without triggering a full reload
       const newSwaps = new Map(swaps);
       newSwaps.set(alias, fieldId);
       setSwaps(newSwaps);
 
+      // Re-validate the updated mapping locally
+      const rdbFieldIds = new Set(rdbFields.map((f) => f.fieldID));
+      setMappings((prev) =>
+        prev.map((m) => {
+          if (m.coheusAlias !== alias) return m;
+          const normalizedFieldId = fieldId.replace(/^Fields\./, "");
+          const withFieldsPrefix = fieldId.startsWith("Fields.")
+            ? fieldId
+            : `Fields.${fieldId}`;
+          const isValid =
+            rdbFieldIds.has(fieldId) ||
+            rdbFieldIds.has(normalizedFieldId) ||
+            rdbFieldIds.has(withFieldsPrefix);
+          return { ...m, swappedFieldId: fieldId, isValid };
+        })
+      );
+
       toast({
-        title: "Success",
-        description: "Field swap saved successfully",
+        title: "Saved",
+        description: `${alias} mapped to ${fieldId}`,
       });
 
       setIsDialogOpen(false);
       setEditingAlias(null);
       setNewFieldId("");
-      onMappingChange?.();
     } catch (error: any) {
       console.error("Error saving field swap:", error);
       toast({
@@ -487,16 +465,33 @@ export function EncompassFieldMapping({
         }
       );
 
+      // Update local state without triggering a full reload
       const newSwaps = new Map(swaps);
       newSwaps.delete(alias);
       setSwaps(newSwaps);
 
-      toast({
-        title: "Success",
-        description: "Field swap deleted successfully",
-      });
+      // Re-validate using the default field ID
+      const rdbFieldIds = new Set(rdbFields.map((f) => f.fieldID));
+      setMappings((prev) =>
+        prev.map((m) => {
+          if (m.coheusAlias !== alias) return m;
+          const defaultId = m.defaultEncompassFieldId;
+          const normalizedFieldId = defaultId.replace(/^Fields\./, "");
+          const withFieldsPrefix = defaultId.startsWith("Fields.")
+            ? defaultId
+            : `Fields.${defaultId}`;
+          const isValid =
+            rdbFieldIds.has(defaultId) ||
+            rdbFieldIds.has(normalizedFieldId) ||
+            rdbFieldIds.has(withFieldsPrefix);
+          return { ...m, swappedFieldId: undefined, isValid };
+        })
+      );
 
-      onMappingChange?.();
+      toast({
+        title: "Reverted",
+        description: `${alias} restored to default mapping`,
+      });
     } catch (error: any) {
       console.error("Error deleting field swap:", error);
       toast({
@@ -589,9 +584,8 @@ export function EncompassFieldMapping({
                 description: `Applied ${applyResponse.applied} high-confidence fix${applyResponse.applied !== 1 ? "es" : ""}. ${response.mediumConfidenceCount + response.lowConfidenceCount} fields need manual review.`,
               });
 
-              // Reload data to reflect changes
+              // Reload field data only (not the parent)
               await loadData();
-              onMappingChange?.();
             }
 
             if (applyResponse.errors && applyResponse.errors.length > 0) {
@@ -630,7 +624,7 @@ export function EncompassFieldMapping({
         setAnalyzeProgress(0);
       }, 500);
     }
-  }, [tenantId, losConnectionId, toast, loadData, onMappingChange]);
+  }, [tenantId, losConnectionId, toast, loadData]);
 
   const handleToggleSuggestion = useCallback((alias: string) => {
     setSelectedSuggestions((prev) => {
@@ -706,11 +700,10 @@ export function EncompassFieldMapping({
           description: `Successfully applied ${response.applied} field mappings`,
         });
 
-        // Refresh the data
+        // Refresh field data only (not the parent)
         setShowSuggestions(false);
         setSelectedSuggestions(new Set());
         await loadData();
-        onMappingChange?.();
       }
 
       if (response.errors && response.errors.length > 0) {
@@ -738,7 +731,6 @@ export function EncompassFieldMapping({
     tenantId,
     losConnectionId,
     toast,
-    onMappingChange,
   ]);
 
   const getConfidenceBadge = (
@@ -986,149 +978,6 @@ export function EncompassFieldMapping({
   // Legacy Config Import Handlers
   // ============================================================================
 
-  const handleImportJsonParse = useCallback((jsonText: string) => {
-    setImportJsonText(jsonText);
-    setImportError(null);
-    setImportData(null);
-
-    if (!jsonText.trim()) {
-      return;
-    }
-
-    try {
-      const data = JSON.parse(jsonText) as LegacyImportData;
-
-      // Validate structure
-      if (!data.fieldSwaps || !Array.isArray(data.fieldSwaps)) {
-        throw new Error("Invalid format: missing fieldSwaps array");
-      }
-
-      // Validate each field swap has required fields
-      for (const swap of data.fieldSwaps) {
-        if (!swap.coheusAlias || !swap.newFieldId) {
-          throw new Error(
-            "Invalid format: field swaps must have coheusAlias and newFieldId"
-          );
-        }
-      }
-
-      setImportData(data);
-    } catch (e: any) {
-      setImportError(e.message || "Failed to parse JSON");
-    }
-  }, []);
-
-  const handleFileUpload = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        handleImportJsonParse(content);
-      };
-      reader.onerror = () => {
-        setImportError("Failed to read file");
-      };
-      reader.readAsText(file);
-
-      // Reset file input so same file can be selected again
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    },
-    [handleImportJsonParse]
-  );
-
-  const handleApplyImport = useCallback(async () => {
-    if (!importData || importData.fieldSwaps.length === 0) {
-      toast({
-        title: "No Field Swaps",
-        description: "No field swaps to import",
-        variant: "default",
-      });
-      return;
-    }
-
-    if (!tenantId || !losConnectionId) {
-      toast({
-        title: "Error",
-        description: "Tenant ID and Connection ID are required",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsApplyingImport(true);
-
-    try {
-      // Convert legacy format to the format expected by the apply endpoint
-      const swapsToApply = importData.fieldSwaps.map((s) => ({
-        coheusAlias: s.coheusAlias,
-        fieldId: s.newFieldId,
-      }));
-
-      const response = await api.request<{
-        success: boolean;
-        applied: number;
-        errors: string[];
-      }>(
-        `/api/encompass/discovery/apply/${losConnectionId}?tenant_id=${tenantId}`,
-        {
-          method: "POST",
-          body: JSON.stringify({ suggestions: swapsToApply }),
-        }
-      );
-
-      if (response.success) {
-        toast({
-          title: "Import Successful",
-          description: `Applied ${response.applied} field swap${
-            response.applied !== 1 ? "s" : ""
-          } from legacy config`,
-        });
-
-        // Reset import state and close dialog
-        setShowImportDialog(false);
-        setImportData(null);
-        setImportJsonText("");
-        setImportError(null);
-
-        // Refresh data
-        await loadData();
-        onMappingChange?.();
-      }
-
-      if (response.errors && response.errors.length > 0) {
-        console.warn(
-          "Some imports failed:",
-          response.errors
-        );
-        toast({
-          title: "Partial Import",
-          description: `Applied ${response.applied} swaps, ${response.errors.length} failed`,
-          variant: "default",
-        });
-      }
-    } catch (error: any) {
-      console.error("Error applying import:", error);
-      toast({
-        title: "Import Failed",
-        description: error.message || "Failed to apply imported field swaps",
-        variant: "destructive",
-      });
-    } finally {
-      setIsApplyingImport(false);
-    }
-  }, [importData, tenantId, losConnectionId, toast, onMappingChange]);
-
-  const handleCloseImportDialog = useCallback(() => {
-    setShowImportDialog(false);
-    setImportData(null);
-    setImportJsonText("");
-    setImportError(null);
-  }, []);
 
   if (loading) {
     return (
@@ -1866,201 +1715,6 @@ export function EncompassFieldMapping({
             </DialogContent>
           </Dialog>
 
-          {/* Import Legacy Config Dialog */}
-          <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <FileJson className="h-5 w-5" />
-                  Import Legacy Config
-                </DialogTitle>
-                <DialogDescription>
-                  Import field mappings from a legacy Coheus configuration file.
-                  Upload or paste the JSON generated by the migration script.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="flex-1 overflow-y-auto space-y-4 py-4">
-                {/* File Upload */}
-                <div>
-                  <Label>Upload JSON File</Label>
-                  <div className="mt-2">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      accept=".json"
-                      onChange={handleFileUpload}
-                      title="Upload legacy configuration JSON file"
-                      className="hidden"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full"
-                    >
-                      <Upload className="h-4 w-4 mr-2" />
-                      Choose File
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white dark:bg-slate-950 px-2 text-slate-500">
-                      Or paste JSON
-                    </span>
-                  </div>
-                </div>
-
-                {/* JSON Textarea */}
-                <div>
-                  <Label>JSON Content</Label>
-                  <Textarea
-                    value={importJsonText}
-                    onChange={(e) => handleImportJsonParse(e.target.value)}
-                    placeholder="Paste the migration JSON here..."
-                    className="mt-2 font-mono text-xs h-32"
-                  />
-                </div>
-
-                {/* Error Display */}
-                {importError && (
-                  <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                        Invalid JSON
-                      </p>
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                        {importError}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Preview */}
-                {importData && (
-                  <div className="space-y-3">
-                    {/* Summary */}
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                      <h4 className="font-medium text-sm mb-2">
-                        Import Preview
-                      </h4>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <span className="text-slate-500">Client ID:</span>{" "}
-                          <span className="font-medium">
-                            {importData.clientInfo?.instanceId || "N/A"}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Source:</span>{" "}
-                          <span className="font-medium truncate">
-                            {importData.clientInfo?.sourceFile || "N/A"}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Field Swaps:</span>{" "}
-                          <Badge variant="secondary" className="ml-1">
-                            {importData.fieldSwaps.length}
-                          </Badge>
-                        </div>
-                        <div>
-                          <span className="text-slate-500">
-                            Additional Fields:
-                          </span>{" "}
-                          <Badge variant="outline" className="ml-1">
-                            {importData.additionalFields?.length || 0}
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Field Swaps List */}
-                    {importData.fieldSwaps.length > 0 && (
-                      <div className="border rounded-lg overflow-hidden">
-                        <div className="bg-slate-100 dark:bg-slate-800 px-3 py-2 border-b">
-                          <h4 className="font-medium text-sm">
-                            Field Swaps to Import
-                          </h4>
-                        </div>
-                        <div className="max-h-48 overflow-y-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead className="text-xs">Alias</TableHead>
-                                <TableHead className="text-xs">
-                                  Default Field ID
-                                </TableHead>
-                                <TableHead className="text-xs">
-                                  New Field ID
-                                </TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {importData.fieldSwaps.map((swap, idx) => (
-                                <TableRow key={idx}>
-                                  <TableCell className="font-medium text-xs py-2">
-                                    {swap.coheusAlias}
-                                  </TableCell>
-                                  <TableCell className="font-mono text-xs py-2 text-slate-500">
-                                    {swap.defaultFieldId}
-                                  </TableCell>
-                                  <TableCell className="font-mono text-xs py-2">
-                                    <Badge variant="secondary">
-                                      {swap.newFieldId}
-                                    </Badge>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-                    )}
-
-                    {importData.fieldSwaps.length === 0 && (
-                      <div className="p-4 text-center text-slate-500 text-sm">
-                        No field swaps found in the imported file. All fields
-                        match defaults.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <DialogFooter className="border-t pt-4">
-                <Button variant="outline" onClick={handleCloseImportDialog}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleApplyImport}
-                  disabled={
-                    !importData ||
-                    importData.fieldSwaps.length === 0 ||
-                    isApplyingImport
-                  }
-                >
-                  {isApplyingImport ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Applying...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="h-4 w-4 mr-2" />
-                      Apply {importData?.fieldSwaps.length || 0} Field Swap
-                      {importData?.fieldSwaps.length !== 1 ? "s" : ""}
-                    </>
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </div>
       </CardContent>
     </Card>

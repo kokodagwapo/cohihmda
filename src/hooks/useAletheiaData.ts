@@ -50,40 +50,6 @@ const getIconForType = (type: string) => {
   }
 };
 
-// Demo insights fallback
-const getDemoInsights = (): AletheiaInsight[] => [
-  {
-    type: "info" as const,
-    icon: Info,
-    message:
-      "YTD revenue reached $2.4M, up 18% versus last year — strong momentum continues.",
-    priority: "high" as const,
-    reasoning:
-      "Revenue trajectory shows consistent growth. At current velocity, you're positioned for a strong quarter.",
-    source: "business_overview",
-  },
-  {
-    type: "info" as const,
-    icon: Info,
-    message:
-      "Active pipeline: 185 loans, $78.2M in process — strong pipeline depth.",
-    priority: "high" as const,
-    reasoning:
-      "Pipeline volume indicates healthy demand. Monitor conversion rates to optimize throughput.",
-    source: "loan_funnel",
-  },
-  {
-    type: "success" as const,
-    icon: CheckCircle2,
-    message:
-      "Pull-through rate: 72.5% (Rolling 90D, excludes active loans) — above industry average.",
-    priority: "high" as const,
-    reasoning:
-      "Pull-through uses rolling 90 days and excludes active loans for accuracy. Industry average is 60-70%.",
-    source: "business_overview",
-  },
-];
-
 export const useAletheiaData = (
   dateFilter: "today" | "mtd" | "ytd" | "custom",
   onDataAvailabilityChange?: (hasData: boolean) => void,
@@ -153,11 +119,7 @@ export const useAletheiaData = (
       });
 
       const mapped = mapInsights(data);
-      if (mapped.length > 0) {
-        setAllInsights(mapped);
-      } else {
-        setAllInsights(getDemoInsights());
-      }
+      setAllInsights(mapped);
     } catch (error: any) {
       console.error("Error refreshing insights:", error);
       setInsightsError(error.message || "Failed to refresh insights");
@@ -307,10 +269,9 @@ export const useAletheiaData = (
       // Check if user has a valid token before making API call
       const token = localStorage.getItem("auth_token");
       if (!token) {
-        const demoInsights = getDemoInsights();
-        setAllInsights(demoInsights);
+        setAllInsights([]);
         setMetadata({ usedLLM: false, generatedAt: new Date().toISOString() });
-        setInsightsError(null);
+        setInsightsError("Not authenticated");
         setInsightsLoading(false);
         return;
       }
@@ -341,51 +302,16 @@ export const useAletheiaData = (
         } else {
           setNeedsGeneration(false);
           const mapped = mapInsights(data);
-          if (mapped.length > 0) {
-            setAllInsights(mapped);
-          } else {
-            const demoInsights = getDemoInsights();
-            setAllInsights(demoInsights);
-            setInsightsError(null);
-          }
+          setAllInsights(mapped);
         }
       } catch (error: any) {
-        if (
-          error.message?.includes("Unauthorized") ||
-          error.message?.includes("401")
-        ) {
-          const demoInsights = getDemoInsights();
-          setAllInsights(demoInsights);
-          setMetadata({
-            usedLLM: false,
-            generatedAt: new Date().toISOString(),
-          });
-          setInsightsError(null);
-        } else if (
-          error.message?.includes("timed out") ||
-          error.message?.includes("timeout")
-        ) {
-          console.warn(
-            "Insights request timed out, using demo data fallback:",
-            error.message
-          );
-          const demoInsights = getDemoInsights();
-          setAllInsights(demoInsights);
-          setMetadata({
-            usedLLM: false,
-            generatedAt: new Date().toISOString(),
-          });
-          setInsightsError(null);
-        } else {
-          console.error("Error fetching insights:", error);
-          setInsightsError(error.message || "Failed to fetch insights");
-          const demoInsights = getDemoInsights();
-          setAllInsights(demoInsights);
-          setMetadata({
-            usedLLM: false,
-            generatedAt: new Date().toISOString(),
-          });
-        }
+        console.error("Error fetching insights:", error);
+        setAllInsights([]);
+        setInsightsError(error.message || "Failed to fetch insights");
+        setMetadata({
+          usedLLM: false,
+          generatedAt: new Date().toISOString(),
+        });
       } finally {
         setInsightsLoading(false);
       }
@@ -432,13 +358,7 @@ export const useAletheiaData = (
     fetchFunnelData();
   }, [dateFilter, selectedTenantId]);
 
-  // Handle error state and set demo insights if needed
-  useEffect(() => {
-    if (insightsError && allInsights.length === 0 && !insightsLoading) {
-      const demoInsights = getDemoInsights();
-      setAllInsights(demoInsights);
-    }
-  }, [insightsError, allInsights.length, insightsLoading]);
+  // No-op: when errors occur we show empty state (no demo data fallback)
 
   // Notify parent about data availability changes (separate effect to avoid loop)
   useEffect(() => {

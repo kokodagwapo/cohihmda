@@ -336,14 +336,10 @@ if (SKIP_DB) {
           console.warn("⚠️ Failed to start LOS sync scheduler:", error);
         }
 
-        // Start vendor sync scheduler (reads from loans table)
-        try {
-          const { startVendorSyncScheduler } =
-            await import("./services/vendorSyncScheduler.js");
-          startVendorSyncScheduler();
-        } catch (error) {
-          console.warn("⚠️ Failed to start vendor sync scheduler:", error);
-        }
+        // Vendor sync scheduler disabled - not yet ready for production use
+        // When vendor outbound integrations (accounting, capital markets, servicing) are needed,
+        // re-enable and fix to use tenant-specific database pools instead of management pool.
+        // See: server/src/services/vendorSyncScheduler.ts
       }
     })
     .catch((error) => {

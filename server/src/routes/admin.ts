@@ -2146,6 +2146,288 @@ router.post(
   },
 );
 
+// ============================================================================
+// Sync Management Routes (Platform Admin)
+// Cross-tenant view of all LOS connections and their sync status
+// ============================================================================
+
+/**
+ * GET /api/admin/sync-management
+ * Get all LOS connections across all tenants with sync status
+ */
+router.get(
+  "/sync-management",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      // Get all active tenants
+      const tenantsResult = await managementPool.query(
+        `SELECT id, name, slug FROM coheus_tenants WHERE status = 'active' ORDER BY name`
+      );
+
+      const allConnections: any[] = [];
+
+      for (const tenant of tenantsResult.rows) {
+        try {
+          const tenantPool = await tenantDbManager.getTenantPool(tenant.id);
+
+          // Auto-fix stale 'in_progress' statuses left from server crashes/restarts.
+          // If a connection has been 'in_progress' for more than 30 minutes, it's stale.
+          const STALE_THRESHOLD_MINUTES = 30;
+          await tenantPool.query(
+            `UPDATE public.los_connections
+             SET last_sync_status = 'interrupted',
+                 last_sync_error = 'Sync was interrupted (server restart or crash)',
+                 updated_at = NOW()
+             WHERE last_sync_status = 'in_progress'
+               AND updated_at < NOW() - INTERVAL '${STALE_THRESHOLD_MINUTES} minutes'`
+          ).catch(() => {});
+
+          // Query connections from tenant database
+          const connectionsResult = await tenantPool.query(
+            `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
+                    last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
+                    is_active, created_at, updated_at
+             FROM public.los_connections
+             ORDER BY name`
+          );
+
+          // Get loan count for this tenant
+          let loanCount = 0;
+          try {
+            const loanResult = await tenantPool.query(
+              "SELECT COUNT(*) as count FROM public.loans"
+            );
+            loanCount = parseInt(loanResult.rows[0]?.count || "0", 10);
+          } catch {
+            // loans table may not exist
+          }
+
+          for (const conn of connectionsResult.rows) {
+            allConnections.push({
+              ...conn,
+              tenant_id: tenant.id,
+              tenant_name: tenant.name,
+              tenant_slug: tenant.slug,
+              loan_count: loanCount,
+            });
+          }
+        } catch (error: any) {
+          // Tenant DB might not have los_connections table yet — skip
+          if (error.code !== "42P01") {
+            logWarn("Error querying connections for tenant", {
+              tenantId: tenant.id,
+              tenantName: tenant.name,
+              error: error.message,
+            });
+          }
+        }
+      }
+
+      // Get scheduler info
+      const schedulerInfo = {
+        interval_minutes: 15,
+        next_run_estimate: new Date(
+          Date.now() + 15 * 60 * 1000
+        ).toISOString(),
+      };
+
+      return res.json({
+        connections: allConnections,
+        scheduler: schedulerInfo,
+        total_tenants: tenantsResult.rows.length,
+      });
+    } catch (error: any) {
+      logError("Error fetching sync management data", error, {
+        userId: req.userId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to fetch sync management data" });
+    }
+  }
+);
+
+/**
+ * PUT /api/admin/sync-management/:connectionId
+ * Update sync settings for a connection (enable/disable, change frequency)
+ */
+router.put(
+  "/sync-management/:connectionId",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const { tenant_id, sync_enabled, sync_frequency } = req.body;
+
+      if (!tenant_id) {
+        return res.status(400).json({ error: "tenant_id is required" });
+      }
+
+      // Validate sync_frequency if provided
+      const validFrequencies = ["realtime", "hourly", "daily", "weekly"];
+      if (sync_frequency && !validFrequencies.includes(sync_frequency)) {
+        return res.status(400).json({
+          error: `Invalid sync_frequency. Must be one of: ${validFrequencies.join(", ")}`,
+        });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenant_id);
+
+      // Build update query dynamically
+      const updates: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      if (typeof sync_enabled === "boolean") {
+        updates.push(`sync_enabled = $${paramIndex++}`);
+        values.push(sync_enabled);
+      }
+
+      if (sync_frequency) {
+        updates.push(`sync_frequency = $${paramIndex++}`);
+        values.push(sync_frequency);
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      updates.push("updated_at = NOW()");
+      values.push(connectionId);
+
+      const result = await tenantPool.query(
+        `UPDATE public.los_connections 
+         SET ${updates.join(", ")} 
+         WHERE id = $${paramIndex} 
+         RETURNING id, name, sync_enabled, sync_frequency, last_synced_at, last_sync_status`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      // Audit log
+      auditLog({
+        userId: req.userId as string,
+        action: "sync_settings_updated",
+        resource: "los_connection",
+        resourceId: connectionId,
+        metadata: {
+          tenant_id,
+          sync_enabled,
+          sync_frequency,
+        },
+      }).catch(() => {});
+
+      logInfo("Sync settings updated", {
+        userId: req.userId,
+        connectionId,
+        tenant_id,
+        sync_enabled,
+        sync_frequency,
+      });
+
+      return res.json({ connection: result.rows[0] });
+    } catch (error: any) {
+      logError("Error updating sync settings", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to update sync settings" });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/sync-management/:connectionId/trigger
+ * Manually trigger a sync for a specific connection from the platform admin view
+ */
+router.post(
+  "/sync-management/:connectionId/trigger",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const { tenant_id } = req.body;
+
+      if (!tenant_id) {
+        return res.status(400).json({ error: "tenant_id is required" });
+      }
+
+      const tenantId = tenant_id as string;
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      // Verify connection exists
+      const connResult = await tenantPool.query(
+        "SELECT id, los_type, connection_method FROM public.los_connections WHERE id = $1",
+        [connectionId]
+      );
+
+      if (connResult.rows.length === 0) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      const conn = connResult.rows[0];
+
+      // Trigger sync based on type (same logic as los.ts sync route)
+      if (conn.connection_method === "api" && conn.los_type === "encompass") {
+        const { EncompassEtlService } = await import(
+          "../services/etl/encompassEtlService.js"
+        );
+        const etlService = new EncompassEtlService(tenantPool);
+
+        // Run sync asynchronously
+        etlService
+          .syncLoans(tenantId, connectionId, { fullSync: false })
+          .catch((error) => {
+            logError("Background sync error (admin trigger)", error, {
+              userId: req.userId,
+              connectionId,
+              tenant_id,
+            });
+          });
+
+        return res.json({
+          success: true,
+          message: "Encompass sync started",
+        });
+      } else if (conn.connection_method === "api") {
+        const { syncLoansFromAPI } = await import(
+          "../services/losApiService.js"
+        );
+        syncLoansFromAPI(connectionId).catch((error) => {
+          logError("Background API sync error (admin trigger)", error, {
+            userId: req.userId,
+            connectionId,
+          });
+        });
+
+        return res.json({
+          success: true,
+          message: "API sync started",
+        });
+      } else {
+        return res.status(400).json({
+          error: "Manual trigger not supported for this connection method",
+        });
+      }
+    } catch (error: any) {
+      logError("Error triggering sync", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res.status(500).json({ error: "Failed to trigger sync" });
+    }
+  }
+);
+
 // Mount SSO configuration routes
 router.use("/sso", ssoConfigRoutes);
 

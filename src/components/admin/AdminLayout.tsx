@@ -29,6 +29,7 @@ import {
   Code2,
   BookOpen,
   MessageSquareHeart,
+  RefreshCw,
 } from "lucide-react";
 import type { AdminSection, AdminMode } from "@/hooks/admin/useAdminState";
 
@@ -174,6 +175,16 @@ const allAdminSections: AdminSectionDef[] = [
     color: "text-emerald-300 dark:text-emerald-400/70",
     allowedRoles: ["super_admin", "platform_admin"],
     category: "Developer",
+    mode: "platform",
+  },
+  {
+    id: "sync-management" as AdminSection,
+    label: "Sync Management",
+    icon: RefreshCw,
+    description: "Cross-tenant sync schedules and status",
+    color: "text-cyan-300 dark:text-cyan-400/70",
+    allowedRoles: ["super_admin", "platform_admin"],
+    category: "Infrastructure",
     mode: "platform",
   },
   {

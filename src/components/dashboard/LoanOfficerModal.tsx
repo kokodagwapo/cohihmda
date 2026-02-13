@@ -98,30 +98,25 @@ export const LoanOfficerModal: React.FC<LoanOfficerModalProps> = ({
   const fetchOfficerData = async () => {
     setLoading(true);
     try {
-      // TODO: Replace with actual API endpoint
-      // For now, create mock data
-      const mockOfficer: OfficerData = {
-        name: officerName,
-        email: null,
-        phone: null,
-        totalLoans: 0,
-        activeLoans: 0,
-        closedLoans: 0,
-        pullThrough: '0%',
-        totalVolume: '$0',
-        activeVolume: '$0',
-        closedVolume: '$0',
-        atRiskVolume: '$0'
-      };
-      
-      const mockRiskBreakdown = { veryHigh: 0, medium: 0, low: 0 };
-      const mockLoans: LoanDetail[] = [];
-      
-      setOfficer(mockOfficer);
-      setRiskBreakdown(mockRiskBreakdown);
-      setLoans(mockLoans);
+      const response = await fetch(`/api/loans/officer-details?name=${encodeURIComponent(officerName)}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('auth_token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setOfficer(data.officer || { name: officerName, email: null, phone: null, totalLoans: 0, activeLoans: 0, closedLoans: 0, pullThrough: '0%', totalVolume: '$0', activeVolume: '$0', closedVolume: '$0', atRiskVolume: '$0' });
+        setRiskBreakdown(data.riskBreakdown || { veryHigh: 0, medium: 0, low: 0 });
+        setLoans(data.loans || []);
+      } else {
+        // API returned error - show empty state
+        setOfficer({ name: officerName, email: null, phone: null, totalLoans: 0, activeLoans: 0, closedLoans: 0, pullThrough: '0%', totalVolume: '$0', activeVolume: '$0', closedVolume: '$0', atRiskVolume: '$0' });
+        setRiskBreakdown({ veryHigh: 0, medium: 0, low: 0 });
+        setLoans([]);
+      }
     } catch (error) {
       console.error('Failed to fetch officer data:', error);
+      setOfficer({ name: officerName, email: null, phone: null, totalLoans: 0, activeLoans: 0, closedLoans: 0, pullThrough: '0%', totalVolume: '$0', activeVolume: '$0', closedVolume: '$0', atRiskVolume: '$0' });
+      setRiskBreakdown({ veryHigh: 0, medium: 0, low: 0 });
+      setLoans([]);
     }
     setLoading(false);
   };

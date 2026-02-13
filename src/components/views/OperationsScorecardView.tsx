@@ -169,148 +169,30 @@ const metricInfo: Record<string, MetricInfo> = {
   }
 };
 
-// Previous period comparison data (mocked - would come from API)
-const mockPreviousData: TierData = {
-  totals: {
-    underwriterCount: 8,
-    unitsOutput: 2050,
-    unitsPercent: 100.0,
-    volumeOutput: 478000000,
-    loanComplexityScore: 115.2,
-    avgUnitsPerMonth: 20,
-    avgDays: 6.10,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 90.5,
-    deniedPercent: 1.8,
-    governmentPercent: 52.1,
-    purchasePercent: 43.8,
-    waFico: 712,
-    waLtv: 81.2,
-  },
-  topTier: {
-    underwriterCount: 3,
-    unitsOutput: 1450,
-    unitsPercent: 70.7,
-    volumeOutput: 340000000,
-    loanComplexityScore: 115.5,
-    avgUnitsPerMonth: 37,
-    avgDays: 5.95,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 91.8,
-    deniedPercent: 1.9,
-    governmentPercent: 50.2,
-    purchasePercent: 48.5,
-    waFico: 714,
-    waLtv: 82.0,
-  },
-  secondTier: {
-    underwriterCount: 2,
-    unitsOutput: 510,
-    unitsPercent: 24.9,
-    volumeOutput: 112000000,
-    loanComplexityScore: 113.8,
-    avgUnitsPerMonth: 20,
-    avgDays: 6.58,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 94.2,
-    deniedPercent: 1.5,
-    governmentPercent: 56.8,
-    purchasePercent: 28.4,
-    waFico: 704,
-    waLtv: 78.1,
-  },
-  bottomTier: {
-    underwriterCount: 3,
-    unitsOutput: 90,
-    unitsPercent: 4.4,
-    volumeOutput: 26000000,
-    loanComplexityScore: 118.5,
-    avgUnitsPerMonth: 2,
-    avgDays: 4.50,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 65.2,
-    deniedPercent: 1.2,
-    governmentPercent: 48.0,
-    purchasePercent: 52.1,
-    waFico: 715,
-    waLtv: 85.2,
-  },
+// Empty tier row - used when no data is available
+const emptyTierRow: ScorecardData = {
+  underwriterCount: 0,
+  unitsOutput: 0,
+  unitsPercent: 0,
+  volumeOutput: 0,
+  loanComplexityScore: 0,
+  avgUnitsPerMonth: 0,
+  avgDays: 0,
+  compensation: '-',
+  costPerFile: '-',
+  approvedPercent: 0,
+  deniedPercent: 0,
+  governmentPercent: 0,
+  purchasePercent: 0,
+  waFico: 0,
+  waLtv: 0,
 };
 
-// Mock data - used as fallback when API data is not available
-const mockData: TierData = {
-  totals: {
-    underwriterCount: 8,
-    unitsOutput: 2167,
-    unitsPercent: 100.0,
-    volumeOutput: 496841208,
-    loanComplexityScore: 113.7,
-    avgUnitsPerMonth: 21,
-    avgDays: 5.81,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 92.8,
-    deniedPercent: 1.4,
-    governmentPercent: 50.2,
-    purchasePercent: 45.2,
-    waFico: 714,
-    waLtv: 80.4,
-  },
-  topTier: {
-    underwriterCount: 3,
-    unitsOutput: 1521,
-    unitsPercent: 70.2,
-    volumeOutput: 354468599,
-    loanComplexityScore: 113.9,
-    avgUnitsPerMonth: 39,
-    avgDays: 5.70,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 93.4,
-    deniedPercent: 1.6,
-    governmentPercent: 48.7,
-    purchasePercent: 50.3,
-    waFico: 716,
-    waLtv: 81.3,
-  },
-  secondTier: {
-    underwriterCount: 2,
-    unitsOutput: 549,
-    unitsPercent: 25.3,
-    volumeOutput: 116312874,
-    loanComplexityScore: 112.3,
-    avgUnitsPerMonth: 21,
-    avgDays: 6.36,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 95.4,
-    deniedPercent: 0.9,
-    governmentPercent: 55.0,
-    purchasePercent: 29.1,
-    waFico: 706,
-    waLtv: 76.8,
-  },
-  bottomTier: {
-    underwriterCount: 3,
-    unitsOutput: 97,
-    unitsPercent: 4.5,
-    volumeOutput: 26059735,
-    loanComplexityScore: 117.9,
-    avgUnitsPerMonth: 2,
-    avgDays: 4.24,
-    compensation: '-',
-    costPerFile: '-',
-    approvedPercent: 68.0,
-    deniedPercent: 1.0,
-    governmentPercent: 46.4,
-    purchasePercent: 55.7,
-    waFico: 717,
-    waLtv: 84.0,
-  },
+const emptyData: TierData = {
+  totals: { ...emptyTierRow },
+  topTier: { ...emptyTierRow },
+  secondTier: { ...emptyTierRow },
+  bottomTier: { ...emptyTierRow },
 };
 
 export function OperationsScorecardView({ selectedTenantId, selectedChannel }: OperationsScorecardViewProps) {
@@ -378,8 +260,8 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
     bottomTier: convertToViewFormat(apiData.tierSummary.bottom),
   } : null;
 
-  // Use API data if available, otherwise fall back to mock data for display
-  const displayData = currentData || mockData;
+  // Use API data if available, otherwise show empty data
+  const displayData = currentData || emptyData;
   
   // Get date range string for display
   const dateRangeDisplay = apiData?.dateRange 
@@ -781,7 +663,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                      </div>
                      {showComparison && (
                        <TrendIndicator 
-                         change={calculateChange(displayData.topTier.unitsOutput, mockPreviousData.topTier.unitsOutput)} 
+                         change={calculateChange(displayData.topTier.unitsOutput, emptyData.topTier.unitsOutput)} 
                        />
                      )}
                    </div>
@@ -804,7 +686,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                      </div>
                      {showComparison && (
                        <TrendIndicator 
-                         change={calculateChange(displayData.totals.avgDays, mockPreviousData.totals.avgDays, false)} 
+                         change={calculateChange(displayData.totals.avgDays, emptyData.totals.avgDays, false)} 
                        />
                      )}
                    </div>
@@ -827,7 +709,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                      </div>
                      {showComparison && (
                        <TrendIndicator 
-                         change={calculateChange(displayData.totals.approvedPercent, mockPreviousData.totals.approvedPercent)} 
+                         change={calculateChange(displayData.totals.approvedPercent, emptyData.totals.approvedPercent)} 
                        />
                      )}
                    </div>
@@ -1131,7 +1013,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           <div className="flex items-center justify-end gap-2">
                             <span>{displayData.totals.underwriterCount}</span>
                             {showComparison && (
-                              <TrendIndicator change={calculateChange(displayData.totals.underwriterCount, mockPreviousData.totals.underwriterCount)} compact />
+                              <TrendIndicator change={calculateChange(displayData.totals.underwriterCount, emptyData.totals.underwriterCount)} compact />
                             )}
                           </div>
                         </td>
@@ -1182,7 +1064,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           <div className="flex items-center justify-end gap-2">
                             <span>{formatNumber(displayData.totals.unitsOutput)}</span>
                             {showComparison && (
-                              <TrendIndicator change={calculateChange(displayData.totals.unitsOutput, mockPreviousData.totals.unitsOutput)} compact />
+                              <TrendIndicator change={calculateChange(displayData.totals.unitsOutput, emptyData.totals.unitsOutput)} compact />
                             )}
                           </div>
                         </td>
@@ -1297,7 +1179,7 @@ export function OperationsScorecardView({ selectedTenantId, selectedChannel }: O
                           <div className="flex items-center justify-end gap-2">
                             <span>{displayData.totals.avgDays.toFixed(2)}</span>
                             {showComparison && (
-                              <TrendIndicator change={calculateChange(displayData.totals.avgDays, mockPreviousData.totals.avgDays, false)} compact />
+                              <TrendIndicator change={calculateChange(displayData.totals.avgDays, emptyData.totals.avgDays, false)} compact />
                             )}
                           </div>
                         </td>

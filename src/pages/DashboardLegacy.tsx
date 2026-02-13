@@ -145,7 +145,6 @@ import {
   getFilteredKPI,
 } from "@/utils/dashboardHelpers";
 import { useDashboardMetrics } from "@/hooks/useDashboardMetrics";
-import { useMockDashboardData } from "@/hooks/useMockDashboardData";
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { BusinessDataTable } from "@/components/dashboard/BusinessDataTable";
 import { DashboardCard } from "@/components/dashboard/DashboardCard";
@@ -525,137 +524,15 @@ const DashboardLegacy = () => {
   // PIN authentication removed - auto-authenticate instead
   // const handlePinSubmit = (e: React.FormEvent) => { ... }
 
-  // Generate mock dashboard data (performers, branches, etc.)
-  const {
-    namePool,
-    realTopPerformers,
-    realMiddlePerformers,
-    realBottomPerformers,
-    branchLOs,
-  } = useMockDashboardData();
-  const realFalloutData = [
-    {
-      type: "Withdrawals",
-      predicted: 12,
-      actual: 10,
-      risk: "medium",
-    },
-    {
-      type: "Declinations",
-      predicted: 8,
-      actual: 9,
-      risk: "high",
-    },
-    {
-      type: "Rate-Driven",
-      predicted: 15,
-      actual: 14,
-      risk: "high",
-    },
-    {
-      type: "Ops-Driven",
-      predicted: 6,
-      actual: 5,
-      risk: "low",
-    },
-    {
-      type: "Borrower Behavior",
-      predicted: 9,
-      actual: 11,
-      risk: "medium",
-    },
-  ];
-  const realProfitabilityData = [
-    {
-      month: "Jan",
-      margin: 3.2,
-      productivity: 85,
-      revenue: 2.1,
-    },
-    {
-      month: "Feb",
-      margin: 3.5,
-      productivity: 88,
-      revenue: 2.3,
-    },
-    {
-      month: "Mar",
-      margin: 3.8,
-      productivity: 92,
-      revenue: 2.5,
-    },
-    {
-      month: "Apr",
-      margin: 4.1,
-      productivity: 89,
-      revenue: 2.4,
-    },
-    {
-      month: "May",
-      margin: 4.3,
-      productivity: 94,
-      revenue: 2.7,
-    },
-    {
-      month: "Jun",
-      margin: 4.5,
-      productivity: 96,
-      revenue: 2.9,
-    },
-  ];
-  const realCycleTimeData = [
-    {
-      role: "LO",
-      avgDays: 12,
-      targetDays: 10,
-      efficiency: 83,
-    },
-    {
-      role: "Processor",
-      avgDays: 18,
-      targetDays: 15,
-      efficiency: 78,
-    },
-    {
-      role: "UW",
-      avgDays: 22,
-      targetDays: 20,
-      efficiency: 91,
-    },
-    {
-      role: "Closer",
-      avgDays: 8,
-      targetDays: 7,
-      efficiency: 88,
-    },
-  ];
-  const realPullThroughData = [
-    {
-      stage: "Application",
-      count: 100,
-      percentage: 100,
-    },
-    {
-      stage: "Processing",
-      count: 78,
-      percentage: 78,
-    },
-    {
-      stage: "Underwriting",
-      count: 65,
-      percentage: 65,
-    },
-    {
-      stage: "Closing",
-      count: 58,
-      percentage: 58,
-    },
-    {
-      stage: "Funded",
-      count: 52,
-      percentage: 52,
-    },
-  ];
+  // Empty data arrays - no demo/mock data, real data comes from API
+  const realTopPerformers: any[] = [];
+  const realMiddlePerformers: any[] = [];
+  const realBottomPerformers: any[] = [];
+  const branchLOs: any[] = [];
+  const realFalloutData: any[] = [];
+  const realProfitabilityData: any[] = [];
+  const realCycleTimeData: any[] = [];
+  const realPullThroughData: any[] = [];
 
   // Select the correct performer list based on tier (Top 20%, Middle 30%, Bottom 50%)
   const getAllPerformersByTier = () => {

@@ -95,48 +95,6 @@ export interface UseCohiChatOptions {
 }
 
 // ============================================================================
-// Demo Data Generator (fallback for development)
-// ============================================================================
-
-const generateDemoResponse = (question: string): CohiChatResponse => {
-  const q = question.toLowerCase();
-
-  if (q.includes("important") || q.includes("today") || q.includes("know")) {
-    return {
-      message:
-        "Here's your executive briefing. Top performers MTD: Sarah Chen leads with 42 units and $18.2M volume. Focus areas: pipeline velocity and reducing fallout in the retail channel.",
-      visualization: {
-        type: "horizontal_bar",
-        title: "Top Performers (MTD)",
-        data: [
-          { name: "Sarah Chen", units: 42, volume: 18200000 },
-          { name: "Mike Torres", units: 38, volume: 15600000 },
-          { name: "Jess Rivera", units: 35, volume: 14200000 },
-        ],
-        xKey: "name",
-        yKey: "units",
-        colors: ["#3B82F6", "#10B981", "#8B5CF6"],
-      },
-      suggestedQuestions: [
-        "Show me loans by branch",
-        "What are the FHA requirements?",
-        "Top loan officers by volume",
-      ],
-    };
-  }
-
-  return {
-    message: "I can help you with loan data and mortgage knowledge. Try asking about your pipeline, loan officers, or regulatory requirements.",
-    suggestedQuestions: [
-      "Show me loan volume by month",
-      "Top 10 loan officers",
-      "What are FHA guidelines?",
-      "Pipeline breakdown",
-    ],
-  };
-};
-
-// ============================================================================
 // Hook
 // ============================================================================
 
@@ -285,26 +243,22 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
           setSuggestedQuestions(response.suggestedQuestions);
         }
       } catch (error: any) {
-        console.error("[CohiChat] Error sending message, using demo mode:", error);
+        console.error("[CohiChat] Error sending message:", error);
 
-        // Use demo response when API fails
-        const demoResponse = generateDemoResponse(question.trim());
-
-        const demoMessage: ChatMessage = {
+        const errorMessage: ChatMessage = {
           id: assistantMessageId,
           role: "assistant",
-          content: demoResponse.message,
-          visualization: demoResponse.visualization,
-          data: demoResponse.data,
+          content: "I encountered an error processing your request. Please try again.",
           timestamp: new Date(),
+          error: error.message,
         };
 
         setMessages((prev) =>
-          prev.map((m) => (m.id === assistantMessageId ? demoMessage : m))
+          prev.map((m) => (m.id === assistantMessageId ? errorMessage : m))
         );
 
-        if (demoResponse.suggestedQuestions) {
-          setSuggestedQuestions(demoResponse.suggestedQuestions);
+        if (onError) {
+          onError(error);
         }
       } finally {
         setIsLoading(false);

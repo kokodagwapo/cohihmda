@@ -133,11 +133,21 @@ Resources:
               StringEquals:
                 iam:PassedToService: ecs-tasks.amazonaws.com
 
-          # CloudFormation template validation
-          - Sid: CloudFormationValidate
+          # CloudFormation stack management (for infrastructure deployments)
+          - Sid: CloudFormationAccess
             Effect: Allow
             Action:
               - cloudformation:ValidateTemplate
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStackResources
+              - cloudformation:GetTemplate
+              - cloudformation:GetTemplateSummary
+              - cloudformation:CreateChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:ListChangeSets
             Resource: "*"
 
           # STS for identity verification

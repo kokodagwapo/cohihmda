@@ -430,74 +430,8 @@ CURRENT INTELLIGENCE:
     setShowChat(!showChat);
   };
 
-  // Mock team members data
-  const mockTeamMembers: TeamMember[] = [
-    {
-      id: '1',
-      name: 'Sarah Johnson',
-      role: 'Senior Agent',
-      score: 94,
-      trend: 'up',
-      callsHandled: 156,
-      avgHandleTime: '4:32',
-      customerSatisfaction: 4.8,
-      qualityScore: 96,
-      sales: 45000,
-      conversionRate: 28.5
-    },
-    {
-      id: '2',
-      name: 'Michael Chen',
-      role: 'Agent',
-      score: 87,
-      trend: 'stable',
-      callsHandled: 143,
-      avgHandleTime: '5:12',
-      customerSatisfaction: 4.5,
-      qualityScore: 88,
-      sales: 38000,
-      conversionRate: 24.2
-    },
-    {
-      id: '3',
-      name: 'Emily Rodriguez',
-      role: 'Team Lead',
-      score: 91,
-      trend: 'up',
-      callsHandled: 98,
-      avgHandleTime: '6:45',
-      customerSatisfaction: 4.7,
-      qualityScore: 93,
-      sales: 52000,
-      conversionRate: 31.8
-    },
-    {
-      id: '4',
-      name: 'James Wilson',
-      role: 'Agent',
-      score: 78,
-      trend: 'down',
-      callsHandled: 132,
-      avgHandleTime: '6:20',
-      customerSatisfaction: 4.1,
-      qualityScore: 79,
-      sales: 28000,
-      conversionRate: 18.3
-    },
-    {
-      id: '5',
-      name: 'Lisa Anderson',
-      role: 'Senior Agent',
-      score: 89,
-      trend: 'up',
-      callsHandled: 167,
-      avgHandleTime: '4:58',
-      customerSatisfaction: 4.6,
-      qualityScore: 90,
-      sales: 41000,
-      conversionRate: 26.7
-    }
-  ];
+  // Team members data - would be fetched from API
+  const teamMembers: TeamMember[] = [];
 
   const getPerformanceDetails = (member: TeamMember): PerformanceDetail[] => {
     return [
@@ -559,17 +493,13 @@ CURRENT INTELLIGENCE:
     setIsProcessingFile(true);
     setUploadedFiles([file]);
 
-    // Simulate file processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // TODO: Implement real file analysis via API
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Generate mock data based on file type
-    const chartData = generateMockChartData(file.name, fileType || '');
-    
     const analysisMessage: Message = {
       role: 'Cohi',
-      text: `I've analyzed your ${fileType?.toUpperCase()} file "${file.name}". Here's what I found:`,
+      text: `File "${file.name}" uploaded. File analysis is not yet available. Please use the chat to ask questions about your data.`,
       timestamp: new Date(),
-      chartData
     };
 
     setMessages(prev => [...prev, analysisMessage]);
@@ -586,71 +516,6 @@ CURRENT INTELLIGENCE:
     }
   };
 
-  // Generate mock chart data based on file type
-  const generateMockChartData = (fileName: string, fileType: string): ChartData => {
-    const dataTypes = ['bar', 'line', 'pie'] as const;
-    const randomType = dataTypes[Math.floor(Math.random() * dataTypes.length)];
-
-    if (randomType === 'bar') {
-      return {
-        type: 'bar',
-        fileName,
-        data: [
-          { month: 'Jan', value: 4200, target: 4000 },
-          { month: 'Feb', value: 3800, target: 4000 },
-          { month: 'Mar', value: 4500, target: 4000 },
-          { month: 'Apr', value: 5100, target: 4000 },
-          { month: 'May', value: 4800, target: 4000 },
-          { month: 'Jun', value: 5400, target: 4000 }
-        ],
-        summary: 'Performance metrics show a 28% increase over the 6-month period',
-        insights: [
-          'Strong upward trend detected in Q2',
-          'April exceeded targets by 27.5%',
-          'Consistent growth momentum maintained',
-          'Recommend scaling operations for continued growth'
-        ]
-      };
-    } else if (randomType === 'line') {
-      return {
-        type: 'line',
-        fileName,
-        data: [
-          { week: 'W1', sales: 12500, forecast: 12000 },
-          { week: 'W2', sales: 13200, forecast: 12500 },
-          { week: 'W3', sales: 14100, forecast: 13000 },
-          { week: 'W4', sales: 13800, forecast: 13500 },
-          { week: 'W5', sales: 15200, forecast: 14000 },
-          { week: 'W6', sales: 16100, forecast: 14500 }
-        ],
-        summary: 'Sales trajectory exceeding forecasts by an average of 8.3%',
-        insights: [
-          'Week-over-week growth averaging 5.2%',
-          'Outperforming forecasts consistently',
-          'Peak performance in Week 6 at $16.1K',
-          'Momentum suggests continued outperformance'
-        ]
-      };
-    } else {
-      return {
-        type: 'pie',
-        fileName,
-        data: [
-          { category: 'Operations', value: 35, color: '#3b82f6' },
-          { category: 'Sales', value: 28, color: '#10b981' },
-          { category: 'Support', value: 22, color: '#f59e0b' },
-          { category: 'Admin', value: 15, color: '#8b5cf6' }
-        ],
-        summary: 'Resource allocation shows balanced distribution across departments',
-        insights: [
-          'Operations leading at 35% of total resources',
-          'Sales and Support account for 50% combined',
-          'Admin overhead maintained at efficient 15%',
-          'Recommended: Increase Sales allocation by 5%'
-        ]
-      };
-    }
-  };
 
   // Initiate phone call with uploaded document context
   const handlePhoneCall = () => {
@@ -908,7 +773,7 @@ CURRENT INTELLIGENCE:
                     role: 'Cohi',
                     text: 'Here are your top team members and their current performance:',
                     timestamp: new Date(),
-                    teamMembers: mockTeamMembers
+                    teamMembers: teamMembers
                   };
                   setMessages(prev => [...prev, teamMessage]);
                 }}

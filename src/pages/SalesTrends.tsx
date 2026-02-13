@@ -132,64 +132,6 @@ const generateTrendData = (trendPercent: number): TrendDataPoint[] => {
   return dataPoints;
 };
 
-// Mock data for 3 months
-const mockLoanOfficers3Months: LoanOfficer[] = [
-  { id: '1', name: 'Craig James Nelson', initials: 'CJ', branch: 'Branch 2001', branchNumber: '2001', tier: 'top', closed: 19, volume: 6300000, marginBPS: 391, trendPercent: -17, daysAvg: 47, trendData: generateTrendData(-17) },
-  { id: '2', name: 'Stanley Edward Obrecht Jr.', initials: 'SE', branch: 'Branch 2001', branchNumber: '2001', tier: 'top', closed: 18, volume: 7600000, marginBPS: 394, trendPercent: -17, daysAvg: 35, trendData: generateTrendData(-17) },
-  { id: '3', name: 'Paul Francis Hughes', initials: 'PF', branch: 'Branch 2001', branchNumber: '2001', tier: '2nd', closed: 29, volume: 5600000, marginBPS: 251, trendPercent: 18, daysAvg: 54, trendData: generateTrendData(18) },
-  { id: '4', name: 'Aaron Michael Rist', initials: 'AM', branch: 'Branch 2001', branchNumber: '2001', tier: '2nd', closed: 20, volume: 5400000, marginBPS: 444, trendPercent: 50, daysAvg: 54, trendData: generateTrendData(50) },
-  { id: '5', name: 'Vance Ryan Wohlert', initials: 'VR', branch: 'Branch 2301', branchNumber: '2301', tier: 'top', closed: 32, volume: 4600000, marginBPS: 345, trendPercent: 86, daysAvg: 56, trendData: generateTrendData(86) },
-  { id: '6', name: 'James Ralph Erb', initials: 'JR', branch: 'Branch 2001', branchNumber: '2001', tier: '2nd', closed: 28, volume: 3200000, marginBPS: 397, trendPercent: 100, daysAvg: 44, trendData: generateTrendData(100) },
-  { id: '7', name: 'Sharon Shechter Rosen', initials: 'SS', branch: 'Branch 2001', branchNumber: '2001', tier: 'bottom', closed: 25, volume: 4900000, marginBPS: 357, trendPercent: -22, daysAvg: 60, trendData: generateTrendData(-22) },
-  { id: '8', name: 'Jay Bryant Howard', initials: 'JB', branch: 'Branch 2001', branchNumber: '2001', tier: 'bottom', closed: 24, volume: 7200000, marginBPS: 237, trendPercent: 22, daysAvg: 43, trendData: generateTrendData(22) },
-  { id: '9', name: 'Michael Thompson', initials: 'MT', branch: 'Branch 2301', branchNumber: '2301', tier: '2nd', closed: 19, volume: 6900000, marginBPS: 363, trendPercent: -55, daysAvg: 55, trendData: generateTrendData(-55) },
-  { id: '10', name: 'Jennifer Martinez', initials: 'JM', branch: 'Branch 2102', branchNumber: '2102', tier: 'top', closed: 27, volume: 7000000, marginBPS: 293, trendPercent: 33, daysAvg: 58, trendData: generateTrendData(33) },
-];
-
-// Mock data for 6 months
-const mockLoanOfficers6Months: LoanOfficer[] = [
-  { id: '1', name: 'Craig James Nelson', initials: 'CJ', branch: 'Branch 2001', branchNumber: '2001', tier: 'top', closed: 46, volume: 12600000, marginBPS: 358, trendPercent: 50, daysAvg: 52, trendData: generateTrendData(50) },
-  { id: '2', name: 'Stanley Edward Obrecht Jr.', initials: 'SE', branch: 'Branch 2001', branchNumber: '2001', tier: 'top', closed: 42, volume: 14400000, marginBPS: 313, trendPercent: 83, daysAvg: 55, trendData: generateTrendData(83) },
-  { id: '3', name: 'Paul Francis Hughes', initials: 'PF', branch: 'Branch 2001', branchNumber: '2001', tier: '2nd', closed: 44, volume: 12600000, marginBPS: 373, trendPercent: -50, daysAvg: 34, trendData: generateTrendData(-50) },
-  { id: '4', name: 'Aaron Michael Rist', initials: 'AM', branch: 'Branch 2001', branchNumber: '2001', tier: '2nd', closed: 52, volume: 12600000, marginBPS: 382, trendPercent: -38, daysAvg: 44, trendData: generateTrendData(-38) },
-  { id: '5', name: 'Vance Ryan Wohlert', initials: 'VR', branch: 'Branch 2301', branchNumber: '2301', tier: 'top', closed: 51, volume: 10100000, marginBPS: 336, trendPercent: 0, daysAvg: 56, trendData: generateTrendData(0) },
-  { id: '6', name: 'James Ralph Erb', initials: 'JR', branch: 'Branch 2001', branchNumber: '2001', tier: '2nd', closed: 47, volume: 9400000, marginBPS: 271, trendPercent: 300, daysAvg: 51, trendData: generateTrendData(300) },
-  { id: '7', name: 'Sharon Shechter Rosen', initials: 'SS', branch: 'Branch 2001', branchNumber: '2001', tier: 'bottom', closed: 52, volume: 15600000, marginBPS: 296, trendPercent: -85, daysAvg: 46, trendData: generateTrendData(-85) },
-  { id: '8', name: 'Jay Bryant Howard', initials: 'JB', branch: 'Branch 2001', branchNumber: '2001', tier: 'bottom', closed: 46, volume: 18000000, marginBPS: 319, trendPercent: -67, daysAvg: 45, trendData: generateTrendData(-67) },
-  { id: '9', name: 'Michael Thompson', initials: 'MT', branch: 'Branch 2301', branchNumber: '2301', tier: '2nd', closed: 31, volume: 10100000, marginBPS: 404, trendPercent: -20, daysAvg: 35, trendData: generateTrendData(-20) },
-  { id: '10', name: 'Jennifer Martinez', initials: 'JM', branch: 'Branch 2102', branchNumber: '2102', tier: 'top', closed: 40, volume: 11200000, marginBPS: 307, trendPercent: -25, daysAvg: 58, trendData: generateTrendData(-25) },
-];
-
-const fundTypeData3Months: FundTypeData[] = [
-  { name: 'Conventional', value: 266, fill: '#3b82f6' },
-  { name: 'FHA', value: 190, fill: '#10b981' },
-  { name: 'VA', value: 67, fill: '#a855f7' },
-  { name: 'USDA', value: 30, fill: '#f97316' },
-  { name: 'Jumbo', value: 28, fill: '#ec4899' },
-];
-
-const fundTypeData6Months: FundTypeData[] = [
-  { name: 'Conventional', value: 378, fill: '#3b82f6' },
-  { name: 'FHA', value: 99, fill: '#10b981' },
-  { name: 'VA', value: 53, fill: '#a855f7' },
-  { name: 'USDA', value: 37, fill: '#f97316' },
-  { name: 'Jumbo', value: 36, fill: '#ec4899' },
-];
-
-const monthlyPerformance3Months: MonthlyPerformance[] = [
-  { month: '2025-Nov', units: 74, volume: 17000000 },
-  { month: '2025-Dec', units: 78, volume: 20000000 },
-  { month: '2026-Jan', units: 89, volume: 21700000 },
-];
-
-const monthlyPerformance6Months: MonthlyPerformance[] = [
-  { month: '2025-Aug', units: 66, volume: 17300000 },
-  { month: '2025-Sep', units: 70, volume: 22200000 },
-  { month: '2025-Oct', units: 93, volume: 21600000 },
-  { month: '2025-Nov', units: 74, volume: 20500000 },
-  { month: '2025-Dec', units: 81, volume: 22100000 },
-  { month: '2026-Jan', units: 67, volume: 22800000 },
-];
 
 const SalesTrends = () => {
   const { theme } = useTheme();

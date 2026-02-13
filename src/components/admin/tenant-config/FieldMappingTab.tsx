@@ -61,13 +61,6 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
   // Filter to only show Encompass connections (field mapping is specific to Encompass currently)
   const encompassConnections = losConnections.filter(c => c.los_type === 'encompass');
 
-  const handleMappingChange = () => {
-    toast({
-      title: 'Success',
-      description: 'Field mapping updated successfully',
-    });
-    onRefresh();
-  };
 
   const getSyncStatusBadge = (connection: any) => {
     if (!connection.last_sync_status) return null;
@@ -218,7 +211,6 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                   <EncompassFieldMapping
                     losConnectionId={selectedConnectionId}
                     tenantId={selectedTenantId}
-                    onMappingChange={handleMappingChange}
                   />
                 </TabsContent>
 
