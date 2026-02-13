@@ -169,113 +169,11 @@ export function RolesPermissionsSection() {
   const loadRoles = async () => {
     setLoading(true);
     try {
-      // For now, use mock data - replace with API call
-      // const response = await api.request(`/api/roles${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`);
-      
-      // Mock roles for development
-      const mockRoles: Role[] = [
-        {
-          id: '1',
-          name: 'Tenant Admin',
-          description: 'Full administrative access to the organization',
-          is_system_role: true,
-          is_default: false,
-          tenant_id: selectedTenantId || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          user_count: 2,
-          permissions: RESOURCES.map(r => ({
-            resource: r.id,
-            actions: { create: true, read: true, update: true, delete: true }
-          })),
-          feature_access: AVAILABLE_FEATURES.map(f => ({
-            feature_id: f.id,
-            feature_name: f.name,
-            has_access: true
-          }))
-        },
-        {
-          id: '2',
-          name: 'Loan Officer',
-          description: 'Standard loan officer with access to their synced loans',
-          is_system_role: false,
-          is_default: true,
-          tenant_id: selectedTenantId || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          user_count: 15,
-          permissions: [
-            { resource: 'loans', actions: { create: false, read: true, update: false, delete: false } },
-            { resource: 'users', actions: { create: false, read: false, update: false, delete: false } },
-            { resource: 'reports', actions: { create: true, read: true, update: false, delete: false } },
-            { resource: 'settings', actions: { create: false, read: false, update: false, delete: false } }
-          ],
-          feature_access: [
-            { feature_id: 'insights', feature_name: 'Insights Dashboard', has_access: true },
-            { feature_id: 'loans', feature_name: 'Loan Browser', has_access: true },
-            { feature_id: 'leaderboard', feature_name: 'Leaderboard', has_access: true },
-            { feature_id: 'funnel', feature_name: 'Loan Funnel', has_access: true },
-            { feature_id: 'reports', feature_name: 'Reports', has_access: true },
-            { feature_id: 'data_quality', feature_name: 'Data Quality', has_access: false },
-            { feature_id: 'data_chat', feature_name: 'Data Chat', has_access: true },
-            { feature_id: 'my_dashboard', feature_name: 'My Dashboard', has_access: true },
-            { feature_id: 'users', feature_name: 'User Management', has_access: false },
-            { feature_id: 'settings', feature_name: 'Settings', has_access: false }
-          ]
-        },
-        {
-          id: '3',
-          name: 'Branch Manager',
-          description: 'Manager with visibility across team members',
-          is_system_role: false,
-          is_default: false,
-          tenant_id: selectedTenantId || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          user_count: 5,
-          permissions: [
-            { resource: 'loans', actions: { create: false, read: true, update: false, delete: false } },
-            { resource: 'users', actions: { create: false, read: true, update: false, delete: false } },
-            { resource: 'reports', actions: { create: true, read: true, update: true, delete: false } },
-            { resource: 'settings', actions: { create: false, read: true, update: false, delete: false } }
-          ],
-          feature_access: AVAILABLE_FEATURES.map(f => ({
-            feature_id: f.id,
-            feature_name: f.name,
-            has_access: !['users', 'settings'].includes(f.id)
-          }))
-        },
-        {
-          id: '4',
-          name: 'Viewer',
-          description: 'Read-only access to dashboards and reports',
-          is_system_role: false,
-          is_default: false,
-          tenant_id: selectedTenantId || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          user_count: 8,
-          permissions: RESOURCES.map(r => ({
-            resource: r.id,
-            actions: { create: false, read: true, update: false, delete: false }
-          })),
-          feature_access: [
-            { feature_id: 'insights', feature_name: 'Insights Dashboard', has_access: true },
-            { feature_id: 'loans', feature_name: 'Loan Browser', has_access: false },
-            { feature_id: 'leaderboard', feature_name: 'Leaderboard', has_access: true },
-            { feature_id: 'funnel', feature_name: 'Loan Funnel', has_access: false },
-            { feature_id: 'reports', feature_name: 'Reports', has_access: true },
-            { feature_id: 'data_quality', feature_name: 'Data Quality', has_access: false },
-            { feature_id: 'data_chat', feature_name: 'Data Chat', has_access: true },
-            { feature_id: 'my_dashboard', feature_name: 'My Dashboard', has_access: false },
-            { feature_id: 'users', feature_name: 'User Management', has_access: false },
-            { feature_id: 'settings', feature_name: 'Settings', has_access: false }
-          ]
-        }
-      ];
-      
-      setRoles(mockRoles);
+      const response = await api.request<{ roles: Role[] }>(`/api/roles${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`);
+      setRoles(response?.roles || []);
     } catch (error: any) {
+      console.error('Failed to load roles:', error);
+      setRoles([]);
       toast({
         title: 'Error',
         description: 'Failed to load roles',

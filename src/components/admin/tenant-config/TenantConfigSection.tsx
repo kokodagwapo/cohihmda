@@ -44,6 +44,7 @@ export function TenantConfigSection() {
     useAdminTenant();
   const [activeTab, setActiveTab] = useState("mapping");
   const [loading, setLoading] = useState(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
 
   // Data states
@@ -69,6 +70,7 @@ export function TenantConfigSection() {
       setScoringWeights({});
       setComplexityComponents({});
       setStaffingUnitTargets(null);
+      setInitialLoadDone(false);
       return;
     }
 
@@ -113,6 +115,7 @@ export function TenantConfigSection() {
       setComplexityComponents(complexityRes.components || {});
       setStaffingUnitTargets(staffingTargetsRes ?? null);
       setLosConnections(losRes.connections || []);
+      setInitialLoadDone(true);
     } catch (error: any) {
       console.error("Error loading tenant config:", error);
       toast({
@@ -232,7 +235,7 @@ export function TenantConfigSection() {
             ))}
           </TabsList>
 
-          {loading ? (
+          {loading && !initialLoadDone ? (
             <Card className="border-slate-200 dark:border-slate-700">
               <CardContent className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-slate-400" />

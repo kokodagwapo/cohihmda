@@ -191,33 +191,13 @@ export function OrgSettingsSection({ tenantId: propTenantId }: OrgSettingsSectio
 
   const loadSubscription = async () => {
     try {
-      // Mock subscription for development
-      const mockSubscription: Subscription = {
-        id: "sub_1",
-        plan_name: "Professional",
-        plan_tier: "professional",
-        status: "active",
-        current_period_start: new Date(
-          Date.now() - 15 * 24 * 60 * 60 * 1000,
-        ).toISOString(),
-        current_period_end: new Date(
-          Date.now() + 15 * 24 * 60 * 60 * 1000,
-        ).toISOString(),
-        user_limit: 50,
-        loan_limit: 10000,
-        features: [
-          "Unlimited dashboard views",
-          "Custom roles & permissions",
-          "SSO integration",
-          "API access",
-          "Priority support",
-          "Data export",
-        ],
-      };
-
-      setSubscription(mockSubscription);
+      const response = await api.request<Subscription>(
+        `/api/admin/subscription${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`,
+      );
+      setSubscription(response || null);
     } catch (error: any) {
       console.error("Failed to load subscription:", error);
+      setSubscription(null);
     }
   };
 

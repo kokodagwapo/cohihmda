@@ -24,6 +24,7 @@ import {
   ListIdentityProvidersCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { pool as managementPool } from "../../config/managementDatabase.js";
+import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { logInfo, logError, logWarn } from "../../services/logger.js";
 import { XMLParser } from "fast-xml-parser";
@@ -39,15 +40,22 @@ function getManagementPool(): pg.Pool {
 
 const router = Router();
 
-// Cognito configuration
-const COGNITO_REGION = process.env.COGNITO_REGION || "us-east-2";
-const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID || "";
-const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID || "";
+// Cognito configuration — read lazily via functions to ensure dotenv has loaded
+// (ES modules import before dotenv runs, so top-level const reads would get empty strings)
+const getCognitoRegion = () => process.env.COGNITO_REGION || "us-east-2";
+const getCognitoUserPoolId = () => process.env.COGNITO_USER_POOL_ID || "";
+const getCognitoClientId = () => process.env.COGNITO_CLIENT_ID || "";
 
-// Initialize Cognito client
-const cognitoClient = new CognitoIdentityProviderClient({
-  region: COGNITO_REGION,
-});
+// Cognito client — initialized lazily
+let _cognitoClient: CognitoIdentityProviderClient | null = null;
+function getCognitoClient(): CognitoIdentityProviderClient {
+  if (!_cognitoClient) {
+    _cognitoClient = new CognitoIdentityProviderClient({
+      region: getCognitoRegion(),
+    });
+  }
+  return _cognitoClient;
+}
 
 // Supported provider types
 type ProviderType = "saml" | "oidc" | "azure_ad" | "okta" | "google";
@@ -244,8 +252,8 @@ async function createOrUpdateCognitoIdp(
   // Check if IdP already exists
   let exists = false;
   try {
-    await cognitoClient.send(new DescribeIdentityProviderCommand({
-      UserPoolId: COGNITO_USER_POOL_ID,
+    await getCognitoClient().send(new DescribeIdentityProviderCommand({
+      UserPoolId: getCognitoUserPoolId(),
       ProviderName: idpName,
     }));
     exists = true;
@@ -322,8 +330,8 @@ async function createOrUpdateCognitoIdp(
   
   if (exists) {
     // Update existing IdP
-    await cognitoClient.send(new UpdateIdentityProviderCommand({
-      UserPoolId: COGNITO_USER_POOL_ID,
+    await getCognitoClient().send(new UpdateIdentityProviderCommand({
+      UserPoolId: getCognitoUserPoolId(),
       ProviderName: idpName,
       ProviderDetails: providerDetails,
       AttributeMapping: attributeMapping,
@@ -331,8 +339,8 @@ async function createOrUpdateCognitoIdp(
     logInfo("[SSOConfig] Updated Cognito IdP", { idpName, providerType });
   } else {
     // Create new IdP
-    await cognitoClient.send(new CreateIdentityProviderCommand({
-      UserPoolId: COGNITO_USER_POOL_ID,
+    await getCognitoClient().send(new CreateIdentityProviderCommand({
+      UserPoolId: getCognitoUserPoolId(),
       ProviderName: idpName,
       ProviderType: cognitoProviderType,
       ProviderDetails: providerDetails,
@@ -352,9 +360,9 @@ async function createOrUpdateCognitoIdp(
  */
 async function addIdpToAppClient(idpName: string): Promise<void> {
   // Get current app client config
-  const clientResponse = await cognitoClient.send(new DescribeUserPoolClientCommand({
-    UserPoolId: COGNITO_USER_POOL_ID,
-    ClientId: COGNITO_CLIENT_ID,
+  const clientResponse = await getCognitoClient().send(new DescribeUserPoolClientCommand({
+    UserPoolId: getCognitoUserPoolId(),
+    ClientId: getCognitoClientId(),
   }));
   
   const client = clientResponse.UserPoolClient;
@@ -367,9 +375,9 @@ async function addIdpToAppClient(idpName: string): Promise<void> {
   if (!currentProviders.includes(idpName)) {
     currentProviders.push(idpName);
     
-    await cognitoClient.send(new UpdateUserPoolClientCommand({
-      UserPoolId: COGNITO_USER_POOL_ID,
-      ClientId: COGNITO_CLIENT_ID,
+    await getCognitoClient().send(new UpdateUserPoolClientCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      ClientId: getCognitoClientId(),
       SupportedIdentityProviders: currentProviders,
       // Preserve other settings
       CallbackURLs: client.CallbackURLs,
@@ -391,18 +399,18 @@ async function addIdpToAppClient(idpName: string): Promise<void> {
 async function deleteCognitoIdp(idpName: string): Promise<void> {
   try {
     // Remove from app client first
-    const clientResponse = await cognitoClient.send(new DescribeUserPoolClientCommand({
-      UserPoolId: COGNITO_USER_POOL_ID,
-      ClientId: COGNITO_CLIENT_ID,
+    const clientResponse = await getCognitoClient().send(new DescribeUserPoolClientCommand({
+      UserPoolId: getCognitoUserPoolId(),
+      ClientId: getCognitoClientId(),
     }));
     
     const client = clientResponse.UserPoolClient;
     if (client) {
       const providers = (client.SupportedIdentityProviders || []).filter(p => p !== idpName);
       
-      await cognitoClient.send(new UpdateUserPoolClientCommand({
-        UserPoolId: COGNITO_USER_POOL_ID,
-        ClientId: COGNITO_CLIENT_ID,
+      await getCognitoClient().send(new UpdateUserPoolClientCommand({
+        UserPoolId: getCognitoUserPoolId(),
+        ClientId: getCognitoClientId(),
         SupportedIdentityProviders: providers,
         CallbackURLs: client.CallbackURLs,
         LogoutURLs: client.LogoutURLs,
@@ -415,8 +423,8 @@ async function deleteCognitoIdp(idpName: string): Promise<void> {
     }
     
     // Delete the IdP
-    await cognitoClient.send(new DeleteIdentityProviderCommand({
-      UserPoolId: COGNITO_USER_POOL_ID,
+    await getCognitoClient().send(new DeleteIdentityProviderCommand({
+      UserPoolId: getCognitoUserPoolId(),
       ProviderName: idpName,
     }));
     
@@ -477,7 +485,7 @@ router.get("/config", authenticateToken, async (req: AuthRequest, res: Response)
     // When using Cognito as SAML broker, the SP values are Cognito's endpoints (same for all tenants)
     // The client's IdP (Entra, CyberArk, etc.) sends SAML assertions to Cognito, not to Cohi directly
     const cognitoDomain = process.env.COGNITO_DOMAIN || "";
-    const cognitoUserPoolId = COGNITO_USER_POOL_ID;
+    const cognitoUserPoolId = getCognitoUserPoolId();
     const spInfo = {
       entity_id: cognitoUserPoolId ? `urn:amazon:cognito:sp:${cognitoUserPoolId}` : "Not configured — Cognito User Pool ID required",
       acs_url: cognitoDomain ? `https://${cognitoDomain}/saml2/idpresponse` : "Not configured — Cognito Domain required",
@@ -492,7 +500,7 @@ router.get("/config", authenticateToken, async (req: AuthRequest, res: Response)
       auth_config: tenant.auth_config || { mode: "hybrid", allow_email_password: true },
       configurations: configResult.rows,
       sp_info: spInfo,
-      cognito_configured: !!(COGNITO_USER_POOL_ID && COGNITO_CLIENT_ID),
+      cognito_configured: !!(getCognitoUserPoolId() && getCognitoClientId()),
     });
     
   } catch (error: any) {
@@ -509,6 +517,15 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
   try {
     const input: SSOConfigInput = req.body;
     const userRole = req.userRole || "";
+    
+    logInfo("[SSOConfig] POST /config request received", { 
+      providerType: input.provider_type,
+      hasMetadataUrl: !!input.metadata_url,
+      hasMetadataXml: !!input.metadata_xml,
+      emailDomains: input.email_domains,
+      userRole,
+      userId: req.userId,
+    });
     
     // Only super/platform admins can override tenant_id via query param
     const tenantId = ["super_admin", "platform_admin"].includes(userRole)
@@ -537,7 +554,7 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
     const tenant = tenantResult.rows[0];
     
     // Validate Cognito is configured before attempting IdP creation
-    if (!COGNITO_USER_POOL_ID || !COGNITO_CLIENT_ID) {
+    if (!getCognitoUserPoolId() || !getCognitoClientId()) {
       return res.status(503).json({ 
         error: "SSO is not available. Cognito User Pool is not configured.",
         details: "COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID environment variables must be set."
@@ -570,10 +587,30 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
     let parsedMetadata: ParsedSAMLMetadata | undefined;
     if (input.provider_type !== "oidc" && input.provider_type !== "google") {
       if (input.metadata_url) {
-        const metadataXml = await fetchMetadataFromUrl(input.metadata_url);
-        parsedMetadata = parseSAMLMetadata(metadataXml);
+        logInfo("[SSOConfig] Fetching metadata from URL", { url: input.metadata_url, tenantSlug: tenant.slug });
+        try {
+          const metadataXml = await fetchMetadataFromUrl(input.metadata_url);
+          logInfo("[SSOConfig] Metadata fetched successfully", { length: metadataXml.length });
+          parsedMetadata = parseSAMLMetadata(metadataXml);
+          logInfo("[SSOConfig] Metadata parsed", { entityId: parsedMetadata.entityId, ssoUrl: parsedMetadata.ssoUrl });
+        } catch (fetchError: any) {
+          logError("[SSOConfig] Metadata fetch/parse failed", fetchError, { url: input.metadata_url });
+          return res.status(400).json({ 
+            error: "Failed to fetch or parse SAML metadata",
+            details: fetchError.message 
+          });
+        }
       } else if (input.metadata_xml) {
-        parsedMetadata = parseSAMLMetadata(input.metadata_xml);
+        try {
+          parsedMetadata = parseSAMLMetadata(input.metadata_xml);
+          logInfo("[SSOConfig] Metadata XML parsed", { entityId: parsedMetadata.entityId, ssoUrl: parsedMetadata.ssoUrl });
+        } catch (parseError: any) {
+          logError("[SSOConfig] Metadata XML parse failed", parseError, {});
+          return res.status(400).json({ 
+            error: "Failed to parse SAML metadata XML",
+            details: parseError.message 
+          });
+        }
       } else {
         return res.status(400).json({ error: "SAML metadata (URL or XML) is required" });
       }
@@ -600,20 +637,40 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
       });
     }
     
-    // Check for existing configuration
+    // Check for existing configuration for this tenant + idp type
     const existingConfig = await mgmtPool.query(
-      `SELECT id FROM tenant_identity_providers WHERE tenant_id = $1 AND provider_type = $2`,
+      `SELECT id FROM tenant_identity_providers WHERE tenant_id = $1 AND idp_type = $2`,
       [tenantId, input.provider_type]
     );
+    
+    // Build provider display name
+    const providerNames: Record<string, string> = {
+      saml: "SAML IdP",
+      azure_ad: "Microsoft Entra ID",
+      okta: "Okta",
+      oidc: "OIDC Provider",
+      google: "Google Workspace",
+      coheus_bridge: "Coheus Bridge",
+    };
+    const providerDisplayName = providerNames[input.provider_type] || input.provider_type;
     
     const configData = {
       idp_entity_id: parsedMetadata?.entityId,
       idp_sso_url: parsedMetadata?.ssoUrl,
       idp_slo_url: parsedMetadata?.sloUrl,
+      idp_certificate: parsedMetadata?.certificate ? "present" : undefined, // Don't store full cert in JSON
       oidc_client_id: input.oidc_client_id,
       oidc_issuer_url: input.oidc_issuer_url,
       attribute_mapping: input.attribute_mapping,
     };
+    
+    logInfo("[SSOConfig] Saving config to database", { 
+      tenantSlug: tenant.slug, 
+      providerType: input.provider_type,
+      cognitoIdpName,
+      isUpdate: existingConfig.rows.length > 0,
+      emailDomains: input.email_domains,
+    });
     
     let configId: string;
     
@@ -626,15 +683,17 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
              idp_type = $3,
              config = $4,
              is_enabled = $5,
+             provider_name = $6,
              updated_at = NOW()
-         WHERE id = $6
+         WHERE id = $7
          RETURNING id`,
         [
           cognitoIdpName,
           input.email_domains,
           input.provider_type,
-          configData,
+          JSON.stringify(configData),
           input.is_enabled ?? true,
+          providerDisplayName,
           existingConfig.rows[0].id
         ]
       );
@@ -644,16 +703,17 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
       // Insert new
       const insertResult = await mgmtPool.query(
         `INSERT INTO tenant_identity_providers 
-         (tenant_id, provider_type, idp_type, cognito_idp_name, email_domains, config, is_enabled, is_primary, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
+         (tenant_id, provider_type, provider_name, idp_type, cognito_idp_name, email_domains, config, is_enabled, is_primary, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9)
          RETURNING id`,
         [
           tenantId,
           "cognito_federated",
+          providerDisplayName,
           input.provider_type,
           cognitoIdpName,
           input.email_domains,
-          configData,
+          JSON.stringify(configData),
           input.is_enabled ?? true,
           req.userId
         ]
@@ -670,7 +730,12 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
     });
     
   } catch (error: any) {
-    logError("[SSOConfig] Save config error", error, {});
+    logError("[SSOConfig] Save config error", error, { 
+      message: error.message,
+      code: error.code,
+      stack: error.stack?.substring(0, 500),
+    });
+    console.error("[SSOConfig] Full error:", error);
     res.status(500).json({ error: error.message || "Failed to save SSO configuration" });
   }
 });
@@ -771,7 +836,7 @@ router.post("/test", authenticateToken, async (req: AuthRequest, res: Response) 
       `identity_provider=${encodeURIComponent(config.cognito_idp_name)}` +
       `&redirect_uri=${encodeURIComponent(callbackUrl)}` +
       `&response_type=code` +
-      `&client_id=${COGNITO_CLIENT_ID}` +
+      `&client_id=${getCognitoClientId()}` +
       `&scope=email+openid+profile` +
       `&state=sso_test_${config_id}`;
     
@@ -807,23 +872,27 @@ router.get("/history", authenticateToken, async (req: AuthRequest, res: Response
       }
     }
     
-    const mgmtPool = getManagementPool();
-    
-    // SSO login history is stored in each tenant's database, not in management DB
-    // For management-level history, we query the management pool's audit logs
-    // For tenant-level history, we need to query the tenant's sso_login_history table
-    const result = await mgmtPool.query(
-      `SELECT al.id, al.user_email, al.description, al.status, al.ip_address, al.user_agent, al.created_at
-       FROM audit_logs al
-       WHERE al.action = 'login' AND al.resource = 'auth' 
-         AND al.description LIKE '%SSO%'
-         AND (al.tenant_id = $1 OR ($2 = true AND al.tenant_id IS NULL))
-       ORDER BY al.created_at DESC 
-       LIMIT $3`,
-      [tenantId, ["super_admin", "platform_admin"].includes(userRole), limit]
-    );
-    
-    res.json({ history: result.rows });
+    // SSO login history is stored in each tenant's database in sso_login_history table
+    // (written by cognitoAuth.ts on each SSO login)
+    try {
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const result = await tenantPool.query(
+        `SELECT id, user_email, user_name, provider, cognito_idp_name, status, error_message, created_at
+         FROM sso_login_history
+         ORDER BY created_at DESC 
+         LIMIT $1`,
+        [limit]
+      );
+      res.json({ history: result.rows });
+    } catch (dbError: any) {
+      // Table may not exist yet if no SSO logins have occurred, or tenant DB not available
+      if (dbError.message?.includes("does not exist") || dbError.code === "42P01") {
+        logInfo("[SSOConfig] SSO history table not found — no SSO logins recorded yet", { tenantId });
+        res.json({ history: [] });
+      } else {
+        throw dbError;
+      }
+    }
     
   } catch (error: any) {
     logError("[SSOConfig] Get history error", error, {});

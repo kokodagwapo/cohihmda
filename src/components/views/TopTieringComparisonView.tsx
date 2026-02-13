@@ -113,227 +113,6 @@ interface TopTieringComparisonViewProps {
   selectedChannel?: string | null;
 }
 
-// Mock data for Branches
-const mockBranches: ActorData[] = [
-  {
-    id: "2001",
-    name: "Branch 2001",
-    tier: "top",
-    revenue: 5000000,
-    units: 800,
-    volume: 5000000,
-    revenueBPS: 320,
-    revenuePerLoan: 6250,
-  },
-  {
-    id: "2002",
-    name: "Branch 2002",
-    tier: "top",
-    revenue: 2750000,
-    units: 200,
-    volume: 2750000,
-    revenueBPS: 300,
-    revenuePerLoan: 13750,
-  },
-  {
-    id: "2101",
-    name: "Branch 2101",
-    tier: "second",
-    revenue: 1000000,
-    units: 150,
-    volume: 1000000,
-    revenueBPS: 280,
-    revenuePerLoan: 6667,
-  },
-  {
-    id: "2201",
-    name: "Branch 2201",
-    tier: "second",
-    revenue: 900000,
-    units: 100,
-    volume: 900000,
-    revenueBPS: 250,
-    revenuePerLoan: 9000,
-  },
-  {
-    id: "2301",
-    name: "Branch 2301",
-    tier: "bottom",
-    revenue: 500000,
-    units: 50,
-    volume: 500000,
-    revenueBPS: 220,
-    revenuePerLoan: 10000,
-  },
-  {
-    id: "1000",
-    name: "Branch 1000",
-    tier: "bottom",
-    revenue: 400000,
-    units: 40,
-    volume: 400000,
-    revenueBPS: 200,
-    revenuePerLoan: 10000,
-  },
-  {
-    id: "2005",
-    name: "Branch 2005",
-    tier: "bottom",
-    revenue: 350000,
-    units: 35,
-    volume: 350000,
-    revenueBPS: 190,
-    revenuePerLoan: 10000,
-  },
-  {
-    id: "2205",
-    name: "Branch 2205",
-    tier: "bottom",
-    revenue: 280000,
-    units: 30,
-    volume: 280000,
-    revenueBPS: 180,
-    revenuePerLoan: 9333,
-  },
-];
-
-// Mock data for Loan Officers (44 total based on image)
-// Top Tier: 9 Loan Officers (50.4% = $6.02M)
-// Second Tier: 12 Loan Officers (29.9% = $3.57M)
-// Bottom Tier: 23 Loan Officers (19.7% = $2.34M)
-// Total: $11.93M, Total Units: 1,895
-const loanOfficerNames = [
-  "Stanley",
-  "Alicia M",
-  "Craig J",
-  "Vance",
-  "James",
-  "Aaron",
-  "Stephe",
-  "Sharon",
-  "Sean C",
-  "Matthe",
-  "Paul Fr",
-  "Cari An",
-  "Jay Bry",
-  "Joanne",
-  "Charles",
-  "Frank E",
-  "Chad M",
-  "Samuel",
-  "Laura J",
-  "David",
-  "Brad H",
-  "Brian C",
-  "Anthon",
-  "Jerry D",
-  "John Gr",
-  "Jeffrey",
-  "Marcus",
-  "Dougla",
-  "Kyle Ch",
-  "Laura K",
-  "Kaity C",
-  "Gregor",
-  "Laura",
-  "Joyce",
-  "Garrett",
-  "Rachae",
-  "Clay Jo",
-  "Jayme",
-  "Kristin",
-  "Louis N",
-  "Ashton",
-  "Jason",
-  "Melanie",
-  "Tanya",
-];
-
-const generateLoanOfficers = (): ActorData[] => {
-  const officers: ActorData[] = [];
-
-  // Top Tier: 9 officers, $6.02M total
-  // Distribute revenue to match ~$6.02M total
-  const topTierRevenues = [
-    850000, 750000, 700000, 680000, 670000, 650000, 640000, 620000, 460000,
-  ];
-  const topTierCount = 9;
-  for (let i = 0; i < topTierCount; i++) {
-    const revenue = topTierRevenues[i] || 600000;
-    const units = Math.round(revenue / 6000); // ~$6K per unit
-    officers.push({
-      id: `lo-${i + 1}`,
-      name: loanOfficerNames[i] || `LO ${i + 1}`,
-      tier: "top",
-      revenue,
-      units,
-      volume: revenue,
-      revenueBPS: Math.round(300 + Math.random() * 50), // 300-350 BPS
-      revenuePerLoan: Math.round(revenue / units),
-    });
-  }
-
-  // Second Tier: 12 officers, $3.57M total
-  const secondTierRevenues = [
-    350000, 330000, 320000, 310000, 300000, 290000, 280000, 270000, 260000,
-    250000, 240000, 230000,
-  ];
-  const secondTierCount = 12;
-  for (let i = 0; i < secondTierCount; i++) {
-    const revenue = secondTierRevenues[i] || 297500;
-    const units = Math.round(revenue / 5500);
-    officers.push({
-      id: `lo-${topTierCount + i + 1}`,
-      name: loanOfficerNames[topTierCount + i] || `LO ${topTierCount + i + 1}`,
-      tier: "second",
-      revenue,
-      units,
-      volume: revenue,
-      revenueBPS: Math.round(220 + Math.random() * 60), // 220-280 BPS
-      revenuePerLoan: Math.round(revenue / units),
-    });
-  }
-
-  // Bottom Tier: 23 officers, $2.34M total
-  const bottomTierCount = 23;
-  const bottomTierAvgRevenue = 2340000 / bottomTierCount;
-  for (let i = 0; i < bottomTierCount; i++) {
-    const revenue = Math.round(bottomTierAvgRevenue * (0.7 + (i % 10) * 0.03)); // Vary by position
-    const units = Math.max(1, Math.round(revenue / 5000));
-    officers.push({
-      id: `lo-${topTierCount + secondTierCount + i + 1}`,
-      name:
-        loanOfficerNames[topTierCount + secondTierCount + i] ||
-        `LO ${topTierCount + secondTierCount + i + 1}`,
-      tier: "bottom",
-      revenue,
-      units,
-      volume: revenue,
-      revenueBPS: Math.round(150 + Math.random() * 70), // 150-220 BPS
-      revenuePerLoan: Math.round(revenue / units),
-    });
-  }
-
-  // Normalize to match exact totals
-  const currentTotalRevenue = officers.reduce((sum, o) => sum + o.revenue, 0);
-  const targetRevenue = 11930000;
-  const revenueScale = targetRevenue / currentTotalRevenue;
-
-  const currentTotalUnits = officers.reduce((sum, o) => sum + o.units, 0);
-  const targetUnits = 1895;
-  const unitsScale = targetUnits / currentTotalUnits;
-
-  return officers.map((o) => ({
-    ...o,
-    revenue: Math.round(o.revenue * revenueScale),
-    units: Math.max(1, Math.round(o.units * unitsScale)),
-    revenuePerLoan: Math.round(
-      (o.revenue * revenueScale) / Math.max(1, Math.round(o.units * unitsScale))
-    ),
-  }));
-};
-
-const mockLoanOfficers = generateLoanOfficers();
 
 export function TopTieringComparisonView({
   selectedTenantId,
@@ -471,7 +250,7 @@ export function TopTieringComparisonView({
 
   const formatNumber = (num: number) => num.toLocaleString("en-US");
 
-  // Get current data based on selected actor - use API data when available, else mock
+  // Get current data based on selected actor - use API data when available, else empty
   const currentData: ActorData[] = useMemo(() => {
     if (apiData && apiData.actors.length > 0) {
       // Transform API data to match local interface
@@ -486,9 +265,9 @@ export function TopTieringComparisonView({
         revenuePerLoan: actor.revenuePerLoan,
       }));
     }
-    // Fall back to mock data
-    return selectedActor === "branch" ? mockBranches : mockLoanOfficers;
-  }, [apiData, selectedActor]);
+    // Return empty array when no API data available
+    return [];
+  }, [apiData]);
 
   // Sync selections to the global store whenever they change
   // NOTE: This must come AFTER currentData is defined

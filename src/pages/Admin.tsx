@@ -29,6 +29,7 @@ import { KnowledgeCenterSection } from "@/components/admin/KnowledgeCenterSectio
 import { AIPromptManager } from "@/components/admin/AIPromptManager";
 import { InsightFeedbackSection } from "@/components/admin/InsightFeedbackSection";
 import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSection";
+import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
 import { Menu, Settings, Crown, Briefcase, Building2 } from "lucide-react";
@@ -679,6 +680,11 @@ export const Admin = () => {
                 >
                   <PlatformSettingsSection />
                 </motion.div>
+              )}
+
+              {/* Sync Management Section (Platform Admin) */}
+              {activeSection === "sync-management" && (
+                <SyncManagementSection />
               )}
             </AdminLayoutWithContext>
           </div>
