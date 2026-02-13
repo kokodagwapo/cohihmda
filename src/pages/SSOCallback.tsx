@@ -61,11 +61,7 @@ export const SSOCallback = () => {
 
         // Set auth state
         if (data.token && data.user) {
-          // Store token and user info
-          localStorage.setItem('cohi_token', data.token);
-          localStorage.setItem('cohi_user', JSON.stringify(data.user));
-          
-          // Update auth context
+          // Update auth context (this stores the token in localStorage as 'auth_token' and sets API client)
           if (setAuthFromToken) {
             setAuthFromToken(data.token, data.user);
           }

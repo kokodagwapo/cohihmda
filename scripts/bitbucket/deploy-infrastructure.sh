@@ -125,7 +125,7 @@ validate_templates() {
 get_stack_parameters() {
     local stack_name=$1
     
-    echo "Getting existing parameters from stack: $stack_name"
+    echo "Getting existing parameters from stack: $stack_name" >&2
     
     # Get parameter keys and build JSON array with UsePreviousValue: true
     # Uses only AWS CLI + bash (no jq dependency)
@@ -209,7 +209,7 @@ deploy_backend_stack() {
         --stack-name "$stack_name" \
         --change-set-name "$CHANGE_SET_NAME" \
         --template-body "file://$template_file" \
-        --use-previous-template false \
+        --no-use-previous-template \
         --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
         --parameters "$(get_stack_parameters "$stack_name")" \
         --region "$AWS_DEFAULT_REGION" \
@@ -373,7 +373,7 @@ deploy_waf_cloudfront_stack() {
         --stack-name "$stack_name" \
         --change-set-name "$CHANGE_SET_NAME" \
         --template-body "file://$template_file" \
-        --use-previous-template false \
+        --no-use-previous-template \
         --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
         --parameters "$existing_params" \
         --region "$cf_region" \
