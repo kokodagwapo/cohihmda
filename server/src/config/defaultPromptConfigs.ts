@@ -112,7 +112,10 @@ When users ask broad questions, ALWAYS scope data to a RECENT time window. Never
 ## Visualization Selection & Data Aggregation Rules (CRITICAL)
 - Time series (dates) → "line" or "area" chart, ALWAYS aggregate by date period (day, week, month, quarter, year)
 - Category comparisons → "bar" chart (vertical) or "horizontal_bar" (for 5+ categories), ALWAYS aggregate by category
-- Part of whole (proportions) → "pie" or "donut" chart, ALWAYS aggregate
+- Multi-metric comparison (2+ numeric columns, e.g. funded_count vs denied_count by month) → "stacked_bar" (stacked) or "grouped_bar" (side-by-side bars). Use yKeys array to list the numeric columns.
+- Cross-tabulation / breakdown by two dimensions → "pivot" table. Use when user wants a metric broken down by two categorical fields (e.g. "revenue by loan officer per month", "volume by product per branch"). Return FLAT rows — the frontend handles the cross-tabulation.
+- Part of whole (proportions, <20 categories) → "pie" or "donut" chart, ALWAYS aggregate
+- Part of whole with many categories (5-50) → "treemap". Better than pie/donut when there are too many slices.
 - Single metric value → "kpi" card
 - Detailed individual records → "table" ONLY when user explicitly asks for a list of individual loans/records
 
@@ -134,6 +137,10 @@ When users ask broad questions, ALWAYS scope data to a RECENT time window. Never
    - Aggregate the metric (usually COUNT or SUM)
 5. Maximum 50 data points for charts (use LIMIT or broader date grouping)
 6. If user asks to see individual loans as a chart, suggest using a table instead or ask for clarification
+7. For pivot tables: return FLAT rows with 3+ columns (row dimension, column dimension, value). Do NOT pivot in SQL — the frontend handles cross-tabulation. Just return the raw grouped data.
+   Example: SELECT l.loan_officer, TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS month, SUM(l.loan_amount) AS total FROM public.loans l GROUP BY 1, 2 ORDER BY 1, 2
+8. For stacked_bar / grouped_bar: return one xKey column plus 2+ numeric columns. Use yKeys in chartConfig to list the numeric column names.
+   Example: SELECT period, SUM(funded) AS funded_count, SUM(denied) AS denied_count FROM ... GROUP BY period ORDER BY period
 
 ## Response Format
 Respond with a JSON object:
@@ -141,17 +148,28 @@ Respond with a JSON object:
   "sql": "SELECT ... FROM public.loans l WHERE ... GROUP BY ... ORDER BY ...",
   "params": [],
   "explanation": "Brief explanation of what this query does",
-  "visualizationType": "bar|line|pie|area|table|kpi|donut|horizontal_bar",
+  "visualizationType": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot",
   "chartConfig": {
     "title": "Descriptive chart title",
     "xKey": "column name for x-axis (the category/date column)",
-    "yKey": "column name for y-axis (the aggregated value)",
+    "yKey": "column name for y-axis (the primary aggregated value)",
+    "yKeys": ["col1", "col2"],
     "xLabel": "Human-readable X-axis label (e.g., 'Application Month', 'Branch')",
     "yLabel": "Human-readable Y-axis label (e.g., 'Total Loan Amount', 'Number of Loans')",
-    "nameKey": "for pie charts - category column",
-    "valueKey": "for pie charts - value column"
+    "nameKey": "for pie/treemap charts - category column",
+    "valueKey": "for pie/treemap charts - value column",
+    "pivotConfig": {
+      "rowKey": "row dimension column",
+      "columnKey": "column dimension column",
+      "valueKey": "numeric value column",
+      "aggregation": "sum|count|avg|min|max"
+    }
   }
-}`,
+}
+Notes:
+- yKeys: include ONLY for stacked_bar/grouped_bar when there are 2+ numeric columns
+- pivotConfig: include ONLY for pivot type
+- nameKey/valueKey: include for pie, donut, and treemap types`,
     model: "gpt-4o",
     temperature: 0.2,
     max_tokens: 1500,

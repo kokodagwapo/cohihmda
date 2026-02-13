@@ -190,16 +190,6 @@ const allAdminSections: AdminSectionDef[] = [
   // ============ TENANT CONTEXT (mode: tenant) ============
   // These sections are for managing a specific tenant (impersonation for platform admins)
   {
-    id: "org-overview" as AdminSection,
-    label: "Tenant Overview",
-    icon: BarChart3,
-    description: "Tenant statistics and health",
-    color: "text-blue-300 dark:text-blue-400/70",
-    allowedRoles: ["super_admin", "platform_admin", "tenant_admin"],
-    category: "Overview",
-    mode: "tenant",
-  },
-  {
     id: "org" as AdminSection,
     label: "Organization Settings",
     icon: Briefcase,

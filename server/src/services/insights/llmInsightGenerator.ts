@@ -618,11 +618,31 @@ function buildDetailFilters(
         text.toLowerCase().includes(name.toLowerCase())
       );
 
+      // Store per-officer snapshot values at generation time so the detail modal
+      // can display them exactly as the headline references them (consistency).
+      const allActors = metrics.tiering.byActorType.flatMap(t =>
+        [...t.topPerformers, ...t.bottomPerformers]
+      );
+      const actorSnapshots: Record<string, { units: number; revenue: number; volume: number; pullThrough: number }> = {};
+      for (const name of mentionedNames) {
+        const actor = allActors.find(a => a.name.toLowerCase() === name.toLowerCase());
+        if (actor) {
+          actorSnapshots[actor.name] = {
+            units: actor.units,
+            revenue: actor.revenue,
+            volume: actor.volume,
+            pullThrough: actor.pullThrough,
+          };
+        }
+      }
+
       return {
         type: "tiering",
         actorType,
         // If specific officers are mentioned, pass their names for filtering
         ...(mentionedNames.length > 0 ? { actorNames: mentionedNames } : {}),
+        // Snapshot of each officer's metrics at generation time for detail consistency
+        ...(Object.keys(actorSnapshots).length > 0 ? { actorSnapshots } : {}),
       };
     }
 

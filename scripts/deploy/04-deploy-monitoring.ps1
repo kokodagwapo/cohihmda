@@ -15,10 +15,17 @@ Write-Status "Starting Monitoring Stack Deployment" "Magenta"
 # Get required info from backend stack
 $ECS_CLUSTER = Get-StackOutput $STACK_BACKEND "ECSClusterName"
 $ECS_SERVICE = Get-StackOutput $STACK_BACKEND "ECSServiceName"
+$ALB_FULL_NAME = Get-StackOutput $STACK_BACKEND "ALBFullName"
+$TG_FULL_NAME = Get-StackOutput $STACK_BACKEND "TargetGroupFullName"
 
 if (-not $ECS_CLUSTER) {
     Write-Status "ERROR: Backend stack not found. Deploy backend first!" "Red"
     exit 1
+}
+
+if (-not $ALB_FULL_NAME -or -not $TG_FULL_NAME) {
+    Write-Status "WARNING: ALB/TargetGroup full names not found. Redeploy backend stack to add these outputs." "Yellow"
+    Write-Status "Monitoring alarms for ALB metrics will not work until these are available." "Yellow"
 }
 
 # Get Aurora instance identifier (for CloudWatch metrics)
@@ -28,6 +35,8 @@ $AURORA_INSTANCE_ID = "$AURORA_CLUSTER_ID-instance"
 
 Write-Status "ECS Cluster: $ECS_CLUSTER"
 Write-Status "ECS Service: $ECS_SERVICE"
+Write-Status "ALB Full Name: $ALB_FULL_NAME"
+Write-Status "Target Group Full Name: $TG_FULL_NAME"
 Write-Status "Aurora Instance: $AURORA_INSTANCE_ID"
 
 # Deploy monitoring stack
@@ -36,9 +45,17 @@ Write-Status "Deploying monitoring stack..."
 $params = @(
     "ParameterKey=ProjectName,ParameterValue=$PROJECT_NAME"
     "ParameterKey=Environment,ParameterValue=$ENVIRONMENT"
-    "ParameterKey=EBEnvironmentName,ParameterValue=$ECS_SERVICE"
+    "ParameterKey=ECSClusterName,ParameterValue=$ECS_CLUSTER"
+    "ParameterKey=ECSServiceName,ParameterValue=$ECS_SERVICE"
     "ParameterKey=RDSInstanceIdentifier,ParameterValue=$AURORA_INSTANCE_ID"
 )
+
+if ($ALB_FULL_NAME -and $TG_FULL_NAME) {
+    $params += "ParameterKey=ALBFullName,ParameterValue=$ALB_FULL_NAME"
+    $params += "ParameterKey=TargetGroupFullName,ParameterValue=$TG_FULL_NAME"
+} else {
+    Write-Status "Skipping ALB/TargetGroup params (not yet available). ALB alarms will be disabled." "Yellow"
+}
 
 if ($ALERT_EMAIL) {
     $params += "ParameterKey=AlertEmail,ParameterValue=$ALERT_EMAIL"

@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from "react";
 
 export type AdminSection =
   | "overview"
-  | "org-overview" // Tenant admin overview (their org only)
   | "tenants"
   | "platform-team" // Cohi internal team management (super_admin only)
   | "users"
@@ -66,7 +65,7 @@ export const useAdminState = () => {
         if (mode === "platform") {
           setActiveSection("overview");
         } else {
-          setActiveSection("org-overview");
+          setActiveSection("users");
         }
       }
     },

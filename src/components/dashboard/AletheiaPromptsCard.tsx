@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap,
@@ -27,9 +28,11 @@ import {
   MessageSquareText,
   Send,
   Tag,
+  Telescope,
 } from "lucide-react";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
@@ -173,6 +176,8 @@ interface BucketLaneProps {
   onDeleteInsight?: (insightId: number) => Promise<void>;
   /** Admin-only: submit feedback on an insight */
   onSubmitFeedback?: (insightId: number, rating: -1 | 1, tags?: string[], comment?: string) => Promise<boolean>;
+  /** Deep-dive an insight in the workbench */
+  onInvestigate?: (insightId: number) => void;
   /** Whether the user is a platform admin */
   isAdmin?: boolean;
 }
@@ -188,6 +193,7 @@ function BucketLane({
   onGenerateMore,
   onDeleteInsight,
   onSubmitFeedback,
+  onInvestigate,
   isAdmin,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
@@ -310,9 +316,25 @@ function BucketLane({
           <p className="flex-1 text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
             {insight.headline || insight.message}
           </p>
-          {/* Admin feedback + delete buttons */}
+          {/* Admin feedback + delete + investigate buttons */}
           {isAdmin && insight.insightId && (
             <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
+              {/* Investigate (deep dive in workbench) */}
+              {onInvestigate && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onInvestigate(insight.insightId!);
+                  }}
+                  className="p-1 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
+                  title="Deep dive in Workbench"
+                >
+                  <Telescope
+                    className="w-3 h-3 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                    strokeWidth={2}
+                  />
+                </button>
+              )}
               {/* Thumbs Up */}
               {onSubmitFeedback && (
                 <button
@@ -746,6 +768,29 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     [drillableSources]
   );
 
+  // Deep-dive: create a workbench canvas from an insight and navigate to it
+  const navigate = useNavigate();
+  const handleInvestigate = useCallback(
+    async (insightId: number) => {
+      try {
+        const tenantParam = selectedTenantId
+          ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+          : "";
+        const result = await api.request<{ id: string }>(
+          `/api/workbench/canvases/from-insight${tenantParam}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ insightId }),
+          }
+        );
+        navigate(`/my-dashboard?canvas=${result.id}`);
+      } catch (err) {
+        console.error("Error creating deep-dive canvas:", err);
+      }
+    },
+    [selectedTenantId, navigate]
+  );
+
   const isDrillable = useCallback(
     (insight: AletheiaInsight) => {
       return !!(insight.source && drillableSources.includes(insight.source));
@@ -1008,6 +1053,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                   onSubmitFeedback={
                     isAdmin ? submitFeedback : undefined
                   }
+                  onInvestigate={isAdmin ? handleInvestigate : undefined}
                   isAdmin={isAdmin}
                 />
               );

@@ -3,10 +3,9 @@ Description: |
   Coheus Monitoring Stack - CloudWatch Dashboard and Comprehensive Alarms
   
   This stack creates:
-  - CloudWatch Dashboard with all key metrics
-  - SNS Topic for alerts
+  - CloudWatch Dashboard with all key metrics (ECS, ALB, Aurora)
+  - SNS Topics for alerts (critical, warning, info)
   - Composite alarms for overall system health
-  - Lambda for custom metrics (optional)
 
 Parameters:
   ProjectName:
@@ -23,13 +22,27 @@ Parameters:
       - prod
     Description: Environment name
 
-  EBEnvironmentName:
+  ECSClusterName:
     Type: String
-    Description: Elastic Beanstalk environment name for metrics
+    Description: ECS Fargate cluster name for metrics
+
+  ECSServiceName:
+    Type: String
+    Description: ECS Fargate service name for metrics
+
+  ALBFullName:
+    Type: String
+    Default: ''
+    Description: ALB full name for metrics (e.g., app/coheus-prod-alb/abc123). Leave empty if backend stack hasn't exported this yet.
+
+  TargetGroupFullName:
+    Type: String
+    Default: ''
+    Description: Target group full name for metrics (e.g., targetgroup/coheus-prod-tg/abc123). Leave empty if backend stack hasn't exported this yet.
 
   RDSInstanceIdentifier:
     Type: String
-    Description: RDS instance identifier for metrics
+    Description: RDS/Aurora instance identifier for metrics
 
   CloudFrontDistributionId:
     Type: String
@@ -59,6 +72,9 @@ Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
   HasSlackWebhook: !Not [!Equals [!Ref SlackWebhookUrl, '']]
   HasCloudFront: !Not [!Equals [!Ref CloudFrontDistributionId, '']]
+  HasALB: !And
+    - !Not [!Equals [!Ref ALBFullName, '']]
+    - !Not [!Equals [!Ref TargetGroupFullName, '']]
 
 Resources:
   # ============================================================================
@@ -122,22 +138,48 @@ Resources:
   # Critical Alarms
   # ============================================================================
 
-  # EB Environment Health - Critical
-  EBHealthCriticalAlarm:
+  # ECS CPU Utilization - Critical (replaces EB Environment Health)
+  ECSCPUCriticalAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-eb-health-critical'
-      AlarmDescription: 'CRITICAL: Elastic Beanstalk environment health is Severe or Degraded'
-      MetricName: EnvironmentHealth
-      Namespace: AWS/ElasticBeanstalk
-      Statistic: Maximum
+      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-cpu-critical'
+      AlarmDescription: 'CRITICAL: ECS service CPU utilization exceeds 90%'
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
       Period: 60
       EvaluationPeriods: 3
-      Threshold: 20  # 20=Degraded, 25=Severe
-      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: EnvironmentName
-          Value: !Ref EBEnvironmentName
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+        - Name: ServiceName
+          Value: !Ref ECSServiceName
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: breaching
+
+  # ECS Memory Utilization - Critical
+  ECSMemoryCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-memory-critical'
+      AlarmDescription: 'CRITICAL: ECS service memory utilization exceeds 90%'
+      MetricName: MemoryUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+        - Name: ServiceName
+          Value: !Ref ECSServiceName
       AlarmActions:
         - !Ref CriticalAlertsTopic
       OKActions:
@@ -167,17 +209,19 @@ Resources:
       TreatMissingData: notBreaching
 
   # Database Connections Critical
+  # Aurora max_connections is 1000. With reduced pool sizes (legacy=10, mgmt=8, tenant=5/each),
+  # normal usage per ECS task ≈ 25-50 connections. Threshold 200 = 20% of DB capacity.
   DBConnectionsCriticalAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub '${ProjectName}-${Environment}-db-connections-critical'
-      AlarmDescription: 'CRITICAL: Database connections at maximum capacity'
+      AlarmDescription: 'CRITICAL: Database connections exceeding 200 (max_connections=1000). Check for pool leaks or excess ECS tasks.'
       MetricName: DatabaseConnections
       Namespace: AWS/RDS
       Statistic: Maximum
       Period: 60
       EvaluationPeriods: 3
-      Threshold: 85  # db.t3.micro max is ~87
+      Threshold: 200
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: DBInstanceIdentifier
@@ -188,22 +232,25 @@ Resources:
         - !Ref InfoAlertsTopic
       TreatMissingData: notBreaching
 
-  # High 5xx Error Rate Critical
-  HighErrorRateCriticalAlarm:
+  # ALB 5xx Error Rate - Critical (replaces EB ApplicationRequests5xx)
+  ALB5xxCriticalAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasALB
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-5xx-errors-critical'
-      AlarmDescription: 'CRITICAL: High rate of 5xx errors'
-      MetricName: ApplicationRequests5xx
-      Namespace: AWS/ElasticBeanstalk
+      AlarmName: !Sub '${ProjectName}-${Environment}-alb-5xx-critical'
+      AlarmDescription: 'CRITICAL: High rate of 5xx errors from targets'
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
       Statistic: Sum
       Period: 60
       EvaluationPeriods: 3
       Threshold: 50
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: EnvironmentName
-          Value: !Ref EBEnvironmentName
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+        - Name: TargetGroup
+          Value: !Ref TargetGroupFullName
       AlarmActions:
         - !Ref CriticalAlertsTopic
       OKActions:
@@ -236,22 +283,48 @@ Resources:
   # Warning Alarms
   # ============================================================================
 
-  # EB Environment Health - Warning
-  EBHealthWarningAlarm:
+  # ECS CPU Utilization - Warning (replaces EB Environment Health Warning)
+  ECSCPUWarningAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-eb-health-warning'
-      AlarmDescription: 'WARNING: Elastic Beanstalk environment health is degraded'
-      MetricName: EnvironmentHealth
-      Namespace: AWS/ElasticBeanstalk
-      Statistic: Maximum
+      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-cpu-warning'
+      AlarmDescription: 'WARNING: ECS service CPU utilization exceeds 70%'
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
       Period: 300
       EvaluationPeriods: 2
-      Threshold: 15  # 15=Warning
-      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: EnvironmentName
-          Value: !Ref EBEnvironmentName
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+        - Name: ServiceName
+          Value: !Ref ECSServiceName
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # ECS Memory Utilization - Warning
+  ECSMemoryWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-memory-warning'
+      AlarmDescription: 'WARNING: ECS service memory utilization exceeds 80%'
+      MetricName: MemoryUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+        - Name: ServiceName
+          Value: !Ref ECSServiceName
       AlarmActions:
         - !Ref WarningAlertsTopic
       OKActions:
@@ -280,22 +353,25 @@ Resources:
         - !Ref InfoAlertsTopic
       TreatMissingData: notBreaching
 
-  # High Latency Warning
-  HighLatencyWarningAlarm:
+  # ALB Latency Warning (replaces EB ApplicationLatencyP99)
+  ALBLatencyWarningAlarm:
     Type: AWS::CloudWatch::Alarm
+    Condition: HasALB
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-high-latency-warning'
-      AlarmDescription: 'WARNING: Application response time exceeds 2 seconds'
-      MetricName: ApplicationLatencyP99
-      Namespace: AWS/ElasticBeanstalk
-      Statistic: Average
+      AlarmName: !Sub '${ProjectName}-${Environment}-alb-latency-warning'
+      AlarmDescription: 'WARNING: ALB target response time exceeds 2 seconds (p99)'
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      ExtendedStatistic: p99
       Period: 300
       EvaluationPeriods: 3
-      Threshold: 2  # 2 seconds
+      Threshold: 2
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: EnvironmentName
-          Value: !Ref EBEnvironmentName
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+        - Name: TargetGroup
+          Value: !Ref TargetGroupFullName
       AlarmActions:
         - !Ref WarningAlertsTopic
       OKActions:
@@ -356,7 +432,10 @@ Resources:
     Properties:
       AlarmName: !Sub '${ProjectName}-${Environment}-system-health'
       AlarmDescription: 'Overall system health - triggered when any critical component fails'
-      AlarmRule: !Sub 'ALARM(${EBHealthCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${HighErrorRateCriticalAlarm})'
+      AlarmRule: !If
+        - HasALB
+        - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${ALB5xxCriticalAlarm})'
+        - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm})'
       AlarmActions:
         - !Ref CriticalAlertsTopic
       OKActions:
@@ -364,239 +443,58 @@ Resources:
 
   # ============================================================================
   # CloudWatch Dashboard
+  # Uses Fn::If to swap between full (with ALB) and reduced (without ALB) body
+  # because empty ALBFullName/TargetGroupFullName cause validation errors.
   # ============================================================================
   MonitoringDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
       DashboardName: !Sub '${ProjectName}-${Environment}-dashboard'
-      DashboardBody: !Sub |
-        {
-          "widgets": [
+      DashboardBody: !If
+        - HasALB
+        # ---- Full dashboard WITH ALB widgets ----
+        - !Sub |
             {
-              "type": "text",
-              "x": 0,
-              "y": 0,
-              "width": 24,
-              "height": 1,
-              "properties": {
-                "markdown": "# ${ProjectName} ${Environment} - System Health Dashboard"
-              }
-            },
-            {
-              "type": "alarm",
-              "x": 0,
-              "y": 1,
-              "width": 24,
-              "height": 3,
-              "properties": {
-                "title": "Alarm Status",
-                "alarms": [
-                  "${EBHealthCriticalAlarm.Arn}",
-                  "${DBCPUCriticalAlarm.Arn}",
-                  "${DBConnectionsCriticalAlarm.Arn}",
-                  "${HighErrorRateCriticalAlarm.Arn}",
-                  "${DBStorageCriticalAlarm.Arn}"
-                ]
-              }
-            },
-            {
-              "type": "metric",
-              "x": 0,
-              "y": 4,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "EB Environment Health",
-                "metrics": [
-                  ["AWS/ElasticBeanstalk", "EnvironmentHealth", "EnvironmentName", "${EBEnvironmentName}"]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Maximum"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 8,
-              "y": 4,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Application Requests",
-                "metrics": [
-                  ["AWS/ElasticBeanstalk", "ApplicationRequestsTotal", "EnvironmentName", "${EBEnvironmentName}", {"label": "Total"}],
-                  ["AWS/ElasticBeanstalk", "ApplicationRequests2xx", "EnvironmentName", "${EBEnvironmentName}", {"label": "2xx", "color": "#2ca02c"}],
-                  ["AWS/ElasticBeanstalk", "ApplicationRequests4xx", "EnvironmentName", "${EBEnvironmentName}", {"label": "4xx", "color": "#ff7f0e"}],
-                  ["AWS/ElasticBeanstalk", "ApplicationRequests5xx", "EnvironmentName", "${EBEnvironmentName}", {"label": "5xx", "color": "#d62728"}]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Sum"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 16,
-              "y": 4,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Application Latency",
-                "metrics": [
-                  ["AWS/ElasticBeanstalk", "ApplicationLatencyP50", "EnvironmentName", "${EBEnvironmentName}", {"label": "p50"}],
-                  ["AWS/ElasticBeanstalk", "ApplicationLatencyP90", "EnvironmentName", "${EBEnvironmentName}", {"label": "p90"}],
-                  ["AWS/ElasticBeanstalk", "ApplicationLatencyP99", "EnvironmentName", "${EBEnvironmentName}", {"label": "p99", "color": "#d62728"}]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Average"
-              }
-            },
-            {
-              "type": "text",
-              "x": 0,
-              "y": 10,
-              "width": 24,
-              "height": 1,
-              "properties": {
-                "markdown": "## Database Metrics (RDS)"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 0,
-              "y": 11,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Database CPU Utilization",
-                "metrics": [
-                  ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Average",
-                "annotations": {
-                  "horizontal": [
-                    {"label": "Warning", "value": 70, "color": "#ff7f0e"},
-                    {"label": "Critical", "value": 90, "color": "#d62728"}
-                  ]
-                }
-              }
-            },
-            {
-              "type": "metric",
-              "x": 8,
-              "y": 11,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Database Connections",
-                "metrics": [
-                  ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Maximum",
-                "annotations": {
-                  "horizontal": [
-                    {"label": "Max (t3.micro)", "value": 87, "color": "#d62728"}
-                  ]
-                }
-              }
-            },
-            {
-              "type": "metric",
-              "x": 16,
-              "y": 11,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Database Storage",
-                "metrics": [
-                  ["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 300,
-                "stat": "Average",
-                "annotations": {
-                  "horizontal": [
-                    {"label": "Warning (5GB)", "value": 5000000000, "color": "#ff7f0e"},
-                    {"label": "Critical (1GB)", "value": 1000000000, "color": "#d62728"}
-                  ]
-                }
-              }
-            },
-            {
-              "type": "metric",
-              "x": 0,
-              "y": 17,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Database Freeable Memory",
-                "metrics": [
-                  ["AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", "${RDSInstanceIdentifier}"]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Average"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 8,
-              "y": 17,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Database Read/Write IOPS",
-                "metrics": [
-                  ["AWS/RDS", "ReadIOPS", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Read IOPS"}],
-                  ["AWS/RDS", "WriteIOPS", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Write IOPS"}]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Average"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 16,
-              "y": 17,
-              "width": 8,
-              "height": 6,
-              "properties": {
-                "title": "Database Latency",
-                "metrics": [
-                  ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Read Latency"}],
-                  ["AWS/RDS", "WriteLatency", "DBInstanceIdentifier", "${RDSInstanceIdentifier}", {"label": "Write Latency"}]
-                ],
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "${AWS::Region}",
-                "period": 60,
-                "stat": "Average"
-              }
+              "widgets": [
+                {"type":"text","x":0,"y":0,"width":24,"height":1,"properties":{"markdown":"# ${ProjectName} ${Environment} - System Health Dashboard"}},
+                {"type":"alarm","x":0,"y":1,"width":24,"height":3,"properties":{"title":"Alarm Status","alarms":["${ECSCPUCriticalAlarm.Arn}","${ECSMemoryCriticalAlarm.Arn}","${DBCPUCriticalAlarm.Arn}","${DBConnectionsCriticalAlarm.Arn}","${ALB5xxCriticalAlarm.Arn}","${DBStorageCriticalAlarm.Arn}"]}},
+                {"type":"text","x":0,"y":4,"width":24,"height":1,"properties":{"markdown":"## ECS Service Metrics"}},
+                {"type":"metric","x":0,"y":5,"width":8,"height":6,"properties":{"title":"ECS CPU Utilization","metrics":[["AWS/ECS","CPUUtilization","ClusterName","${ECSClusterName}","ServiceName","${ECSServiceName}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (70%)","value":70,"color":"#ff7f0e"},{"label":"Critical (90%)","value":90,"color":"#d62728"}]}}},
+                {"type":"metric","x":8,"y":5,"width":8,"height":6,"properties":{"title":"ECS Memory Utilization","metrics":[["AWS/ECS","MemoryUtilization","ClusterName","${ECSClusterName}","ServiceName","${ECSServiceName}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (80%)","value":80,"color":"#ff7f0e"},{"label":"Critical (90%)","value":90,"color":"#d62728"}]}}},
+                {"type":"metric","x":16,"y":5,"width":8,"height":6,"properties":{"title":"ECS Running Task Count","metrics":[["ECS/ContainerInsights","RunningTaskCount","ClusterName","${ECSClusterName}","ServiceName","${ECSServiceName}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"text","x":0,"y":11,"width":24,"height":1,"properties":{"markdown":"## Application Load Balancer Metrics"}},
+                {"type":"metric","x":0,"y":12,"width":8,"height":6,"properties":{"title":"ALB Request Count & HTTP Codes","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","${ALBFullName}",{"label":"Total Requests"}],["AWS/ApplicationELB","HTTPCode_Target_2XX_Count","LoadBalancer","${ALBFullName}",{"label":"2xx","color":"#2ca02c"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","${ALBFullName}",{"label":"4xx","color":"#ff7f0e"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","${ALBFullName}",{"label":"5xx","color":"#d62728"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Sum"}},
+                {"type":"metric","x":8,"y":12,"width":8,"height":6,"properties":{"title":"ALB Target Response Time","metrics":[["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","${ALBFullName}",{"label":"p50","stat":"p50"}],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","${ALBFullName}",{"label":"p90","stat":"p90"}],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","${ALBFullName}",{"label":"p99","stat":"p99","color":"#d62728"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"annotations":{"horizontal":[{"label":"Warning (2s)","value":2,"color":"#ff7f0e"}]}}},
+                {"type":"metric","x":16,"y":12,"width":8,"height":6,"properties":{"title":"ALB Healthy/Unhealthy Hosts","metrics":[["AWS/ApplicationELB","HealthyHostCount","TargetGroup","${TargetGroupFullName}","LoadBalancer","${ALBFullName}",{"label":"Healthy","color":"#2ca02c"}],["AWS/ApplicationELB","UnHealthyHostCount","TargetGroup","${TargetGroupFullName}","LoadBalancer","${ALBFullName}",{"label":"Unhealthy","color":"#d62728"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"text","x":0,"y":18,"width":24,"height":1,"properties":{"markdown":"## Database Metrics (Aurora/RDS)"}},
+                {"type":"metric","x":0,"y":19,"width":8,"height":6,"properties":{"title":"Database CPU Utilization","metrics":[["AWS/RDS","CPUUtilization","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","annotations":{"horizontal":[{"label":"Warning","value":70,"color":"#ff7f0e"},{"label":"Critical","value":90,"color":"#d62728"}]}}},
+                {"type":"metric","x":8,"y":19,"width":8,"height":6,"properties":{"title":"Database Connections","metrics":[["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Maximum","annotations":{"horizontal":[{"label":"Critical (85)","value":85,"color":"#d62728"}]}}},
+                {"type":"metric","x":16,"y":19,"width":8,"height":6,"properties":{"title":"Database Storage","metrics":[["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (5GB)","value":5000000000,"color":"#ff7f0e"},{"label":"Critical (1GB)","value":1000000000,"color":"#d62728"}]}}},
+                {"type":"metric","x":0,"y":25,"width":8,"height":6,"properties":{"title":"Database Freeable Memory","metrics":[["AWS/RDS","FreeableMemory","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"metric","x":8,"y":25,"width":8,"height":6,"properties":{"title":"Database Read/Write IOPS","metrics":[["AWS/RDS","ReadIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read IOPS"}],["AWS/RDS","WriteIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write IOPS"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"metric","x":16,"y":25,"width":8,"height":6,"properties":{"title":"Database Latency","metrics":[["AWS/RDS","ReadLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read Latency"}],["AWS/RDS","WriteLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write Latency"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}}
+              ]
             }
-          ]
-        }
+        # ---- Reduced dashboard WITHOUT ALB widgets ----
+        - !Sub |
+            {
+              "widgets": [
+                {"type":"text","x":0,"y":0,"width":24,"height":1,"properties":{"markdown":"# ${ProjectName} ${Environment} - System Health Dashboard"}},
+                {"type":"alarm","x":0,"y":1,"width":24,"height":3,"properties":{"title":"Alarm Status","alarms":["${ECSCPUCriticalAlarm.Arn}","${ECSMemoryCriticalAlarm.Arn}","${DBCPUCriticalAlarm.Arn}","${DBConnectionsCriticalAlarm.Arn}","${DBStorageCriticalAlarm.Arn}"]}},
+                {"type":"text","x":0,"y":4,"width":24,"height":1,"properties":{"markdown":"## ECS Service Metrics"}},
+                {"type":"metric","x":0,"y":5,"width":8,"height":6,"properties":{"title":"ECS CPU Utilization","metrics":[["AWS/ECS","CPUUtilization","ClusterName","${ECSClusterName}","ServiceName","${ECSServiceName}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (70%)","value":70,"color":"#ff7f0e"},{"label":"Critical (90%)","value":90,"color":"#d62728"}]}}},
+                {"type":"metric","x":8,"y":5,"width":8,"height":6,"properties":{"title":"ECS Memory Utilization","metrics":[["AWS/ECS","MemoryUtilization","ClusterName","${ECSClusterName}","ServiceName","${ECSServiceName}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (80%)","value":80,"color":"#ff7f0e"},{"label":"Critical (90%)","value":90,"color":"#d62728"}]}}},
+                {"type":"metric","x":16,"y":5,"width":8,"height":6,"properties":{"title":"ECS Running Task Count","metrics":[["ECS/ContainerInsights","RunningTaskCount","ClusterName","${ECSClusterName}","ServiceName","${ECSServiceName}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"text","x":0,"y":11,"width":24,"height":1,"properties":{"markdown":"## ALB Metrics (not available yet — redeploy backend stack to enable)"}},
+                {"type":"text","x":0,"y":12,"width":24,"height":1,"properties":{"markdown":"## Database Metrics (Aurora/RDS)"}},
+                {"type":"metric","x":0,"y":13,"width":8,"height":6,"properties":{"title":"Database CPU Utilization","metrics":[["AWS/RDS","CPUUtilization","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","annotations":{"horizontal":[{"label":"Warning","value":70,"color":"#ff7f0e"},{"label":"Critical","value":90,"color":"#d62728"}]}}},
+                {"type":"metric","x":8,"y":13,"width":8,"height":6,"properties":{"title":"Database Connections","metrics":[["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Maximum","annotations":{"horizontal":[{"label":"Critical (85)","value":85,"color":"#d62728"}]}}},
+                {"type":"metric","x":16,"y":13,"width":8,"height":6,"properties":{"title":"Database Storage","metrics":[["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (5GB)","value":5000000000,"color":"#ff7f0e"},{"label":"Critical (1GB)","value":1000000000,"color":"#d62728"}]}}},
+                {"type":"metric","x":0,"y":19,"width":8,"height":6,"properties":{"title":"Database Freeable Memory","metrics":[["AWS/RDS","FreeableMemory","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"metric","x":8,"y":19,"width":8,"height":6,"properties":{"title":"Database Read/Write IOPS","metrics":[["AWS/RDS","ReadIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read IOPS"}],["AWS/RDS","WriteIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write IOPS"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"metric","x":16,"y":19,"width":8,"height":6,"properties":{"title":"Database Latency","metrics":[["AWS/RDS","ReadLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read Latency"}],["AWS/RDS","WriteLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write Latency"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}}
+              ]
+            }
 
 Outputs:
   CriticalAlertsTopicArn:

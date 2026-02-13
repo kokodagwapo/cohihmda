@@ -61,7 +61,11 @@ export interface VisualizationConfig {
     | "table"
     | "kpi"
     | "donut"
-    | "horizontal_bar";
+    | "horizontal_bar"
+    | "stacked_bar"
+    | "grouped_bar"
+    | "treemap"
+    | "pivot";
   title: string;
   data: any[];
   xKey?: string;
@@ -75,6 +79,7 @@ export interface VisualizationConfig {
   showLegend?: boolean;
   showGrid?: boolean;
   stacked?: boolean;
+  numberFormat?: "number" | "currency" | "percent" | "compact";
   kpiConfig?: {
     value: number | string;
     label: string;
@@ -86,6 +91,12 @@ export interface VisualizationConfig {
     columns: { key: string; label: string; format?: string }[];
     sortable?: boolean;
     pageSize?: number;
+  };
+  pivotConfig?: {
+    rowKey: string;
+    columnKey: string;
+    valueKey: string;
+    aggregation?: "sum" | "count" | "avg" | "min" | "max";
   };
 }
 
@@ -672,15 +683,43 @@ async function executeQuery(
 // Visualization Generation
 // ============================================================================
 
+/**
+ * Validate that a key actually exists in the data columns.
+ * Falls back to fuzzy matching, then positional fallback.
+ */
+function validateKeyData(
+  key: string | undefined,
+  cols: string[],
+  fallbackIndex: number,
+  preferNumeric?: boolean,
+  sampleRow?: Record<string, any>
+): string {
+  if (key && cols.includes(key)) return key;
+  if (key) {
+    const normalized = key.toLowerCase().replace(/[_\s]/g, "");
+    const match = cols.find(
+      (c) => c.toLowerCase().replace(/[_\s]/g, "") === normalized
+    );
+    if (match) return match;
+  }
+  if (preferNumeric && sampleRow) {
+    const numCol = cols.find((c) => typeof sampleRow[c] === "number");
+    if (numCol) return numCol;
+  }
+  return cols[fallbackIndex] || cols[0] || key || "value";
+}
+
 function buildVisualizationConfig(
   data: any[],
   queryConfig: GeneratedQuery
 ): VisualizationConfig {
   const chartConfig = queryConfig.chartConfig as any;
 
-  // Helper to create human-readable label from key
   const humanize = (key: string): string =>
     key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+
+  const cols = Object.keys(data[0] || {});
+  const sampleRow = data[0] || {};
 
   const baseConfig: VisualizationConfig = {
     type: queryConfig.visualizationType,
@@ -693,26 +732,65 @@ function buildVisualizationConfig(
   switch (queryConfig.visualizationType) {
     case "bar":
     case "horizontal_bar":
+    case "stacked_bar":
+    case "grouped_bar":
     case "line":
-    case "area":
-      const xKey = chartConfig.xKey || Object.keys(data[0] || {})[0];
-      const yKey = chartConfig.yKey || Object.keys(data[0] || {})[1];
+    case "area": {
+      const xKey = validateKeyData(
+        chartConfig.xKey,
+        cols,
+        0,
+        false,
+        sampleRow
+      );
+      const yKey = validateKeyData(
+        chartConfig.yKey,
+        cols.filter((c) => c !== xKey),
+        0,
+        true,
+        sampleRow
+      );
+      const validatedYKeys = chartConfig.yKeys
+        ?.map((k: string) =>
+          validateKeyData(k, cols, 0, true, sampleRow)
+        )
+        .filter((k: string) => k !== xKey);
+
       return {
         ...baseConfig,
         xKey,
         yKey,
-        yKeys: chartConfig.yKeys,
+        yKeys: validatedYKeys?.length ? validatedYKeys : undefined,
         xLabel: chartConfig.xLabel || humanize(xKey),
         yLabel: chartConfig.yLabel || humanize(yKey),
+        stacked:
+          queryConfig.visualizationType === "stacked_bar"
+            ? true
+            : chartConfig.stacked,
         colors: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"],
       };
+    }
 
     case "pie":
-    case "donut":
+    case "donut": {
+      const nameKey = validateKeyData(
+        chartConfig.nameKey,
+        cols,
+        0,
+        false,
+        sampleRow
+      );
+      const valueKey = validateKeyData(
+        chartConfig.valueKey,
+        cols.filter((c) => c !== nameKey),
+        0,
+        true,
+        sampleRow
+      );
       return {
         ...baseConfig,
-        nameKey: chartConfig.nameKey || Object.keys(data[0] || {})[0],
-        valueKey: chartConfig.valueKey || Object.keys(data[0] || {})[1],
+        nameKey,
+        valueKey,
         colors: [
           "#3b82f6",
           "#10b981",
@@ -723,12 +801,17 @@ function buildVisualizationConfig(
           "#14b8a6",
         ],
       };
+    }
 
-    case "kpi":
+    case "kpi": {
       const firstRow = data[0] || {};
-      const kpiValueKey = Object.keys(firstRow)[0];
+      const numericCols = cols.filter(
+        (c) => typeof firstRow[c] === "number"
+      );
+      const kpiValueKey = numericCols[0] || cols[0];
       return {
         ...baseConfig,
+        yKey: kpiValueKey,
         kpiConfig: {
           value: firstRow[kpiValueKey],
           label: chartConfig.title || humanize(kpiValueKey),
@@ -739,10 +822,11 @@ function buildVisualizationConfig(
               : "number",
         },
       };
+    }
 
     case "table":
-    default:
-      const columns = Object.keys(data[0] || {}).map((key) => ({
+    default: {
+      const columns = cols.map((key) => ({
         key,
         label: humanize(key),
         format: undefined,
@@ -755,6 +839,7 @@ function buildVisualizationConfig(
           pageSize: 10,
         },
       };
+    }
   }
 }
 

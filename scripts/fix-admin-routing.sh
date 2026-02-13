@@ -12,13 +12,13 @@ REGION="us-east-1"
 echo "🔧 Fixing admin page routing..."
 
 # Ensure 404.html exists and is properly configured
-if [ ! -f "docs/404.html" ]; then
-    echo "❌ Error: docs/404.html not found"
+if [ ! -f "dist/404.html" ]; then
+    echo "❌ Error: dist/404.html not found"
     exit 1
 fi
 
 # Upload 404.html with proper headers
-aws s3 cp docs/404.html "s3://${S3_BUCKET}/404.html" \
+aws s3 cp dist/404.html "s3://${S3_BUCKET}/404.html" \
     --region ${REGION} \
     --content-type "text/html; charset=utf-8" \
     --cache-control "no-cache, no-store, must-revalidate" \

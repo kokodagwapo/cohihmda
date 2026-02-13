@@ -45,7 +45,6 @@ import { useLOSConnections } from "@/hooks/admin/useLOSConnections";
 import { useSynapseConnections } from "@/hooks/admin/useSynapseConnections";
 import { useDeployments } from "@/hooks/admin/useDeployments";
 import { useRAGSettings } from "@/hooks/admin/useRAGSettings";
-import { useUsers } from "@/hooks/admin/useUsers";
 import { useStripeData } from "@/hooks/admin/useStripeData";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -66,7 +65,7 @@ export const Admin = () => {
   const tenantName = user?.tenant_name;
 
   // Determine default section based on role
-  const defaultSection: AdminSection = isPlatform ? "overview" : "org-overview";
+  const defaultSection: AdminSection = isPlatform ? "overview" : "users";
 
   // State management
   const {
@@ -154,14 +153,6 @@ export const Admin = () => {
     saveApiKeys,
   } = useRAGSettings();
   const {
-    users,
-    loading: usersLoading,
-    loadUsers,
-    createUser,
-    updateUser,
-    deleteUser,
-  } = useUsers();
-  const {
     subscriptionPlans,
     subscriptions,
     loading: stripeLoading,
@@ -180,14 +171,14 @@ export const Admin = () => {
   useEffect(() => {
     // Set the default section based on user role and admin mode
     if (!isPlatform && activeSection === "overview") {
-      // Tenant admins should not see platform overview, redirect to org overview
-      setActiveSection("org-overview");
+      // Tenant admins should not see platform overview, redirect to users
+      setActiveSection("users");
     } else if (isPlatform) {
       // Platform admins: ensure section matches mode
-      if (adminMode === "platform" && activeSection === "org-overview") {
-        setActiveSection("overview");
+      if (adminMode === "platform" && activeSection === "users") {
+        // Don't redirect -- users is valid in both modes
       } else if (adminMode === "tenant" && activeSection === "overview") {
-        setActiveSection("org-overview");
+        setActiveSection("users");
       }
     }
 
@@ -212,7 +203,7 @@ export const Admin = () => {
             await loadTenants();
             break;
           case "users":
-            await loadUsers();
+            // UserManagementSection handles its own data loading
             break;
           case "roles":
           case "sso":
@@ -271,14 +262,12 @@ export const Admin = () => {
     loadRagVoiceData,
     isPlatform,
     user?.tenant_id,
-    loadUsers,
   ]);
 
   // Get current section name for mobile header
   const getCurrentSectionLabel = () => {
     const sections = [
       { id: "overview", label: "Platform Overview" },
-      { id: "org-overview", label: "Overview" },
       { id: "tenants", label: "Tenants" },
       { id: "users", label: "Users" },
       { id: "roles", label: "Access & Permissions" },
@@ -435,54 +424,6 @@ export const Admin = () => {
               {activeSection === "overview" && isPlatform && (
                 <OverviewSection stats={stats} overviewLoading={statsLoading} />
               )}
-
-              {/* Organization/Tenant Overview Section (Tenant Admin or Platform Admin in tenant mode) */}
-              {activeSection === "org-overview" &&
-                (!isPlatform || adminMode === "tenant") && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <div className="space-y-6">
-                      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                        <h2 className="text-2xl font-light text-slate-900 dark:text-white mb-4">
-                          Welcome, {user?.full_name || "Admin"}
-                        </h2>
-                        <p className="text-slate-600 dark:text-slate-400 mb-6">
-                          Manage your organization's users, integrations, and
-                          settings from this dashboard.
-                        </p>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-                            <h3 className="text-lg font-medium text-blue-900 dark:text-blue-100">
-                              Users
-                            </h3>
-                            <p className="text-sm text-blue-700 dark:text-blue-300">
-                              Manage team members and permissions
-                            </p>
-                          </div>
-                          <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
-                            <h3 className="text-lg font-medium text-purple-900 dark:text-purple-100">
-                              Integrations
-                            </h3>
-                            <p className="text-sm text-purple-700 dark:text-purple-300">
-                              Connect your LOS and vendors
-                            </p>
-                          </div>
-                          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 rounded-lg p-4 border border-emerald-200 dark:border-emerald-800">
-                            <h3 className="text-lg font-medium text-emerald-900 dark:text-emerald-100">
-                              Data Quality
-                            </h3>
-                            <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                              Monitor data health and issues
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
 
               {/* Tenants Section */}
               {activeSection === "tenants" && (

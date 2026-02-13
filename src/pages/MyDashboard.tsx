@@ -326,8 +326,8 @@ export default function MyDashboard() {
             </Button>
           </div>
 
-          {/* Canvas – scrolls independently */}
-          <div className="flex-1 min-h-0 overflow-auto">
+          {/* Canvas – fills remaining space; canvas handles its own scrolling internally */}
+          <div className="flex-1 min-h-0 overflow-hidden">
             {showEmptyState ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-6 py-20">
                 <div className="relative mb-6">

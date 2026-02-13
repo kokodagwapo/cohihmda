@@ -22,6 +22,20 @@ export type SectionType =
   | 'leaderboard'
   | 'executive-dashboard';
 
+/**
+ * A dynamic (user-added) filter dimension.
+ * These are stored per-section and applied to Cohi widgets as SQL WHERE conditions
+ * and to registry widgets where the data hook supports them.
+ */
+export interface DynamicFilterEntry {
+  /** DB column name (e.g. 'state', 'channel', 'loan_type') */
+  column: string;
+  /** Display label (e.g. 'State', 'Channel') */
+  label: string;
+  /** Selected value — 'all' means no filter applied */
+  value: string;
+}
+
 export interface SectionFilters {
   /** Which dashboard this section represents – maps to a data source */
   sectionType: SectionType;
@@ -38,6 +52,8 @@ export interface SectionFilters {
   applicationType: string;
   /** For sales: branch or loan_officer */
   actorType: 'branch' | 'loan_officer';
+  /** User-added dynamic filters (column = value conditions) */
+  dynamicFilters?: DynamicFilterEntry[];
 }
 
 const currentYear = new Date().getFullYear();
@@ -66,6 +82,12 @@ interface WidgetSectionState {
   removeSection: (sectionId: string) => void;
   /** Find the first section of a given type and return its filters (or null) */
   getFiltersByType: (sectionType: SectionType) => SectionFilters | null;
+  /** Add a dynamic filter to a section */
+  addDynamicFilter: (sectionId: string, filter: DynamicFilterEntry) => void;
+  /** Remove a dynamic filter from a section by column name */
+  removeDynamicFilter: (sectionId: string, column: string) => void;
+  /** Update a dynamic filter's value */
+  updateDynamicFilter: (sectionId: string, column: string, value: string) => void;
 }
 
 export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
@@ -121,5 +143,55 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
       if (filters.sectionType === sectionType) return filters;
     }
     return null;
+  },
+
+  addDynamicFilter: (sectionId: string, filter: DynamicFilterEntry) => {
+    set((state) => {
+      const prev = state.sections[sectionId];
+      if (!prev) return state;
+      const existing = prev.dynamicFilters || [];
+      // Don't add if already present
+      if (existing.some((f) => f.column === filter.column)) return state;
+      return {
+        sections: {
+          ...state.sections,
+          [sectionId]: { ...prev, dynamicFilters: [...existing, filter] },
+        },
+      };
+    });
+  },
+
+  removeDynamicFilter: (sectionId: string, column: string) => {
+    set((state) => {
+      const prev = state.sections[sectionId];
+      if (!prev || !prev.dynamicFilters) return state;
+      return {
+        sections: {
+          ...state.sections,
+          [sectionId]: {
+            ...prev,
+            dynamicFilters: prev.dynamicFilters.filter((f) => f.column !== column),
+          },
+        },
+      };
+    });
+  },
+
+  updateDynamicFilter: (sectionId: string, column: string, value: string) => {
+    set((state) => {
+      const prev = state.sections[sectionId];
+      if (!prev || !prev.dynamicFilters) return state;
+      return {
+        sections: {
+          ...state.sections,
+          [sectionId]: {
+            ...prev,
+            dynamicFilters: prev.dynamicFilters.map((f) =>
+              f.column === column ? { ...f, value } : f,
+            ),
+          },
+        },
+      };
+    });
   },
 }));

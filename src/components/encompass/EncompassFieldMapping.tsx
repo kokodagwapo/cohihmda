@@ -66,7 +66,6 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Filter,
   Upload,
   FileJson,
   X,
@@ -304,7 +303,6 @@ export function EncompassFieldMapping({
       setLoading(true);
 
       if (!tenantId) {
-        console.error("[EncompassFieldMapping] Tenant ID is missing");
         toast({
           title: "Error",
           description: "Tenant ID is required to load field mappings",
@@ -315,7 +313,6 @@ export function EncompassFieldMapping({
       }
 
       if (!losConnectionId) {
-        console.error("[EncompassFieldMapping] Connection ID is missing");
         toast({
           title: "Error",
           description: "Connection ID is required to load field mappings",
@@ -325,49 +322,22 @@ export function EncompassFieldMapping({
         return;
       }
 
-      console.log("[EncompassFieldMapping] Loading field mappings:", {
-        losConnectionId,
-        tenantId,
-      });
-
-      // Load field mappings (with categories) - this should always work
-      console.log(
-        "[EncompassFieldMapping] Step 1: Loading field mappings with categories..."
-      );
+      // Load field mappings (with categories)
       const mappingsResponse = await api.request<{
         mappings: FieldMapping[];
         categories: CategoryInfo[];
       }>("/api/encompass/field-mappings");
-      console.log(
-        "[EncompassFieldMapping] Step 1 complete: Loaded",
-        mappingsResponse.mappings?.length || 0,
-        "mappings across",
-        mappingsResponse.categories?.length || 0,
-        "categories"
-      );
 
-      // Store categories
       if (mappingsResponse.categories) {
         setCategories(mappingsResponse.categories);
       }
 
-      // Load saved field swaps - this should always work (just returns empty array if none)
-      console.log(
-        "[EncompassFieldMapping] Step 2: Loading saved field swaps..."
-      );
+      // Load saved field swaps
       const swapsResponse = await api.request<{ swaps: FieldSwap[] }>(
         `/api/encompass/field-swaps/${losConnectionId}?tenant_id=${tenantId}`
       );
-      console.log(
-        "[EncompassFieldMapping] Step 2 complete: Loaded",
-        swapsResponse.swaps?.length || 0,
-        "swaps"
-      );
 
-      // Load RDB fields separately - this may fail if Encompass auth fails, but that's OK
-      console.log(
-        "[EncompassFieldMapping] Step 3: Loading RDB fields from Encompass (optional for validation)..."
-      );
+      // Load RDB fields separately - may fail if Encompass auth fails, but that's OK
       let rdbFieldsResponse: {
         rdbFields: EncompassRdbField[];
         warning?: string;
@@ -379,35 +349,12 @@ export function EncompassFieldMapping({
           warning?: string;
           error?: string;
         }>(`/api/encompass/fields/${losConnectionId}?tenant_id=${tenantId}`);
-        console.log(
-          "[EncompassFieldMapping] Step 3 complete: Loaded",
-          rdbFieldsResponse.rdbFields?.length || 0,
-          "RDB fields"
-        );
       } catch (error: any) {
-        // If RDB fields fetch fails, return empty array - UI will work without validation
-        console.warn(
-          "[EncompassFieldMapping] Step 3 failed: Unable to fetch RDB fields:",
-          error
-        );
         rdbFieldsResponse = {
           rdbFields: [],
           warning: "Unable to fetch RDB fields for validation",
         };
       }
-
-      console.log(
-        "[EncompassFieldMapping] Loaded mappings:",
-        mappingsResponse.mappings?.length || 0
-      );
-      console.log(
-        "[EncompassFieldMapping] Loaded swaps:",
-        swapsResponse.swaps?.length || 0
-      );
-      console.log(
-        "[EncompassFieldMapping] Loaded RDB fields:",
-        rdbFieldsResponse.rdbFields?.length || 0
-      );
 
       // Show warning if RDB fields couldn't be loaded
       if (rdbFieldsResponse.warning || rdbFieldsResponse.error) {
@@ -421,7 +368,6 @@ export function EncompassFieldMapping({
         });
       }
 
-      // Store RDB fields for field selection
       setRdbFields(rdbFieldsResponse.rdbFields || []);
 
       // Build swaps map
@@ -437,30 +383,13 @@ export function EncompassFieldMapping({
         (rdbFieldsResponse.rdbFields || []).map((f) => f.fieldID)
       );
 
-      // Debug: Log some sample RDB field IDs to see the format
-      if (rdbFieldIds.size > 0) {
-        const sampleIds = Array.from(rdbFieldIds).slice(0, 5);
-        console.log("[EncompassFieldMapping] Sample RDB field IDs:", sampleIds);
-      }
-
-      // Debug: Log some sample default field IDs
-      const sampleDefaults = (mappingsResponse.mappings || [])
-        .slice(0, 5)
-        .map((m) => m.defaultEncompassFieldId);
-      console.log(
-        "[EncompassFieldMapping] Sample default field IDs:",
-        sampleDefaults
-      );
-
       const mappingsArray = mappingsResponse.mappings || [];
-      let debugCount = 0; // Track how many debug logs we've printed
 
-      const validatedMappings = mappingsArray.map((mapping, index) => {
+      const validatedMappings = mappingsArray.map((mapping) => {
         const swappedFieldId = swapsMap.get(mapping.coheusAlias);
         const effectiveFieldId =
           swappedFieldId || mapping.defaultEncompassFieldId;
 
-        // Check if the effective field ID exists in RDB
         // RDB fields might be in format "3142" or "Fields.3142", so try multiple formats
         const normalizedFieldId = effectiveFieldId.replace(/^Fields\./, "");
         const withFieldsPrefix = effectiveFieldId.startsWith("Fields.")
@@ -472,24 +401,6 @@ export function EncompassFieldMapping({
           rdbFieldIds.has(normalizedFieldId) ||
           rdbFieldIds.has(withFieldsPrefix);
 
-        // Debug first few failures to understand format mismatch
-        if (!isValid && rdbFieldIds.size > 0 && debugCount < 5) {
-          debugCount++;
-          console.log(
-            `[EncompassFieldMapping] Field "${mapping.coheusAlias}" validation:`,
-            {
-              defaultFieldId: mapping.defaultEncompassFieldId,
-              effectiveFieldId,
-              normalizedFieldId,
-              withFieldsPrefix,
-              exactMatch: rdbFieldIds.has(effectiveFieldId),
-              normalizedMatch: rdbFieldIds.has(normalizedFieldId),
-              withPrefixMatch: rdbFieldIds.has(withFieldsPrefix),
-              sampleRdbIds: Array.from(rdbFieldIds).slice(0, 3),
-            }
-          );
-        }
-
         return {
           ...mapping,
           isValid,
@@ -500,10 +411,7 @@ export function EncompassFieldMapping({
       setMappings(validatedMappings);
       setValidating(false);
     } catch (error: any) {
-      console.error(
-        "[EncompassFieldMapping] Error loading field mappings:",
-        error
-      );
+      console.error("Failed to load field mappings:", error);
       toast({
         title: "Error",
         description: "Failed to load field mappings",
@@ -628,15 +536,14 @@ export function EncompassFieldMapping({
     setSelectedSuggestions(new Set());
 
     try {
-      // Show progress for discovery phase
+      // Step 1: Run analysis
       setAnalyzeProgress(30);
 
-      // Call the suggestions API which does discovery + analysis + matching
       const response = await api.request<SuggestionsResponse>(
         `/api/encompass/discovery/suggestions/${losConnectionId}?tenant_id=${tenantId}&run_analysis=true&sample_size=50`
       );
 
-      setAnalyzeProgress(90);
+      setAnalyzeProgress(60);
 
       if (response.success && response.suggestions) {
         setSuggestions(response.suggestions);
@@ -647,28 +554,70 @@ export function EncompassFieldMapping({
           unmappedCount: response.unmappedCount,
         });
 
-        // Auto-select high confidence suggestions that differ from current mapping
-        const autoSelected = new Set<string>();
-        response.suggestions.forEach((s) => {
-          if (
+        // Step 2: Auto-apply high-confidence suggestions
+        const highConfidenceFixes = response.suggestions.filter(
+          (s) =>
             s.confidenceLevel === "high" &&
             s.suggestedFieldId &&
-            s.suggestedFieldId !== s.defaultFieldId &&
-            !s.isCurrentlyMapped
-          ) {
-            autoSelected.add(s.coheusAlias);
-          }
-        });
-        setSelectedSuggestions(autoSelected);
-        setShowSuggestions(true);
+            s.suggestedFieldId !== s.defaultFieldId
+        );
 
-        toast({
-          title: "Analysis Complete",
-          description: `Found ${response.highConfidenceCount} high-confidence, ${response.mediumConfidenceCount} medium-confidence suggestions`,
-        });
+        if (highConfidenceFixes.length > 0) {
+          setAnalyzeProgress(80);
+
+          const suggestionsToApply = highConfidenceFixes.map((s) => ({
+            coheusAlias: s.coheusAlias,
+            fieldId: s.suggestedFieldId!,
+          }));
+
+          try {
+            const applyResponse = await api.request<{
+              success: boolean;
+              applied: number;
+              errors: string[];
+            }>(
+              `/api/encompass/discovery/apply/${losConnectionId}?tenant_id=${tenantId}`,
+              {
+                method: "POST",
+                body: JSON.stringify({ suggestions: suggestionsToApply }),
+              }
+            );
+
+            if (applyResponse.success && applyResponse.applied > 0) {
+              toast({
+                title: "Auto-Fix Applied",
+                description: `Applied ${applyResponse.applied} high-confidence fix${applyResponse.applied !== 1 ? "es" : ""}. ${response.mediumConfidenceCount + response.lowConfidenceCount} fields need manual review.`,
+              });
+
+              // Reload data to reflect changes
+              await loadData();
+              onMappingChange?.();
+            }
+
+            if (applyResponse.errors && applyResponse.errors.length > 0) {
+              console.warn("Some auto-fixes failed:", applyResponse.errors);
+            }
+          } catch (applyError: any) {
+            console.error("Error applying auto-fixes:", applyError);
+            // Still show the suggestions for manual review
+            setShowSuggestions(true);
+            toast({
+              title: "Partial Auto-Fix",
+              description: `Analysis found ${response.highConfidenceCount} fixes but failed to apply them. Use the Fix button on each field.`,
+              variant: "destructive",
+            });
+          }
+        } else {
+          // No high-confidence fixes found, show suggestions for manual review
+          setShowSuggestions(true);
+          toast({
+            title: "Analysis Complete",
+            description: `No high-confidence fixes found. ${response.mediumConfidenceCount} medium-confidence suggestions available -- use the Fix button on each field to review.`,
+          });
+        }
       }
     } catch (error: any) {
-      console.error("[EncompassFieldMapping] Error analyzing fields:", error);
+      console.error("Error analyzing fields:", error);
       toast({
         title: "Analysis Failed",
         description: error.message || "Failed to analyze fields",
@@ -681,7 +630,7 @@ export function EncompassFieldMapping({
         setAnalyzeProgress(0);
       }, 500);
     }
-  }, [tenantId, losConnectionId, toast]);
+  }, [tenantId, losConnectionId, toast, loadData, onMappingChange]);
 
   const handleToggleSuggestion = useCallback((alias: string) => {
     setSelectedSuggestions((prev) => {
@@ -766,7 +715,7 @@ export function EncompassFieldMapping({
 
       if (response.errors && response.errors.length > 0) {
         console.warn(
-          "[EncompassFieldMapping] Some mappings failed:",
+          "Some mappings failed:",
           response.errors
         );
       }
@@ -1153,7 +1102,7 @@ export function EncompassFieldMapping({
 
       if (response.errors && response.errors.length > 0) {
         console.warn(
-          "[EncompassFieldMapping] Some imports failed:",
+          "Some imports failed:",
           response.errors
         );
         toast({
@@ -1163,7 +1112,7 @@ export function EncompassFieldMapping({
         });
       }
     } catch (error: any) {
-      console.error("[EncompassFieldMapping] Error applying import:", error);
+      console.error("Error applying import:", error);
       toast({
         title: "Import Failed",
         description: error.message || "Failed to apply imported field swaps",
@@ -1224,215 +1173,125 @@ export function EncompassFieldMapping({
           )}
 
           {/* Search and Filter Toolbar */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search by alias, field ID, or column name..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
+          <div className="space-y-3">
+            {/* Row 1: Search + Category + Filter */}
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search by alias or field ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
 
-            {/* Filter Toggle */}
-            <div className="flex items-center gap-2">
-              <Button
-                variant={filterMode === "all" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterMode("all")}
-              >
-                All Fields
-              </Button>
-              <Button
-                variant={filterMode === "invalid" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilterMode("invalid")}
-                className={
-                  filterMode === "invalid"
-                    ? ""
-                    : invalidFieldsCount > 0
-                    ? "border-red-300 text-red-600 hover:bg-red-50"
-                    : ""
+              {/* Category Filter */}
+              <Select
+                value={selectedCategory}
+                onValueChange={(value) =>
+                  setSelectedCategory(value as FieldCategory | "all")
                 }
               >
-                <Filter className="h-3 w-3 mr-1" />
-                Invalid Only
-              </Button>
-            </div>
-
-            {/* Category Filter Dropdown */}
-            <Select
-              value={selectedCategory}
-              onValueChange={(value) =>
-                setSelectedCategory(value as FieldCategory | "all")
-              }
-            >
-              <SelectTrigger className="w-[180px]">
-                <Layers className="h-3 w-3 mr-2" />
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">
-                  All Categories ({mappings.length})
-                </SelectItem>
-                {categories.map((cat) => (
-                  <SelectItem key={cat.category} value={cat.category}>
-                    <div className="flex items-center justify-between w-full">
-                      <span>{cat.label}</span>
-                      <span className="ml-2 text-xs text-slate-500">
-                        ({categoryStats[cat.category]?.total || 0})
-                        {(categoryStats[cat.category]?.invalid || 0) > 0 && (
-                          <span className="text-red-500 ml-1">
-                            • {categoryStats[cat.category]?.invalid} invalid
-                          </span>
-                        )}
-                      </span>
-                    </div>
+                <SelectTrigger className="w-[200px] shrink-0">
+                  <Layers className="h-3 w-3 mr-2" />
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    All Categories ({mappings.length})
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  {categories.map((cat) => (
+                    <SelectItem key={cat.category} value={cat.category}>
+                      <div className="flex items-center justify-between w-full">
+                        <span>{cat.label}</span>
+                        <span className="ml-2 text-xs text-slate-500">
+                          ({categoryStats[cat.category]?.total || 0})
+                          {(categoryStats[cat.category]?.invalid || 0) > 0 && (
+                            <span className="text-red-500 ml-1">
+                              {categoryStats[cat.category]?.invalid} invalid
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-            {/* Invalid Fields Count Badge */}
-            {invalidFieldsCount > 0 && (
-              <Badge variant="destructive" className="shrink-0">
-                <AlertTriangle className="h-3 w-3 mr-1" />
-                {invalidFieldsCount} invalid field
-                {invalidFieldsCount !== 1 ? "s" : ""}
-              </Badge>
-            )}
+              {/* Valid / Invalid Filter */}
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant={filterMode === "all" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setFilterMode("all")}
+                >
+                  All
+                </Button>
+                <Button
+                  variant={filterMode === "invalid" ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={() => setFilterMode("invalid")}
+                >
+                  {invalidFieldsCount > 0 ? `${invalidFieldsCount} Invalid` : "Invalid"}
+                </Button>
+              </div>
 
-            {/* Analyze Invalid Fields Button */}
-            {invalidFieldsCount > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  // Filter to show only invalid fields and run analysis
-                  setFilterMode("invalid");
-                  // Always run analysis to get fresh suggestions
-                  handleAnalyzeFields();
-                }}
-                disabled={isAnalyzing}
-                className="shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
-              >
-                {isAnalyzing ? (
-                  <>
-                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                    Analyzing...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3 w-3 mr-1" />
-                    Analyze {invalidFieldsCount} Invalid
-                  </>
-                )}
-              </Button>
-            )}
-
-            {/* Expand/Collapse All */}
-            <div className="flex items-center gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={expandAllCategories}
-                className="shrink-0 h-8 px-2"
-                title="Expand all categories"
-              >
-                <ChevronDown className="h-3 w-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={collapseAllCategories}
-                className="shrink-0 h-8 px-2"
-                title="Collapse all categories"
-              >
-                <ChevronRight className="h-3 w-3" />
-              </Button>
+              {/* Expand/Collapse All */}
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={expandAllCategories}
+                  className="h-8 px-2"
+                  title="Expand all categories"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={collapseAllCategories}
+                  className="h-8 px-2"
+                  title="Collapse all categories"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
 
-            {/* Import Legacy Config Button */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowImportDialog(true)}
-              className="shrink-0"
-            >
-              <Upload className="h-3 w-3 mr-1" />
-              Import Legacy Config
-            </Button>
+            {/* Row 2: Auto-Fix action bar (only when invalid fields exist) */}
+            {invalidFieldsCount > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                <span className="text-sm text-amber-800 dark:text-amber-200">
+                  {invalidFieldsCount} field{invalidFieldsCount !== 1 ? "s" : ""} could not be validated against your Encompass RDB.
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setFilterMode("invalid");
+                    handleAnalyzeFields();
+                  }}
+                  disabled={isAnalyzing}
+                  className="ml-auto shrink-0"
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3 w-3 mr-1" />
+                      Auto-Fix
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
 
-          {/* Category Summary Stats */}
-          {mappings.length > 0 && (
-            <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-medium flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-slate-500" />
-                  Field Categories Overview
-                </h4>
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-slate-600 dark:text-slate-400">
-                    <strong>{categories.length}</strong> categories
-                  </span>
-                  <span className="text-slate-600 dark:text-slate-400">
-                    <strong>{mappings.length}</strong> total fields
-                  </span>
-                  {invalidFieldsCount > 0 && (
-                    <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      <strong>{invalidFieldsCount}</strong> invalid
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-2">
-                {categories.map((cat) => {
-                  const stats = categoryStats[cat.category];
-                  if (!stats || stats.total === 0) return null;
-                  return (
-                    <button
-                      key={cat.category}
-                      onClick={() => {
-                        setSelectedCategory(cat.category);
-                        setExpandedCategories(new Set([cat.category]));
-                      }}
-                      className={cn(
-                        "p-2 rounded-md text-left transition-colors text-xs",
-                        selectedCategory === cat.category
-                          ? "bg-blue-100 dark:bg-blue-900/50 border-blue-300 border"
-                          : "bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700",
-                        stats.invalid > 0 && "border-l-2 border-l-amber-400"
-                      )}
-                    >
-                      <div className="font-medium truncate" title={cat.label}>
-                        {cat.label}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-slate-500">
-                        <span>{stats.total} fields</span>
-                        {stats.invalid > 0 && (
-                          <span className="text-red-500 text-xs">
-                            {stats.invalid} invalid
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-                {selectedCategory !== "all" && (
-                  <button
-                    onClick={() => setSelectedCategory("all")}
-                    className="p-2 rounded-md text-left transition-colors text-xs bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
-                  >
-                    <div className="font-medium">Clear Filter</div>
-                    <div className="text-slate-500 mt-1">Show all</div>
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Field Mappings - Categorized Accordion */}
           <div className="space-y-2">
@@ -1502,28 +1361,19 @@ export function EncompassFieldMapping({
                             <Table className="table-fixed w-full">
                               <TableHeader>
                                 <TableRow>
-                                  <TableHead className="w-[14%] min-w-[110px]">
-                                    Coheus Alias
+                                  <TableHead className="w-[22%] min-w-[140px]">
+                                    Field
                                   </TableHead>
                                   <TableHead className="w-[6%] min-w-[50px]">
                                     Type
                                   </TableHead>
-                                  <TableHead className="w-[14%] min-w-[110px]">
-                                    PostgreSQL Column
-                                  </TableHead>
-                                  <TableHead className="w-[16%] min-w-[130px]">
-                                    Default Field ID
-                                  </TableHead>
-                                  <TableHead className="w-[10%] min-w-[70px]">
+                                  <TableHead className="w-[12%] min-w-[80px]">
                                     Status
                                   </TableHead>
-                                  <TableHead className="w-[10%] min-w-[80px]">
-                                    Suggestion
+                                  <TableHead className="w-[30%] min-w-[200px]">
+                                    Encompass Field ID
                                   </TableHead>
-                                  <TableHead className="w-[18%] min-w-[140px]">
-                                    Current Field ID
-                                  </TableHead>
-                                  <TableHead className="w-[12%] min-w-[80px]">
+                                  <TableHead className="w-[14%] min-w-[80px]">
                                     Actions
                                   </TableHead>
                                 </TableRow>
@@ -1548,138 +1398,47 @@ export function EncompassFieldMapping({
                                           "bg-red-50 dark:bg-red-900/20 border-l-4 border-l-red-500"
                                       )}
                                     >
+                                      {/* Field name */}
                                       <TableCell
-                                        className="font-medium break-words"
-                                        title={mapping.coheusAlias}
+                                        className="font-medium"
+                                        title={`${mapping.coheusAlias}\nDB column: ${mapping.postgresqlColumn}`}
                                       >
-                                        <div className="break-words text-sm">
-                                          {mapping.coheusAlias}
-                                        </div>
+                                        <div className="text-sm">{mapping.coheusAlias}</div>
                                       </TableCell>
+                                      {/* Type */}
                                       <TableCell>
                                         <div
                                           className="flex items-center gap-1"
-                                          title={getFieldTypeLabel(
-                                            mapping.fieldType
-                                          )}
+                                          title={getFieldTypeLabel(mapping.fieldType)}
                                         >
                                           {getFieldTypeIcon(mapping.fieldType)}
                                         </div>
                                       </TableCell>
-                                      <TableCell
-                                        className="font-mono text-xs text-slate-500 break-words"
-                                        title={mapping.postgresqlColumn}
-                                      >
-                                        <div className="break-words">
-                                          {mapping.postgresqlColumn}
-                                        </div>
-                                      </TableCell>
-                                      <TableCell
-                                        className="font-mono text-xs break-words"
-                                        title={mapping.defaultEncompassFieldId}
-                                      >
-                                        <div className="break-words">
-                                          {mapping.defaultEncompassFieldId}
-                                        </div>
-                                      </TableCell>
+                                      {/* Status */}
                                       <TableCell>
                                         {isValid ? (
-                                          <div className="flex items-center gap-1 flex-wrap">
-                                            <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                                            <span className="text-xs text-green-600">
-                                              Valid
-                                            </span>
-                                          </div>
+                                          <CheckCircle2 className="h-4 w-4 text-green-500" />
                                         ) : (
-                                          <Badge
-                                            variant="destructive"
-                                            className="text-xs"
-                                          >
-                                            <AlertTriangle className="h-3 w-3 mr-1" />
-                                            Not Found
+                                          <Badge variant="destructive" className="text-xs">
+                                            Invalid
                                           </Badge>
                                         )}
                                       </TableCell>
-                                      {/* Suggestion/Confidence column */}
+                                      {/* Encompass Field ID */}
                                       <TableCell>
-                                        {(() => {
-                                          const confidence =
-                                            getConfidenceForMapping(
-                                              mapping.coheusAlias
-                                            );
-                                          const analyzed = hasAnalysisRun(
-                                            mapping.coheusAlias
-                                          );
-
-                                          if (!analyzed) {
-                                            return (
-                                              <span className="text-xs text-slate-400 italic">
-                                                Not analyzed
-                                              </span>
-                                            );
-                                          }
-
-                                          if (
-                                            confidence < 0 ||
-                                            fieldSuggestions.length === 0
-                                          ) {
-                                            return (
-                                              <Badge
-                                                variant="outline"
-                                                className="text-xs bg-amber-50 text-amber-700 border-amber-200"
-                                              >
-                                                Add to RDB?
-                                              </Badge>
-                                            );
-                                          }
-
-                                          if (confidence >= 70) {
-                                            return (
-                                              <Badge className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                                {confidence}% match
-                                              </Badge>
-                                            );
-                                          }
-
-                                          return (
-                                            <Badge
-                                              variant="outline"
-                                              className="text-xs bg-amber-50 text-amber-700 border-amber-200"
-                                            >
-                                              {confidence}% low
-                                            </Badge>
-                                          );
-                                        })()}
-                                      </TableCell>
-                                      <TableCell>
-                                        {isSwapped ? (
-                                          <div className="flex items-center gap-1 flex-wrap">
-                                            <Badge
-                                              variant="secondary"
-                                              className="font-mono text-xs break-words"
-                                              title={swappedFieldId}
-                                            >
-                                              <span className="break-all">
-                                                {swappedFieldId}
-                                              </span>
-                                            </Badge>
-                                            <Badge
-                                              variant="outline"
-                                              className="text-xs shrink-0"
-                                            >
-                                              Swapped
-                                            </Badge>
-                                          </div>
-                                        ) : (
+                                        <div className="flex items-center gap-2">
                                           <span
-                                            className="font-mono text-xs text-slate-500 break-words"
+                                            className="font-mono text-xs text-slate-700 dark:text-slate-300 break-all"
                                             title={effectiveFieldId}
                                           >
-                                            <div className="break-words">
-                                              {effectiveFieldId}
-                                            </div>
+                                            {effectiveFieldId}
                                           </span>
-                                        )}
+                                          {isSwapped && (
+                                            <Badge variant="outline" className="text-xs shrink-0">
+                                              Custom
+                                            </Badge>
+                                          )}
+                                        </div>
                                       </TableCell>
                                       <TableCell>
                                         <div className="flex items-center gap-1 flex-wrap">
@@ -2131,6 +1890,7 @@ export function EncompassFieldMapping({
                       ref={fileInputRef}
                       accept=".json"
                       onChange={handleFileUpload}
+                      title="Upload legacy configuration JSON file"
                       className="hidden"
                     />
                     <Button

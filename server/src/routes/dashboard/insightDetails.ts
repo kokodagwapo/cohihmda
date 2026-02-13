@@ -28,16 +28,19 @@ const router = Router();
 async function loadDetailFilters(
   tenantPool: any,
   insightId: number
-): Promise<Record<string, any> | null> {
+): Promise<{ filters: Record<string, any> | null; generatedAt: string | null }> {
   try {
     const result = await tenantPool.query(
-      `SELECT detail_query FROM generated_insights WHERE id = $1`,
+      `SELECT detail_query, generated_at FROM generated_insights WHERE id = $1`,
       [insightId]
     );
-    if (result.rows.length === 0) return null;
-    return result.rows[0].detail_query || null;
+    if (result.rows.length === 0) return { filters: null, generatedAt: null };
+    return {
+      filters: result.rows[0].detail_query || null,
+      generatedAt: result.rows[0].generated_at || null,
+    };
   } catch {
-    return null;
+    return { filters: null, generatedAt: null };
   }
 }
 
@@ -83,8 +86,11 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
 
     // 1. Try to load stored detail_query from the DB (gold standard)
     let filters: Record<string, any> | null = null;
+    let insightGeneratedAt: string | null = null;
     if (insightId) {
-      filters = await loadDetailFilters(tenantPool, Number(insightId));
+      const loaded = await loadDetailFilters(tenantPool, Number(insightId));
+      filters = loaded.filters;
+      insightGeneratedAt = loaded.generatedAt;
     }
     const insightHeadline = String(headline || '').toLowerCase();
 
@@ -1168,18 +1174,38 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         let overrideSummaryMetrics: string[] | null = null;
 
         if (isFiltered && displayActors.length > 0 && displayActors.length <= 10) {
-          // Officer-specific summary: show their actual metrics
-          const totalUnits = displayActors.reduce((s: number, a: any) => s + a.units, 0);
-          const totalVol = displayActors.reduce((s: number, a: any) => s + a.volume, 0);
-          const totalRev = displayActors.reduce((s: number, a: any) => s + a.revenue, 0);
-          const avgPT = displayActors.length > 0
-            ? Math.round(displayActors.reduce((s: number, a: any) => s + a.pullThrough, 0) / displayActors.length * 10) / 10
+          // Officer-specific summary: use stored snapshots from generation time if
+          // available (guarantees consistency with headline numbers).  Fall back to
+          // live query data when snapshots are absent (older insights).
+          const snapshots: Record<string, { units: number; revenue: number; volume: number; pullThrough: number }> | undefined =
+            filters?.actorSnapshots;
+
+          // Build per-officer metrics — prefer snapshot, fall back to live data
+          const actorsWithMetrics = displayActors.map((a: any) => {
+            const snap = snapshots?.[a.name];
+            return {
+              name: a.name,
+              units: snap?.units ?? a.units,
+              volume: snap?.volume ?? a.volume,
+              revenue: snap?.revenue ?? a.revenue,
+              pullThrough: snap?.pullThrough ?? a.pullThrough,
+              avgCycleTime: a.avgCycleTime,
+              lostOpportunityUnits: a.lostOpportunityUnits,
+              deniedUnits: a.deniedUnits,
+            };
+          });
+
+          const totalUnits = actorsWithMetrics.reduce((s: number, a: any) => s + a.units, 0);
+          const totalVol = actorsWithMetrics.reduce((s: number, a: any) => s + a.volume, 0);
+          const totalRev = actorsWithMetrics.reduce((s: number, a: any) => s + a.revenue, 0);
+          const avgPT = actorsWithMetrics.length > 0
+            ? Math.round(actorsWithMetrics.reduce((s: number, a: any) => s + a.pullThrough, 0) / actorsWithMetrics.length * 10) / 10
             : 0;
-          const avgCycle = displayActors.length > 0
-            ? Math.round(displayActors.reduce((s: number, a: any) => s + a.avgCycleTime, 0) / displayActors.length)
+          const avgCycle = actorsWithMetrics.length > 0
+            ? Math.round(actorsWithMetrics.reduce((s: number, a: any) => s + a.avgCycleTime, 0) / actorsWithMetrics.length)
             : 0;
-          const totalLost = displayActors.reduce((s: number, a: any) => s + a.lostOpportunityUnits, 0);
-          const totalDenied = displayActors.reduce((s: number, a: any) => s + a.deniedUnits, 0);
+          const totalLost = actorsWithMetrics.reduce((s: number, a: any) => s + a.lostOpportunityUnits, 0);
+          const totalDenied = actorsWithMetrics.reduce((s: number, a: any) => s + a.deniedUnits, 0);
 
           summary = {
             officerUnits: totalUnits,
@@ -1190,7 +1216,6 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             ...(totalLost > 0 ? { officerLost: totalLost } : {}),
             ...(totalDenied > 0 ? { officerDenied: totalDenied } : {}),
           };
-          // Override LLM-specified summary metrics with officer-specific ones
           overrideSummaryMetrics = Object.keys(summary);
         } else {
           summary = {
@@ -1265,6 +1290,11 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
     };
+
+    // Include when the insight was generated so the frontend can show data freshness
+    if (insightGeneratedAt) {
+      result.dataAsOf = insightGeneratedAt;
+    }
 
     res.json(result);
 

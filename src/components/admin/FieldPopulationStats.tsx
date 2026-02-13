@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
-import { Loader2, RefreshCw, Database, TrendingUp, TrendingDown, Bug } from 'lucide-react';
+import { Loader2, RefreshCw, Database, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, XCircle, Search as SearchIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface FieldPopulationStatsProps {
@@ -25,14 +25,33 @@ interface FieldPopulationData {
   fields: FieldStat[];
 }
 
+interface AnalysisReport {
+  // From schema-dictionary comparison
+  orphanedColumns: Array<{ column: string; type: string }>;
+  missingColumns: Array<{ alias: string; expectedColumn: string }>;
+  validMappings: number;
+  totalDbColumns: number;
+  // From transformation comparison
+  problemMappings: Array<{ alias: string; fieldId: string; column: string; rawValue: any; foundAsKey?: string }>;
+  emptyColumns: string[];
+  populatedColumns: string[];
+  // From debug
+  foundInSampleNotMapped: Array<{ alias: string; columnName: string; fieldId: string; foundAs: string }>;
+  missingFromSample: Array<{ alias: string; columnName: string; fieldId: string; foundVariations?: string[] }>;
+}
+
 export function FieldPopulationStats({ tenantId, losConnectionId }: FieldPopulationStatsProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<FieldPopulationData | null>(null);
   const [sortBy, setSortBy] = useState<'rate' | 'name'>('rate');
   const [filter, setFilter] = useState<'all' | 'populated' | 'empty'>('all');
-  const [debugData, setDebugData] = useState<any>(null);
-  const [loadingDebug, setLoadingDebug] = useState(false);
+
+  // Unified analysis state
+  const [analysisReport, setAnalysisReport] = useState<AnalysisReport | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState('');
+  const [analysisProgress, setAnalysisProgress] = useState(0);
 
   const loadStats = async () => {
     if (!tenantId) return;
@@ -55,62 +74,78 @@ export function FieldPopulationStats({ tenantId, losConnectionId }: FieldPopulat
     }
   };
 
-  const [comparisonData, setComparisonData] = useState<any>(null);
-  const [loadingComparison, setLoadingComparison] = useState(false);
-  const [schemaDictData, setSchemaDictData] = useState<any>(null);
-  const [loadingSchemaDict, setLoadingSchemaDict] = useState(false);
-
-  const loadComparison = async () => {
+  const runAnalysis = async () => {
     if (!tenantId) return;
-    
-    setLoadingComparison(true);
-    try {
-      const response = await api.request(`/api/los/transformation-comparison?tenant_id=${tenantId}`);
-      setComparisonData(response);
-    } catch (error: any) {
-      console.error('Error loading transformation comparison:', error);
-    } finally {
-      setLoadingComparison(false);
-    }
-  };
 
-  const loadSchemaDictComparison = async () => {
-    if (!tenantId) return;
-    
-    setLoadingSchemaDict(true);
+    setAnalyzing(true);
+    setAnalysisReport(null);
+
+    const report: AnalysisReport = {
+      orphanedColumns: [],
+      missingColumns: [],
+      validMappings: 0,
+      totalDbColumns: 0,
+      problemMappings: [],
+      emptyColumns: [],
+      populatedColumns: [],
+      foundInSampleNotMapped: [],
+      missingFromSample: [],
+    };
+
     try {
-      const response = await api.request(`/api/los/schema-dictionary-comparison?tenant_id=${tenantId}`);
-      setSchemaDictData(response);
+      // Step 1: Schema-dictionary comparison
+      setAnalysisStep('Checking field mappings against data dictionary...');
+      setAnalysisProgress(15);
+      try {
+        const schemaDict = await api.request(`/api/los/schema-dictionary-comparison?tenant_id=${tenantId}`);
+        report.orphanedColumns = schemaDict.orphanedColumns || [];
+        report.missingColumns = schemaDict.missingColumns || [];
+        report.validMappings = schemaDict.summary?.validColumns || 0;
+        report.totalDbColumns = schemaDict.summary?.totalDatabaseColumns || 0;
+      } catch (e) {
+        console.warn('Schema-dictionary comparison failed:', e);
+      }
+
+      // Step 2: Transformation comparison
+      setAnalysisStep('Comparing raw data with database schema...');
+      setAnalysisProgress(45);
+      try {
+        const comparison = await api.request(`/api/los/transformation-comparison?tenant_id=${tenantId}`);
+        if (comparison.summary) {
+          report.problemMappings = comparison.problemMappings || [];
+          report.emptyColumns = comparison.emptyColumns || [];
+          report.populatedColumns = comparison.populatedColumns || [];
+        }
+      } catch (e) {
+        console.warn('Transformation comparison failed:', e);
+      }
+
+      // Step 3: Debug empty fields (only if connection available)
+      if (losConnectionId) {
+        setAnalysisStep('Debugging empty field mappings...');
+        setAnalysisProgress(75);
+        try {
+          const debug = await api.request(
+            `/api/los/field-mapping-debug?tenant_id=${tenantId}&connection_id=${losConnectionId}`
+          );
+          report.foundInSampleNotMapped = debug.foundInSample || [];
+          report.missingFromSample = debug.missingFromSample || [];
+        } catch (e) {
+          console.warn('Field mapping debug failed:', e);
+        }
+      }
+
+      setAnalysisProgress(100);
+      setAnalysisStep('Analysis complete');
+      setAnalysisReport(report);
     } catch (error: any) {
-      console.error('Error loading schema-dictionary comparison:', error);
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to load schema-dictionary comparison',
+        title: 'Analysis Failed',
+        description: error.message || 'Failed to run field analysis',
         variant: 'destructive',
       });
     } finally {
-      setLoadingSchemaDict(false);
-    }
-  };
-
-  const loadDebugInfo = async () => {
-    if (!tenantId || !losConnectionId) return;
-
-    setLoadingDebug(true);
-    try {
-      const debug = await api.request(
-        `/api/los/field-mapping-debug?tenant_id=${tenantId}&connection_id=${losConnectionId}`
-      );
-      setDebugData(debug);
-    } catch (error: any) {
-      console.error('Error loading debug info:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load field mapping debug info',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoadingDebug(false);
+      setAnalyzing(false);
     }
   };
 
@@ -149,6 +184,12 @@ export function FieldPopulationStats({ tenantId, losConnectionId }: FieldPopulat
     return 'text-red-600 dark:text-red-400';
   };
 
+  // Count issues for the report summary
+  const totalIssues = analysisReport
+    ? analysisReport.orphanedColumns.length +
+      analysisReport.problemMappings.length +
+      analysisReport.foundInSampleNotMapped.length
+    : 0;
 
   return (
     <Card className="border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -163,39 +204,21 @@ export function FieldPopulationStats({ tenantId, losConnectionId }: FieldPopulat
               Data completeness across all loan fields
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
             <Button
-              variant="outline"
               size="sm"
-              onClick={loadSchemaDictComparison}
-              disabled={loadingSchemaDict}
-              className="text-xs"
-            >
-              <Database className={`h-3 w-3 mr-1 ${loadingSchemaDict ? 'animate-spin' : ''}`} />
-              Dictionary Check
-            </Button>
-            <Button
               variant="outline"
-              size="sm"
-              onClick={loadComparison}
-              disabled={loadingComparison}
-              className="text-xs"
+              onClick={runAnalysis}
+              disabled={analyzing || !data}
+              className="font-extralight"
             >
-              <Database className={`h-3 w-3 mr-1 ${loadingComparison ? 'animate-spin' : ''}`} />
-              Compare Schema
+              {analyzing ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <SearchIcon className="h-4 w-4 mr-2" />
+              )}
+              {analyzing ? 'Analyzing...' : 'Run Analysis'}
             </Button>
-            {losConnectionId && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="font-extralight"
-                onClick={loadDebugInfo}
-                disabled={loadingDebug}
-              >
-                <Bug className={`h-4 w-4 mr-2 ${loadingDebug ? 'animate-spin' : ''}`} />
-                Debug Empty Fields
-              </Button>
-            )}
             <Button
               size="sm"
               variant="outline"
@@ -255,6 +278,191 @@ export function FieldPopulationStats({ tenantId, losConnectionId }: FieldPopulat
                 </div>
               </div>
             </div>
+
+            {/* Analysis Progress */}
+            {analyzing && (
+              <div className="p-4 border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                <div className="flex items-center gap-2 mb-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400" />
+                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    {analysisStep}
+                  </span>
+                </div>
+                <Progress value={analysisProgress} className="h-1.5" />
+              </div>
+            )}
+
+            {/* Unified Analysis Report */}
+            {analysisReport && (
+              <div className="space-y-4">
+                {/* Report Summary */}
+                <div className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg">
+                  <h3 className="text-sm font-medium text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+                    <Database className="h-4 w-4" />
+                    Analysis Report
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Valid Mappings</div>
+                      <div className="text-lg font-thin text-green-600 dark:text-green-400">
+                        {analysisReport.validMappings}
+                        <span className="text-xs text-slate-400 ml-1">/ {analysisReport.totalDbColumns}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Orphaned Columns</div>
+                      <div className={`text-lg font-thin ${analysisReport.orphanedColumns.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                        {analysisReport.orphanedColumns.length}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Problem Mappings</div>
+                      <div className={`text-lg font-thin ${analysisReport.problemMappings.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                        {analysisReport.problemMappings.length}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Unmapped Fields</div>
+                      <div className={`text-lg font-thin ${analysisReport.foundInSampleNotMapped.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
+                        {analysisReport.foundInSampleNotMapped.length}
+                      </div>
+                    </div>
+                  </div>
+
+                  {totalIssues === 0 && (
+                    <div className="mt-3 flex items-center gap-2 text-green-600 dark:text-green-400">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span className="text-sm">All field mappings look healthy.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Mapping Issues */}
+                {(analysisReport.orphanedColumns.length > 0 || analysisReport.problemMappings.length > 0) && (
+                  <div className="p-4 border border-red-200 dark:border-red-800 rounded-lg bg-red-50 dark:bg-red-900/10">
+                    <h3 className="text-sm font-medium text-red-900 dark:text-red-100 mb-3 flex items-center gap-2">
+                      <XCircle className="h-4 w-4" />
+                      Mapping Issues ({analysisReport.orphanedColumns.length + analysisReport.problemMappings.length})
+                    </h3>
+
+                    {analysisReport.orphanedColumns.length > 0 && (
+                      <div className="mb-4">
+                        <div className="text-xs font-medium text-red-700 dark:text-red-300 mb-2">
+                          Orphaned columns -- no mapping in data dictionary, will never populate ({analysisReport.orphanedColumns.length}):
+                        </div>
+                        <div className="max-h-48 overflow-y-auto border border-red-200 dark:border-red-800 rounded bg-white dark:bg-slate-800/50">
+                          <table className="w-full text-xs">
+                            <thead className="bg-red-100 dark:bg-red-900/30 sticky top-0">
+                              <tr>
+                                <th className="text-left p-2 font-medium">Column Name</th>
+                                <th className="text-left p-2 font-medium">Type</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {analysisReport.orphanedColumns.map((col, idx) => (
+                                <tr key={idx} className="border-t border-red-100 dark:border-red-900/30">
+                                  <td className="p-2 font-mono text-slate-700 dark:text-slate-300">{col.column}</td>
+                                  <td className="p-2 text-slate-500 dark:text-slate-400">{col.type}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {analysisReport.problemMappings.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-red-700 dark:text-red-300 mb-2">
+                          Has raw data but empty in database ({analysisReport.problemMappings.length}):
+                        </div>
+                        <div className="max-h-48 overflow-y-auto border border-red-200 dark:border-red-800 rounded bg-white dark:bg-slate-800/50">
+                          <table className="w-full text-xs">
+                            <thead className="bg-red-100 dark:bg-red-900/30 sticky top-0">
+                              <tr>
+                                <th className="text-left p-2 font-medium">Alias</th>
+                                <th className="text-left p-2 font-medium">Column</th>
+                                <th className="text-left p-2 font-medium">Raw Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {analysisReport.problemMappings.map((m, idx) => (
+                                <tr key={idx} className="border-t border-red-100 dark:border-red-900/30">
+                                  <td className="p-2 text-slate-700 dark:text-slate-300">{m.alias}</td>
+                                  <td className="p-2 font-mono text-slate-500 dark:text-slate-400">{m.column}</td>
+                                  <td className="p-2 font-mono text-blue-600 dark:text-blue-400 max-w-32 truncate" title={String(m.rawValue)}>
+                                    {m.rawValue !== undefined ? String(m.rawValue).slice(0, 30) : '-'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {(analysisReport.foundInSampleNotMapped.length > 0 || analysisReport.missingColumns.length > 0) && (
+                  <div className="p-4 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50 dark:bg-amber-900/10">
+                    <h3 className="text-sm font-medium text-amber-900 dark:text-amber-100 mb-3 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Recommendations
+                    </h3>
+
+                    {analysisReport.foundInSampleNotMapped.length > 0 && (
+                      <div className="mb-4">
+                        <div className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-2">
+                          Fields found in Encompass data but not being mapped ({analysisReport.foundInSampleNotMapped.length}):
+                        </div>
+                        <div className="max-h-48 overflow-y-auto space-y-1">
+                          {analysisReport.foundInSampleNotMapped.slice(0, 20).map((field, idx) => (
+                            <div key={idx} className="text-xs font-mono p-2 bg-white dark:bg-slate-800/50 rounded border border-amber-200 dark:border-amber-800">
+                              <span className="text-slate-600 dark:text-slate-400">{field.alias}</span>
+                              <span className="text-slate-400 dark:text-slate-500 mx-2">-&gt;</span>
+                              <span className="text-slate-700 dark:text-slate-300">{field.columnName}</span>
+                              <span className="text-slate-400 ml-2">(found as: {field.foundAs})</span>
+                            </div>
+                          ))}
+                          {analysisReport.foundInSampleNotMapped.length > 20 && (
+                            <div className="text-xs text-slate-500 dark:text-slate-400 italic">
+                              ... and {analysisReport.foundInSampleNotMapped.length - 20} more
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {analysisReport.missingColumns.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-2">
+                          Dictionary has mapping but no DB column ({analysisReport.missingColumns.length}):
+                        </div>
+                        <div className="max-h-48 overflow-y-auto border border-amber-200 dark:border-amber-800 rounded bg-white dark:bg-slate-800/50">
+                          <table className="w-full text-xs">
+                            <thead className="bg-amber-100 dark:bg-amber-900/30 sticky top-0">
+                              <tr>
+                                <th className="text-left p-2 font-medium">Alias</th>
+                                <th className="text-left p-2 font-medium">Expected Column</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {analysisReport.missingColumns.map((col, idx) => (
+                                <tr key={idx} className="border-t border-amber-100 dark:border-amber-900/30">
+                                  <td className="p-2 text-slate-700 dark:text-slate-300">{col.alias}</td>
+                                  <td className="p-2 font-mono text-slate-500 dark:text-slate-400">{col.expectedColumn}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Filters and Sort */}
             <div className="flex items-center gap-4">
@@ -367,385 +575,6 @@ export function FieldPopulationStats({ tenantId, losConnectionId }: FieldPopulat
               Showing {filteredFields.length} of {data.fields.length} fields
               {filter !== 'all' && ` (filtered: ${filter})`}
             </div>
-
-            {/* Schema vs Data Dictionary Comparison - Most Important! */}
-            {schemaDictData && (
-              <div className="mt-6 p-4 border border-purple-200 dark:border-purple-800 rounded-lg bg-purple-50 dark:bg-purple-900/20">
-                <div className="flex items-center gap-2 mb-3">
-                  <Database className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                  <h3 className="text-sm font-medium text-purple-900 dark:text-purple-100">
-                    Database Schema vs Data Dictionary
-                  </h3>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                  Shows which database columns have valid mappings in the data dictionary (CoheusDataDictionary.xml)
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">DB Columns</div>
-                    <div className="text-lg font-thin text-slate-900 dark:text-white">
-                      {schemaDictData.summary?.totalDatabaseColumns || 0}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Valid Mappings</div>
-                    <div className="text-lg font-thin text-green-600 dark:text-green-400">
-                      {schemaDictData.summary?.validColumns || 0}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Orphaned (No Mapping)</div>
-                    <div className="text-lg font-thin text-red-600 dark:text-red-400">
-                      {schemaDictData.summary?.orphanedColumns || 0}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Dictionary Aliases</div>
-                    <div className="text-lg font-thin text-slate-900 dark:text-white">
-                      {schemaDictData.summary?.aliasesInDictionary || 0}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Missing in DB</div>
-                    <div className="text-lg font-thin text-yellow-600 dark:text-yellow-400">
-                      {schemaDictData.summary?.missingColumnsInDb || 0}
-                    </div>
-                  </div>
-                </div>
-                
-                {schemaDictData.orphanedColumns && schemaDictData.orphanedColumns.length > 0 && (
-                  <div className="mt-4">
-                    <div className="text-xs font-medium text-red-700 dark:text-red-300 mb-2">
-                      🚫 Orphaned Columns - Will NEVER Populate ({schemaDictData.orphanedColumns.length}):
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                      These columns exist in the database but have no mapping in the data dictionary. They cannot be populated via Encompass sync.
-                    </p>
-                    <div className="max-h-48 overflow-y-auto border border-red-200 dark:border-red-800 rounded">
-                      <table className="w-full text-xs">
-                        <thead className="bg-red-100 dark:bg-red-900/30 sticky top-0">
-                          <tr>
-                            <th className="text-left p-2 font-medium">Column Name</th>
-                            <th className="text-left p-2 font-medium">Type</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {schemaDictData.orphanedColumns.map((col: any, idx: number) => (
-                            <tr key={idx} className="border-t border-red-100 dark:border-red-900/30">
-                              <td className="p-2 font-mono text-slate-700 dark:text-slate-300">{col.column}</td>
-                              <td className="p-2 text-slate-500 dark:text-slate-400">{col.type}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-                
-                {schemaDictData.missingColumns && schemaDictData.missingColumns.length > 0 && (
-                  <div className="mt-4">
-                    <div className="text-xs font-medium text-yellow-700 dark:text-yellow-300 mb-2">
-                      ⚠️ Missing DB Columns - Data Dictionary Has Mapping ({schemaDictData.missingColumns.length}):
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                      These aliases exist in the data dictionary but have no corresponding column in the database.
-                    </p>
-                    <div className="max-h-48 overflow-y-auto border border-yellow-200 dark:border-yellow-800 rounded">
-                      <table className="w-full text-xs">
-                        <thead className="bg-yellow-100 dark:bg-yellow-900/30 sticky top-0">
-                          <tr>
-                            <th className="text-left p-2 font-medium">Alias</th>
-                            <th className="text-left p-2 font-medium">Expected Column</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {schemaDictData.missingColumns.map((col: any, idx: number) => (
-                            <tr key={idx} className="border-t border-yellow-100 dark:border-yellow-900/30">
-                              <td className="p-2 text-slate-700 dark:text-slate-300">{col.alias}</td>
-                              <td className="p-2 font-mono text-slate-500 dark:text-slate-400">{col.expectedColumn}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Transformation Comparison */}
-            {comparisonData && (
-              <div className="mt-6 p-4 border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50 dark:bg-blue-900/20">
-                <div className="flex items-center gap-2 mb-3">
-                  <Database className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                  <h3 className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                    Schema vs Transformed Loan Comparison
-                  </h3>
-                </div>
-                
-                {/* Check if no data available */}
-                {comparisonData.error === 'no_loans' || (!comparisonData.summary && !comparisonData.transformedLoanKeys) ? (
-                  <div className="text-sm text-slate-500 dark:text-slate-400 py-4 text-center">
-                    No loan data available. Sync some loans to see transformation comparison.
-                  </div>
-                ) : comparisonData.summary ? (
-                  /* New format */
-                  <>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Raw Data Keys</div>
-                        <div className="text-lg font-thin text-slate-900 dark:text-white">
-                          {comparisonData.summary.totalRawDataKeys || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">DB Columns</div>
-                        <div className="text-lg font-thin text-slate-900 dark:text-white">
-                          {comparisonData.summary.databaseColumns || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Populated</div>
-                        <div className="text-lg font-thin text-green-600 dark:text-green-400">
-                          {comparisonData.summary.populatedColumns || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Empty</div>
-                        <div className="text-lg font-thin text-yellow-600 dark:text-yellow-400">
-                          {comparisonData.summary.emptyColumns || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Problem Mappings</div>
-                        <div className="text-lg font-thin text-red-600 dark:text-red-400">
-                          {comparisonData.summary.problemMappings || 0}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {comparisonData.problemMappings && comparisonData.problemMappings.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-xs font-medium text-red-700 dark:text-red-300 mb-2">
-                          ⚠️ Problem Mappings - Has Raw Data But Empty in DB ({comparisonData.problemMappings.length}):
-                        </div>
-                        <div className="max-h-64 overflow-y-auto border border-red-200 dark:border-red-800 rounded">
-                          <table className="w-full text-xs">
-                            <thead className="bg-red-100 dark:bg-red-900/30 sticky top-0">
-                              <tr>
-                                <th className="text-left p-2 font-medium">Alias</th>
-                                <th className="text-left p-2 font-medium">Field ID</th>
-                                <th className="text-left p-2 font-medium">Found As Key</th>
-                                <th className="text-left p-2 font-medium">Column</th>
-                                <th className="text-left p-2 font-medium">Raw Value</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {comparisonData.problemMappings.map((m: any, idx: number) => (
-                                <tr key={idx} className="border-t border-red-100 dark:border-red-900/30">
-                                  <td className="p-2 text-slate-700 dark:text-slate-300">{m.alias}</td>
-                                  <td className="p-2 font-mono text-slate-500 dark:text-slate-400 text-[10px]">{m.fieldId}</td>
-                                  <td className="p-2 font-mono text-green-600 dark:text-green-400 text-[10px]">{m.foundAsKey || '-'}</td>
-                                  <td className="p-2 font-mono text-slate-500 dark:text-slate-400">{m.column}</td>
-                                  <td className="p-2 font-mono text-blue-600 dark:text-blue-400 max-w-32 truncate" title={String(m.rawValue)}>
-                                    {m.rawValue !== undefined ? String(m.rawValue).slice(0, 30) : '-'}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {comparisonData.emptyColumns && comparisonData.emptyColumns.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-xs font-medium text-yellow-700 dark:text-yellow-300 mb-2">
-                          Empty Columns in Sample Loan ({comparisonData.emptyColumns.length}):
-                        </div>
-                        <div className="text-xs font-mono text-slate-600 dark:text-slate-400">
-                          {comparisonData.emptyColumns.slice(0, 30).join(', ')}
-                          {comparisonData.emptyColumns.length > 30 && ` ... and ${comparisonData.emptyColumns.length - 30} more`}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {comparisonData.populatedColumns && comparisonData.populatedColumns.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-xs font-medium text-green-700 dark:text-green-300 mb-2">
-                          ✓ Populated Columns ({comparisonData.populatedColumns.length}):
-                        </div>
-                        <div className="text-xs font-mono text-slate-600 dark:text-slate-400">
-                          {comparisonData.populatedColumns.slice(0, 30).join(', ')}
-                          {comparisonData.populatedColumns.length > 30 && ` ... and ${comparisonData.populatedColumns.length - 30} more`}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  /* Old format fallback */
-                  <>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Transformed Keys</div>
-                        <div className="text-lg font-thin text-slate-900 dark:text-white">
-                          {comparisonData.transformedLoanKeys?.length || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Database Columns</div>
-                        <div className="text-lg font-thin text-slate-900 dark:text-white">
-                          {comparisonData.databaseColumns?.length || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Missing in DB</div>
-                        <div className="text-lg font-thin text-red-600 dark:text-red-400">
-                          {comparisonData.missingInDatabase?.length || 0}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Empty Columns</div>
-                        <div className="text-lg font-thin text-yellow-600 dark:text-yellow-400">
-                          {comparisonData.missingInTransformed?.length || 0}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {comparisonData.missingInDatabase && comparisonData.missingInDatabase.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-xs font-medium text-red-700 dark:text-red-300 mb-2">
-                          ⚠️ Fields in Transformed Loan But Not in Database Schema ({comparisonData.missingInDatabase.length}):
-                        </div>
-                        <div className="text-xs font-mono text-slate-600 dark:text-slate-400">
-                          {comparisonData.missingInDatabase.slice(0, 30).join(', ')}
-                          {comparisonData.missingInDatabase.length > 30 && ` ... and ${comparisonData.missingInDatabase.length - 30} more`}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {comparisonData.missingInTransformed && comparisonData.missingInTransformed.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-xs font-medium text-yellow-700 dark:text-yellow-300 mb-2">
-                          Database Columns With No Data ({comparisonData.missingInTransformed.length}):
-                        </div>
-                        <div className="text-xs font-mono text-slate-600 dark:text-slate-400">
-                          {comparisonData.missingInTransformed.slice(0, 30).join(', ')}
-                          {comparisonData.missingInTransformed.length > 30 && ` ... and ${comparisonData.missingInTransformed.length - 30} more`}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Debug Information */}
-            {debugData && (
-              <div className="mt-6 p-4 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800/30">
-                <div className="flex items-center gap-2 mb-3">
-                  <Bug className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-                  <h3 className="text-sm font-medium text-slate-900 dark:text-white">
-                    Field Mapping Debug Analysis
-                  </h3>
-                </div>
-                <div className={`grid gap-4 mb-4 ${debugData.summary.foundInSampleButNotMapped !== undefined ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Total Mapped</div>
-                    <div className="text-lg font-thin text-slate-900 dark:text-white">
-                      {debugData.summary.totalMappedFields}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Populated</div>
-                    <div className="text-lg font-thin text-green-600 dark:text-green-400">
-                      {debugData.summary.populatedFields}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">Empty (0%)</div>
-                    <div className="text-lg font-thin text-red-600 dark:text-red-400">
-                      {debugData.summary.emptyMappedFields}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-light">In Sample Loan</div>
-                    <div className="text-lg font-thin text-slate-900 dark:text-white">
-                      {debugData.summary.fieldsInSample}
-                    </div>
-                  </div>
-                </div>
-                
-                {debugData.foundInSample && debugData.foundInSample.length > 0 && (
-                  <div className="mt-4">
-                    <div className="text-xs font-medium text-red-700 dark:text-red-300 mb-2">
-                      ⚠️ CRITICAL: Fields Found in Sample But Not Being Mapped ({debugData.foundInSample.length}):
-                    </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                      These fields exist in the API response but aren't being populated. The enhanced mapping logic should fix these automatically.
-                    </div>
-                    <div className="max-h-48 overflow-y-auto space-y-1">
-                      {debugData.foundInSample.slice(0, 30).map((field: any, idx: number) => (
-                        <div key={idx} className="text-xs font-mono p-2 bg-red-50 dark:bg-red-900/20 rounded border border-red-200 dark:border-red-800">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <span className="text-slate-600 dark:text-slate-400">{field.alias}</span>
-                              <span className="text-slate-400 dark:text-slate-500 mx-2">→</span>
-                              <span className="text-slate-700 dark:text-slate-300">{field.columnName}</span>
-                            </div>
-                            <div className="text-slate-500 dark:text-slate-400">
-                              Found as: <span className="font-semibold">{field.foundAs}</span>
-                            </div>
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                            Field ID: {field.fieldId}
-                          </div>
-                        </div>
-                      ))}
-                      {debugData.foundInSample.length > 30 && (
-                        <div className="text-xs text-slate-500 dark:text-slate-400 italic">
-                          ... and {debugData.foundInSample.length - 30} more
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                
-                {debugData.missingFromSample && debugData.missingFromSample.length > 0 && (
-                  <div className="mt-4">
-                    <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-                      Fields Not Found in Sample Loan Response ({debugData.missingFromSample.length}):
-                    </div>
-                    <div className="max-h-48 overflow-y-auto space-y-1">
-                      {debugData.missingFromSample.slice(0, 20).map((field: any, idx: number) => (
-                        <div key={idx} className="text-xs font-mono p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <span className="text-slate-600 dark:text-slate-400">{field.alias}</span>
-                              <span className="text-slate-400 dark:text-slate-500 mx-2">→</span>
-                              <span className="text-slate-700 dark:text-slate-300">{field.columnName}</span>
-                            </div>
-                            <div className="text-slate-500 dark:text-slate-400">
-                              Field ID: {field.fieldId}
-                            </div>
-                          </div>
-                          {field.foundVariations && field.foundVariations.length > 0 && (
-                            <div className="mt-1 text-xs text-yellow-600 dark:text-yellow-400">
-                              Similar fields found: {field.foundVariations.join(', ')}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {debugData.missingFromSample.length > 20 && (
-                        <div className="text-xs text-slate-500 dark:text-slate-400 italic">
-                          ... and {debugData.missingFromSample.length - 20} more
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
       </CardContent>

@@ -1,18 +1,18 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Coheus WAF + CloudFront Security Stack
-  
+
   This stack creates:
   - WAFv2 Web ACL with AWS Managed Rules
   - Rate limiting, SQL injection, XSS protection
   - CloudFront distribution with WAF association
   - S3 origin (OAC) for frontend; custom origin for API (ALB)
-  
+
   Caching (SPA best practice):
   - Static assets (default): long TTL, gzip/brotli in cache key
   - index.html: managed CachingDisabled (no cache; custom TTL=0 cannot use EnableAcceptEncoding*)
   - /api/*, /health: managed CachingDisabled + AllViewer origin request
-  
+
   Deploy in us-east-1 (required for CloudFront WAF).
 
 Parameters:
@@ -37,16 +37,16 @@ Parameters:
   BackendOriginDomain:
     Type: String
     Description: Backend origin domain (e.g., coheus-prod.us-east-1.elasticbeanstalk.com)
-    Default: ''
+    Default: ""
 
   CertificateArn:
     Type: String
-    Default: ''
+    Default: ""
     Description: ACM certificate ARN for custom domain (must be in us-east-1)
 
   DomainName:
     Type: String
-    Default: ''
+    Default: ""
     Description: Custom domain name (e.g., app.cohi.io)
 
   RateLimitPerIP:
@@ -56,10 +56,10 @@ Parameters:
 
   EnableBackendOrigin:
     Type: String
-    Default: 'true'
+    Default: "true"
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
     Description: Enable backend origin for /api/* routing
 
   BackendOriginProtocol:
@@ -71,12 +71,12 @@ Parameters:
     Description: CloudFront-to-ALB protocol. Use https-only when ALB has an HTTPS listener (CertificateArn in backend stack) and BackendOriginDomain is a custom domain (e.g. api.cohi.io) with that cert. See docs/deployment/HTTPS_AND_CERTIFICATES.md.
 
 Conditions:
-  HasCustomDomain: !Not [!Equals [!Ref DomainName, '']]
-  HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
-  BackendOriginUseHTTPS: !Equals [!Ref BackendOriginProtocol, 'https-only']
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+  BackendOriginUseHTTPS: !Equals [!Ref BackendOriginProtocol, "https-only"]
   HasBackendOrigin: !And
-    - !Equals [!Ref EnableBackendOrigin, 'true']
-    - !Not [!Equals [!Ref BackendOriginDomain, '']]
+    - !Equals [!Ref EnableBackendOrigin, "true"]
+    - !Not [!Equals [!Ref BackendOriginDomain, ""]]
 
 Resources:
   # ============================================================================
@@ -85,14 +85,14 @@ Resources:
   WebACL:
     Type: AWS::WAFv2::WebACL
     Properties:
-      Name: !Sub '${ProjectName}-${Environment}-waf'
-      Description: !Sub 'WAF Web ACL for ${ProjectName} ${Environment}'
+      Name: !Sub "${ProjectName}-${Environment}-waf"
+      Description: !Sub "WAF Web ACL for ${ProjectName} ${Environment}"
       Scope: CLOUDFRONT
       DefaultAction:
         Allow: {}
       VisibilityConfig:
         CloudWatchMetricsEnabled: true
-        MetricName: !Sub '${ProjectName}-${Environment}-waf'
+        MetricName: !Sub "${ProjectName}-${Environment}-waf"
         SampledRequestsEnabled: true
       Rules:
         # Rule 1: AWS Managed Common Rule Set
@@ -105,7 +105,7 @@ Resources:
               VendorName: AWS
               Name: AWSManagedRulesCommonRuleSet
               ExcludedRules:
-                - Name: SizeRestrictions_BODY  # Allow larger request bodies for file uploads
+                - Name: SizeRestrictions_BODY # Allow larger request bodies for file uploads
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedRulesCommonRuleSetMetric
@@ -179,7 +179,7 @@ Resources:
             OrStatement:
               Statements:
                 - ByteMatchStatement:
-                    SearchString: 'curl'
+                    SearchString: "curl"
                     FieldToMatch:
                       SingleHeader:
                         Name: user-agent
@@ -188,7 +188,7 @@ Resources:
                         Type: LOWERCASE
                     PositionalConstraint: CONTAINS
                 - ByteMatchStatement:
-                    SearchString: 'wget'
+                    SearchString: "wget"
                     FieldToMatch:
                       SingleHeader:
                         Name: user-agent
@@ -208,7 +208,7 @@ Resources:
 
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-waf'
+          Value: !Sub "${ProjectName}-${Environment}-waf"
         - Key: Environment
           Value: !Ref Environment
 
@@ -219,7 +219,7 @@ Resources:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
       OriginAccessControlConfig:
-        Name: !Sub '${ProjectName}-${Environment}-oac'
+        Name: !Sub "${ProjectName}-${Environment}-oac"
         Description: Origin Access Control for S3 bucket
         OriginAccessControlOriginType: s3
         SigningBehavior: always
@@ -228,16 +228,16 @@ Resources:
   # ============================================================================
   # CloudFront Cache Policies
   # ============================================================================
-  
+
   # Cache policy for static assets (long cache)
   StaticAssetsCachePolicy:
     Type: AWS::CloudFront::CachePolicy
     Properties:
       CachePolicyConfig:
-        Name: !Sub '${ProjectName}-${Environment}-static-assets'
+        Name: !Sub "${ProjectName}-${Environment}-static-assets"
         Comment: Cache policy for static assets (JS, CSS, images)
-        DefaultTTL: 86400  # 1 day
-        MaxTTL: 31536000  # 1 year
+        DefaultTTL: 86400 # 1 day
+        MaxTTL: 31536000 # 1 year
         MinTTL: 86400
         ParametersInCacheKeyAndForwardedToOrigin:
           CookiesConfig:
@@ -256,7 +256,7 @@ Resources:
   # ============================================================================
   # CloudFront Origin Request Policies
   # ============================================================================
-  
+
   # API origin uses AWS managed AllViewer policy: forwards all headers (including
   # Authorization), cookies, and query strings. Custom policies cannot whitelist
   # Authorization (CloudFront restriction).
@@ -270,18 +270,18 @@ Resources:
     Properties:
       DistributionConfig:
         Enabled: true
-        Comment: !Sub '${ProjectName} ${Environment} distribution'
+        Comment: !Sub "${ProjectName} ${Environment} distribution"
         DefaultRootObject: index.html
-        PriceClass: PriceClass_100  # US, Canada, Europe
+        PriceClass: PriceClass_100 # US, Canada, Europe
         WebACLId: !GetAtt WebACL.Arn
         HttpVersion: http2and3
-        
+
         # Custom domain configuration
         Aliases: !If
           - HasCustomDomain
           - - !Ref DomainName
           - !Ref AWS::NoValue
-        
+
         ViewerCertificate: !If
           - HasCertificate
           - AcmCertificateArn: !Ref CertificateArn
@@ -296,8 +296,8 @@ Resources:
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
             OriginAccessControlId: !GetAtt OriginAccessControl.Id
             S3OriginConfig:
-              OriginAccessIdentity: ''
-          
+              OriginAccessIdentity: ""
+
           # Backend Origin (conditional)
           # Protocol: http-only (default) or https-only. Use https-only when ALB has a cert and BackendOriginDomain is that custom domain. See docs/deployment/HTTPS_AND_CERTIFICATES.md.
           - !If
@@ -307,12 +307,13 @@ Resources:
               CustomOriginConfig:
                 HTTPPort: 80
                 HTTPSPort: 443
-                OriginProtocolPolicy: !If [BackendOriginUseHTTPS, https-only, http-only]
+                OriginProtocolPolicy:
+                  !If [BackendOriginUseHTTPS, https-only, http-only]
                 OriginSSLProtocols: !If
                   - BackendOriginUseHTTPS
                   - - TLSv1.2
                   - !Ref AWS::NoValue
-                OriginReadTimeout: 180
+                OriginReadTimeout: 60
                 OriginKeepaliveTimeout: 60
             - !Ref AWS::NoValue
 
@@ -336,7 +337,7 @@ Resources:
           # API requests to backend
           - !If
             - HasBackendOrigin
-            - PathPattern: '/api/*'
+            - PathPattern: "/api/*"
               TargetOriginId: BackendOrigin
               ViewerProtocolPolicy: redirect-to-https
               AllowedMethods:
@@ -350,29 +351,29 @@ Resources:
               CachedMethods:
                 - GET
                 - HEAD
-              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled managed policy
-              OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # Managed AllViewer (forwards Authorization, etc.)
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled managed policy
+              OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # Managed AllViewer (forwards Authorization, etc.)
               Compress: true
             - !Ref AWS::NoValue
-          
+
           # Health check endpoint
           - !If
             - HasBackendOrigin
-            - PathPattern: '/health'
+            - PathPattern: "/health"
               TargetOriginId: BackendOrigin
               ViewerProtocolPolicy: redirect-to-https
               AllowedMethods:
                 - GET
                 - HEAD
-              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled managed policy
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled managed policy
               Compress: true
             - !Ref AWS::NoValue
-          
+
           # index.html - no cache for SPA (managed CachingDisabled)
-          - PathPattern: '/index.html'
+          - PathPattern: "/index.html"
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed CachingDisabled
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed CachingDisabled
             ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
             Compress: true
             AllowedMethods:
@@ -398,7 +399,7 @@ Resources:
 
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-distribution'
+          Value: !Sub "${ProjectName}-${Environment}-distribution"
         - Key: Environment
           Value: !Ref Environment
 
@@ -409,7 +410,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub '${ProjectName}-${Environment}-security-headers'
+        Name: !Sub "${ProjectName}-${Environment}-security-headers"
         Comment: Security headers for Coheus
         SecurityHeadersConfig:
           ContentTypeOptions:
@@ -430,7 +431,7 @@ Resources:
             Override: true
             Protection: true
           ContentSecurityPolicy:
-            ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-ancestors 'none';"
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https://*.optimalblue.com; frame-ancestors 'none';"
             Override: false
 
   # ============================================================================
@@ -453,7 +454,7 @@ Resources:
               SSEAlgorithm: AES256
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-frontend'
+          Value: !Sub "${ProjectName}-${Environment}-frontend"
 
   # ============================================================================
   # Empty bucket on stack delete (so bucket can be deleted and redeploy works)
@@ -461,9 +462,9 @@ Resources:
   EmptyBucketRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${ProjectName}-${Environment}-empty-bucket-role'
+      RoleName: !Sub "${ProjectName}-${Environment}-empty-bucket-role"
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -480,24 +481,24 @@ Resources:
       PolicyName: EmptyBucket
       Roles: [!Ref EmptyBucketRole]
       PolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
               - s3:ListBucket
               - s3:ListBucketVersions
               - s3:GetBucketVersioning
-            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}'
+            Resource: !Sub "arn:aws:s3:::${FrontendBucket}"
           - Effect: Allow
             Action:
               - s3:DeleteObject
               - s3:DeleteObjectVersion
-            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}/*'
+            Resource: !Sub "arn:aws:s3:::${FrontendBucket}/*"
   EmptyBucketFunction:
     Type: AWS::Lambda::Function
     DependsOn: EmptyBucketRolePolicy
     Properties:
-      FunctionName: !Sub '${ProjectName}-${Environment}-empty-frontend-bucket'
+      FunctionName: !Sub "${ProjectName}-${Environment}-empty-frontend-bucket"
       Runtime: nodejs20.x
       Handler: index.handler
       Role: !GetAtt EmptyBucketRole.Arn
@@ -556,17 +557,17 @@ Resources:
     Properties:
       Bucket: !Ref FrontendBucket
       PolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Sid: AllowCloudFrontServicePrincipal
             Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub 'arn:aws:s3:::${FrontendBucket}/*'
+            Resource: !Sub "arn:aws:s3:::${FrontendBucket}/*"
             Condition:
               StringEquals:
-                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+                "AWS:SourceArn": !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
 
   # ============================================================================
   # CloudWatch Alarms for WAF
@@ -574,8 +575,8 @@ Resources:
   WAFBlockedRequestsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-waf-blocked-requests'
-      AlarmDescription: 'High number of blocked requests by WAF'
+      AlarmName: !Sub "${ProjectName}-${Environment}-waf-blocked-requests"
+      AlarmDescription: "High number of blocked requests by WAF"
       MetricName: BlockedRequests
       Namespace: AWS/WAFV2
       Statistic: Sum
@@ -585,7 +586,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: WebACL
-          Value: !Sub '${ProjectName}-${Environment}-waf'
+          Value: !Sub "${ProjectName}-${Environment}-waf"
         - Name: Rule
           Value: ALL
         - Name: Region
@@ -595,8 +596,8 @@ Resources:
   WAFRateLimitAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-waf-rate-limit-triggered'
-      AlarmDescription: 'Rate limit rule is blocking requests'
+      AlarmName: !Sub "${ProjectName}-${Environment}-waf-rate-limit-triggered"
+      AlarmDescription: "Rate limit rule is blocking requests"
       MetricName: BlockedRequests
       Namespace: AWS/WAFV2
       Statistic: Sum
@@ -606,7 +607,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: WebACL
-          Value: !Sub '${ProjectName}-${Environment}-waf'
+          Value: !Sub "${ProjectName}-${Environment}-waf"
         - Name: Rule
           Value: RateLimitRule
         - Name: Region
@@ -618,7 +619,7 @@ Outputs:
     Description: S3 bucket name for frontend assets
     Value: !Ref FrontendBucket
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-frontend-bucket'
+      Name: !Sub "${ProjectName}-${Environment}-frontend-bucket"
 
   FrontendBucketArn:
     Description: S3 bucket ARN
@@ -628,28 +629,28 @@ Outputs:
     Description: CloudFront distribution ID
     Value: !Ref CloudFrontDistribution
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-cf-distribution-id'
+      Name: !Sub "${ProjectName}-${Environment}-cf-distribution-id"
 
   CloudFrontDomainName:
     Description: CloudFront distribution domain name
     Value: !GetAtt CloudFrontDistribution.DomainName
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-cf-domain'
+      Name: !Sub "${ProjectName}-${Environment}-cf-domain"
 
   CloudFrontURL:
     Description: Full CloudFront URL
-    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
 
   CustomDomainURL:
     Condition: HasCustomDomain
     Description: Custom domain URL
-    Value: !Sub 'https://${DomainName}'
+    Value: !Sub "https://${DomainName}"
 
   WebACLArn:
     Description: WAF Web ACL ARN
     Value: !GetAtt WebACL.Arn
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-waf-arn'
+      Name: !Sub "${ProjectName}-${Environment}-waf-arn"
 
   WebACLId:
     Description: WAF Web ACL ID
@@ -659,4 +660,4 @@ Outputs:
     Description: Origin Access Control ID for S3
     Value: !GetAtt OriginAccessControl.Id
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-oac-id'
+      Name: !Sub "${ProjectName}-${Environment}-oac-id"

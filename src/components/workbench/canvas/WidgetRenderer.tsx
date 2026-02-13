@@ -992,6 +992,7 @@ export function WidgetRenderer({
           otherGroups={otherGroups}
           onMoveItemOut={onMoveItemOut}
           savedFilters={payload.savedFilters}
+          filtersCollapsed={payload.filtersCollapsed}
         />
       </div>
     );

@@ -84,7 +84,7 @@ import {
 import { getWidgetDefinition } from '@/components/widgets/registry';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { WorkbenchCohiPanel } from '@/components/workbench/WorkbenchCohiPanel';
-import { useWorkbenchCohi } from '@/hooks/useWorkbenchCohi';
+import { useWorkbenchCohi, type SourceInsightContext } from '@/hooks/useWorkbenchCohi';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
 import { ReportBuilder } from '@/components/workbench/report/ReportBuilder';
 import { serializeWidgetCatalog } from '@/utils/widgetCatalogSerializer';
@@ -150,8 +150,8 @@ const BACKGROUND_TEMPLATES: { id: string; label: string; style: React.CSSPropert
 const GRID_COLS = 12;
 const GRID_ROW_HEIGHT = 140;
 const GRID_MARGIN = { x: 8, y: 8 };
-const DEFAULT_SECTION_SIZE = { w: 420, h: 280 };
-const DEFAULT_WIDGET_SIZE = { w: 360, h: 240 };
+const DEFAULT_SECTION_SIZE = { w: 600, h: 420 };
+const DEFAULT_WIDGET_SIZE = { w: 560, h: 400 };
 const TEMPLATE_SCALE = 0.75;
 const TEMPLATE_MIN_SIZE = { w: 260, h: 180 };
 
@@ -494,6 +494,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
   const [activeAddGroup, setActiveAddGroup] = useState(() => DASHBOARD_SECTION_GROUPS[0]?.label ?? 'Insights');
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
+  const [sourceInsight, setSourceInsight] = useState<SourceInsightContext | null>(null);
   const [showCohiPanel, setShowCohiPanel] = useState(() => {
     // Auto-open Cohi panel on first visit
     const visited = localStorage.getItem('cohi-workbench-visited');
@@ -508,6 +509,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
   const [aiBackgroundResult, setAiBackgroundResult] = useState<{ templateId: string; suggestedDescription: string } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const backgroundImageInputRef = useRef<HTMLInputElement>(null);
@@ -605,6 +607,8 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
     tenantId,
     canvasItems: items,
     widgetCatalog,
+    canvasId,
+    sourceInsight,
     onAutoExecuteActions: useCallback((actions: WidgetAction[]) => {
       // Batch-execute all canvas actions to avoid stale-state issues
       // Separate create_widget actions (need intelligent layout) from others
@@ -616,8 +620,34 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         cohiActionRef.current(action);
       }
 
-      // Batch all create_widget actions into a SINGLE widget_group (or add to existing)
-      if (createWidgetActions.length > 0) {
+      // Handle create_widget actions: single → standalone, multiple → group
+      if (createWidgetActions.length === 1) {
+        // Single widget → standalone cohi_widget on canvas
+        const action = createWidgetActions[0];
+        setItemsWithHistory((prev) => {
+          const yBottom = prev.reduce((max, it) => Math.max(max, it.y + it.h), 0);
+          const standaloneItem = createLayoutItem(
+            `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            'cohi_widget',
+            {
+              type: 'cohi_widget' as const,
+              sql: action.sql,
+              title: action.title,
+              vizConfig: action.config,
+              explanation: action.explanation,
+            },
+            {
+              x: 12,
+              y: yBottom + 16,
+              w: Math.min(Math.max(width - 56, 400), 700),
+              h: 420,
+            }
+          );
+          return [...prev, standaloneItem];
+        });
+        toast({ title: 'Widget added', description: createWidgetActions[0].title });
+      } else if (createWidgetActions.length > 1) {
+        // Multiple widgets → group them together in a widget_group
         setItemsWithHistory((prev) => {
           // Build all cohi widget items
           const cohiItems = createWidgetActions.map((action, idx) => ({
@@ -629,39 +659,6 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
             explanation: action.explanation,
           }));
 
-          // Check if there's an existing widget_group we can append to
-          const existingGroupIdx = prev.findIndex(
-            (it) => it.type === 'widget_group' && it.payload.type === 'widget_group'
-          );
-
-          if (existingGroupIdx !== -1) {
-            // Add to existing group
-            const existingGroup = prev[existingGroupIdx];
-            const groupPayload = existingGroup.payload;
-            const currentItems = groupPayload.items || groupPayload.widgetIds.map((id: string) => ({ kind: 'registry' as const, defId: id }));
-            const mergedItems = [...currentItems, ...cohiItems];
-
-            // Grow the group height to accommodate new widgets
-            const newChartCount = createWidgetActions.length;
-            const extraH = Math.ceil(newChartCount / 2) * 280;
-
-            const updated = prev.map((it, i) =>
-              i === existingGroupIdx
-                ? {
-                    ...it,
-                    h: it.h + extraH,
-                    payload: {
-                      ...groupPayload,
-                      items: mergedItems,
-                      widgetIds: mergedItems.filter((item: any) => item.kind === 'registry').map((item: any) => item.defId),
-                    },
-                  }
-                : it
-            );
-            return updated;
-          }
-
-          // No existing group — create a new one
           const newItems = [...prev];
           let yOffset = 20;
           for (const item of prev) {
@@ -669,18 +666,15 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
             if (bottom + 20 > yOffset) yOffset = bottom + 20;
           }
 
-          // Determine a good title for the group
-          const groupTitle = createWidgetActions.length === 1
-            ? (createWidgetActions[0].title || 'Cohi Widget')
-            : 'Cohi Dashboard';
+          const groupTitle = 'Cohi Dashboard';
 
-          // Size: taller for more widgets (KPIs are short, charts need ~250px each)
+          // Size: taller for more widgets (KPIs are short, charts need ~280px each)
           const kpiCount = createWidgetActions.filter((a) => a.config?.type === 'kpi').length;
           const chartCount = createWidgetActions.length - kpiCount;
           const kpiRows = Math.ceil(kpiCount / 4);
           const chartRows = Math.ceil(chartCount / 2);
-          const groupH = Math.max(350, 110 + kpiRows * 100 + chartRows * 280);
-          const groupW = Math.max(width - 40, 600);
+          const groupH = Math.max(420, 60 + kpiRows * 100 + chartRows * 300);
+          const groupW = Math.max(width - 56, 600);
 
           const groupId = `canvas-group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const groupItem = createLayoutItem(
@@ -693,6 +687,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
               sectionType: 'company-scorecard' as SectionType,
               widgetIds: [],
               items: cohiItems,
+              filterSync: false, // Cohi widgets start with independent filters
             },
             { x: 0, y: yOffset, w: groupW, h: groupH }
           );
@@ -700,7 +695,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           return newItems;
         });
         toast({
-          title: `${createWidgetActions.length} widget${createWidgetActions.length > 1 ? 's' : ''} added`,
+          title: `${createWidgetActions.length} widgets added`,
           description: createWidgetActions.map((a) => a.title).filter(Boolean).join(', '),
         });
       }
@@ -783,60 +778,28 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           break;
         }
         case 'create_widget': {
-          // Check if there's an existing widget_group on the canvas we can add to
-          const existingGroup = items.find(
-            (it) => it.type === 'widget_group' && it.payload.type === 'widget_group'
-          );
-
-          if (existingGroup && existingGroup.payload.type === 'widget_group') {
-            // Add to existing group
-            const groupPayload = existingGroup.payload;
-            const currentItems = groupPayload.items || groupPayload.widgetIds.map((id: string) => ({ kind: 'registry' as const, defId: id }));
-            const newCohiItem = {
-              kind: 'cohi' as const,
-              id: `cohi-${Date.now()}`,
+          // Create a standalone cohi_widget on the canvas.
+          // Users can wrap it in a group or move it to an existing group later.
+          const yBottom = items.reduce((max, it) => Math.max(max, it.y + it.h), 0);
+          const standaloneItem = createLayoutItem(
+            `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            'cohi_widget',
+            {
+              type: 'cohi_widget',
               sql: action.sql,
               title: action.title,
               vizConfig: action.config,
               explanation: action.explanation,
-            };
-            const updatedItems = [...currentItems, newCohiItem];
-            const updatedPayload = {
-              ...groupPayload,
-              items: updatedItems,
-              widgetIds: updatedItems.filter((i: any) => i.kind === 'registry').map((i: any) => i.defId),
-            };
-            const targetGroupId = existingGroup.i;
-            setItemsWithHistory((prev) =>
-              prev.map((it) => it.i === targetGroupId ? { ...it, payload: updatedPayload } : it)
-            );
-            toast({ title: 'Widget added to group', description: action.title });
-          } else {
-            // Create a new widget_group containing this single cohi widget
-            const groupId = `canvas-group-${Date.now()}`;
-            const cohiGroupItem = createLayoutItem(
-              groupId,
-              'widget_group',
-              {
-                type: 'widget_group',
-                groupId,
-                title: action.title,
-                sectionType: 'company-scorecard',
-                widgetIds: [],
-                items: [{
-                  kind: 'cohi' as const,
-                  id: `cohi-${Date.now()}`,
-                  sql: action.sql,
-                  title: action.title,
-                  vizConfig: action.config,
-                  explanation: action.explanation,
-                }],
-              },
-              { x: 20, y: 20, w: 700, h: 500 }
-            );
-            setItemsWithHistory((prev) => [...prev, cohiGroupItem]);
-            toast({ title: 'Widget group created', description: action.title });
-          }
+            },
+            {
+              x: 12,
+              y: yBottom + 16,
+              w: Math.min(Math.max(width - 56, 400), 700),
+              h: 420,
+            }
+          );
+          setItemsWithHistory((prev) => [...prev, standaloneItem]);
+          toast({ title: 'Widget added', description: action.title });
           break;
         }
         case 'delete_widget': {
@@ -1010,6 +973,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           sectionType: (group.sectionType || 'company-scorecard') as import('@/stores/widgetSectionStore').SectionType,
           widgetIds: [] as string[],
           items: groupItems,
+          filterSync: false, // AI-generated widgets start with independent filters
         };
 
         // Size the group based on widget count
@@ -1068,6 +1032,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         if (Array.isArray(content.annotations)) setAnnotations(content.annotations);
         if (content.background && typeof content.background === 'object') setCanvasBackground(content.background);
         if (Array.isArray(content.uploadsMeta)) setUploads(content.uploadsMeta);
+        if (content.sourceInsight && typeof content.sourceInsight === 'object') {
+          setSourceInsight(content.sourceInsight as SourceInsightContext);
+          // Auto-open Cohi panel for deep-dive canvases
+          setShowCohiPanel(true);
+        }
         if (data.title) setSaveTitle(data.title);
         if (typeof data.favorited === 'boolean') setShareFavorited(data.favorited);
         setCanvasId(data.id);
@@ -1131,8 +1100,10 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasId, items.length, loadCanvasId]);
 
+  // Observe the canvas root element (not outer wrapper) so width updates
+  // when the Cohi panel opens/closes and the canvas area actually resizes.
   useEffect(() => {
-    const el = containerRef.current;
+    const el = canvasRootRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -1144,6 +1115,46 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
   }, []);
 
   const canvasWidth = Math.max(width - 32, 480);
+
+  // ─── Auto-fit: proportionally rescale items when Cohi panel opens/closes ───
+  // Tracks the panel state and rescales widget positions/widths so they fit
+  // the new available width without horizontal overflow.
+  const canvasWidthRef = useRef(canvasWidth);
+  canvasWidthRef.current = canvasWidth;
+  const prevPanelOpenRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    // Skip the very first render (initial mount)
+    if (prevPanelOpenRef.current === null) {
+      prevPanelOpenRef.current = showCohiPanel;
+      return;
+    }
+    // Only act when the panel state actually changed
+    if (prevPanelOpenRef.current === showCohiPanel) return;
+    prevPanelOpenRef.current = showCohiPanel;
+
+    // Wait for DOM reflow + ResizeObserver to update canvasWidth
+    const timer = setTimeout(() => {
+      const targetWidth = canvasWidthRef.current;
+      setItems((prev) => {
+        if (prev.length === 0) return prev;
+        const maxRight = Math.max(0, ...prev.map((i) => i.x + i.w));
+        // Skip if items already fit or there's nothing to scale
+        if (maxRight <= 0) return prev;
+        const scale = targetWidth / maxRight;
+        // Don't bother if the change is tiny (<5%)
+        if (Math.abs(1 - scale) < 0.05) return prev;
+        return prev.map((item) => ({
+          ...item,
+          x: Math.max(0, Math.round(item.x * scale)),
+          w: Math.max(200, Math.round(item.w * scale)),
+        }));
+      });
+    }, 350);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCohiPanel]);
 
   const bringToFront = useCallback(
     (id: string) => {
@@ -1284,8 +1295,12 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
       next: Partial<Pick<CanvasLayoutItem, 'x' | 'y' | 'w' | 'h'>>,
       withHistory = false
     ) => {
+      // Clamp position so widgets can't be dragged off the left/top edges
+      const clamped = { ...next };
+      if (clamped.x !== undefined) clamped.x = Math.max(0, clamped.x);
+      if (clamped.y !== undefined) clamped.y = Math.max(0, clamped.y);
       const setter = withHistory ? setItemsWithHistory : setItems;
-      setter((prev) => prev.map((i) => (i.i === id ? { ...i, ...next } : i)));
+      setter((prev) => prev.map((i) => (i.i === id ? { ...i, ...clamped } : i)));
     },
     [setItems, setItemsWithHistory]
   );
@@ -1357,8 +1372,8 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
             return d?.category === 'table';
           }).length;
           const chartRows = Math.ceil(chartCount / 2);
-          const contentH = kpiRows * 80 + chartRows * 210 + tableCount * 280 + 20;
-          groupH = Math.max(350, 110 + contentH);
+          const contentH = kpiRows * 80 + chartRows * 240 + tableCount * 300 + 20;
+          groupH = Math.max(400, 60 + contentH); // 60px for compact header
         }
 
         const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -1663,11 +1678,15 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
 
   const canvasContentHeight = Math.max(
     400,
-    items.length === 0 ? 400 : Math.max(0, ...items.map((i) => i.y + i.h)) + 200
+    items.length === 0 ? 400 : Math.max(0, ...items.map((i) => i.y + i.h)) + 120
   );
+  // Content width: use canvas width as the base, only expand if items actually
+  // overflow (e.g. user dragged a widget beyond the viewport). The +40 gives a
+  // small drop-zone margin without forcing unnecessary horizontal scroll.
+  const itemsMaxRight = items.length > 0 ? Math.max(0, ...items.map((i) => i.x + i.w)) : 0;
   const canvasContentWidth = Math.max(
     canvasWidth,
-    items.length === 0 ? canvasWidth : Math.max(0, ...items.map((i) => i.x + i.w)) + 200
+    itemsMaxRight > canvasWidth ? itemsMaxRight + 40 : canvasWidth,
   );
 
   const handleAiBackgroundSubmit = useCallback(async () => {
@@ -2316,8 +2335,9 @@ Structure it as a narrative-first executive briefing:
 
   return (
     <WidgetDataProvider>
-    <div ref={containerRef} className="flex h-full w-full min-h-0">
+    <div ref={containerRef} className="flex h-full w-full min-h-0 overflow-hidden">
       <div
+        ref={canvasRootRef}
         id="workbench-canvas-root"
         className="flex-1 min-w-0 flex flex-col overflow-hidden"
         style={canvasContainerStyle}
@@ -2886,6 +2906,7 @@ Structure it as a narrative-first executive briefing:
                             vizConfig: cohiPayload.vizConfig,
                             explanation: cohiPayload.explanation,
                           }],
+                          filterSync: false, // Cohi widgets start with independent filters
                         },
                         { x: item.x, y: item.y, w: 700, h: 500 },
                       );

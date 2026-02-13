@@ -106,12 +106,12 @@ function getPool(): pg.Pool {
       user: dbConfig.user,
       password: dbConfig.password,
       ssl: sslEnabled ? { rejectUnauthorized: false } : false,
-      max: 50, // Increased from 20 to handle large imports
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 30000, // Increased to 30 seconds
-      query_timeout: 60000, // Increased to 60 seconds for large imports
-      // Add retry logic
-      allowExitOnIdle: false,
+      max: 10, // Reduced from 50 — most queries complete in <50ms; high max wastes DB connections
+      min: 0, // Don't hold idle connections unnecessarily
+      idleTimeoutMillis: 10000, // 10s idle timeout — release connections faster
+      connectionTimeoutMillis: 15000, // 15 seconds connection timeout
+      query_timeout: 60000, // 60 seconds for long-running queries (imports, etc.)
+      allowExitOnIdle: true, // Release all connections when idle to reduce DB load
     });
 
     // Handle connection errors

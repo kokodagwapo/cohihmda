@@ -17,14 +17,8 @@ dist-ssr
 server/src/version.json
 server/dist/version.json
 
-# Build outputs (docs is used for GitHub Pages, but exclude build artifacts)
-!docs
-docs/assets/*.js.map
-docs/assets/*.css.map
-# Ignore hashed build artifacts in docs/assets
-docs/assets/index-*.js
-docs/assets/index-*.css
-docs/assets/*.es-*.js
+# Build outputs (dist/ is the Vite build output directory)
+# dist is already listed above
 
 # Editor directories and files
 .vscode/*

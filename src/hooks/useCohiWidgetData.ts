@@ -17,6 +17,15 @@ export interface DateFilter {
   end: string;      // YYYY-MM-DD
 }
 
+/**
+ * A single dimension filter condition to inject into the SQL WHERE clause.
+ * E.g. { column: 'branch', value: 'West Coast' } → WHERE branch = 'West Coast'
+ */
+export interface DimensionFilter {
+  column: string;
+  value: string;
+}
+
 export interface CohiWidgetDataState {
   data: any[] | null;
   loading: boolean;
@@ -60,11 +69,15 @@ async function resolveEffectiveTenantId(
  *
  * When `dateFilter` is provided, the server wraps the SQL in a CTE
  * that filters to the given date range on the specified column.
+ *
+ * When `dimensionFilters` are provided, the server injects additional
+ * WHERE conditions (e.g. branch = 'X', loan_officer = 'Y').
  */
 export function useCohiWidgetData(
   sql: string | undefined,
   tenantId?: string | null,
   dateFilter?: DateFilter | null,
+  dimensionFilters?: DimensionFilter[] | null,
 ): CohiWidgetDataState {
   const [data, setData] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -72,6 +85,9 @@ export function useCohiWidgetData(
   const [trigger, setTrigger] = useState(0);
 
   const refetch = useCallback(() => setTrigger((t) => t + 1), []);
+
+  // Stable serialized key for dimension filters to use in dependency array
+  const dimKey = dimensionFilters?.map((d) => `${d.column}=${d.value}`).join('|') ?? '';
 
   useEffect(() => {
     if (!sql) return;
@@ -91,6 +107,9 @@ export function useCohiWidgetData(
         const body: Record<string, unknown> = { sql };
         if (dateFilter) {
           body.dateFilter = dateFilter;
+        }
+        if (dimensionFilters && dimensionFilters.length > 0) {
+          body.dimensionFilters = dimensionFilters;
         }
 
         const response = await api.request<{
@@ -123,7 +142,7 @@ export function useCohiWidgetData(
     return () => {
       cancelled = true;
     };
-  }, [sql, tenantId, dateFilter?.column, dateFilter?.start, dateFilter?.end, trigger]);
+  }, [sql, tenantId, dateFilter?.column, dateFilter?.start, dateFilter?.end, dimKey, trigger]);
 
   return { data, loading, error, refetch };
 }

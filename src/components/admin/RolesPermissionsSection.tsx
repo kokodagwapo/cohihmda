@@ -489,6 +489,19 @@ export function RolesPermissionsSection() {
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
+      {/* Preview Banner */}
+      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
+        <div className="flex items-center gap-2">
+          <Shield className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+            Preview Mode
+          </p>
+        </div>
+        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+          Roles and permissions are not yet persisted. Changes made here will not be saved. This section is a design preview while requirements are being finalized.
+        </p>
+      </div>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>

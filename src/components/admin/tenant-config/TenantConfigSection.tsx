@@ -15,7 +15,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Calculator,
@@ -131,15 +130,10 @@ export function TenantConfigSection() {
   }, [loadData, selectedTenantId]);
 
   const tabs = [
-    { id: "mapping", label: "Field Mapping", icon: Link2, count: null },
-    {
-      id: "calculations",
-      label: "Revenue Calculations",
-      icon: Calculator,
-      count: null,
-    },
-    { id: "scoring", label: "Scoring Weights", icon: BarChart3, count: null },
-    { id: "import", label: "Legacy Import", icon: Upload, count: null },
+    { id: "mapping", label: "Field Mapping", icon: Link2 },
+    { id: "calculations", label: "Revenue Calculations", icon: Calculator },
+    { id: "scoring", label: "Scoring Weights", icon: BarChart3 },
+    { id: "import", label: "Legacy Import", icon: Upload },
   ];
 
   return (
@@ -234,11 +228,6 @@ export function TenantConfigSection() {
               >
                 <tab.icon className="h-4 w-4" />
                 <span className="hidden sm:inline">{tab.label}</span>
-                {tab.count !== null && tab.count > 0 && (
-                  <Badge variant="secondary" className="ml-1 text-xs">
-                    {tab.count}
-                  </Badge>
-                )}
               </TabsTrigger>
             ))}
           </TabsList>

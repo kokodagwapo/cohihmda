@@ -289,7 +289,7 @@ router.get('/history', authenticateToken, attachTenantContext, async (req: AuthR
  */
 router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
-    const { sql, dateFilter } = req.body;
+    const { sql, dateFilter, dimensionFilters } = req.body;
 
     if (!sql || typeof sql !== 'string') {
       return res.status(400).json({ error: 'sql is required' });
@@ -380,6 +380,56 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
       }
 
       console.log(`[CohiChat] Date filter applied on ${col} [${dateFilter.start} → ${dateFilter.end}]`);
+    } else {
+      console.log(`[CohiChat] No date filter applied — SQL will use its own date scoping`);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Dimension filters: inject equality conditions (branch, loan_officer, etc.)
+    // dimensionFilters: Array<{ column: string, value: string }>
+    // ---------------------------------------------------------------------------
+    if (Array.isArray(dimensionFilters) && dimensionFilters.length > 0) {
+      for (const df of dimensionFilters) {
+        if (!df.column || !df.value || typeof df.column !== 'string' || typeof df.value !== 'string') continue;
+        const dimCol = df.column.replace(/[^a-zA-Z0-9_.]/g, ''); // sanitise
+        // Use parameterised-style quoting to prevent injection
+        const safeVal = df.value.replace(/'/g, "''"); // escape single quotes
+        const dimCond = `${dimCol} = '${safeVal}'`;
+
+        // Check if the SQL references this column (with or without alias)
+        const colEscaped = dimCol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const hasColumn = new RegExp(`\\b(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?${colEscaped}\\b`, 'i').test(effectiveSql);
+        if (!hasColumn) continue; // Skip if column not referenced in SQL
+
+        // Inject into WHERE clause (same strategy as date filter)
+        const whereCheck = /\bWHERE\b/gi;
+        let lastIdx = -1;
+        let match: RegExpExecArray | null;
+        while ((match = whereCheck.exec(effectiveSql)) !== null) {
+          lastIdx = match.index;
+        }
+
+        if (lastIdx >= 0) {
+          const afterWhere = effectiveSql.substring(lastIdx + 5);
+          const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|UNION|INTERSECT|EXCEPT)\b/i.exec(afterWhere);
+          if (boundary) {
+            const insertAt = lastIdx + 5 + boundary.index;
+            effectiveSql = effectiveSql.substring(0, insertAt) + ` AND ${dimCond} ` + effectiveSql.substring(insertAt);
+          } else {
+            effectiveSql = effectiveSql + ` AND ${dimCond}`;
+          }
+        } else {
+          const boundary = /\b(GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b/i.exec(effectiveSql);
+          if (boundary) {
+            const insertAt = boundary.index;
+            effectiveSql = effectiveSql.substring(0, insertAt) + `WHERE ${dimCond} ` + effectiveSql.substring(insertAt);
+          } else {
+            effectiveSql = effectiveSql + ` WHERE ${dimCond}`;
+          }
+        }
+
+        console.log(`[CohiChat] Dimension filter applied: ${dimCol} = '${safeVal}'`);
+      }
     }
 
     const tenantContext = getTenantContext(req);

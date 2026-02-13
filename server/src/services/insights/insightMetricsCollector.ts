@@ -7,11 +7,17 @@ import pg from "pg";
 import { queryMetrics, DateRange } from "../metrics/metricsService.js";
 import {
   buildChannelWhereClause,
-  getTenantRevenueExpression,
   getActorColumnForChannel,
   getActorLabelForChannel,
   isActorMissing,
 } from "../../utils/scorecard-utils.js";
+import {
+  computePeriodSnapshot,
+  computeAllPeriodSnapshots,
+  getStandardDateRanges,
+  getTenantRevenueExpression,
+  type PeriodSnapshot,
+} from "../metrics/canonicalMetrics.js";
 
 // Prediction data structure
 export interface PredictionData {
@@ -224,166 +230,14 @@ export interface InsightMetricsPayload {
   };
 }
 
-// Unified period snapshot — all key metrics from a single query for one time window
-// Guarantees: pullThroughRate + falloutRate = 100% (both use same population)
-export interface PeriodSnapshot {
-  window: string;        // "ytd" | "90d" | "60d" | "30d" | "mtd"
-  start: string;
-  end: string;
-  totalApplications: number;
-  completed: number;     // loans that have finished lifecycle (non-active)
-  funded: number;        // subset of completed that were funded/closed
-  locked: number;
-  fundedVolume: number;
-  fundedRevenue: number;
-  avgCycleTime: number;
-  pullThroughRate: number;  // funded / completed * 100
-  falloutRate: number;      // (completed - funded) / completed * 100
-}
+// Re-export PeriodSnapshot from canonical metrics (single source of truth)
+export type { PeriodSnapshot } from "../metrics/canonicalMetrics.js";
 
-/**
- * Calculate date ranges for different periods
- */
-function getDateRanges(): {
-  today: DateRange;
-  mtd: DateRange;
-  ytd: DateRange;
-  rolling90D: DateRange;
-  rolling60D: DateRange;
-  trailing30: DateRange;
-  lastMonth: DateRange;
-  lastYear: DateRange;
-  prior30: DateRange;
-  prior60: DateRange;
-  prior90: DateRange;
-} {
-  const now = new Date();
-  const today = now.toISOString().split("T")[0];
-  const DAY = 24 * 60 * 60 * 1000;
-  const toDate = (d: Date) => d.toISOString().split("T")[0];
+// Date ranges now come from canonical metrics (getStandardDateRanges)
+// Alias for backward compatibility within this file
+const getDateRanges = getStandardDateRanges;
 
-  // Start of month
-  const startOfMonth = toDate(new Date(now.getFullYear(), now.getMonth(), 1));
-
-  // Start of year
-  const startOfYear = toDate(new Date(now.getFullYear(), 0, 1));
-
-  // Rolling windows
-  const rolling90Start = toDate(new Date(now.getTime() - 90 * DAY));
-  const rolling60Start = toDate(new Date(now.getTime() - 60 * DAY));
-  const trailing30Start = toDate(new Date(now.getTime() - 30 * DAY));
-
-  // Prior matching windows (for apples-to-apples comparison)
-  const prior30Start = toDate(new Date(now.getTime() - 60 * DAY));
-  const prior30End = toDate(new Date(now.getTime() - 31 * DAY));
-  const prior60Start = toDate(new Date(now.getTime() - 120 * DAY));
-  const prior60End = toDate(new Date(now.getTime() - 61 * DAY));
-  const prior90Start = toDate(new Date(now.getTime() - 180 * DAY));
-  const prior90End = toDate(new Date(now.getTime() - 91 * DAY));
-
-  // Last month (calendar)
-  const lastMonthEnd = toDate(new Date(now.getFullYear(), now.getMonth(), 0));
-  const lastMonthStart = toDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-
-  // Last year same YTD period
-  const lastYearStart = toDate(new Date(now.getFullYear() - 1, 0, 1));
-  const lastYearEnd = toDate(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()));
-
-  return {
-    today: { start: today, end: today },
-    mtd: { start: startOfMonth, end: today },
-    ytd: { start: startOfYear, end: today },
-    rolling90D: { start: rolling90Start, end: today },
-    rolling60D: { start: rolling60Start, end: today },
-    trailing30: { start: trailing30Start, end: today },
-    lastMonth: { start: lastMonthStart, end: lastMonthEnd },
-    lastYear: { start: lastYearStart, end: lastYearEnd },
-    prior30: { start: prior30Start, end: prior30End },
-    prior60: { start: prior60Start, end: prior60End },
-    prior90: { start: prior90Start, end: prior90End },
-  };
-}
-
-// ============================================================================
-// Unified Period Snapshot — single SQL query for all key metrics in one window
-// Guarantees pullThroughRate + falloutRate = 100%
-// ============================================================================
-
-async function computePeriodSnapshot(
-  tenantPool: pg.Pool,
-  windowName: string,
-  start: string,
-  end: string,
-  revenueExpr: string,
-  channelGroup?: string
-): Promise<PeriodSnapshot> {
-  const channelClause = buildChannelWhereClause(channelGroup);
-  const closeDateExpr = "COALESCE(funding_date::date, closing_date)";
-
-  try {
-    const result = await tenantPool.query(
-      `SELECT
-        COUNT(*) as total_apps,
-        -- Completed = not still in-flight (matches scorecard denominator)
-        COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
-          THEN 1 END) as completed,
-        -- Funded = completed AND has a close/funding date (the positive outcome)
-        COUNT(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL OR investor_purchase_date IS NOT NULL)
-          AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
-          THEN 1 END) as funded,
-        -- Volume & revenue from funded loans only
-        SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
-          THEN loan_amount ELSE 0 END) as funded_volume,
-        SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
-          THEN (${revenueExpr}) ELSE 0 END) as funded_revenue,
-        -- Cycle time from funded loans only
-        AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
-          THEN ${closeDateExpr} - application_date END) as avg_cycle_days,
-        COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked
-      FROM public.loans
-      WHERE application_date >= $1 AND application_date <= $2
-        ${channelClause}`,
-      [start, end]
-    );
-
-    const row = result.rows[0];
-    const completed = parseInt(row?.completed) || 0;
-    const funded = parseInt(row?.funded) || 0;
-
-    const snapshot: PeriodSnapshot = {
-      window: windowName,
-      start,
-      end,
-      totalApplications: parseInt(row?.total_apps) || 0,
-      completed,
-      funded,
-      locked: parseInt(row?.locked) || 0,
-      fundedVolume: parseFloat(row?.funded_volume) || 0,
-      fundedRevenue: parseFloat(row?.funded_revenue) || 0,
-      avgCycleTime: Math.round(parseFloat(row?.avg_cycle_days) || 0),
-      pullThroughRate: completed > 0 ? Math.round((funded / completed) * 1000) / 10 : 0,
-      falloutRate: completed > 0 ? Math.round(((completed - funded) / completed) * 1000) / 10 : 0,
-    };
-
-    console.log(
-      `[InsightMetrics] Snapshot "${windowName}" (${start}→${end}): ` +
-      `apps=${snapshot.totalApplications}, completed=${completed}, funded=${funded}, ` +
-      `PT=${snapshot.pullThroughRate}%, Fallout=${snapshot.falloutRate}%, ` +
-      `Vol=$${Math.round(snapshot.fundedVolume)}, Rev=$${Math.round(snapshot.fundedRevenue)}, ` +
-      `Cycle=${snapshot.avgCycleTime}d`
-    );
-
-    return snapshot;
-  } catch (error) {
-    console.error(`[InsightMetrics] Error computing period snapshot for ${windowName}:`, error);
-    return {
-      window: windowName, start, end,
-      totalApplications: 0, completed: 0, funded: 0, locked: 0,
-      fundedVolume: 0, fundedRevenue: 0, avgCycleTime: 0,
-      pullThroughRate: 0, falloutRate: 0,
-    };
-  }
-}
+// computePeriodSnapshot is now imported from canonicalMetrics.ts
 
 /**
  * Fetch stored predictions from the database

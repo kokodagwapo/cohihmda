@@ -70,25 +70,11 @@ interface UserDisplay {
   tenant_id?: string;
   tenant_name?: string;
   tenant_slug?: string;
-  // For super admins
-  is_super_admin?: boolean;
   // Encompass integration
   encompass_user_id?: string;
   los_connection_id?: string;
   loan_access_mode?: 'encompass_sync' | 'full_access' | 'no_access' | 'manual';
   loan_access_synced_at?: string;
-}
-
-/**
- * Tenant type
- */
-interface Tenant {
-  id: string;
-  name: string;
-  slug: string;
-  status: string;
-  database_name: string;
-  created_at: string;
 }
 
 // Role display names and colors
@@ -109,11 +95,11 @@ export function UserManagementSection() {
   const { toast } = useToast();
   
   // Use admin tenant context for tenant awareness
-  const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName } = useAdminTenant();
+  // tenants list comes from context (loaded once for platform admins) -- no local duplicate
+  const { selectedTenantId, isTenantAdmin, isPlatformAdmin, currentTenantName, tenants: contextTenants } = useAdminTenant();
   
   // State
   const [tenantUsers, setTenantUsers] = useState<UserDisplay[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
@@ -141,7 +127,6 @@ export function UserManagementSection() {
     full_name: '',
     role: 'user',
     tenant_slug: '',
-    is_super_admin: false,
   });
 
   // Load LOS connections for Encompass user sync
@@ -228,29 +213,6 @@ export function UserManagementSection() {
       }));
       
       setTenantUsers(usersWithTenant);
-      
-      // For platform admins, keep the existing tenants list; for tenant admins, set their tenant
-      if (!isPlatformAdmin) {
-        if (response.tenant) {
-          setTenants([{
-            id: response.tenant.id,
-            name: response.tenant.name,
-            slug: response.tenant.slug || response.tenant.id,
-            status: 'active',
-            database_name: '',
-            created_at: '',
-          }]);
-        } else if (currentUser?.tenant_id && currentUser?.tenant_name) {
-          setTenants([{
-            id: currentUser.tenant_id,
-            name: currentUser.tenant_name,
-            slug: currentUser.tenant_id,
-            status: 'active',
-            database_name: '',
-            created_at: '',
-          }]);
-        }
-      }
     } catch (error: any) {
       console.error('Failed to load tenant users:', error);
       toast({
@@ -263,16 +225,8 @@ export function UserManagementSection() {
   };
 
   const loadTenantsOnly = async () => {
-    try {
-      // Load only tenants list (for the filter dropdown)
-      const tenantsResponse = await api.request('/api/admin/tenants');
-      setTenants(tenantsResponse.tenants || []);
-      setTenantUsers([]); // No users until a tenant is selected
-    } catch (error: any) {
-      console.error('Failed to load tenants:', error);
-      setTenants([]);
-      setTenantUsers([]);
-    }
+    // Tenants list is managed by AdminTenantContext -- just clear users
+    setTenantUsers([]);
   };
 
   const handleRefresh = async () => {
@@ -290,54 +244,37 @@ export function UserManagementSection() {
 
   const handleCreateUser = async () => {
     try {
-      // Tenant admins can only create tenant users (never super admins)
-      if (formData.is_super_admin && !isPlatformAdmin) {
-        toast({ title: 'Error', description: 'You do not have permission to create super admins', variant: 'destructive' });
+      // Determine tenant ID:
+      // 1. Tenant admins: always use their own tenant
+      // 2. Platform admins: prefer global selector, fall back to modal dropdown
+      let tenantId: string | null = null;
+      
+      if (isTenantAdmin) {
+        tenantId = selectedTenantId || currentUser?.tenant_id || null;
+      } else if (selectedTenantId) {
+        // Platform admin with tenant selected from global selector
+        tenantId = selectedTenantId;
+      } else if (formData.tenant_slug) {
+        // Fallback: platform admin using modal dropdown (no global tenant selected)
+        const tenant = contextTenants.find(t => t.slug === formData.tenant_slug);
+        tenantId = tenant?.id || null;
+      }
+      
+      if (!tenantId) {
+        toast({ title: 'Error', description: 'Please select an organization first', variant: 'destructive' });
         return;
       }
       
-      if (formData.is_super_admin) {
-        // Create super admin in management database (platform admins only)
-        await api.request('/api/admin/super-admins', {
-          method: 'POST',
-          body: JSON.stringify({
-            email: formData.email,
-            password: formData.password,
-            full_name: formData.full_name,
-            role: formData.role || 'platform_admin',
-          }),
-        });
-      } else {
-        // Determine tenant ID:
-        // - For tenant admins: use their own tenant ID
-        // - For platform admins: use selected tenant from form
-        let tenantId: string | null = null;
-        
-        if (isTenantAdmin) {
-          // Tenant admins always create users in their own tenant
-          tenantId = selectedTenantId || currentUser?.tenant_id || null;
-        } else if (formData.tenant_slug) {
-          // Platform admins select tenant from dropdown
-          const tenant = tenants.find(t => t.slug === formData.tenant_slug);
-          tenantId = tenant?.id || null;
-        }
-        
-        if (!tenantId) {
-          toast({ title: 'Error', description: 'Please select a tenant', variant: 'destructive' });
-          return;
-        }
-        
-        // Create user in tenant database
-        await api.request(`/api/admin/tenants/${tenantId}/users`, {
-          method: 'POST',
-          body: JSON.stringify({
-            email: formData.email,
-            password: formData.password,
-            full_name: formData.full_name,
-            role: formData.role || 'user',
-          }),
-        });
-      }
+      // Create user in tenant database
+      await api.request(`/api/admin/tenants/${tenantId}/users`, {
+        method: 'POST',
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          full_name: formData.full_name,
+          role: formData.role || 'user',
+        }),
+      });
       
       toast({
         title: 'User Created',
@@ -365,19 +302,10 @@ export function UserManagementSection() {
       if (formData.role !== selectedUser.role) updateData.role = formData.role;
       if (formData.password) updateData.password = formData.password;
       
-      if (selectedUser.is_super_admin) {
-        // Update super admin
-        await api.request(`/api/admin/super-admins/${selectedUser.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updateData),
-        });
-      } else {
-        // Update tenant user
-        await api.request(`/api/admin/tenants/${selectedUser.tenant_id}/users/${selectedUser.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updateData),
-        });
-      }
+      await api.request(`/api/admin/tenants/${selectedUser.tenant_id}/users/${selectedUser.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateData),
+      });
       
       toast({
         title: 'User Updated',
@@ -399,11 +327,7 @@ export function UserManagementSection() {
     if (!confirm(`Are you sure you want to delete ${user.email}?`)) return;
     
     try {
-      if (user.is_super_admin) {
-        await api.request(`/api/admin/super-admins/${user.id}`, { method: 'DELETE' });
-      } else {
-        await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, { method: 'DELETE' });
-      }
+      await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, { method: 'DELETE' });
       
       toast({
         title: 'User Deleted',
@@ -423,17 +347,10 @@ export function UserManagementSection() {
     try {
       const newStatus = !user.is_active;
       
-      if (user.is_super_admin) {
-        await api.request(`/api/admin/super-admins/${user.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ is_active: newStatus }),
-        });
-      } else {
-        await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ is_active: newStatus }),
-        });
-      }
+      await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ is_active: newStatus }),
+      });
       
       toast({
         title: newStatus ? 'User Activated' : 'User Deactivated',
@@ -456,7 +373,6 @@ export function UserManagementSection() {
       full_name: '',
       role: 'user',
       tenant_slug: '',
-      is_super_admin: false,
     });
   };
 
@@ -468,7 +384,6 @@ export function UserManagementSection() {
       full_name: user.full_name || '',
       role: user.role,
       tenant_slug: user.tenant_slug || '',
-      is_super_admin: user.is_super_admin || false,
     });
     setEditDialogOpen(true);
   };
@@ -608,7 +523,12 @@ export function UserManagementSection() {
                 User Management
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Manage platform users and tenant users
+            {isTenantAdmin
+              ? `Manage users for ${currentTenantName || 'your organization'}`
+              : currentTenantName
+                ? `Manage users for ${currentTenantName}`
+                : 'Select an organization to manage its users'
+            }
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -624,6 +544,8 @@ export function UserManagementSection() {
           <Button
             size="sm"
             onClick={() => setCreateDialogOpen(true)}
+            disabled={isPlatformAdmin && !selectedTenantId}
+            title={isPlatformAdmin && !selectedTenantId ? 'Select an organization first' : 'Add a new user'}
           >
             <UserPlus className="h-4 w-4 mr-2" />
             Add User
@@ -632,36 +554,8 @@ export function UserManagementSection() {
       </div>
 
       {/* Stats */}
-      <div className={`grid gap-4 ${isPlatformAdmin ? 'md:grid-cols-2' : 'md:grid-cols-2'}`}>
-        {isPlatformAdmin && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                  <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Tenants</p>
-                  <p className="text-2xl font-semibold">{tenants.length}</p>
-                </div>
-            </div>
-            </CardContent>
-          </Card>
-        )}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-sm text-slate-500">{isTenantAdmin ? 'Organization Users' : 'Tenant Users'}</p>
-                <p className="text-2xl font-semibold">{tenantUsers.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        {isTenantAdmin && currentTenantName && (
+      <div className="grid gap-4 md:grid-cols-2">
+        {currentTenantName && (
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
@@ -676,6 +570,19 @@ export function UserManagementSection() {
             </CardContent>
           </Card>
         )}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                <Users className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm text-slate-500">Users</p>
+                <p className="text-2xl font-semibold">{tenantUsers.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Tabs for tenant user management */}
@@ -683,7 +590,7 @@ export function UserManagementSection() {
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="tenant-users">
             <Users className="h-4 w-4 mr-2" />
-            Cohi Users ({tenantUsers.length})
+            Users ({tenantUsers.length})
           </TabsTrigger>
           <TabsTrigger value="encompass-users">
             <Link2 className="h-4 w-4 mr-2" />
@@ -699,10 +606,10 @@ export function UserManagementSection() {
               <CardContent className="py-12 text-center">
                 <Building2 className="h-12 w-12 mx-auto mb-4 text-slate-300 dark:text-slate-600" />
                 <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
-                  Select a Tenant
+                  Select an Organization
                 </h3>
                 <p className="text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                  Use the tenant selector in the header to choose which organization's users to manage.
+                  Use the organization selector at the top to choose which organization's users to manage.
                 </p>
               </CardContent>
             </Card>
@@ -739,7 +646,6 @@ export function UserManagementSection() {
               <TableHeader>
                   <TableRow>
                     <TableHead>User</TableHead>
-                    <TableHead>Tenant</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Encompass</TableHead>
                     <TableHead>Status</TableHead>
@@ -757,12 +663,6 @@ export function UserManagementSection() {
                             <p className="font-medium">{user.full_name || user.email}</p>
                             <p className="text-sm text-slate-500">{user.email}</p>
                           </div>
-                    </TableCell>
-                    <TableCell>
-                          <Badge variant="outline">
-                            <Building2 className="h-3 w-3 mr-1" />
-                            {user.tenant_name}
-                      </Badge>
                     </TableCell>
                         <TableCell>
                           <Badge className={roleConfig.color}>
@@ -833,7 +733,7 @@ export function UserManagementSection() {
                   })}
                   {filteredTenantUsers.length === 0 && (
                   <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-slate-500">
+                      <TableCell colSpan={6} className="text-center py-8 text-slate-500">
                         {searchQuery
                           ? 'No users match your search'
                           : 'No users found'}
@@ -881,53 +781,37 @@ export function UserManagementSection() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create User</DialogTitle>
+            <DialogTitle>Add User</DialogTitle>
             <DialogDescription>
-              {isTenantAdmin 
-                ? `Add a new user to ${currentTenantName || 'your organization'}`
-                : 'Add a new user to the platform'
-              }
+              {`Add a new user to ${currentTenantName || 'the organization'}`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* User Type selector - only visible to platform admins */}
-            {isPlatformAdmin && (
+            {/* Tenant display - read-only when a tenant is selected */}
+            {isPlatformAdmin && selectedTenantId && (
               <div className="space-y-2">
-                <Label>User Type</Label>
-                <Select
-                  value={formData.is_super_admin ? 'super_admin' : 'tenant'}
-                  onValueChange={(v) => setFormData({ 
-                    ...formData, 
-                    is_super_admin: v === 'super_admin',
-                    role: v === 'super_admin' ? 'super_admin' : 'user'
-                  })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="super_admin">Cohi Admin (Super Admin)</SelectItem>
-                    <SelectItem value="tenant">Tenant User</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Organization</Label>
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-md border">
+                  <Building2 className="h-4 w-4 text-slate-500" />
+                  <span className="text-sm font-medium">{currentTenantName || 'Selected tenant'}</span>
+                </div>
               </div>
             )}
-
-            {/* Tenant selector - only for platform admins creating tenant users */}
-            {isPlatformAdmin && !formData.is_super_admin && (
+            {/* Fallback dropdown when no tenant is globally selected */}
+            {isPlatformAdmin && !selectedTenantId && (
               <div className="space-y-2">
-                <Label>Tenant</Label>
+                <Label>Organization</Label>
                 <Select
                   value={formData.tenant_slug}
                   onValueChange={(v) => setFormData({ ...formData, tenant_slug: v })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select tenant" />
+                    <SelectValue placeholder="Select organization" />
                   </SelectTrigger>
                   <SelectContent>
-                    {tenants.map(tenant => (
-                      <SelectItem key={tenant.slug} value={tenant.slug}>
+                    {contextTenants.map(tenant => (
+                      <SelectItem key={tenant.slug || tenant.id} value={tenant.slug || tenant.id}>
                         {tenant.name}
                       </SelectItem>
                     ))}
@@ -964,28 +848,24 @@ export function UserManagementSection() {
               />
             </div>
 
-            {/* Role selector - different options for platform admins vs tenant admins */}
-            {!formData.is_super_admin && (
-              <div className="space-y-2">
-                <Label>Role</Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(v) => setFormData({ ...formData, role: v })}
-                >
-                  <SelectTrigger>
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select
+                value={formData.role}
+                onValueChange={(v) => setFormData({ ...formData, role: v })}
+              >
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                  <SelectContent>
-                    {/* Tenant admins can create other tenant admins for their org */}
-                    <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                    <SelectItem value="loan_officer">Loan Officer</SelectItem>
-                    <SelectItem value="processor">Processor</SelectItem>
-                    <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="viewer">Viewer</SelectItem>
+                <SelectContent>
+                  <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                  <SelectItem value="loan_officer">Loan Officer</SelectItem>
+                  <SelectItem value="processor">Processor</SelectItem>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            )}
           </div>
 
           <DialogFooter>
@@ -1047,21 +927,11 @@ export function UserManagementSection() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {formData.is_super_admin ? (
-                    <>
-                      <SelectItem value="super_admin">Super Admin</SelectItem>
-                      <SelectItem value="platform_admin">Platform Admin</SelectItem>
-                      <SelectItem value="support">Support</SelectItem>
-                    </>
-                  ) : (
-                    <>
-                      <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
-                      <SelectItem value="loan_officer">Loan Officer</SelectItem>
-                      <SelectItem value="processor">Processor</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="viewer">Viewer</SelectItem>
-                    </>
-                  )}
+                  <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                  <SelectItem value="loan_officer">Loan Officer</SelectItem>
+                  <SelectItem value="processor">Processor</SelectItem>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
                 </SelectContent>
               </Select>
             </div>

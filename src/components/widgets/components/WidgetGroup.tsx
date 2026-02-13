@@ -31,6 +31,7 @@ import {
   Copy,
   FolderInput,
   GripVertical,
+  Link2,
   Maximize2,
   MessageSquare,
   Minimize2,
@@ -40,6 +41,10 @@ import {
   Check,
   Sparkles,
   Calendar,
+  SlidersHorizontal,
+  Unlink2,
+  Bookmark,
+  BookmarkCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
@@ -53,21 +58,29 @@ import {
   useWidgetSectionStore,
   type SectionFilters,
   type SectionType,
+  type DynamicFilterEntry,
 } from '@/stores/widgetSectionStore';
 import {
   getWidgetDefinition,
-  getWidgetsBySource,
-  type WidgetDefinition,
 } from '@/components/widgets/registry';
 import { useWidgetData } from '@/components/widgets/data';
 import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRenderer';
 import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDialog';
+import { AddWidgetDialog } from '@/components/widgets/components/AddWidgetDialog';
 import { WidgetDataProvider } from '@/components/widgets/data';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
-import type { GroupWidgetItem } from '@/components/workbench/canvas/types';
-import type { DateFilter } from '@/hooks/useCohiWidgetData';
+import { useFilterPresetStore, type FilterPreset } from '@/stores/filterPresetStore';
+import type { GroupWidgetItem, WidgetFilterState } from '@/components/workbench/canvas/types';
+import type { DateFilter, DimensionFilter } from '@/hooks/useCohiWidgetData';
+import type { VisualizationConfig } from '@/hooks/useCohiChat';
+
+// ---------------------------------------------------------------------------
+// Stable empty array to avoid Zustand selector re-render loops
+// ---------------------------------------------------------------------------
+
+const EMPTY_FILTER_PRESETS: FilterPreset[] = [];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,6 +110,14 @@ export interface WidgetGroupProps {
   onMoveItemOut?: (item: GroupWidgetItem, targetGroupId: string) => void;
   /** Persisted filter state restored from saved canvas */
   savedFilters?: Partial<import('@/stores/widgetSectionStore').SectionFilters>;
+  /** Start with filters collapsed (compact mode for deep-dive canvases) */
+  filtersCollapsed?: boolean;
+  /**
+   * When true, all widgets share the group's master filter.
+   * When false, each Cohi widget uses its own independent filter bar.
+   * Defaults to true for backward compatibility.
+   */
+  filterSync?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +202,28 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Available dimension filter catalog — users can add these via the "+" button
+// ---------------------------------------------------------------------------
+
+/**
+ * All loan-table columns a user can filter on.
+ * These are fetched dynamically from the DB via /api/loans/distinct-values/:column.
+ */
+const AVAILABLE_FILTER_DIMENSIONS: { column: string; label: string }[] = [
+  { column: 'branch', label: 'Branch' },
+  { column: 'loan_officer', label: 'Loan Officer' },
+  { column: 'channel', label: 'Channel' },
+  { column: 'loan_type', label: 'Loan Type' },
+  { column: 'loan_purpose', label: 'Loan Purpose' },
+  { column: 'property_state', label: 'State' },
+  { column: 'property_county', label: 'County' },
+  { column: 'occupancy_type', label: 'Occupancy' },
+  { column: 'property_type', label: 'Property Type' },
+  { column: 'current_loan_status', label: 'Loan Status' },
+  { column: 'investor_name', label: 'Investor' },
+];
+
 const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: string; dot: string }> = {
   'company-scorecard':    { border: 'border-indigo-400/50',  bg: 'bg-indigo-50/50 dark:bg-indigo-950/20',  accent: 'text-indigo-600 dark:text-indigo-400',  dot: 'bg-indigo-500' },
   'credit-risk':          { border: 'border-emerald-400/50', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20', accent: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
@@ -203,20 +246,6 @@ const SELF_MANAGED_SECTIONS: Set<SectionType> = new Set([
   'executive-dashboard',
   'leaderboard',
 ]);
-
-// Map SectionType → DataSourceId for add-widget filtering
-const SECTION_TO_SOURCE: Record<SectionType, string> = {
-  'company-scorecard':    'company-scorecard',
-  'credit-risk':          'credit-risk',
-  'sales-scorecard':      'sales-scorecard',
-  'operations-scorecard': 'operations-scorecard',
-  'operations-trends':    'operations-trends',
-  'sales-trends':         'sales-trends',
-  'funnel':               'funnel',
-  'top-tiering-comparison': 'top-tiering-comparison',
-  'leaderboard':          'dashboard-metrics',
-  'executive-dashboard':  'executive-dashboard',
-};
 
 // ---------------------------------------------------------------------------
 // Helpers – convert legacy widgetIds to GroupWidgetItem[]
@@ -329,6 +358,9 @@ function GridCellWidget({
   width,
   height,
   dateFilter,
+  dimensionFilters,
+  filterSyncEnabled,
+  onFilterChange,
   onDelete,
   onDuplicate,
   onMaximize,
@@ -343,6 +375,9 @@ function GridCellWidget({
   width: number;
   height: number;
   dateFilter: DateFilter | null;
+  dimensionFilters: DimensionFilter[] | null;
+  filterSyncEnabled: boolean;
+  onFilterChange?: (filters: WidgetFilterState) => void;
   onDelete: () => void;
   onDuplicate: () => void;
   onMaximize: () => void;
@@ -378,28 +413,34 @@ function GridCellWidget({
   const hasOtherGroups = otherGroups && otherGroups.length > 0 && onMoveToGroup;
   const canEdit = item.kind === 'cohi' && !!onOpenEditDialog;
 
+  // Derive a display title for the drag handle
+  const widgetTitle = item.kind === 'cohi'
+    ? item.title
+    : (getWidgetDefinition(item.defId)?.name || item.defId);
+
   return (
     <div
       className="h-full w-full relative rounded-lg overflow-hidden flex flex-col group/widget"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setMoveMenuOpen(false); }}
     >
-      {/* Always-visible drag handle strip */}
+      {/* Title + drag handle strip */}
       <div
-        className="widget-drag-handle flex items-center justify-between h-5 min-h-[20px] px-1.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-700/40 cursor-grab active:cursor-grabbing select-none transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
+        className="widget-drag-handle flex items-center gap-1.5 h-6 min-h-[24px] px-1.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-700/40 cursor-grab active:cursor-grabbing select-none transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
         title="Drag to reorder"
         aria-label="Drag to reorder"
       >
-        <div className="flex items-center gap-1">
-          <GripVertical className="h-3 w-3 text-slate-300 dark:text-slate-600" />
-          {item.kind === 'cohi' && (
-            <Sparkles className="h-2.5 w-2.5 text-indigo-400" />
-          )}
-        </div>
+        <GripVertical className="h-3 w-3 text-slate-300 dark:text-slate-600 shrink-0" />
+        {item.kind === 'cohi' && (
+          <Sparkles className="h-2.5 w-2.5 text-indigo-400 shrink-0" />
+        )}
+        <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300 truncate flex-1 min-w-0">
+          {widgetTitle}
+        </span>
 
         {/* Action buttons on hover */}
         <div className={cn(
-          'flex items-center gap-0.5 transition-opacity',
+          'flex items-center gap-0.5 transition-opacity shrink-0',
           hovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
         )}>
           {/* Edit with Cohi (only for cohi widgets) */}
@@ -488,7 +529,7 @@ function GridCellWidget({
         {item.kind === 'registry' ? (
           <GridCellRegistryWidget defId={item.defId} canvasItemId={itemId} width={width} height={height - 20} />
         ) : (
-          <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} onVizTypeChange={onVizTypeChange} />
+          <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} onFilterChange={onFilterChange} onVizTypeChange={onVizTypeChange} />
         )}
       </div>
     </div>
@@ -555,6 +596,9 @@ function GridCellCohiWidget({
   width,
   height,
   dateFilter,
+  dimensionFilters,
+  filterSyncEnabled,
+  onFilterChange,
   onVizTypeChange,
 }: {
   item: Extract<GroupWidgetItem, { kind: 'cohi' }>;
@@ -562,6 +606,9 @@ function GridCellCohiWidget({
   width: number;
   height: number;
   dateFilter: DateFilter | null;
+  dimensionFilters: DimensionFilter[] | null;
+  filterSyncEnabled: boolean;
+  onFilterChange?: (filters: WidgetFilterState) => void;
   onVizTypeChange?: (type: string) => void;
 }) {
   const { selectedTenantId } = useTenantStore();
@@ -576,8 +623,13 @@ function GridCellCohiWidget({
         width={width}
         height={height}
         groupDateFilter={dateFilter}
+        groupDimensionFilters={dimensionFilters}
+        filterSyncEnabled={filterSyncEnabled}
+        initialFilters={item.savedFilters}
+        onFilterChange={onFilterChange}
         onVizTypeChange={onVizTypeChange}
         canvasItemId={canvasItemId}
+        hideTitle
       />
     </div>
   );
@@ -592,11 +644,15 @@ function MaximizeDialog({
   open,
   onClose,
   dateFilter,
+  dimensionFilters,
+  filterSyncEnabled,
 }: {
   item: GroupWidgetItem | null;
   open: boolean;
   onClose: () => void;
   dateFilter: DateFilter | null;
+  dimensionFilters: DimensionFilter[] | null;
+  filterSyncEnabled: boolean;
 }) {
   if (!item) return null;
 
@@ -629,7 +685,7 @@ function MaximizeDialog({
           {item.kind === 'registry' ? (
             <MaximizeRegistryWidget defId={item.defId} />
           ) : (
-            <MaximizeCohiWidget item={item} dateFilter={dateFilter} />
+            <MaximizeCohiWidget item={item} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} />
           )}
         </div>
       </DialogContent>
@@ -653,9 +709,13 @@ function MaximizeRegistryWidget({ defId }: { defId: string }) {
 function MaximizeCohiWidget({
   item,
   dateFilter,
+  dimensionFilters,
+  filterSyncEnabled,
 }: {
   item: Extract<GroupWidgetItem, { kind: 'cohi' }>;
   dateFilter: DateFilter | null;
+  dimensionFilters: DimensionFilter[] | null;
+  filterSyncEnabled: boolean;
 }) {
   const { selectedTenantId } = useTenantStore();
   return (
@@ -668,106 +728,11 @@ function MaximizeCohiWidget({
       width={1200}
       height={700}
       groupDateFilter={dateFilter}
+      groupDimensionFilters={dimensionFilters}
+      filterSyncEnabled={filterSyncEnabled}
+      initialFilters={item.savedFilters}
+      hideTitle
     />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Add Widget Popover
-// ---------------------------------------------------------------------------
-
-function AddWidgetPicker({
-  sectionType,
-  existingItems,
-  onAddRegistry,
-  onClose,
-}: {
-  sectionType: SectionType;
-  existingItems: GroupWidgetItem[];
-  onAddRegistry: (defId: string) => void;
-  onClose: () => void;
-}) {
-  const sourceId = SECTION_TO_SOURCE[sectionType];
-  const available = useMemo(() => getWidgetsBySource(sourceId), [sourceId]);
-  const [search, setSearch] = useState('');
-
-  const existingRegistryIds = useMemo(
-    () => existingItems.filter((i) => i.kind === 'registry').map((i) => (i as any).defId as string),
-    [existingItems],
-  );
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return available;
-    const q = search.toLowerCase();
-    return available.filter(
-      (w) =>
-        w.name.toLowerCase().includes(q) ||
-        w.category.toLowerCase().includes(q) ||
-        w.description.toLowerCase().includes(q),
-    );
-  }, [available, search]);
-
-  // Group by category
-  const grouped = useMemo(() => {
-    const map = new Map<string, WidgetDefinition[]>();
-    for (const w of filtered) {
-      if (!map.has(w.category)) map.set(w.category, []);
-      map.get(w.category)!.push(w);
-    }
-    return map;
-  }, [filtered]);
-
-  return (
-    <div className="absolute top-full left-0 mt-1 z-50 w-72 max-h-80 overflow-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl canvas-interactive">
-      {/* Search */}
-      <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 p-2">
-        <input
-          autoFocus
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search widgets…"
-          title="Search available widgets"
-          className="w-full h-7 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 text-xs text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-        />
-      </div>
-
-      {/* Widget list */}
-      <div className="p-1">
-        {[...grouped.entries()].map(([category, widgets]) => (
-          <div key={category}>
-            <div className="px-2 py-1 text-[9px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-              {category}
-            </div>
-            {widgets.map((w) => {
-              const alreadyIn = existingRegistryIds.includes(w.id);
-              return (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => { onAddRegistry(w.id); onClose(); }}
-                  className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 text-xs transition-colors"
-                >
-                  <span className="flex-1 font-medium text-slate-700 dark:text-slate-200 truncate">
-                    {w.name}
-                  </span>
-                  {alreadyIn && (
-                    <span className="text-[8px] font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1 py-0.5">
-                      IN GROUP
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <p className="text-xs text-slate-400 dark:text-slate-500 text-center py-4">
-            No widgets found
-          </p>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -790,9 +755,14 @@ export function WidgetGroup({
   otherGroups,
   onMoveItemOut,
   savedFilters: savedFiltersProp,
+  filtersCollapsed: filtersCollapsedProp,
+  filterSync: filterSyncProp,
 }: WidgetGroupProps) {
   const registerSection = useWidgetSectionStore((s) => s.registerSection);
   const updateFilters = useWidgetSectionStore((s) => s.updateFilters);
+  const addDynamicFilter = useWidgetSectionStore((s) => s.addDynamicFilter);
+  const removeDynamicFilter = useWidgetSectionStore((s) => s.removeDynamicFilter);
+  const updateDynamicFilter = useWidgetSectionStore((s) => s.updateDynamicFilter);
   const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
 
   // Normalize legacy widgetIds to items
@@ -800,14 +770,16 @@ export function WidgetGroup({
 
   // Local state
   const [collapsed, setCollapsed] = useState(collapsedProp ?? false);
+  const [filtersCollapsed, setFiltersCollapsed] = useState(filtersCollapsedProp ?? false);
+  // filterSync defaults to true for backward compat with existing canvases
+  const [filterSync, setFilterSync] = useState(filterSyncProp ?? true);
   const [isRenaming, setIsRenaming] = useState(false);
   const [localTitle, setLocalTitle] = useState(title);
   const [maximizedItem, setMaximizedItem] = useState<GroupWidgetItem | null>(null);
-  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [showAddDialog, setShowAddDialog] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const addPickerRef = useRef<HTMLDivElement>(null);
   const filtersRestoredRef = useRef(false);
 
   // Sync collapsed with prop
@@ -829,18 +801,6 @@ export function WidgetGroup({
   useEffect(() => {
     if (isRenaming) titleInputRef.current?.focus();
   }, [isRenaming]);
-
-  // Close add picker on outside click
-  useEffect(() => {
-    if (!showAddPicker) return;
-    const handleClick = (e: MouseEvent) => {
-      if (addPickerRef.current && !addPickerRef.current.contains(e.target as Node)) {
-        setShowAddPicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [showAddPicker]);
 
   // ─── Build the group's dateFilter for cohi_widget children ───
   const groupDateFilter = useMemo<DateFilter | null>(() => {
@@ -870,6 +830,26 @@ export function WidgetGroup({
     return null;
   }, [filters.dateField, filters.periodSelection, filters.dateRange, filters.year]);
 
+  // ─── Build dimension filters (branch, loan officer, dynamic, etc.) for cohi widgets ───
+  const groupDimensionFilters = useMemo<DimensionFilter[] | null>(() => {
+    const dims: DimensionFilter[] = [];
+    if (filters.branch && filters.branch !== 'all') {
+      dims.push({ column: 'branch', value: filters.branch });
+    }
+    if (filters.loanOfficer && filters.loanOfficer !== 'all') {
+      dims.push({ column: 'loan_officer', value: filters.loanOfficer });
+    }
+    // Include user-added dynamic filters
+    if (filters.dynamicFilters) {
+      for (const df of filters.dynamicFilters) {
+        if (df.value && df.value !== 'all') {
+          dims.push({ column: df.column, value: df.value });
+        }
+      }
+    }
+    return dims.length > 0 ? dims : null;
+  }, [filters.branch, filters.loanOfficer, filters.dynamicFilters]);
+
   // ─── Payload updater (merges into existing payload) ───
   const patchPayload = useCallback(
     (patch: Record<string, unknown>) => {
@@ -894,9 +874,10 @@ export function WidgetGroup({
     if (filters.actorType && filters.actorType !== 'loan_officer') toSave.actorType = filters.actorType;
     if (filters.branch && filters.branch !== 'all') toSave.branch = filters.branch;
     if (filters.loanOfficer && filters.loanOfficer !== 'all') toSave.loanOfficer = filters.loanOfficer;
+    if (filters.dynamicFilters && filters.dynamicFilters.length > 0) toSave.dynamicFilters = filters.dynamicFilters;
     patchPayload({ savedFilters: Object.keys(toSave).length > 0 ? toSave : undefined });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer]);
+  }, [filters.year, filters.dateRange, filters.periodSelection, filters.dateField, filters.applicationType, filters.actorType, filters.branch, filters.loanOfficer, filters.dynamicFilters]);
 
   // ─── Grid layout ───
   const contentWidth = Math.max(width - 24, MIN_GRID_WIDTH);
@@ -971,6 +952,21 @@ export function WidgetGroup({
     [items, widgetLayouts, persistItems, onMoveItemOut],
   );
 
+  /** Persist filter changes for a single cohi widget */
+  const handleCohiWidgetFilterChange = useCallback(
+    (index: number, newFilters: WidgetFilterState) => {
+      const item = items[index];
+      if (item.kind !== 'cohi') return;
+      const updated: GroupWidgetItem = {
+        ...item,
+        savedFilters: Object.keys(newFilters).length > 0 ? newFilters : undefined,
+      };
+      const next = items.map((it, i) => (i === index ? updated : it));
+      persistItems(next);
+    },
+    [items, persistItems],
+  );
+
   /** Persist a viz type change for a cohi item back into the items array */
   const handleVizTypeChange = useCallback(
     (index: number, newType: string) => {
@@ -1010,6 +1006,24 @@ export function WidgetGroup({
     [items, persistItems],
   );
 
+  /** Add a Cohi-generated (SQL-backed) widget to this group */
+  const handleAddCohiWidget = useCallback(
+    (widget: { sql: string; title: string; vizConfig: VisualizationConfig; explanation?: string }) => {
+      const cohiItem: GroupWidgetItem = {
+        kind: 'cohi',
+        id: `cohi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        sql: widget.sql,
+        title: widget.title,
+        vizConfig: widget.vizConfig,
+        explanation: widget.explanation,
+        // No savedFilters = widget starts with SQL's own date range (no filter override)
+      };
+      const next = [...items, cohiItem];
+      persistItems(next);
+    },
+    [items, persistItems],
+  );
+
   // ─── Title management ───
   const commitTitle = useCallback(() => {
     setIsRenaming(false);
@@ -1026,6 +1040,37 @@ export function WidgetGroup({
     setCollapsed(next);
     patchPayload({ collapsed: next });
   }, [collapsed, patchPayload]);
+
+  // ─── Filter sync toggle ───
+  const toggleFilterSync = useCallback(() => {
+    const next = !filterSync;
+    setFilterSync(next);
+    patchPayload({ filterSync: next });
+
+    // When turning sync ON, broadcast the current group filter to all Cohi
+    // widgets so they reflect the same date range.  When turning OFF, clear
+    // each widget's savedFilters so they revert to their SQL's own dates.
+    if (items.some((i) => i.kind === 'cohi')) {
+      const broadcastItems = items.map((item) => {
+        if (item.kind !== 'cohi') return item;
+        if (next) {
+          // Sync ON → write current group filter state into the widget
+          const groupState: WidgetFilterState = {};
+          if (filters.dateField && filters.dateField !== 'application_date') groupState.dateField = filters.dateField;
+          if (filters.periodSelection?.preset) groupState.preset = filters.periodSelection.preset;
+          if (filters.year) groupState.year = filters.year;
+          if (filters.periodSelection?.dateRange) groupState.dateRange = filters.periodSelection.dateRange;
+          else if (filters.dateRange) groupState.dateRange = filters.dateRange;
+          return { ...item, savedFilters: Object.keys(groupState).length > 0 ? groupState : undefined };
+        } else {
+          // Sync OFF → clear saved filters, let each widget start fresh
+          const { savedFilters: _, ...rest } = item;
+          return rest as typeof item;
+        }
+      });
+      persistItems(broadcastItems);
+    }
+  }, [filterSync, patchPayload, items, filters, persistItems]);
 
   // ─── Filter handlers ───
   const handleYearChange = useCallback(
@@ -1045,6 +1090,27 @@ export function WidgetGroup({
         dateRange: selection.dateRange,
         ...(selection.year != null ? { year: selection.year } : {}),
       });
+    },
+    [groupId, updateFilters],
+  );
+
+  // ─── Apply a saved filter preset to the group ───
+  const handleApplyGroupPreset = useCallback(
+    (preset: FilterPreset) => {
+      const f = preset.filters;
+      const patch: Partial<SectionFilters> = {};
+      if (f.dateField) patch.dateField = f.dateField;
+      if (f.preset) {
+        const range = computePresetDateRange(f.preset as PeriodPreset);
+        patch.periodSelection = { preset: f.preset as PeriodPreset, dateRange: range };
+        patch.dateRange = range;
+      } else if (f.year) {
+        patch.year = f.year;
+        patch.dateRange = { start: `${f.year}-01-01`, end: `${f.year}-12-31` };
+      } else if (f.dateRange) {
+        patch.dateRange = f.dateRange;
+      }
+      updateFilters(groupId, patch);
     },
     [groupId, updateFilters],
   );
@@ -1075,12 +1141,9 @@ export function WidgetGroup({
   // ─── Keyboard shortcuts ───
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape' && showAddPicker) {
-        setShowAddPicker(false);
-        e.stopPropagation();
-      }
+      // Dialog handles its own close on Escape
     },
-    [showAddPicker],
+    [],
   );
 
   const colors = SECTION_COLORS[sectionType];
@@ -1093,32 +1156,31 @@ export function WidgetGroup({
   return (
     <div
       className={cn(
-        'h-full w-full flex flex-col rounded-xl border-2 overflow-hidden',
+        'h-full w-full flex flex-col rounded-xl border-2 overflow-hidden group/widgetgroup',
         colors.border,
         'bg-white dark:bg-slate-900 shadow-sm',
       )}
       onKeyDown={handleKeyDown}
     >
-      {/* ═══════ Group header ═══════ */}
+      {/* ═══════ Compact group header — single row: title + filter toggle + actions ═══════ */}
       <div className={cn('shrink-0 border-b border-slate-200/70 dark:border-slate-700/70', colors.bg)}>
-        {/* Title row */}
-        <div className="flex items-center gap-2 px-3 py-2">
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-[32px]">
           {/* Collapse toggle */}
           <button
             type="button"
             onClick={toggleCollapse}
-            className="p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors canvas-interactive"
+            className="p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors canvas-interactive shrink-0"
             title={collapsed ? 'Expand group' : 'Collapse group'}
             aria-label={collapsed ? 'Expand group' : 'Collapse group'}
           >
             {collapsed ? (
-              <ChevronRight className="h-4 w-4 text-slate-500" />
+              <ChevronRight className="h-3.5 w-3.5 text-slate-500" />
             ) : (
-              <ChevronDown className="h-4 w-4 text-slate-500" />
+              <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
             )}
           </button>
 
-          <div className={cn('w-2 h-2 rounded-full shrink-0', colors.dot)} />
+          <div className={cn('w-1.5 h-1.5 rounded-full shrink-0', colors.dot)} />
 
           {/* Editable title */}
           {isRenaming ? (
@@ -1134,7 +1196,7 @@ export function WidgetGroup({
                   if (e.key === 'Enter') commitTitle();
                   if (e.key === 'Escape') { setLocalTitle(title); setIsRenaming(false); }
                 }}
-                className="flex-1 min-w-0 text-sm font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50 canvas-interactive"
+                className="flex-1 min-w-0 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50 canvas-interactive"
               />
               <button
                 type="button"
@@ -1142,12 +1204,12 @@ export function WidgetGroup({
                 className="p-0.5 rounded text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 canvas-interactive"
                 aria-label="Save title"
               >
-                <Check className="h-3.5 w-3.5" />
+                <Check className="h-3 w-3" />
               </button>
             </div>
           ) : (
             <h3
-              className={cn('text-sm font-semibold tracking-tight flex-1 min-w-0 truncate cursor-pointer', colors.accent)}
+              className={cn('text-xs font-semibold tracking-tight flex-1 min-w-0 truncate cursor-pointer', colors.accent)}
               onDoubleClick={() => { setLocalTitle(title); setIsRenaming(true); }}
               title="Double-click to rename"
             >
@@ -1155,57 +1217,76 @@ export function WidgetGroup({
             </h3>
           )}
 
+          {/* Rename pencil — only on hover */}
           {!isRenaming && (
             <button
               type="button"
               onClick={() => { setLocalTitle(title); setIsRenaming(true); }}
-              className="p-0.5 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 canvas-interactive transition-colors"
+              className="p-0.5 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 canvas-interactive transition-colors opacity-0 group-hover/widgetgroup:opacity-100"
               title="Rename group"
               aria-label="Rename group"
             >
-              <Pencil className="h-3 w-3" />
+              <Pencil className="h-2.5 w-2.5" />
             </button>
           )}
 
-          {/* Widget count */}
-          <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider shrink-0">
-            {itemLabel}
-          </span>
-
-          {/* Add widget */}
-          <div className="relative shrink-0" ref={addPickerRef}>
+          {/* Filter sync toggle */}
+          {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && (
             <button
               type="button"
-              onClick={() => setShowAddPicker((v) => !v)}
+              onClick={toggleFilterSync}
               className={cn(
-                'flex items-center gap-1 h-6 px-2 rounded-md border text-[10px] font-medium canvas-interactive transition-colors',
-                showAddPicker
-                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
-                  : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-700 dark:hover:text-slate-200',
+                'flex items-center gap-0.5 h-5 px-1.5 rounded text-[9px] font-medium canvas-interactive transition-all shrink-0',
+                filterSync
+                  ? 'text-blue-500 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/30'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800',
               )}
-              title="Add widget to group"
-              aria-label="Add widget"
+              title={filterSync ? 'Sync ON: all widgets share group filters. Click to let each widget filter independently.' : 'Sync OFF: each widget has its own filters. Click to sync all widgets.'}
+              aria-label={filterSync ? 'Disable filter sync' : 'Enable filter sync'}
             >
-              <Plus className="h-3 w-3" />
-              Add
+              {filterSync ? <Link2 className="h-2.5 w-2.5" /> : <Unlink2 className="h-2.5 w-2.5" />}
+              <span>{filterSync ? 'Synced' : 'Independent'}</span>
             </button>
-            {showAddPicker && (
-              <AddWidgetPicker
-                sectionType={sectionType}
-                existingItems={items}
-                onAddRegistry={handleAddRegistryWidget}
-                onClose={() => setShowAddPicker(false)}
-              />
+          )}
+
+          {/* Filter bar toggle (only when sync is on) */}
+          {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && (
+            <button
+              type="button"
+              onClick={() => setFiltersCollapsed((v) => !v)}
+              className={cn(
+                'flex items-center gap-0.5 h-5 px-1.5 rounded text-[9px] font-medium canvas-interactive transition-all shrink-0',
+                filtersCollapsed
+                  ? 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'text-blue-500 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/30',
+              )}
+              title={filtersCollapsed ? 'Show group filters' : 'Hide group filters'}
+              aria-label={filtersCollapsed ? 'Show group filters' : 'Hide group filters'}
+            >
+              <SlidersHorizontal className="h-2.5 w-2.5" />
+              <span>Filters</span>
+            </button>
+          )}
+
+          {/* Add widget — opens the multi-tab dialog */}
+          <button
+            type="button"
+            onClick={() => setShowAddDialog(true)}
+            className={cn(
+              'flex items-center gap-0.5 h-5 px-1.5 rounded border text-[9px] font-medium canvas-interactive transition-colors shrink-0',
+              'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-blue-300 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20',
             )}
-          </div>
+            title="Add widget to group"
+            aria-label="Add widget"
+          >
+            <Plus className="h-2.5 w-2.5" />
+            Add
+          </button>
         </div>
 
-        {/* Date period picker + extra filters (only show when expanded).
-            Sections whose embedded component manages its own filter controls
-            (e.g. ExecutiveDashboard, LeaderBoardSection) skip the group-level
-            date picker to avoid redundant/conflicting controls. */}
-        {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && (
-          <div className="flex items-center gap-2 px-3 pb-2.5 flex-wrap">
+        {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
+        {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
+          <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
             <DatePeriodPicker
               year={filters.year}
               onYearChange={handleYearChange}
@@ -1220,7 +1301,6 @@ export function WidgetGroup({
 
             {/* Data-driven filters from SECTION_FILTER_CONFIG */}
             {(SECTION_FILTER_CONFIG[sectionType] ?? []).map((field) => {
-              // Resolve the parent filter's DB column name for cascading
               const sectionFields = SECTION_FILTER_CONFIG[sectionType] ?? [];
               const parentField = field.dependsOn
                 ? sectionFields.find((f) => f.key === field.dependsOn)
@@ -1237,6 +1317,43 @@ export function WidgetGroup({
                 />
               );
             })}
+
+            {/* Dynamic (user-added) filters */}
+            {(filters.dynamicFilters || []).map((df) => (
+              <DynamicDimensionFilter
+                key={df.column}
+                entry={df}
+                tenantId={tenantIdForEdit}
+                onChange={(value) => updateDynamicFilter(groupId, df.column, value)}
+                onRemove={() => removeDynamicFilter(groupId, df.column)}
+              />
+            ))}
+
+            {/* Divider before add-filter */}
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Add filter dimension button */}
+            <AddFilterPicker
+              groupId={groupId}
+              existingColumns={[
+                // Built-in filter columns
+                ...(SECTION_FILTER_CONFIG[sectionType] ?? [])
+                  .filter((f) => f.optionsSource)
+                  .map((f) => f.optionsSource!),
+                // Dynamic filter columns already added
+                ...(filters.dynamicFilters || []).map((f) => f.column),
+              ]}
+              onAdd={(col, label) => addDynamicFilter(groupId, { column: col, label, value: 'all' })}
+            />
+
+            {/* Divider before presets */}
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+            {/* Filter preset bookmarks */}
+            <GroupFilterBookmarkButton
+              filters={filters}
+              onApplyPreset={handleApplyGroupPreset}
+            />
           </div>
         )}
       </div>
@@ -1288,6 +1405,9 @@ export function WidgetGroup({
                     width={cellW}
                     height={cellH}
                     dateFilter={groupDateFilter}
+                    dimensionFilters={groupDimensionFilters}
+                    filterSyncEnabled={filterSync}
+                    onFilterChange={item.kind === 'cohi' ? (f) => handleCohiWidgetFilterChange(idx, f) : undefined}
                     onDelete={() => handleDelete(idx)}
                     onDuplicate={() => handleDuplicate(idx)}
                     onMaximize={() => setMaximizedItem(item)}
@@ -1324,6 +1444,8 @@ export function WidgetGroup({
         open={maximizedItem !== null}
         onClose={() => setMaximizedItem(null)}
         dateFilter={groupDateFilter}
+        dimensionFilters={groupDimensionFilters}
+        filterSyncEnabled={filterSync}
       />
 
       {/* Edit Widget Dialog */}
@@ -1340,6 +1462,17 @@ export function WidgetGroup({
           onSave={(updated) => handleEditWidgetSave(editingItemIdx, updated)}
         />
       )}
+
+      {/* Add Widget Dialog — multi-tab with Ask Cohi, Quick Metrics, Templates */}
+      <AddWidgetDialog
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        sectionType={sectionType}
+        groupId={groupId}
+        existingItems={items}
+        onAddRegistry={handleAddRegistryWidget}
+        onAddCohi={handleAddCohiWidget}
+      />
     </div>
   );
 }
@@ -1487,6 +1620,320 @@ function ApiFilterSelect({
         </select>
         <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-slate-400 pointer-events-none" />
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DynamicDimensionFilter – renders a user-added dynamic filter with remove button
+// ---------------------------------------------------------------------------
+
+function DynamicDimensionFilter({
+  entry,
+  tenantId,
+  onChange,
+  onRemove,
+}: {
+  entry: DynamicFilterEntry;
+  tenantId?: string | null;
+  onChange: (value: string) => void;
+  onRemove: () => void;
+}) {
+  const { options, loading } = useFilterOptions({
+    column: entry.column,
+    tenantId,
+  });
+
+  const selectOptions = useMemo(() => {
+    const items: { value: string; label: string }[] = [
+      { value: 'all', label: `All ${entry.label}` },
+    ];
+    for (const opt of options) {
+      items.push({ value: opt, label: opt });
+    }
+    return items;
+  }, [options, entry.label]);
+
+  return (
+    <div className="flex items-center gap-1 group/dimfilter">
+      <span className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+        {entry.label}
+      </span>
+      <div className="relative">
+        <select
+          value={entry.value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={loading && options.length === 0}
+          className="appearance-none h-6 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 pl-2 pr-5 text-[11px] font-medium text-slate-700 dark:text-slate-200 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 canvas-interactive disabled:opacity-50"
+          title={entry.label}
+        >
+          {selectOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-slate-400 pointer-events-none" />
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="p-0.5 rounded text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors canvas-interactive opacity-0 group-hover/dimfilter:opacity-100"
+        title={`Remove ${entry.label} filter`}
+        aria-label={`Remove ${entry.label} filter`}
+      >
+        <Trash2 className="h-2.5 w-2.5" />
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AddFilterPicker – dropdown to add a new filter dimension from the catalog
+// ---------------------------------------------------------------------------
+
+function AddFilterPicker({
+  groupId,
+  existingColumns,
+  onAdd,
+}: {
+  groupId: string;
+  existingColumns: string[];
+  onAdd: (column: string, label: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const available = useMemo(
+    () => AVAILABLE_FILTER_DIMENSIONS.filter((d) => !existingColumns.includes(d.column)),
+    [existingColumns],
+  );
+
+  if (available.length === 0) return null;
+
+  return (
+    <div className="relative" ref={pickerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'flex items-center gap-0.5 h-5 px-1.5 rounded text-[9px] font-medium canvas-interactive transition-colors',
+          open
+            ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
+            : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800',
+        )}
+        title="Add filter dimension"
+        aria-label="Add filter"
+      >
+        <Plus className="h-2.5 w-2.5" />
+        <span>Filter</span>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 w-52 max-h-60 overflow-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl canvas-interactive">
+          <div className="px-2 py-1.5 text-[9px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
+            Add filter dimension
+          </div>
+          <div className="p-1">
+            {available.map((dim) => (
+              <button
+                key={dim.column}
+                type="button"
+                onClick={() => {
+                  onAdd(dim.column, dim.label);
+                  setOpen(false);
+                }}
+                className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 text-xs transition-colors"
+              >
+                <SlidersHorizontal className="h-3 w-3 text-slate-400 shrink-0" />
+                <span className="font-medium text-slate-700 dark:text-slate-200">{dim.label}</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-auto">{dim.column}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GroupFilterBookmarkButton – save/load filter presets on the group filter bar
+// ---------------------------------------------------------------------------
+
+function GroupFilterBookmarkButton({
+  filters,
+  onApplyPreset,
+}: {
+  filters: SectionFilters;
+  onApplyPreset: (preset: FilterPreset) => void;
+}) {
+  const { selectedTenantId } = useTenantStore();
+  const tenantId = selectedTenantId || 'default';
+  const presets = useFilterPresetStore((s) => s.presetsByTenant[tenantId]) ?? EMPTY_FILTER_PRESETS;
+  const addPreset = useFilterPresetStore((s) => s.addPreset);
+  const removePreset = useFilterPresetStore((s) => s.removePreset);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSaving(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Build WidgetFilterState from the group's SectionFilters
+  const currentFilterState = useMemo<WidgetFilterState>(() => {
+    const state: WidgetFilterState = {};
+    if (filters.dateField && filters.dateField !== 'application_date') state.dateField = filters.dateField;
+    if (filters.periodSelection?.preset) state.preset = filters.periodSelection.preset;
+    if (filters.year) state.year = filters.year;
+    if (filters.periodSelection?.dateRange) {
+      state.dateRange = filters.periodSelection.dateRange;
+    } else if (filters.dateRange) {
+      state.dateRange = filters.dateRange;
+    }
+    return state;
+  }, [filters.dateField, filters.periodSelection, filters.dateRange, filters.year]);
+
+  const hasActiveFilter = Object.keys(currentFilterState).length > 0;
+
+  const handleSave = () => {
+    if (!presetName.trim()) return;
+    addPreset(tenantId, presetName.trim(), currentFilterState);
+    setPresetName('');
+    setSaving(false);
+  };
+
+  const describePreset = (p: FilterPreset): string => {
+    const parts: string[] = [];
+    if (p.filters.preset) parts.push(p.filters.preset);
+    if (p.filters.year) parts.push(String(p.filters.year));
+    if (p.filters.dateField && p.filters.dateField !== 'application_date') parts.push(p.filters.dateField);
+    if (p.filters.dimensionFilters?.length) parts.push(`+${p.filters.dimensionFilters.length} filters`);
+    return parts.join(' \u00b7 ') || 'No filter';
+  };
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => { setOpen((v) => !v); setSaving(false); }}
+        className={cn(
+          'flex items-center gap-0.5 h-5 px-1.5 rounded text-[9px] font-medium canvas-interactive transition-colors',
+          open
+            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
+            : 'text-slate-400 dark:text-slate-500 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
+        )}
+        title="Filter bookmarks"
+        aria-label="Filter bookmarks"
+      >
+        {presets.length > 0 ? <BookmarkCheck className="h-2.5 w-2.5" /> : <Bookmark className="h-2.5 w-2.5" />}
+        <span>Presets</span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-6 z-50 w-56 bg-white dark:bg-slate-900 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1 text-[11px]">
+          {/* Header */}
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+            Filter Presets
+          </div>
+
+          {/* Existing presets */}
+          {presets.length === 0 && !saving && (
+            <div className="px-3 py-2 text-slate-400 dark:text-slate-500 italic">
+              No saved presets
+            </div>
+          )}
+          {presets.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 group/preset"
+            >
+              <button
+                type="button"
+                className="flex-1 text-left text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 truncate"
+                onClick={() => {
+                  onApplyPreset(p);
+                  setOpen(false);
+                }}
+                title={describePreset(p)}
+              >
+                <span className="font-medium">{p.name}</span>
+                <span className="ml-1.5 text-[9px] text-slate-400">{describePreset(p)}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => removePreset(tenantId, p.id)}
+                className="p-0.5 rounded text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover/preset:opacity-100 transition-opacity canvas-interactive"
+                title="Delete preset"
+              >
+                <Trash2 className="h-2.5 w-2.5" />
+              </button>
+            </div>
+          ))}
+
+          {/* Divider */}
+          <div className="border-t border-slate-100 dark:border-slate-800 my-1" />
+
+          {/* Save current */}
+          {saving ? (
+            <div className="px-3 py-1.5 flex items-center gap-1.5">
+              <input
+                type="text"
+                placeholder="Preset name..."
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSave();
+                  if (e.key === 'Escape') setSaving(false);
+                }}
+                className="flex-1 h-5 px-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[10px] focus:outline-none focus:ring-1 focus:ring-indigo-500/50 canvas-interactive"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!presetName.trim()}
+                className="h-5 px-2 rounded bg-indigo-500 text-white text-[10px] font-medium hover:bg-indigo-600 disabled:opacity-50 canvas-interactive"
+              >
+                Save
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSaving(true)}
+              disabled={!hasActiveFilter}
+              className="w-full text-left px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={hasActiveFilter ? 'Save current group filters as a preset' : 'Set a filter first'}
+            >
+              <Bookmark className="h-2.5 w-2.5 inline-block mr-1.5" />
+              Save current as preset...
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -19,7 +19,10 @@
     "seed:local": "tsx scripts/seed-local-dev.ts",
     "init:local": "tsx scripts/init-local-database.ts",
     "create-admin": "node ../scripts/create-admin-user.js",
-    "check-user": "tsx scripts/check-user-and-create-super-admin.js"
+    "check-user": "tsx scripts/check-user-and-create-super-admin.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.980.0",
@@ -66,7 +69,8 @@
     "@types/pg": "^8.15.2",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "fast-xml-parser": "5.3.4"

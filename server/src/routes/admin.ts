@@ -870,6 +870,8 @@ router.get(
     // Get tenant pool
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     
+    // Filter out super_admin role -- that's a platform-level role that should
+    // never appear in a tenant's user list (may have been JIT-created via SSO)
     const result = await tenantPool.query(`
       SELECT 
         id,
@@ -885,6 +887,7 @@ router.get(
         loan_access_mode,
         loan_access_synced_at
       FROM users
+      WHERE role != 'super_admin'
       ORDER BY created_at DESC
     `);
     
@@ -933,6 +936,13 @@ router.post(
       });
     }
     
+    // Reject platform-level roles in tenant databases
+    if (req.body.role === "super_admin" || req.body.role === "platform_admin") {
+      return res.status(400).json({
+        error: "Cannot create platform-level users in a tenant. Use the platform admin management instead.",
+      });
+    }
+
     const schema = z.object({
       email: z.string().email(),
       password: z.string().min(6),
@@ -1170,6 +1180,74 @@ router.delete(
           error: "Failed to delete tenant user",
           details: error.message,
         });
+    }
+  },
+);
+
+/**
+ * GET /api/admin/tenants/:tenantId/usage
+ * Get usage statistics for a specific tenant
+ */
+router.get(
+  "/tenants/:tenantId/usage",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.params.tenantId as string;
+
+      // Tenant admins can only view their own tenant's usage
+      if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "You can only view usage for your own organization",
+        });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      // Run queries in parallel
+      const [userCount, loanCount, storageResult, lastSyncResult] =
+        await Promise.all([
+          tenantPool.query("SELECT COUNT(*) as count FROM users"),
+          tenantPool.query("SELECT COUNT(*) as count FROM loans"),
+          tenantPool.query(
+            "SELECT pg_database_size(current_database()) as size_bytes",
+          ),
+          tenantPool.query(
+            "SELECT last_synced_at FROM los_connections WHERE is_active = true ORDER BY last_synced_at DESC NULLS LAST LIMIT 1",
+          ),
+        ]);
+
+      const users = parseInt(userCount.rows[0]?.count || "0");
+      const loans = parseInt(loanCount.rows[0]?.count || "0");
+      const storageBytes = parseInt(
+        storageResult.rows[0]?.size_bytes || "0",
+      );
+      const storageGB = Math.round((storageBytes / 1073741824) * 100) / 100;
+      const lastSync = lastSyncResult.rows[0]?.last_synced_at || null;
+
+      res.json({
+        users: { current: users, limit: 0, percentage: 0 },
+        loans: { current: loans, limit: 0, percentage: 0 },
+        storage: {
+          current: storageGB,
+          limit: 0,
+          percentage: 0,
+          unit: "GB",
+        },
+        last_sync: lastSync,
+        sync_status: lastSync ? "healthy" : "warning",
+      });
+    } catch (error: any) {
+      logError("Error fetching tenant usage", error, {
+        userId: req.userId,
+        tenantId: req.params.tenantId as string,
+      });
+      res.status(500).json({
+        error: "Failed to fetch usage statistics",
+        details: error.message,
+      });
     }
   },
 );

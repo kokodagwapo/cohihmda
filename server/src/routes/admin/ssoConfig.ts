@@ -11,6 +11,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import crypto from "crypto";
 import pg from "pg";
 import {
   CognitoIdentityProviderClient,
@@ -27,7 +28,6 @@ import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { logInfo, logError, logWarn } from "../../services/logger.js";
 import { XMLParser } from "fast-xml-parser";
 import https from "https";
-import http from "http";
 
 // Helper to get management pool
 function getManagementPool(): pg.Pool {
@@ -86,17 +86,45 @@ interface ParsedSAMLMetadata {
 
 /**
  * Fetch and parse SAML metadata from URL
+ * Security: Only HTTPS URLs are allowed to prevent MITM attacks
  */
 async function fetchMetadataFromUrl(url: string): Promise<string> {
+  // Enforce HTTPS to prevent MITM attacks on metadata
+  if (!url.startsWith("https://")) {
+    throw new Error("Metadata URL must use HTTPS");
+  }
+
+  // Basic SSRF protection: block private/internal IP ranges
+  const urlObj = new URL(url);
+  const hostname = urlObj.hostname.toLowerCase();
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname.startsWith("10.") ||
+    hostname.startsWith("192.168.") ||
+    hostname.startsWith("172.") ||
+    hostname === "169.254.169.254" || // AWS metadata endpoint
+    hostname.endsWith(".internal")
+  ) {
+    throw new Error("Metadata URL must point to a public endpoint");
+  }
+
   return new Promise((resolve, reject) => {
-    const protocol = url.startsWith("https") ? https : http;
-    
-    protocol.get(url, (res) => {
+    const req = https.get(url, { timeout: 10000 }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Metadata fetch failed with status ${res.statusCode}`));
+        return;
+      }
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => resolve(data));
       res.on("error", reject);
-    }).on("error", reject);
+    });
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Metadata fetch timed out (10s)"));
+    });
   });
 }
 
@@ -182,13 +210,15 @@ function parseSAMLMetadata(xml: string): ParsedSAMLMetadata {
 
 /**
  * Generate a Cognito-safe IdP name from tenant info
+ * Format: {slug}_{type}_{hash} to avoid collisions between similar slugs
+ * Cognito IdP names: alphanumeric plus _, -, . | max 32 characters
  */
 function generateCognitoIdpName(tenantSlug: string, providerType: string): string {
-  // Cognito IdP names: alphanumeric, plus _, -, .
-  // Max 32 characters
   const sanitized = tenantSlug.replace(/[^a-zA-Z0-9]/g, "");
   const suffix = providerType === "oidc" ? "OIDC" : "SAML";
-  const name = `${sanitized}_${suffix}`.substring(0, 32);
+  // Add a short hash of the full slug to prevent collisions (e.g., "acme" vs "acmecorp")
+  const hash = crypto.createHash("md5").update(tenantSlug).digest("hex").substring(0, 4);
+  const name = `${sanitized}_${suffix}_${hash}`.substring(0, 32);
   return name;
 }
 
@@ -408,12 +438,17 @@ async function deleteCognitoIdp(idpName: string): Promise<void> {
  */
 router.get("/config", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const tenantId = req.query.tenant_id as string || req.tenantId;
     const userRole = req.userRole || "";
+    
+    // Only super/platform admins can override tenant_id via query param
+    // Tenant admins always use their own tenant from the JWT
+    const tenantId = ["super_admin", "platform_admin"].includes(userRole)
+      ? (req.query.tenant_id as string || req.tenantId)
+      : req.tenantId;
     
     // Authorization: super_admin can view any tenant, tenant_admin can only view their own
     if (!["super_admin", "platform_admin"].includes(userRole)) {
-      if (userRole !== "tenant_admin" || req.tenantId !== tenantId) {
+      if (userRole !== "tenant_admin") {
         return res.status(403).json({ error: "Unauthorized to view this tenant's SSO config" });
       }
     }
@@ -454,6 +489,7 @@ router.get("/config", authenticateToken, async (req: AuthRequest, res: Response)
       auth_config: tenant.auth_config || { mode: "hybrid", allow_email_password: true },
       configurations: configResult.rows,
       sp_info: spInfo,
+      cognito_configured: !!(COGNITO_USER_POOL_ID && COGNITO_CLIENT_ID),
     });
     
   } catch (error: any) {
@@ -469,12 +505,16 @@ router.get("/config", authenticateToken, async (req: AuthRequest, res: Response)
 router.post("/config", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const input: SSOConfigInput = req.body;
-    const tenantId = req.query.tenant_id as string || req.tenantId;
     const userRole = req.userRole || "";
+    
+    // Only super/platform admins can override tenant_id via query param
+    const tenantId = ["super_admin", "platform_admin"].includes(userRole)
+      ? (req.query.tenant_id as string || req.tenantId)
+      : req.tenantId;
     
     // Authorization
     if (!["super_admin", "platform_admin"].includes(userRole)) {
-      if (userRole !== "tenant_admin" || req.tenantId !== tenantId) {
+      if (userRole !== "tenant_admin") {
         return res.status(403).json({ error: "Unauthorized to configure this tenant's SSO" });
       }
     }
@@ -492,6 +532,14 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
     }
     
     const tenant = tenantResult.rows[0];
+    
+    // Validate Cognito is configured before attempting IdP creation
+    if (!COGNITO_USER_POOL_ID || !COGNITO_CLIENT_ID) {
+      return res.status(503).json({ 
+        error: "SSO is not available. Cognito User Pool is not configured.",
+        details: "COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID environment variables must be set."
+      });
+    }
     
     // Validate email domains
     if (!input.email_domains || input.email_domains.length === 0) {
@@ -741,23 +789,33 @@ router.post("/test", authenticateToken, async (req: AuthRequest, res: Response) 
  */
 router.get("/history", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const tenantId = req.query.tenant_id as string || req.tenantId;
-    const limit = parseInt(req.query.limit as string) || 50;
     const userRole = req.userRole || "";
+    const limit = parseInt(req.query.limit as string) || 50;
+    
+    // Only super/platform admins can override tenant_id via query param
+    const tenantId = ["super_admin", "platform_admin"].includes(userRole)
+      ? (req.query.tenant_id as string || req.tenantId)
+      : req.tenantId;
     
     // Authorization
     if (!["super_admin", "platform_admin"].includes(userRole)) {
-      if (userRole !== "tenant_admin" || req.tenantId !== tenantId) {
+      if (userRole !== "tenant_admin") {
         return res.status(403).json({ error: "Unauthorized" });
       }
     }
     
     const mgmtPool = getManagementPool();
     
+    // SSO login history is stored in each tenant's database, not in management DB
+    // For management-level history, we query the management pool's audit logs
+    // For tenant-level history, we need to query the tenant's sso_login_history table
     const result = await mgmtPool.query(
-      `SELECT * FROM sso_auth_logs 
-       WHERE tenant_id = $1 OR ($2 = true AND tenant_id IS NULL)
-       ORDER BY created_at DESC 
+      `SELECT al.id, al.user_email, al.description, al.status, al.ip_address, al.user_agent, al.created_at
+       FROM audit_logs al
+       WHERE al.action = 'login' AND al.resource = 'auth' 
+         AND al.description LIKE '%SSO%'
+         AND (al.tenant_id = $1 OR ($2 = true AND al.tenant_id IS NULL))
+       ORDER BY al.created_at DESC 
        LIMIT $3`,
       [tenantId, ["super_admin", "platform_admin"].includes(userRole), limit]
     );
@@ -777,7 +835,6 @@ router.get("/history", authenticateToken, async (req: AuthRequest, res: Response
 router.put("/auth-mode", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const { mode, allow_email_password } = req.body;
-    const tenantId = req.query.tenant_id as string || req.tenantId;
     const userRole = req.userRole || "";
     
     // Validate mode
@@ -785,9 +842,14 @@ router.put("/auth-mode", authenticateToken, async (req: AuthRequest, res: Respon
       return res.status(400).json({ error: "Invalid auth mode" });
     }
     
+    // Only super/platform admins can override tenant_id via query param
+    const tenantId = ["super_admin", "platform_admin"].includes(userRole)
+      ? (req.query.tenant_id as string || req.tenantId)
+      : req.tenantId;
+    
     // Authorization
     if (!["super_admin", "platform_admin"].includes(userRole)) {
-      if (userRole !== "tenant_admin" || req.tenantId !== tenantId) {
+      if (userRole !== "tenant_admin") {
         return res.status(403).json({ error: "Unauthorized" });
       }
     }

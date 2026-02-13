@@ -27,11 +27,11 @@ function createManagementPool(): pg.Pool {
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
     ssl: rawHost !== '127.0.0.1' && rawHost !== 'localhost' ? { rejectUnauthorized: false } : false,
-    max: 20, // Increased pool size
-    min: 2, // Keep minimum connections alive
-    idleTimeoutMillis: 60000, // 60 seconds idle timeout
+    max: 8, // Reduced from 20 — management queries are simple lookups, no need for many connections
+    min: 1, // Keep one connection alive for fast first queries
+    idleTimeoutMillis: 30000, // 30 seconds idle timeout
     connectionTimeoutMillis: 10000, // 10 seconds connection timeout (faster fail)
-    allowExitOnIdle: false, // Keep pool alive
+    allowExitOnIdle: false, // Keep pool alive for tenant config lookups
   });
 
   newPool.on('error', (err: any) => {
