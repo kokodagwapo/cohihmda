@@ -81,6 +81,15 @@ const LOAN_DATA_TABLES = [
   "loan_predictions",
   "ai_pattern_learnings",
   "historical_loan_bucket_cache",
+  "bucket_thresholds_cache",
+  "historical_bucket_totals",
+  "historical_bucket_combos",
+  "risk_band_definitions",
+  "turn_time_baselines",
+  "human_pattern_stats",
+  "categorical_risk_definitions",
+  "persistent_top_patterns",
+  "outcome_numeric_risk_profiles",
 ];
 
 // Batch size for loan copying

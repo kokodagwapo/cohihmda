@@ -84,7 +84,7 @@ interface LoanCardsContainerProps {
   onOpenLoanIdHandled?: () => void;
 }
 
-type TabType = "all" | "likely-withdraw" | "likely-decline" | "favorites";
+type TabType = "all" | "likely-withdraw" | "likely-decline" | "past-est-closing" | "likely-close-late" | "favorites";
 type SortType = "risk" | "amount" | "loan" | "officer";
 
 const ITEMS_PER_PAGE_OPTIONS = [6, 10, 20, 50, 100] as const;
@@ -255,6 +255,36 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
             case "likely-decline":
               if (loan.riskSummary?.predictedOutcome === "deny") return true;
               return predictionMap.get(loan.id)?.predictedOutcome === "deny";
+            case "past-est-closing": {
+              const ecdRaw = (loan as { estimatedClosingDate?: string | null }).estimatedClosingDate;
+              if (ecdRaw == null || ecdRaw === "") return false;
+              try {
+                const ecd = new Date(ecdRaw);
+                if (Number.isNaN(ecd.getTime())) return false;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                ecd.setHours(0, 0, 0, 0);
+                return today > ecd;
+              } catch {
+                return false;
+              }
+            }
+            case "likely-close-late": {
+              if ((loan as { closeLateRisk?: boolean }).closeLateRisk !== true)
+                return false;
+              const ecdRaw = (loan as { estimatedClosingDate?: string | null }).estimatedClosingDate;
+              if (ecdRaw == null || ecdRaw === "") return true;
+              try {
+                const ecd = new Date(ecdRaw);
+                if (Number.isNaN(ecd.getTime())) return true;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                ecd.setHours(0, 0, 0, 0);
+                return today <= ecd;
+              } catch {
+                return true;
+              }
+            }
             case "favorites":
               return isFavorited(loan.id);
             default:
@@ -348,6 +378,36 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
           if (l.riskSummary?.predictedOutcome === "deny") return true;
           return predictionMapForCounts.get(l.id)?.predictedOutcome === "deny";
         }).length,
+        "past-est-closing": loans.filter((l) => {
+          const ecdRaw = (l as { estimatedClosingDate?: string | null }).estimatedClosingDate;
+          if (ecdRaw == null || ecdRaw === "") return false;
+          try {
+            const ecd = new Date(ecdRaw);
+            if (Number.isNaN(ecd.getTime())) return false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            ecd.setHours(0, 0, 0, 0);
+            return today > ecd;
+          } catch {
+            return false;
+          }
+        }).length,
+        "likely-close-late": loans.filter((l) => {
+          if ((l as { closeLateRisk?: boolean }).closeLateRisk !== true)
+            return false;
+          const ecdRaw = (l as { estimatedClosingDate?: string | null }).estimatedClosingDate;
+          if (ecdRaw == null || ecdRaw === "") return true;
+          try {
+            const ecd = new Date(ecdRaw);
+            if (Number.isNaN(ecd.getTime())) return true;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            ecd.setHours(0, 0, 0, 0);
+            return today <= ecd;
+          } catch {
+            return true;
+          }
+        }).length,
         favorites: loans.filter((l) => favoriteIds.has(l.id)).length,
       };
     }, [loans, predictions, favoriteIds]);
@@ -370,6 +430,18 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
         label: "Likely Decline",
         shortLabel: "Decline",
         color: "lightred",
+      },
+      {
+        id: "past-est-closing",
+        label: "Past Est. Closing",
+        shortLabel: "Past ECD",
+        color: "red",
+      },
+      {
+        id: "likely-close-late",
+        label: "Likely Close Late",
+        shortLabel: "Close Late",
+        color: "amber",
       },
       { id: "favorites", label: "Favorites", shortLabel: "Favorites", color: "blue" },
     ];
@@ -408,6 +480,14 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
           active: isDarkMode
             ? "bg-rose-300 text-rose-900"
             : "bg-rose-200 text-rose-800",
+          inactive: isDarkMode
+            ? `${baseStyle} text-slate-400`
+            : `${baseStyle} text-slate-600`,
+        },
+        amber: {
+          active: isDarkMode
+            ? "bg-amber-600 text-white"
+            : "bg-amber-500 text-white",
           inactive: isDarkMode
             ? `${baseStyle} text-slate-400`
             : `${baseStyle} text-slate-600`,

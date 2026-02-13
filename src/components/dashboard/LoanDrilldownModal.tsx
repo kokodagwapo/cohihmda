@@ -45,6 +45,7 @@ interface LoanData {
   closerPullthroughPct?: number | null;
   processorPullthroughPct?: number | null;
   riskSummary?: RiskSummary;
+  closeLateRisk?: boolean | null;
   creditMetricsSignalStrength?: number | null;
   loanCharacteristicsSignalStrength?: number | null;
   timeInMotionSignalStrength?: number | null;
@@ -100,8 +101,24 @@ function buildEmailBody(loan: LoanData): string {
   const commissionHigh = formatAmt(Math.min(amt * 0.01, COMMISSION_MAX));
   const officerTier = loan.officerTier === 'top' ? 'Top Tier' : loan.officerTier === 'second' ? 'Second Tier' : 'Bottom Tier';
   const officerSuffix = loan.officerTtsScore != null && !Number.isNaN(loan.officerTtsScore) ? `  ${officerTier} – ${Math.round(loan.officerTtsScore)}` : '';
+  const isPastEcd = (() => {
+    const ecdRaw = loan.estimatedClosingDate;
+    if (ecdRaw == null || ecdRaw === '') return false;
+    try {
+      const ecd = new Date(ecdRaw);
+      if (Number.isNaN(ecd.getTime())) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      ecd.setHours(0, 0, 0, 0);
+      return today > ecd;
+    } catch {
+      return false;
+    }
+  })();
   const predictedLabel = loan.riskSummary?.predictedOutcome === 'deny' ? '▲ LIKELY DECLINE' :
     loan.riskSummary?.predictedOutcome === 'withdraw' ? '↩ LIKELY WITHDRAW' :
+    isPastEcd ? '📅 PAST EST. CLOSING' :
+    loan.closeLateRisk === true ? '⏱ LIKELY CLOSE LATE' :
     loan.riskSummary?.predictedOutcome === 'at_risk' ? '⚡ AT RISK' : null;
   const riskLabel = loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW';
   const lockVsMarketBucket = loan.interestLockVsMarketSignalStrength ?? (() => {
@@ -142,7 +159,7 @@ function buildEmailBody(loan: LoanData): string {
   if (predictedLabel) body += `${' '.repeat(36)}${predictedLabel}\n`;
   body += `${' '.repeat(36)}${riskLabel}\n\n`;
   body += `${sep}\n`;
-  body += `● Risk Score: ${loan.riskScore}/100 (40 = worst, 100 = best)\n`;
+  body += `● Risk Score: ${loan.riskScore}/100 (0 = lowest risk, 100 = highest risk)\n`;
   body += `${sep}\n\n`;
 
   if (hasSignals) {

@@ -447,6 +447,45 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
 }
 
 /**
+ * Compute market delta for historical outcome (lock rate - close rate at outcome date).
+ * Used by outcome numeric profile service. Same convention as predictionService: positive = rates fell.
+ * @param lockDate - Lock or application date
+ * @param outcomeDate - Outcome date (e.g. current_status_date)
+ * @returns lockMarketRate - closeMarketRate, or null if either rate unavailable
+ */
+export async function computeMarketDeltaForDates(
+  lockDate: string | Date | null,
+  outcomeDate: string | Date | null
+): Promise<number | null> {
+  if (!lockDate || !outcomeDate) return null;
+  const lockObj = typeof lockDate === 'string' ? new Date(lockDate) : lockDate;
+  const outObj = typeof outcomeDate === 'string' ? new Date(outcomeDate) : outcomeDate;
+  if (isNaN(lockObj.getTime()) || isNaN(outObj.getTime()) || outObj < lockObj) return null;
+  const lockStr = lockObj.toISOString().split('T')[0];
+  const outStr = outObj.toISOString().split('T')[0];
+  let lockRate = await getMarketRateForDate(lockStr);
+  if (lockRate === null) {
+    for (let d = 1; d <= 7; d++) {
+      const d2 = new Date(lockObj);
+      d2.setDate(d2.getDate() - d);
+      lockRate = await getMarketRateForDate(d2.toISOString().split('T')[0]);
+      if (lockRate !== null) break;
+    }
+  }
+  let closeRate = await getMarketRateForDate(outStr);
+  if (closeRate === null) {
+    for (let d = 1; d <= 7; d++) {
+      const d2 = new Date(outObj);
+      d2.setDate(d2.getDate() - d);
+      closeRate = await getMarketRateForDate(d2.toISOString().split('T')[0]);
+      if (closeRate !== null) break;
+    }
+  }
+  if (lockRate === null || closeRate === null) return null;
+  return lockRate - closeRate;
+}
+
+/**
  * Get market rates for a date range from database
  * @param startDate - Start date in YYYY-MM-DD format or Date object
  * @param endDate - End date in YYYY-MM-DD format or Date object

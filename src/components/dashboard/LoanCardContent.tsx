@@ -1,7 +1,7 @@
 import React, { useState, useCallback, memo } from "react";
 import { Sparkles, Loader2, Heart } from "lucide-react";
 import { api } from "@/lib/api";
-import { LoanRiskDistribution } from "./LoanRiskDistribution";
+import { LoanRiskDistribution, type ReasonCodeEntry } from "./LoanRiskDistribution";
 
 export interface LoanCardContentLoan {
   id: string;
@@ -40,6 +40,7 @@ export interface LoanCardContentLoan {
     predictedOutcome: "originate" | "withdraw" | "deny" | "at_risk";
     confidence: number;
   } | null;
+  closeLateRisk?: boolean | null;
   creditMetricsSignalStrength?: number | null;
   loanCharacteristicsSignalStrength?: number | null;
   timeInMotionSignalStrength?: number | null;
@@ -47,6 +48,8 @@ export interface LoanCardContentLoan {
   interestLockVsMarketSignalStrength?: number | null;
   loPullthroughSignal?: number | null;
   marketChangeDeltaSignal?: number | null;
+  /** Fallout sequencer reason_codes (zone per feature) for zone-based metric colors. */
+  reasonCodes?: ReasonCodeEntry[] | null;
 }
 
 function formatLockExpirationDate(value: string | null | undefined): string {
@@ -351,37 +354,75 @@ export const LoanCardContent = memo(
               </p>
             </div>
             <div className="flex flex-col items-end gap-0.5 mt-0.5">
-              {loan.riskSummary?.predictedOutcome &&
-                loan.riskSummary.predictedOutcome !== "originate" && (
+              {(() => {
+                const ecdRaw = loan.estimatedClosingDate;
+                const isPastEcd =
+                  ecdRaw != null &&
+                  ecdRaw !== "" &&
+                  (() => {
+                    try {
+                      const ecd = new Date(ecdRaw);
+                      if (Number.isNaN(ecd.getTime())) return false;
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      ecd.setHours(0, 0, 0, 0);
+                      return today > ecd;
+                    } catch {
+                      return false;
+                    }
+                  })();
+                const showBadge =
+                  (loan.riskSummary?.predictedOutcome &&
+                    loan.riskSummary.predictedOutcome !== "originate") ||
+                  isPastEcd ||
+                  (loan.riskSummary?.predictedOutcome === "originate" &&
+                    loan.closeLateRisk === true);
+                if (!showBadge) return null;
+                const isDeny = loan.riskSummary?.predictedOutcome === "deny";
+                const isWithdraw = loan.riskSummary?.predictedOutcome === "withdraw";
+                const label = isDeny
+                  ? "⚠ Likely Decline"
+                  : isWithdraw
+                  ? "↩ Likely Withdraw"
+                  : isPastEcd
+                  ? "📅 Past Est. Closing"
+                  : loan.closeLateRisk === true
+                  ? "⏱ Likely Close Late"
+                  : "⚡ At Risk";
+                const styleClass = isDeny
+                  ? isDarkMode
+                    ? "bg-red-600/30 text-red-300"
+                    : "bg-red-100 text-red-700"
+                  : isWithdraw
+                  ? isDarkMode
+                    ? "bg-orange-500/30 text-orange-300"
+                    : "bg-orange-100 text-orange-700"
+                  : isPastEcd
+                  ? isDarkMode
+                    ? "bg-orange-600/30 text-orange-200"
+                    : "bg-orange-200 text-orange-800"
+                  : loan.closeLateRisk === true
+                  ? isDarkMode
+                    ? "bg-amber-500/30 text-amber-300"
+                    : "bg-amber-100 text-amber-700"
+                  : isDarkMode
+                  ? "bg-amber-500/30 text-amber-300"
+                  : "bg-amber-100 text-amber-700";
+                return (
                   <span
-                    className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
-                      loan.riskSummary.predictedOutcome === "deny"
-                        ? isDarkMode
-                          ? "bg-red-600/30 text-red-300"
-                          : "bg-red-100 text-red-700"
-                        : loan.riskSummary.predictedOutcome === "withdraw"
-                        ? isDarkMode
-                          ? "bg-orange-500/30 text-orange-300"
-                          : "bg-orange-100 text-orange-700"
-                        : isDarkMode
-                        ? "bg-amber-500/30 text-amber-300"
-                        : "bg-amber-100 text-amber-700"
-                    }`}
+                    className={`text-[8px] sm:text-[9px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${styleClass}`}
                   >
-                    {loan.riskSummary.predictedOutcome === "deny"
-                      ? "⚠ Likely Decline"
-                      : loan.riskSummary.predictedOutcome === "withdraw"
-                      ? "↩ Likely Withdraw"
-                      : "⚡ At Risk"}
+                    {label}
                   </span>
-                )}
+                );
+              })()}
               <span
                 className={`text-[9px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded inline-block ${
-                  loan.riskLevel === "Very High"
+                  (loan.riskScore ?? 0) >= 75
                     ? isDarkMode
                       ? "bg-rose-500/20 text-rose-400"
                       : "bg-rose-50 text-rose-600"
-                    : loan.riskLevel === "Medium"
+                    : (loan.riskScore ?? 0) >= 50
                     ? isDarkMode
                       ? "bg-amber-500/20 text-amber-400"
                       : "bg-amber-50 text-amber-600"
@@ -390,10 +431,10 @@ export const LoanCardContent = memo(
                     : "bg-emerald-50 text-emerald-600"
                 }`}
               >
-                {loan.riskLevel === "Very High"
+                {(loan.riskScore ?? 0) >= 75
                   ? "CRITICAL"
-                  : loan.riskLevel === "Medium"
-                  ? "AT RISK"
+                  : (loan.riskScore ?? 0) >= 50
+                  ? "IMPORTANT"
                   : "LOW"}
               </span>
             </div>
@@ -407,9 +448,9 @@ export const LoanCardContent = memo(
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                loan.riskLevel === "Very High"
+                (loan.riskScore ?? 0) >= 75
                   ? "bg-rose-500"
-                  : loan.riskLevel === "Medium"
+                  : (loan.riskScore ?? 0) >= 50
                   ? "bg-amber-500"
                   : "bg-emerald-500"
               }`}
@@ -421,9 +462,9 @@ export const LoanCardContent = memo(
               className={`text-[10px] ${
                 isDarkMode ? "text-slate-500" : "text-slate-400"
               }`}
-              title="Score scale: 40 = worst, 100 = best"
+              title="Score scale: 0 = lowest risk, 100 = highest risk"
             >
-              (40 = worst, 100 = best)
+              (0 = lowest risk, 100 = highest risk)
             </span>
           </div>
         </div>
@@ -479,6 +520,7 @@ export const LoanCardContent = memo(
             interestRate={loan.interestRate}
             marketRate={loan.marketRate}
             marketChangeDelta={loan.marketChangeDelta}
+            reasonCodes={loan.reasonCodes ?? (loan as any).reason_codes ?? undefined}
           />
         )}
         {!compact &&

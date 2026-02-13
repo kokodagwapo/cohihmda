@@ -15,6 +15,12 @@ import {
 } from "../../middleware/tenantContext.js";
 import { apiLimiter } from "../../middleware/rateLimiter.js";
 import { logError, logWarn, logInfo, logDebug } from "../../services/logger.js";
+import {
+  getHistoricalFalloutRates,
+  runFalloutSequencer,
+  runNumericOutcomeProfileDerivation,
+} from "../../services/fallout/index.js";
+import { computeMarketDeltaForDates } from "../../services/dashboard/marketRateService.js";
 
 const router = Router();
 
@@ -26,8 +32,7 @@ const router = Router();
 
 /**
  * POST /api/predictions
- * Predict outcomes for active loans - simplified version with instant bucketing
- * Returns signal strength buckets and rule-based risk summaries
+ * Runs numeric outcome profile derivation + fallout sequencer and returns loan-level predictions.
  */
 router.post(
   "/",
@@ -35,88 +40,48 @@ router.post(
   attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
+    const startMs = Date.now();
     try {
       const tenantContext = getTenantContext(req);
       const tenantPool = tenantContext.tenantPool;
       const tenantId = tenantContext.tenantId;
+      const { loanIds } = req.body || {};
 
-      const {
-        customPrompt,
-        loanIds,
-        maxLoanAgeMonths = 0,
-        limit = 1000,
-      } = req.body;
+      logInfo("[Predictions] Starting document pipeline (fallout sequencer)", { tenantId });
 
-      // Calculate cutoff date if filtering by age
-      const cutoffDate =
-        maxLoanAgeMonths && maxLoanAgeMonths > 0
-          ? new Date(Date.now() - maxLoanAgeMonths * 30 * 24 * 60 * 60 * 1000)
-          : null;
-
-      // Fetch active loans using same criteria as metricsService
-      const activeLoansQuery = `
-      SELECT 
-        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
-        uw_denied_date, uw_suspended_date, last_modified_date,
-        current_loan_status, current_milestone, branch, loan_officer,
-        fico_score, be_dti_ratio, ltv_ratio, cltv,
-        loan_purpose, property_type, occupancy_type, channel,
-        underwriter, closer, processor,
-        ctc_date, approval_date, uw_final_approval_date,
-        conditional_approval_date,
-        submitted_to_processing_date, submitted_to_underwriting_date
-      FROM public.loans 
-      WHERE current_loan_status = 'Active Loan'
-        AND application_date IS NOT NULL
-        AND application_date::text != ''
-        ${cutoffDate ? `AND application_date >= $1` : ""}
-      ORDER BY application_date DESC
-      LIMIT ${Math.min(limit, 2000)}
-    `;
-
-      logInfo("[Predictions] Query", {
-        cutoffDate: cutoffDate?.toISOString() || "none",
-        maxLoanAgeMonths,
-      });
-
-      const loansResult = await tenantPool.query(
-        activeLoansQuery,
-        cutoffDate ? [cutoffDate.toISOString().split("T")[0]] : []
-      );
-      let activeLoans = loansResult.rows;
-
-      // Historical loans for calibration + pullthrough. Same columns as active so prepareLoanData/bucketing have fico, DTI, LTV, etc.
-      const historicalLoansQuery = `
-      SELECT 
-        loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
-        application_date, lock_date, lock_expiration_date, closing_date, estimated_closing_date, funding_date,
-        uw_denied_date, uw_suspended_date, last_modified_date,
-        current_loan_status, current_milestone, branch, loan_officer,
-        fico_score, be_dti_ratio, ltv_ratio, cltv,
-        loan_purpose, property_type, occupancy_type, channel,
-        underwriter, closer, processor,
-        ctc_date, approval_date, uw_final_approval_date,
-        conditional_approval_date,
-        submitted_to_processing_date, submitted_to_underwriting_date
-      FROM public.loans 
-      WHERE current_loan_status != 'Active Loan' OR current_loan_status IS NULL
-      ORDER BY application_date DESC
-      LIMIT 5000
-    `;
-      const historicalResult = await tenantPool.query(historicalLoansQuery);
-      const allLoans = [...activeLoans, ...historicalResult.rows];
-
-      // Filter to specific loan IDs if provided
-      if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
-        const loanIdSet = new Set(loanIds);
-        activeLoans = activeLoans.filter((l) => loanIdSet.has(l.loan_id));
+      // Fetch active loans: sequencer columns + display fields so UI shows loan number, amount, channel, etc.
+      const baseCols = `
+        loan_id, loan_number, loan_amount, branch, current_milestone,
+        loan_type, loan_purpose, occupancy_type, fico_score, ltv_ratio, be_dti_ratio,
+        borr_self_employed, application_date, lock_date, lock_expiration_date, interest_rate,
+        estimated_closing_date, funding_date, closing_date, current_status_date, ctc_date, uw_final_approval_date, conditional_approval_date,
+        loan_officer_id, loan_officer, loan_processor_id, processor, underwriter_id, underwriter, closer_id, closer,
+        channel`;
+      let activeLoans: any[];
+      try {
+        const withMarket = await tenantPool.query(
+          `SELECT ${baseCols}, market_rate, market_rate_at_lock
+           FROM public.loans
+           WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+           ORDER BY application_date DESC
+           LIMIT 5000`
+        );
+        activeLoans = withMarket.rows;
+      } catch {
+        const withoutMarket = await tenantPool.query(
+          `SELECT ${baseCols}
+           FROM public.loans
+           WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+           ORDER BY application_date DESC
+           LIMIT 5000`
+        );
+        activeLoans = withoutMarket.rows;
       }
 
-      logInfo("[Predictions] Data loaded", {
-        activeLoans: activeLoans.length,
-        historicalLoans: allLoans.length - activeLoans.length,
-      });
+      if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
+        const loanIdSet = new Set(loanIds);
+        activeLoans = activeLoans.filter((l: any) => loanIdSet.has(l.loan_id));
+      }
 
       if (activeLoans.length === 0) {
         return res.json({
@@ -131,251 +96,304 @@ router.post(
             likelyCloseLateCount: 0,
           },
           metadata: {
-            model: process.env.PREDICTION_MODEL || "gpt-4o",
+            model: "fallout-sequencer-v1",
             timestamp: new Date().toISOString(),
-            processingTimeMs: 0,
+            processingTimeMs: Date.now() - startMs,
           },
         });
       }
 
-      // Fetch OpenAI API key from tenant's rag_settings
-      let tenantApiKey: string | undefined;
-      try {
-        const { decryptAPIKeys } = await import("../../services/encryption.js");
-        const apiKeyResult = await tenantPool.query(
-          `SELECT openai_api_key FROM public.rag_settings LIMIT 1`
-        );
-        if (apiKeyResult.rows[0]?.openai_api_key) {
-          const decrypted = await decryptAPIKeys({
-            openai_api_key: apiKeyResult.rows[0].openai_api_key,
-          });
-          tenantApiKey = decrypted.openai_api_key || undefined;
-        }
-      } catch (apiKeyError: any) {
-        logInfo("[Predictions] Could not fetch tenant API key", {
-          error: apiKeyError.message,
-        });
-      }
-
-      // Call prediction service
-      const { predictLoanOutcomes } = await import(
-        "../../services/dashboard/predictionService.js"
-      );
-
-      const result = await predictLoanOutcomes(
-        {
-          loans: activeLoans,
-          allLoans,
-          customPrompt,
-          tenantId,
-          tenantPool,
-        },
-        tenantApiKey
-      );
-
-      // Limit response size
-      const LOANS_PER_BUCKET = 50;
-
-      // Enrich bucketed loans with loan_purpose and channel from raw DB when missing
-      // (avoids "--" in UI when values exist in DB but are lost in prepareLoanData/bucketLoanData)
-      const rawByLoanId = new Map(activeLoans.map((l: any) => [l.loan_id, l]));
-      if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
-        result.bucketedLoans.forEach((loan: any) => {
-          const raw = rawByLoanId.get(loan.loan_id);
-          if (raw) {
-            const lp = loan.loan_purpose ?? loan.loanPurpose;
-            const ch = loan.channel;
-            if ((lp == null || String(lp).trim() === "") && raw.loan_purpose) {
-              loan.loan_purpose = raw.loan_purpose;
-              loan.loanPurpose = raw.loan_purpose;
-            }
-            if ((ch == null || String(ch).trim() === "") && raw.channel) {
-              loan.channel = raw.channel;
-            }
-          }
-        });
-      }
-
-      // Extract bucket summary
-      const bucketSummary: Record<string, number> = {};
-      if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
-        result.bucketedLoans.forEach((loan: any) => {
-          const bucket = loan.bucket || "unknown";
-          bucketSummary[bucket] = (bucketSummary[bucket] || 0) + 1;
-        });
-      }
-
-      // Essential fields for response
-      const essentialFields = [
-        "loan_id",
-        "loan_number",
-        "loan_amount",
-        "loan_type",
-        "loan_purpose",
-        "loanPurpose",
-        "channel",
-        "bucket",
-        "current_loan_status",
-        "status",
-        "branch",
-        "application_date",
-        "lock_date",
-        "lock_expiration_date",
-        "closing_date",
-        "funding_date",
-        "estimated_closing_date",
-        "fico_score",
-        "ltv_ratio",
-        "be_dti_ratio",
-        "loan_officer",
-        "underwriter",
-        "closer",
-        "processor",
-        "interest_rate",
-        "market_rate",
-        "marketChangeDelta",
-        "lockMarketRate",
-        "closeMarketRate",
-        "current_milestone",
-        "lastCompletedMilestone",
-        "milestoneNumber",
-        "activeDays",
-        "loPullthroughPercentage",
-        "uwPullthroughPercentage",
-        "closerPullthroughPercentage",
-        "processorPullthroughPercentage",
-        "creditMetricsSignalStrength",
-        "loanCharacteristicsSignalStrength",
-        "timeInMotionSignalStrength",
-        "mloAeFalloutProneSignalStrength",
-        "interestLockVsMarketSignalStrength",
-        "uwPullthroughSignalStrength",
-        "closerPullthroughSignalStrength",
-        "processorPullthroughSignalStrength",
-        "ficoScoreSignal",
-        "ltvSignal",
-        "dtiSignal",
-        "loPullthroughSignal",
-        "marketChangeDeltaSignal",
-        "riskSummary",
-        "riskScore",
-        "creditRiskScore",
-        "processRiskScore",
-        "closeOnTimeProbability",
-        "closeLateRisk",
-        "pipelineStage",
-        "pipelineReadiness",
-      ];
-
-      const rawByLoanIdPred = new Map<string, any>();
-      activeLoans.forEach((l: any) => {
-        const id = l.loan_id ?? l.loanId;
-        if (id != null && String(id).trim() !== "")
-          rawByLoanIdPred.set(String(id), l);
+      // Numeric outcome profiles: ensure current and prior year are computed (reuses 2023/2024 if present).
+      // TODO: Job scheduling for numeric outcome profile derivation still needs to be done (e.g. nightly refresh).
+      await runNumericOutcomeProfileDerivation(tenantPool).catch((e) => {
+        logError("Numeric outcome profile derivation failed in Predict", e, {});
       });
-      // Debug: log first raw row after building rawByLoanIdPred
-      const firstRawPred = activeLoans[0];
-      if (firstRawPred) {
-        const fid = firstRawPred.loan_id ?? firstRawPred.loanId;
-        logInfo("[PredictDebug] predictions first raw row", {
-          "raw.loan_id": fid,
-          typeof_loan_id: typeof fid,
-          "raw.loan_purpose": firstRawPred.loan_purpose,
-          "raw.channel": firstRawPred.channel,
-          "raw.lock_date": firstRawPred.lock_date,
-          rawByLoanIdSize: rawByLoanIdPred.size,
-          sampleMapKeys: Array.from(rawByLoanIdPred.keys()).slice(0, 3),
-        });
-      }
-      let firstStrippedBackfillLogged = false;
-      const bucketGroups: Record<string, any[]> = {};
-      if (result.bucketedLoans && Array.isArray(result.bucketedLoans)) {
-        result.bucketedLoans.forEach((loan: any) => {
-          const bucket = loan.bucket || "unknown";
-          if (!bucketGroups[bucket]) bucketGroups[bucket] = [];
-          if (bucketGroups[bucket].length < LOANS_PER_BUCKET) {
-            const stripped: Record<string, any> = {};
-            essentialFields.forEach((f) => {
-              if (loan[f] !== undefined) stripped[f] = loan[f];
-            });
-            const lid = loan.loan_id ?? loan.loanId;
-            let rawFound = false;
-            const backfillSet: Record<string, any> = {};
-            if (lid != null) {
-              const raw = rawByLoanIdPred.get(String(lid));
-              rawFound = !!raw;
-              if (raw) {
-                if (
-                  raw.loan_purpose != null &&
-                  String(raw.loan_purpose).trim() !== ""
-                ) {
-                  stripped.loan_purpose = raw.loan_purpose;
-                  stripped.loanPurpose = raw.loan_purpose;
-                  backfillSet.loan_purpose = raw.loan_purpose;
-                }
-                if (raw.channel != null && String(raw.channel).trim() !== "") {
-                  stripped.channel = raw.channel;
-                  backfillSet.channel = raw.channel;
-                }
-                if (raw.lock_expiration_date != null) {
-                  stripped.lock_expiration_date = raw.lock_expiration_date;
-                  backfillSet.lock_expiration_date = raw.lock_expiration_date;
-                }
-                if (raw.lock_date != null) {
-                  stripped.lock_date = raw.lock_date;
-                  backfillSet.lock_date = raw.lock_date;
-                }
-              }
-            }
-            if (!firstStrippedBackfillLogged) {
-              firstStrippedBackfillLogged = true;
-              logInfo("[PredictDebug] predictions first stripped backfill", {
-                loan_id: lid,
-                lookupKey: lid != null ? String(lid) : null,
-                rawFound,
-                backfillSet,
-                strippedBeforeBackfill_loan_purpose:
-                  loan.loan_purpose ?? loan.loanPurpose,
-                strippedBeforeBackfill_channel: loan.channel,
-                strippedBeforeBackfill_lock_date: loan.lock_date,
-              });
-            }
-            bucketGroups[bucket].push(stripped);
+
+      // Enrich active loans with market delta (lock rate - current rate) for Withdrawn similarity scoring.
+      const today = new Date();
+      await Promise.all(
+        activeLoans.map(async (loan: any) => {
+          const lockDate = loan.lock_date ?? loan.application_date;
+          if (lockDate) {
+            const delta = await computeMarketDeltaForDates(lockDate, today);
+            loan.marketChangeDelta = delta ?? undefined;
           }
-        });
-      }
+        })
+      );
 
-      const limitedLoans = Object.values(bucketGroups).flat();
+      const rates = await getHistoricalFalloutRates(tenantPool);
 
-      const slimResult = {
-        predictions: result.predictions || [],
-        bucketedLoans: limitedLoans,
-        bucketSummary,
-        totalBucketedLoans: result.bucketedLoans?.length || 0,
-        summary: result.summary,
-        metadata: result.metadata,
+      // Job D: Sequential scoring (blended numeric similarity) and persist to loan_predictions
+      const seq = await runFalloutSequencer(tenantPool, activeLoans, {
+        historicalDeniedRate: rates.deniedRate,
+        historicalWithdrawnRate: rates.withdrawnRate,
+      });
+
+      // Read back from loan_predictions to build API response (include reason_codes for risk score)
+      const loanIdsArr = activeLoans.map((l: any) => l.loan_id);
+      const predResult = await tenantPool.query(
+        `SELECT loan_id, predicted_outcome, confidence, projected_status, reason_codes
+         FROM public.loan_predictions
+         WHERE loan_id = ANY($1)`,
+        [loanIdsArr]
+      );
+      const predByLoanId = new Map(predResult.rows.map((r: any) => [r.loan_id, r]));
+
+      // Helper: risk score 0-100 from reason_codes; use outcome-specific max to match sequencer (deny=12, withdraw=15, else 18)
+      const MAX_DENIED_POINTS = 12;
+      const MAX_WITHDRAWN_POINTS = 15;
+      const MAX_OTHER_POINTS = 18;
+      const reasonCodesToRiskScore = (raw: any, predictedOutcome?: string): number | null => {
+        if (raw == null) return null;
+        const codes = Array.isArray(raw)
+          ? raw
+          : typeof raw === "string"
+            ? (() => {
+                try {
+                  return JSON.parse(raw) as any[];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+        const sum = (codes as Array<{ risk_score?: number }>).reduce(
+          (acc, r) => acc + (Number(r?.risk_score) || 0),
+          0
+        );
+        const maxPoints =
+          predictedOutcome === "deny"
+            ? MAX_DENIED_POINTS
+            : predictedOutcome === "withdraw"
+              ? MAX_WITHDRAWN_POINTS
+              : MAX_OTHER_POINTS;
+        return Math.min(100, Math.max(0, Math.round((sum / maxPoints) * 100)));
       };
 
-      const responseSize = JSON.stringify(slimResult).length;
-      const outcomeCounts = { withdraw: 0, deny: 0, originate: 0, at_risk: 0 };
-      for (const loan of limitedLoans) {
-        const outcome = loan.ruleBasedSummary?.predictedOutcome || loan.predictedOutcome;
-        if (outcome && outcome in outcomeCounts) {
-          outcomeCounts[outcome as keyof typeof outcomeCounts]++;
+      // LO pullthrough % and MLO fallout signal (legacy human_pattern_stats no longer populated)
+      const loPullthroughPctByRole = new Map<string, number>();
+      // Bucket pullthrough % to signal 1-6 (1 = best, 6 = worst) for MLO Fallout Prone display
+      const pullthroughPctToSignal = (pct: number): number => {
+        if (pct >= 90) return 1;
+        if (pct >= 80) return 2;
+        if (pct >= 70) return 3;
+        if (pct >= 60) return 4;
+        if (pct >= 50) return 5;
+        return 6;
+      };
+
+      // Signal strength helpers for card display (match GET /api/predictions logic)
+      const calcCreditMetricsSignal = (l: any): number | null => {
+        const fico = l.fico_score != null ? Number(l.fico_score) : null;
+        const ltv = l.ltv_ratio != null ? Number(l.ltv_ratio) : null;
+        const dti = l.be_dti_ratio != null ? Number(l.be_dti_ratio) : null;
+        if (fico === null && ltv === null && dti === null) return null;
+        let ficoB = 3;
+        if (fico != null) {
+          if (fico >= 760) ficoB = 1;
+          else if (fico >= 720) ficoB = 2;
+          else if (fico >= 680) ficoB = 3;
+          else if (fico >= 640) ficoB = 4;
+          else if (fico >= 600) ficoB = 5;
+          else ficoB = 6;
         }
+        let ltvB = 3;
+        if (ltv != null) {
+          if (ltv <= 60) ltvB = 1;
+          else if (ltv <= 70) ltvB = 2;
+          else if (ltv <= 80) ltvB = 3;
+          else if (ltv <= 90) ltvB = 4;
+          else if (ltv <= 95) ltvB = 5;
+          else ltvB = 6;
+        }
+        let dtiB = 3;
+        if (dti != null) {
+          if (dti <= 28) dtiB = 1;
+          else if (dti <= 36) dtiB = 2;
+          else if (dti <= 43) dtiB = 3;
+          else if (dti <= 50) dtiB = 4;
+          else if (dti <= 55) dtiB = 5;
+          else dtiB = 6;
+        }
+        return Math.round((ficoB + ltvB + dtiB) / 3);
+      };
+      const calcLoanCharacteristicsSignal = (l: any): number | null => {
+        const lt = (l.loan_type || "").toLowerCase();
+        const lp = (l.loan_purpose || "").toLowerCase();
+        const ch = (l.channel || "").toLowerCase();
+        if (!lt && !lp && !ch) return null;
+        let typeB = 3;
+        if (lt.includes("conventional") || lt.includes("conf")) typeB = 2;
+        else if (lt.includes("fha") || lt.includes("va")) typeB = 3;
+        else if (lt.includes("jumbo")) typeB = 4;
+        let purposeB = 3;
+        if (lp.includes("purchase")) purposeB = 2;
+        else if (lp.includes("rate") || lp.includes("refi")) purposeB = 3;
+        else if (lp.includes("cash")) purposeB = 4;
+        let channelB = 3;
+        if (ch.includes("retail")) channelB = 2;
+        else if (ch.includes("broker") || ch.includes("correspondent")) channelB = 4;
+        return Math.round((typeB + purposeB + channelB) / 3);
+      };
+      const calcTimeInMotionSignal = (l: any): number | null => {
+        const app = l.application_date;
+        if (!app) return null;
+        const days = Math.floor((Date.now() - new Date(app).getTime()) / (1000 * 60 * 60 * 24));
+        if (isNaN(days)) return null;
+        if (days <= 15) return 1;
+        if (days <= 30) return 2;
+        if (days <= 45) return 3;
+        if (days <= 60) return 4;
+        if (days <= 90) return 5;
+        return 6;
+      };
+      const calcInterestLockVsMarketSignal = (l: any): number | null => {
+        const rate = l.interest_rate != null ? Number(l.interest_rate) : null;
+        if (rate === null) return null;
+        const market = l.market_rate ?? l.market_rate_at_lock;
+        if (market != null && !isNaN(Number(market))) {
+          const delta = Number(market) - rate;
+          if (delta <= -0.3) return 1;
+          if (delta <= 0) return 2;
+          if (delta <= 0.25) return 3;
+          if (delta <= 0.5) return 5;
+          return 6;
+        }
+        if (rate <= 5.5) return 2;
+        if (rate <= 6.5) return 3;
+        if (rate <= 7.5) return 4;
+        return 5;
+      };
+
+      const predictions: Array<{ loanId: string; predictedOutcome: string }> = [];
+      let predictedWithdraw = 0;
+      let predictedDeny = 0;
+      let predictedOriginate = 0;
+      let likelyCloseLateCount = 0;
+      const bucketedLoans: any[] = [];
+
+      for (const loan of activeLoans) {
+        const lid = (loan.loan_id ?? loan.loanId ?? "").toString();
+        const row = predByLoanId.get(lid);
+        const outcome = row?.predicted_outcome ?? "originate";
+        const projectedStatus = row?.projected_status;
+        if (outcome === "withdraw") predictedWithdraw++;
+        else if (outcome === "deny") predictedDeny++;
+        else predictedOriginate++;
+        if (projectedStatus === "ClosingLate") likelyCloseLateCount++;
+        predictions.push({ loanId: lid, predictedOutcome: outcome });
+        const bucket = outcome === "deny" || outcome === "withdraw" ? "high" : "low";
+        const isClosingLate = projectedStatus === "ClosingLate";
+        const confidence = row?.confidence ?? 50;
+
+        const loName = (loan.loan_officer ?? "").toString().trim() || null;
+        const loId = (loan.loan_officer_id ?? loan.loan_officer ?? "Unknown").toString().trim() || "Unknown";
+        const loPullthroughPct =
+          (loName && loPullthroughPctByRole.get(loName)) ??
+          loPullthroughPctByRole.get(loId) ??
+          loPullthroughPctByRole.get("Unknown") ??
+          null;
+        const mloSignal = loPullthroughPct != null ? pullthroughPctToSignal(loPullthroughPct) : null;
+
+        const appDate = loan.application_date;
+        const activeDays =
+          appDate != null
+            ? Math.floor((Date.now() - new Date(appDate).getTime()) / (1000 * 60 * 60 * 24))
+            : null;
+        const lockRate = loan.interest_rate != null ? Number(loan.interest_rate) : null;
+        const marketRate =
+          loan.market_rate != null
+            ? Number(loan.market_rate)
+            : loan.market_rate_at_lock != null
+              ? Number(loan.market_rate_at_lock)
+              : null;
+        const marketChangeDelta =
+          lockRate != null && marketRate != null && !isNaN(lockRate) && !isNaN(marketRate)
+            ? marketRate - lockRate
+            : null;
+
+        const sequencerRisk = reasonCodesToRiskScore(row?.reason_codes, outcome);
+        const rawReasonCodes = row?.reason_codes;
+        const normalizedReasonCodes = rawReasonCodes != null
+          ? (Array.isArray(rawReasonCodes)
+              ? rawReasonCodes
+              : typeof rawReasonCodes === "string"
+                ? (() => {
+                    try {
+                      return JSON.parse(rawReasonCodes) as any[];
+                    } catch {
+                      return [];
+                    }
+                  })()
+                : [])
+          : [];
+        bucketedLoans.push({
+          ...loan,
+          loan_id: lid,
+          bucket,
+          closeLateRisk: isClosingLate,
+          riskScore: sequencerRisk ?? confidence,
+          reasonCodes: normalizedReasonCodes,
+          loPullthroughPercentage: loPullthroughPct ?? undefined,
+          mloAeFalloutProneSignalStrength: mloSignal ?? undefined,
+          loPullthroughSignal: mloSignal ?? undefined,
+          creditMetricsSignalStrength: calcCreditMetricsSignal(loan) ?? undefined,
+          loanCharacteristicsSignalStrength: calcLoanCharacteristicsSignal(loan) ?? undefined,
+          timeInMotionSignalStrength: calcTimeInMotionSignal(loan) ?? undefined,
+          interestLockVsMarketSignalStrength: calcInterestLockVsMarketSignal(loan) ?? undefined,
+          activeDays: activeDays ?? undefined,
+          market_rate: loan.market_rate ?? undefined,
+          market_rate_at_lock: loan.market_rate_at_lock ?? undefined,
+          lockMarketRate: loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock) : loan.interest_rate != null ? Number(loan.interest_rate) : undefined,
+          marketChangeDelta: marketChangeDelta ?? undefined,
+          riskSummary: {
+            predictedOutcome: outcome,
+            confidence,
+            overallRisk: bucket,
+            ...(sequencerRisk != null && { riskScore: sequencerRisk }),
+          },
+        });
       }
-      logInfo("[Predictions] Response", {
-        totalBucketedLoans: result.bucketedLoans?.length || 0,
-        bucketedLoansInResponse: slimResult.bucketedLoans?.length || 0,
-        outcomeCounts,
-        responseSizeMB: (responseSize / 1024 / 1024).toFixed(2),
+
+      const bucketSummary: Record<string, number> = {};
+      bucketedLoans.forEach((l: any) => {
+        const b = l.bucket || "medium";
+        bucketSummary[b] = (bucketSummary[b] || 0) + 1;
       });
 
+      const processingTimeMs = Date.now() - startMs;
+      logInfo("[Predictions] Document pipeline complete", {
+        tenantId,
+        saved: seq.saved,
+        predictedWithdraw,
+        predictedDeny,
+        predictedOriginate,
+        likelyCloseLateCount,
+        processingTimeMs,
+      });
+
+      const slimResult = {
+        predictions,
+        bucketedLoans,
+        bucketSummary,
+        totalBucketedLoans: bucketedLoans.length,
+        summary: {
+          totalAnalyzed: activeLoans.length,
+          predictedWithdraw,
+          predictedDeny,
+          predictedOriginate,
+          likelyCloseLateCount,
+        },
+        metadata: {
+          model: "fallout-sequencer-v1",
+          timestamp: new Date().toISOString(),
+          processingTimeMs,
+        },
+      };
+
       res.setHeader("Content-Type", "application/json");
-      res.setHeader("Content-Length", responseSize.toString());
       res.json(slimResult);
     } catch (error: any) {
-      logError("Error predicting loan outcomes", error, { userId: req.userId });
+      logError("Error running prediction pipeline", error, { userId: req.userId });
 
       if (handleDatabaseError(error, res, "Failed to predict loan outcomes")) {
         return;
@@ -524,7 +542,9 @@ router.get(
           loan_data,
           model_version,
           created_at,
-          updated_at
+          updated_at,
+          reason_codes,
+          projected_status
         FROM public.loan_predictions
         WHERE 1=1
     `;
@@ -604,6 +624,9 @@ router.get(
           loanDataMap[row.loan_id] = row;
         });
       }
+
+      // LO pullthrough % for MLO Fallout Prone display (legacy human_pattern_stats no longer populated)
+      const getLoPullthroughMap = new Map<string, number>();
 
       // Calculate signal strengths from loan data (since loan_prediction_buckets table may not exist)
       // These are simplified calculations based on the prediction service logic
@@ -772,14 +795,160 @@ router.get(
           mergedLoanData.interestLockVsMarketSignalStrength ??
           calculateInterestLockVsMarketSignal(mergedLoanData);
 
+        // LO pullthrough %: use stored, or from map (legacy human_pattern_stats no longer populated)
+        const loPctFromMap =
+          (mergedLoanData.loan_officer && getLoPullthroughMap.get(String(mergedLoanData.loan_officer).trim())) ??
+          (mergedLoanData.loan_officer_id && getLoPullthroughMap.get(String(mergedLoanData.loan_officer_id).trim())) ??
+          null;
+        const loPullthroughPercentage =
+          mergedLoanData.loPullthroughPercentage ?? loPctFromMap ?? null;
+
         // Calculate LO pullthrough signal from percentage if not stored
         const loPullthroughSignal =
           mergedLoanData.loPullthroughSignal ??
-          calculatePullthroughSignal(mergedLoanData.loPullthroughPercentage);
+          calculatePullthroughSignal(loPullthroughPercentage);
 
         // MLO/AE fallout signal - use stored value, fall back to LO pullthrough signal
         const mloAeFalloutSignal =
           mergedLoanData.mloAeFalloutProneSignalStrength ?? loPullthroughSignal;
+
+        // Risk score from fallout sequencer reason_codes (zone points sum scaled to 0-100).
+        // Use outcome-specific max to match sequencer: Denied max=12 (4 features incl. days_active), Withdrawn max=15, else 18.
+        const MAX_DENIED_POINTS = 12;
+        const MAX_WITHDRAWN_POINTS = 15;
+        const MAX_OTHER_POINTS = 18;
+        let sequencerRiskScore100: number | null = null;
+        const rawReasonCodes = row.reason_codes;
+        const normalizedReasonCodes = rawReasonCodes != null
+          ? (Array.isArray(rawReasonCodes)
+              ? rawReasonCodes
+              : typeof rawReasonCodes === "string"
+                ? (() => {
+                    try {
+                      return JSON.parse(rawReasonCodes) as any[];
+                    } catch {
+                      return [];
+                    }
+                  })()
+                : [])
+          : [];
+        if (normalizedReasonCodes.length > 0) {
+          const sum = (normalizedReasonCodes as Array<{ risk_score?: number }>).reduce(
+            (acc, r) => acc + (Number(r?.risk_score) || 0),
+            0
+          );
+          const maxPoints =
+            row.predicted_outcome === "deny"
+              ? MAX_DENIED_POINTS
+              : row.predicted_outcome === "withdraw"
+                ? MAX_WITHDRAWN_POINTS
+                : MAX_OTHER_POINTS;
+          sequencerRiskScore100 = Math.min(
+            100,
+            Math.max(0, Math.round((sum / maxPoints) * 100))
+          );
+        }
+
+        const storedRiskSummary =
+          mergedLoanData.riskSummary &&
+          typeof mergedLoanData.riskSummary === "object"
+            ? { ...mergedLoanData.riskSummary }
+            : {
+                predictedOutcome: row.predicted_outcome,
+                confidence: row.confidence,
+                risks: row.risk_factors || [],
+                positives: [],
+                overallRisk:
+                  riskBucket === "high"
+                    ? "high"
+                    : riskBucket === "low"
+                      ? "low"
+                      : "medium",
+              };
+        if (sequencerRiskScore100 != null) {
+          (storedRiskSummary as any).riskScore = sequencerRiskScore100;
+          // Keep outcome in sync with sequencer so merged/stale data doesn't show wrong outcome
+          (storedRiskSummary as any).predictedOutcome = row.predicted_outcome;
+          (storedRiskSummary as any).overallRisk =
+            row.predicted_outcome === "deny" || row.predicted_outcome === "withdraw" ? "high" : riskBucket === "low" ? "low" : "medium";
+        }
+
+        // Build loanData: spread full stored loan_data first so all bucket signals and riskSummary come through,
+        // then override with computed/fallback fields so display works even when DB has older schema.
+        const baseLoanData = {
+          ...mergedLoanData,
+          ...(sequencerRiskScore100 != null && { riskScore: sequencerRiskScore100 }),
+          loan_id: row.loan_id,
+          loan_number:
+            mergedLoanData.loan_number ?? mergedLoanData.loanNumber,
+          loan_officer: mergedLoanData.loan_officer,
+          loan_amount: mergedLoanData.loan_amount,
+          loan_type: mergedLoanData.loan_type,
+          current_milestone:
+            mergedLoanData.current_milestone ??
+            mergedLoanData.lastCompletedMilestone,
+          fico_score: mergedLoanData.fico_score ?? mergedLoanData.ficoScore,
+          ltv_ratio: mergedLoanData.ltv_ratio ?? mergedLoanData.ltv,
+          be_dti_ratio: mergedLoanData.be_dti_ratio ?? mergedLoanData.dti,
+          application_date: mergedLoanData.application_date,
+          lock_date: mergedLoanData.lock_date ?? mergedLoanData.lockDate,
+          lock_expiration_date:
+            mergedLoanData.lock_expiration_date ??
+            mergedLoanData.lockExpirationDate,
+          estimated_closing_date:
+            mergedLoanData.estimated_closing_date ??
+            mergedLoanData.estimatedClosingDate,
+          channel: mergedLoanData.channel,
+          loan_purpose:
+            mergedLoanData.loan_purpose ?? mergedLoanData.loanPurpose,
+          underwriter: mergedLoanData.underwriter,
+          closer: mergedLoanData.closer,
+          processor: mergedLoanData.processor,
+          current_loan_status:
+            mergedLoanData.current_loan_status ??
+            mergedLoanData.currentLoanStatus,
+          activeDays: mergedLoanData.activeDays ?? null,
+          loPullthroughPercentage: loPullthroughPercentage ?? null,
+          uwPullthroughPercentage:
+            mergedLoanData.uwPullthroughPercentage ?? null,
+          closerPullthroughPercentage:
+            mergedLoanData.closerPullthroughPercentage ?? null,
+          processorPullthroughPercentage:
+            mergedLoanData.processorPullthroughPercentage ?? null,
+          creditMetricsSignalStrength:
+            mergedLoanData.creditMetricsSignalStrength ?? creditMetricsSignal,
+          loanCharacteristicsSignalStrength:
+            mergedLoanData.loanCharacteristicsSignalStrength ??
+            loanCharacteristicsSignal,
+          timeInMotionSignalStrength:
+            mergedLoanData.timeInMotionSignalStrength ?? timeInMotionSignal,
+          timeInMotionSignal:
+            mergedLoanData.timeInMotionSignal ?? timeInMotionSignal,
+          mloAeFalloutProneSignalStrength:
+            mergedLoanData.mloAeFalloutProneSignalStrength ?? mloAeFalloutSignal,
+          interestLockVsMarketSignalStrength:
+            mergedLoanData.interestLockVsMarketSignalStrength ??
+            interestLockVsMarketSignal,
+          uwPullthroughSignalStrength:
+            mergedLoanData.uwPullthroughSignalStrength ?? null,
+          closerPullthroughSignalStrength:
+            mergedLoanData.closerPullthroughSignalStrength ?? null,
+          processorPullthroughSignalStrength:
+            mergedLoanData.processorPullthroughSignalStrength ?? null,
+          loPullthroughSignal:
+            mergedLoanData.loPullthroughSignal ?? loPullthroughSignal,
+          marketChangeDeltaSignal:
+            mergedLoanData.marketChangeDeltaSignal ?? null,
+          bucket: riskBucket,
+          riskSummary: storedRiskSummary,
+          closeOnTimeProbability: mergedLoanData.closeOnTimeProbability ?? null,
+          closeLateRisk: mergedLoanData.closeLateRisk ?? (row.projected_status === 'ClosingLate'),
+          pipelineStage: mergedLoanData.pipelineStage ?? null,
+          pipelineReadiness: mergedLoanData.pipelineReadiness ?? null,
+          closingLatePrediction: mergedLoanData.closingLatePrediction ?? null,
+          closingProjection: mergedLoanData.closingProjection ?? null,
+          reasonCodes: normalizedReasonCodes,
+        };
 
         return {
           loanId: row.loan_id,
@@ -791,90 +960,7 @@ router.get(
           createdAt: row.created_at,
           updatedAt: row.updated_at,
           bucket: riskBucket,
-          loanData: {
-            loan_id: row.loan_id,
-            loan_number:
-              mergedLoanData.loan_number ?? mergedLoanData.loanNumber,
-            loan_officer: mergedLoanData.loan_officer,
-            loan_amount: mergedLoanData.loan_amount,
-            loan_type: mergedLoanData.loan_type,
-            current_milestone:
-              mergedLoanData.current_milestone ??
-              mergedLoanData.lastCompletedMilestone,
-            fico_score: mergedLoanData.fico_score ?? mergedLoanData.ficoScore,
-            ltv_ratio: mergedLoanData.ltv_ratio ?? mergedLoanData.ltv,
-            be_dti_ratio: mergedLoanData.be_dti_ratio ?? mergedLoanData.dti,
-            interest_rate:
-              mergedLoanData.interest_rate ?? mergedLoanData.interestRate,
-            market_rate:
-              mergedLoanData.market_rate ?? mergedLoanData.marketRate,
-            lockMarketRate: mergedLoanData.lockMarketRate ?? null,
-            closeMarketRate: mergedLoanData.closeMarketRate ?? null,
-            marketChangeDelta: mergedLoanData.marketChangeDelta ?? null,
-            application_date: mergedLoanData.application_date,
-            lock_date: mergedLoanData.lock_date ?? mergedLoanData.lockDate,
-            lock_expiration_date:
-              mergedLoanData.lock_expiration_date ??
-              mergedLoanData.lockExpirationDate,
-            estimated_closing_date:
-              mergedLoanData.estimated_closing_date ??
-              mergedLoanData.estimatedClosingDate,
-            channel: mergedLoanData.channel,
-            property_type:
-              mergedLoanData.property_type ?? mergedLoanData.propertyType,
-            loan_purpose:
-              mergedLoanData.loan_purpose ?? mergedLoanData.loanPurpose,
-            underwriter: mergedLoanData.underwriter,
-            closer: mergedLoanData.closer,
-            processor: mergedLoanData.processor,
-            current_loan_status:
-              mergedLoanData.current_loan_status ??
-              mergedLoanData.currentLoanStatus,
-            // Active days in pipeline
-            activeDays: mergedLoanData.activeDays ?? null,
-            // Pullthrough percentages (for display)
-            loPullthroughPercentage:
-              mergedLoanData.loPullthroughPercentage ?? null,
-            uwPullthroughPercentage:
-              mergedLoanData.uwPullthroughPercentage ?? null,
-            closerPullthroughPercentage:
-              mergedLoanData.closerPullthroughPercentage ?? null,
-            processorPullthroughPercentage:
-              mergedLoanData.processorPullthroughPercentage ?? null,
-            // Signal strengths (stored or calculated)
-            creditMetricsSignalStrength: creditMetricsSignal,
-            loanCharacteristicsSignalStrength: loanCharacteristicsSignal,
-            timeInMotionSignalStrength: timeInMotionSignal,
-            mloAeFalloutProneSignalStrength: mloAeFalloutSignal,
-            interestLockVsMarketSignalStrength: interestLockVsMarketSignal,
-            uwPullthroughSignalStrength:
-              mergedLoanData.uwPullthroughSignalStrength ?? null,
-            closerPullthroughSignalStrength:
-              mergedLoanData.closerPullthroughSignalStrength ?? null,
-            processorPullthroughSignalStrength:
-              mergedLoanData.processorPullthroughSignalStrength ?? null,
-            loPullthroughSignal: loPullthroughSignal,
-            marketChangeDeltaSignal:
-              mergedLoanData.marketChangeDeltaSignal ?? null,
-            bucket: riskBucket,
-            riskSummary: mergedLoanData.riskSummary || {
-              predictedOutcome: row.predicted_outcome,
-              confidence: row.confidence,
-              risks: row.risk_factors || [],
-              positives: [],
-              overallRisk:
-                riskBucket === "high"
-                  ? "high"
-                  : riskBucket === "low"
-                  ? "low"
-                  : "medium",
-            },
-            // Close-late prediction fields (from stored loan_data)
-            closeOnTimeProbability: mergedLoanData.closeOnTimeProbability ?? null,
-            closeLateRisk: mergedLoanData.closeLateRisk ?? null,
-            pipelineStage: mergedLoanData.pipelineStage ?? null,
-            pipelineReadiness: mergedLoanData.pipelineReadiness ?? null,
-          },
+          loanData: baseLoanData,
         };
       });
 

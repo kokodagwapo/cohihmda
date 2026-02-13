@@ -14,6 +14,7 @@ import loansRoutes from "./loans.js";
 import scorecardRoutes from "./scorecard/index.js";
 import toptieringRoutes from "./toptiering/index.js";
 import predictionsRoutes from "./predictions/index.js";
+import falloutRoutes from "./fallout/index.js";
 import fieldMappingsRoutes from "./fieldMappings.js";
 import demoRoutes from "./demo.js";
 import userPreferencesRoutes from "./userPreferences.js";
@@ -68,6 +69,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/scorecard", scorecardRoutes);
   app.use("/api/toptiering", toptieringRoutes);
   app.use("/api/predictions", predictionsRoutes);
+  app.use("/api/fallout", falloutRoutes);
   app.use("/api/field-mappings", fieldMappingsRoutes);
   app.use("/api/demo", demoRoutes);
   app.use("/api/user", userPreferencesRoutes);

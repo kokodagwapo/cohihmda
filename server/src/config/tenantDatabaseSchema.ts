@@ -2003,6 +2003,219 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
       )
       .catch(() => {});
 
+    // Bucket thresholds cache - dynamic FICO/LTV/DTI thresholds by loan type (Conventional vs Government)
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.bucket_thresholds_cache (
+        feature_name TEXT NOT NULL,
+        loan_type TEXT NOT NULL CHECK (loan_type IN ('Conventional', 'Government', 'All')),
+        threshold_data JSONB NOT NULL,
+        sample_size INTEGER NOT NULL,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (feature_name, loan_type)
+      )
+    `,
+      )
+      .catch(() => {});
+
+    // Fallout BRD: historical_bucket_totals, historical_bucket_combos, risk_band_definitions, turn_time_baselines, human_pattern_stats
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.historical_bucket_totals (
+        year INTEGER NOT NULL,
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        bucket_type TEXT NOT NULL,
+        bucket_value TEXT NOT NULL,
+        loan_count INTEGER NOT NULL DEFAULT 0,
+        averages_json JSONB DEFAULT '{}',
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (year, status_type, bucket_type, bucket_value)
+      )
+    `,
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_historical_bucket_totals_lookup ON public.historical_bucket_totals(year, status_type, bucket_type)`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_historical_bucket_totals_calculated ON public.historical_bucket_totals(calculated_at DESC)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.historical_bucket_combos (
+        year INTEGER NOT NULL,
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        combo_key TEXT NOT NULL,
+        dimensions_json JSONB DEFAULT '{}',
+        loan_count INTEGER NOT NULL DEFAULT 0,
+        rank INTEGER NOT NULL,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (year, status_type, combo_key)
+      )
+    `,
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_historical_bucket_combos_lookup ON public.historical_bucket_combos(year, status_type)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.risk_band_definitions (
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        bucket_type TEXT NOT NULL,
+        band_name TEXT NOT NULL CHECK (band_name IN ('Low', 'Medium', 'High', 'Critical')),
+        band_min NUMERIC,
+        band_max NUMERIC,
+        risk_score NUMERIC NOT NULL DEFAULT 0,
+        derived_from_years TEXT,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (status_type, bucket_type, band_name)
+      )
+    `,
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_risk_band_definitions_lookup ON public.risk_band_definitions(status_type, bucket_type)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.turn_time_baselines (
+        segment_key TEXT NOT NULL,
+        milestone_type TEXT NOT NULL CHECK (milestone_type IN ('Lock', 'CondAppr', 'Appr', 'CTC')),
+        avg_days_to_fund NUMERIC NOT NULL DEFAULT 0,
+        p50_days_to_fund NUMERIC,
+        p75_days_to_fund NUMERIC,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (segment_key, milestone_type)
+      )
+    `,
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_turn_time_baselines_segment ON public.turn_time_baselines(segment_key)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.human_pattern_stats (
+        role_type TEXT NOT NULL CHECK (role_type IN ('LO', 'Processor', 'Underwriter', 'Closer')),
+        role_id TEXT NOT NULL,
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        loan_count INTEGER NOT NULL DEFAULT 0,
+        rate NUMERIC DEFAULT 0,
+        avg_days_to_fund NUMERIC,
+        risk_multiplier NUMERIC DEFAULT 1.0,
+        window_days INTEGER,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (role_type, role_id, status_type)
+      )
+    `,
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_human_pattern_stats_role ON public.human_pattern_stats(role_type, role_id)`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_human_pattern_stats_status ON public.human_pattern_stats(status_type)`).catch(() => {});
+
+    // Outcome numeric risk profiles (COHI Numeric Segmented Risk Range Engine): yearly per-segment feature stats
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.outcome_numeric_risk_profiles (
+        year INTEGER NOT NULL,
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        loan_type TEXT NOT NULL,
+        loan_purpose TEXT NOT NULL,
+        occupancy TEXT NOT NULL,
+        feature_name TEXT NOT NULL,
+        recency_bucket TEXT NOT NULL DEFAULT '>180 days' CHECK (recency_bucket IN ('<=180 days', '>180 days')),
+        mean_value NUMERIC,
+        q1_value NUMERIC,
+        q3_value NUMERIC,
+        iqr_value NUMERIC,
+        p10_value NUMERIC,
+        p20_value NUMERIC,
+        p30_value NUMERIC,
+        p40_value NUMERIC,
+        p60_value NUMERIC,
+        p70_value NUMERIC,
+        p80_value NUMERIC,
+        p90_value NUMERIC,
+        sample_size INTEGER NOT NULL DEFAULT 0,
+        low_confidence BOOLEAN NOT NULL DEFAULT false,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (year, status_type, loan_type, loan_purpose, occupancy, feature_name, recency_bucket)
+      )
+    `
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_outcome_numeric_risk_profiles_lookup ON public.outcome_numeric_risk_profiles(year, status_type, loan_type, loan_purpose, occupancy)`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_outcome_numeric_risk_profiles_calculated ON public.outcome_numeric_risk_profiles(calculated_at DESC)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.fallout_drift_snapshot (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        snapshot_type TEXT NOT NULL DEFAULT 'risk_bands',
+        snapshot_json JSONB NOT NULL,
+        calculated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_fallout_drift_snapshot_type_calc ON public.fallout_drift_snapshot(snapshot_type, calculated_at DESC)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.categorical_risk_definitions (
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        bucket_type TEXT NOT NULL,
+        bucket_value TEXT NOT NULL,
+        risk_tier TEXT NOT NULL CHECK (risk_tier IN ('Low', 'Medium', 'High', 'Critical')),
+        risk_score NUMERIC NOT NULL DEFAULT 0,
+        loan_count INTEGER NOT NULL DEFAULT 0,
+        share_of_status NUMERIC DEFAULT 0,
+        years_present INTEGER DEFAULT 1,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (status_type, bucket_type, bucket_value)
+      )
+    `
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_categorical_risk_definitions_lookup ON public.categorical_risk_definitions(status_type, bucket_type)`).catch(() => {});
+
+    await pool
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS public.persistent_top_patterns (
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        combo_key TEXT NOT NULL,
+        dimensions_json JSONB DEFAULT '{}',
+        pattern_score NUMERIC NOT NULL DEFAULT 0,
+        years_present INTEGER NOT NULL DEFAULT 0,
+        avg_rank NUMERIC,
+        total_loan_count INTEGER NOT NULL DEFAULT 0,
+        calculated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (status_type, combo_key)
+      )
+    `
+      )
+      .catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_persistent_top_patterns_status ON public.persistent_top_patterns(status_type)`).catch(() => {});
+
+    // loan_predictions BRD columns (one ADD COLUMN per statement)
+    for (const col of [
+      'as_of_date DATE',
+      'projected_status TEXT',
+      'reason_codes JSONB',
+      'projected_funding_date DATE',
+      'projected_close_window TEXT',
+      'confidence_score NUMERIC',
+    ]) {
+      await pool.query(`ALTER TABLE public.loan_predictions ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
+    }
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_loan_predictions_as_of_date ON public.loan_predictions(as_of_date) WHERE as_of_date IS NOT NULL`).catch(() => {});
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_loan_predictions_projected_status ON public.loan_predictions(projected_status) WHERE projected_status IS NOT NULL`).catch(() => {});
+
     // RAG Knowledge Base table - admin-managed knowledge entries (NO tenant_id)
     await pool
       .query(
