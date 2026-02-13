@@ -474,12 +474,15 @@ router.get("/config", authenticateToken, async (req: AuthRequest, res: Response)
     );
     
     // Generate SP information
-    const frontendUrl = process.env.FRONTEND_URL?.split(",")[0] || "https://cohi.coheus1.com";
+    // When using Cognito as SAML broker, the SP values are Cognito's endpoints (same for all tenants)
+    // The client's IdP (Entra, CyberArk, etc.) sends SAML assertions to Cognito, not to Cohi directly
+    const cognitoDomain = process.env.COGNITO_DOMAIN || "";
+    const cognitoUserPoolId = COGNITO_USER_POOL_ID;
     const spInfo = {
-      entity_id: `urn:cohi:${tenant.slug}`,
-      acs_url: `${frontendUrl}/auth/sso/callback`,
-      slo_url: `${frontendUrl}/auth/sso/logout`,
-      metadata_url: `${frontendUrl}/api/auth/sso/metadata/${tenant.slug}`,
+      entity_id: cognitoUserPoolId ? `urn:amazon:cognito:sp:${cognitoUserPoolId}` : "Not configured — Cognito User Pool ID required",
+      acs_url: cognitoDomain ? `https://${cognitoDomain}/saml2/idpresponse` : "Not configured — Cognito Domain required",
+      slo_url: cognitoDomain ? `https://${cognitoDomain}/saml2/logout` : "",
+      note: "These values are the same for all tenants. Each tenant gets a unique IdP configuration within the shared Cognito User Pool.",
     };
     
     res.json({
