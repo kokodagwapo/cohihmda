@@ -106,7 +106,7 @@ interface SsoState {
  * FRONTEND_URL may contain comma-separated values for CORS, but we need just the first one
  */
 function getPrimaryFrontendUrl(): string {
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5000";
   // Handle comma-separated URLs (take the first one)
   return frontendUrl.split(",")[0].trim();
 }
@@ -366,6 +366,20 @@ router.get("/lookup-tenant", authLimiter, async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      // No tenant-level SSO — check if this is a platform SSO domain
+      if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
+        const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
+        logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
+        return res.json({
+          sso_available: true,
+          tenant_slug: null,
+          tenant_name: "Cohi Platform",
+          idp_name: platformIdpName || undefined, // If not set, Cognito shows hosted UI with all IdPs
+          allow_password: true, // Platform users can also use password
+          auth_mode: "hybrid",
+        });
+      }
+
       // No SSO configured for this domain, allow email/password
       return res.json({
         sso_available: false,

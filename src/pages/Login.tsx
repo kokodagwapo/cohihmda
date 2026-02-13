@@ -1,39 +1,39 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { getApiUrl } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, LogIn, Shield, CheckCircle2, XCircle, Building2, KeyRound } from 'lucide-react';
+import { Loader2, LogIn, CheckCircle2, XCircle, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
+
+type LoginStep = 'email' | 'password' | 'sso-redirect';
 
 export const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { login, loadTenants, tenants, isAuthenticated, user } = useAuth();
+  const { login, loadTenants, isAuthenticated, user } = useAuth();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedTenant, setSelectedTenant] = useState<string>('__auto__');
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline' | 'not-configured'>('checking');
-  const [showTenantSelect, setShowTenantSelect] = useState(false);
   
-  // SSO state
+  // Two-step login flow
+  const [step, setStep] = useState<LoginStep>('email');
+  const [ssoConfigured, setSsoConfigured] = useState(false);
   const [ssoInfo, setSsoInfo] = useState<{
     available: boolean;
-    checking: boolean;
     tenantSlug?: string;
     tenantName?: string;
     idpName?: string;
     allowPassword: boolean;
-  }>({ available: false, checking: false, allowPassword: true });
-  const [ssoConfigured, setSsoConfigured] = useState(false);
+  }>({ available: false, allowPassword: true });
+
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -48,9 +48,7 @@ export const Login = () => {
   const isBackendConfigured = apiUrl !== null && apiUrl !== undefined;
   
   const getHealthUrl = () => {
-    if (!apiUrl || apiUrl === '') {
-      return '/api/health';
-    }
+    if (!apiUrl || apiUrl === '') return '/api/health';
     return `${apiUrl}/health`;
   };
 
@@ -77,9 +75,7 @@ export const Login = () => {
         
         if (response.ok || response.status === 503) {
           setServerStatus('online');
-          // Load available tenants
           loadTenants();
-          // Check if SSO is configured
           checkSsoConfig();
         } else {
           setServerStatus('offline');
@@ -110,75 +106,56 @@ export const Login = () => {
   };
 
   // Lookup SSO availability by email domain
-  const lookupSsoByEmail = useCallback(async (emailValue: string) => {
-    if (!emailValue.includes('@') || !ssoConfigured) {
-      setSsoInfo({ available: false, checking: false, allowPassword: true });
-      return;
-    }
+  const lookupSso = useCallback(async (emailValue: string): Promise<typeof ssoInfo> => {
+    const noSso = { available: false, allowPassword: true };
 
-    setSsoInfo(prev => ({ ...prev, checking: true }));
+    if (!emailValue.includes('@') || !ssoConfigured) {
+      return noSso;
+    }
 
     try {
       const response = await fetch(`${apiUrl}/api/auth/cognito/lookup-tenant?email=${encodeURIComponent(emailValue)}`);
       if (response.ok) {
         const data = await response.json();
-        setSsoInfo({
+        return {
           available: data.sso_available === true,
-          checking: false,
           tenantSlug: data.tenant_slug,
           tenantName: data.tenant_name,
           idpName: data.idp_name,
           allowPassword: data.allow_password !== false,
-        });
-      } else {
-        setSsoInfo({ available: false, checking: false, allowPassword: true });
+        };
       }
     } catch (err) {
       console.debug('[Login] SSO lookup failed:', err);
-      setSsoInfo({ available: false, checking: false, allowPassword: true });
     }
+
+    return noSso;
   }, [apiUrl, ssoConfigured]);
 
-  // Debounced email change handler for SSO lookup
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (email && email.includes('@')) {
-        lookupSsoByEmail(email);
-      }
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [email, lookupSsoByEmail]);
-
-  // Handle SSO sign-in
-  const handleSsoSignIn = () => {
+  // Handle SSO redirect
+  const handleSsoRedirect = useCallback((info: typeof ssoInfo) => {
     const params = new URLSearchParams();
-    if (ssoInfo.tenantSlug) {
-      params.set('tenant', ssoInfo.tenantSlug);
-    }
-    if (ssoInfo.idpName) {
-      params.set('idp', ssoInfo.idpName);
-    }
+    if (info.tenantSlug) params.set('tenant', info.tenantSlug);
+    if (info.idpName) params.set('idp', info.idpName);
     const returnTo = new URLSearchParams(window.location.search).get('returnTo');
-    if (returnTo) {
-      params.set('returnUrl', returnTo);
-    }
+    if (returnTo) params.set('returnUrl', returnTo);
     
-    // Redirect to Cognito authorize endpoint
     window.location.href = `${apiUrl}/api/auth/cognito/authorize?${params.toString()}`;
-  };
+  }, [apiUrl]);
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  // Step 1: User submits email → check SSO, then decide next step
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!email || !password) {
+
+    if (!email.trim()) {
       toast({
         title: 'Validation Error',
-        description: 'Please enter both email/username and password',
+        description: 'Please enter your email address',
         variant: 'destructive',
       });
       return;
     }
-    
+
     if (!isBackendConfigured) {
       toast({
         title: 'Backend Not Configured',
@@ -191,28 +168,55 @@ export const Login = () => {
     setLoading(true);
 
     try {
-      setServerStatus('checking');
-      
-      // Pass tenant slug if selected (__auto__ means auto-detect / super admin)
-      await login(email.trim(), password, selectedTenant === '__auto__' ? undefined : selectedTenant);
-      
-      setServerStatus('online');
-      
-      toast({
-        title: 'Welcome!',
-        description: 'Successfully signed in',
-      });
+      const result = await lookupSso(email.trim());
+      setSsoInfo(result);
 
-      // Redirect based on user type
+      if (result.available) {
+        // SSO detected: redirect immediately
+        setStep('sso-redirect');
+        handleSsoRedirect(result);
+      } else {
+        // No SSO: show password field
+        setStep('password');
+        setTimeout(() => passwordRef.current?.focus(), 100);
+      }
+    } catch (err) {
+      // If lookup fails, fall back to password
+      setStep('password');
+      setTimeout(() => passwordRef.current?.focus(), 100);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2: Password submit
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!password) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter your password',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      setServerStatus('checking');
+      await login(email.trim(), password);
+      setServerStatus('online');
+
+      toast({ title: 'Welcome!', description: 'Successfully signed in' });
+
       const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
       navigate(returnTo);
-      
     } catch (error: any) {
       const errorMsg = error.message?.toLowerCase() || '';
-      
-      if (errorMsg.includes('connection') || 
-          errorMsg.includes('failed to fetch') ||
-          errorMsg.includes('networkerror')) {
+
+      if (errorMsg.includes('connection') || errorMsg.includes('failed to fetch') || errorMsg.includes('networkerror')) {
         setServerStatus('offline');
       } else {
         setServerStatus('online');
@@ -220,10 +224,10 @@ export const Login = () => {
 
       let errorMessage = 'Sign in failed';
       let errorDescription = error.message || 'Invalid credentials';
-      
+
       if (errorMsg.includes('invalid') || errorMsg.includes('401')) {
         errorMessage = 'Invalid Credentials';
-        errorDescription = 'The email/username or password is incorrect.';
+        errorDescription = 'The email or password is incorrect.';
       } else if (errorMsg.includes('disabled') || errorMsg.includes('inactive')) {
         errorMessage = 'Account Disabled';
         errorDescription = 'Your account has been disabled. Please contact your administrator.';
@@ -231,15 +235,18 @@ export const Login = () => {
         errorMessage = 'Connection Error';
         errorDescription = 'Unable to connect to server.';
       }
-      
-      toast({
-        title: errorMessage,
-        description: errorDescription,
-        variant: 'destructive',
-      });
+
+      toast({ title: errorMessage, description: errorDescription, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
+  };
+
+  // Go back to email step
+  const handleBack = () => {
+    setStep('email');
+    setPassword('');
+    setSsoInfo({ available: false, allowPassword: true });
   };
 
   return (
@@ -251,86 +258,83 @@ export const Login = () => {
           </div>
           <CardTitle className="text-2xl font-light">Welcome</CardTitle>
           <CardDescription className="text-base">
-            Sign in to access your dashboard
+            {step === 'email' && 'Sign in to access your dashboard'}
+            {step === 'password' && 'Enter your password to continue'}
+            {step === 'sso-redirect' && 'Redirecting to your organization\'s login...'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSignIn} className="space-y-4">
-            {/* Tenant Selection (optional) */}
-            {tenants.length > 0 && (
+          {/* ── Step 1: Email ──────────────────────────────────────── */}
+          {step === 'email' && (
+            <form onSubmit={handleEmailSubmit} className="space-y-4">
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="tenant">Organization</Label>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="text"
+                  placeholder="Enter your email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                  disabled={loading}
+                  autoComplete="username"
+                />
+              </div>
+
+              <Button type="submit" className="w-full" disabled={loading || serverStatus === 'offline'}>
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    Continue
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
+              </Button>
+            </form>
+          )}
+
+          {/* ── Step 2: Password (with optional SSO) ──────────────── */}
+          {step === 'password' && (
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              {/* Show the email with a back button */}
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowTenantSelect(!showTenantSelect)}
+                    onClick={handleBack}
+                    className="p-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    title="Change email"
                   >
-                    {showTenantSelect ? 'Hide' : 'Select organization'}
+                    <ArrowLeft className="h-4 w-4" />
                   </button>
+                  <div className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-md text-sm text-slate-700 dark:text-slate-300 truncate">
+                    {email}
+                  </div>
                 </div>
-                {showTenantSelect && (
-                  <Select value={selectedTenant} onValueChange={setSelectedTenant}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Auto-detect (or Cohi admin)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__auto__">
-                        <span className="flex items-center gap-2">
-                          <Shield className="h-4 w-4 text-amber-500" />
-                          Auto-detect / Cohi Admin
-                        </span>
-                      </SelectItem>
-                      {tenants.map((tenant) => (
-                        <SelectItem key={tenant.slug} value={tenant.slug}>
-                          <span className="flex items-center gap-2">
-                            <Building2 className="h-4 w-4 text-blue-500" />
-                            {tenant.name}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
               </div>
-            )}
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email or Username</Label>
-              <Input
-                id="email"
-                type="text"
-                placeholder="Enter your email or username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-                disabled={loading}
-                autoComplete="username"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-                autoComplete="current-password"
-              />
-            </div>
-            
-            {/* Password Sign In Button - hidden if SSO-only mode */}
-            {ssoInfo.allowPassword && (
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading}
-              >
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  ref={passwordRef}
+                  id="password"
+                  type="password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={loading}
+                  autoComplete="current-password"
+                />
+              </div>
+
+              <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -343,60 +347,53 @@ export const Login = () => {
                   </>
                 )}
               </Button>
-            )}
 
-            {/* SSO Divider and Button */}
-            {ssoConfigured && (
-              <>
-                {ssoInfo.allowPassword && (
-                  <div className="relative my-4">
-                    <Separator />
-                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-slate-900 px-2 text-xs text-slate-500">
-                      or
-                    </span>
+              {/* SSO option in hybrid mode */}
+              {ssoInfo.available && (
+                <>
+                  <div className="relative my-2">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-white dark:bg-slate-900 px-2 text-slate-500">or</span>
+                    </div>
                   </div>
-                )}
 
-                {ssoInfo.available ? (
                   <Button
                     type="button"
-                    variant={ssoInfo.allowPassword ? "outline" : "default"}
+                    variant="outline"
                     className="w-full"
-                    onClick={handleSsoSignIn}
+                    onClick={() => handleSsoRedirect(ssoInfo)}
                     disabled={loading}
                   >
                     <KeyRound className="mr-2 h-4 w-4" />
-                    {ssoInfo.tenantName 
+                    {ssoInfo.tenantName
                       ? `Sign in with ${ssoInfo.tenantName} SSO`
-                      : 'Sign in with SSO'
-                    }
+                      : 'Sign in with SSO'}
                   </Button>
-                ) : ssoInfo.checking ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    disabled
-                  >
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Checking SSO availability...
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={handleSsoSignIn}
-                    disabled={loading}
-                  >
-                    <KeyRound className="mr-2 h-4 w-4" />
-                    Sign in with SSO
-                  </Button>
-                )}
-              </>
-            )}
-          </form>
-          
+                </>
+              )}
+            </form>
+          )}
+
+          {/* ── SSO Redirect (loading state) ──────────────────────── */}
+          {step === 'sso-redirect' && (
+            <div className="flex flex-col items-center space-y-4 py-8">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Redirecting to {ssoInfo.tenantName || 'your organization'}...
+              </p>
+              <button
+                type="button"
+                onClick={handleBack}
+                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 mt-2"
+              >
+                Cancel and go back
+              </button>
+            </div>
+          )}
+
           {/* Server Status */}
           <div className="mt-6 pt-6 border-t border-border">
             <div className="text-xs text-muted-foreground text-center space-y-2">
