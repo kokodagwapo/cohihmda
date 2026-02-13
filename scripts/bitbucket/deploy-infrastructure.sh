@@ -127,12 +127,32 @@ get_stack_parameters() {
     
     echo "Getting existing parameters from stack: $stack_name"
     
-    # Get current parameters and format them for update
-    aws cloudformation describe-stacks \
+    # Get parameter keys and build JSON array with UsePreviousValue: true
+    # Uses only AWS CLI + bash (no jq dependency)
+    local param_keys
+    param_keys=$(aws cloudformation describe-stacks \
         --stack-name "$stack_name" \
         --region "$AWS_DEFAULT_REGION" \
-        --query 'Stacks[0].Parameters[*].{ParameterKey:ParameterKey,UsePreviousValue:``}' \
-        --output json 2>/dev/null | jq -c '[.[] | {ParameterKey: .ParameterKey, UsePreviousValue: true}]' || echo "[]"
+        --query 'Stacks[0].Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || { echo "[]"; return; }
+    
+    if [ -z "$param_keys" ]; then
+        echo "[]"
+        return
+    fi
+    
+    local result="["
+    local first=true
+    for key in $param_keys; do
+        if [ "$first" = true ]; then
+            first=false
+        else
+            result+=","
+        fi
+        result+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
+    done
+    result+="]"
+    echo "$result"
 }
 
 # ============================================================================
@@ -329,13 +349,25 @@ deploy_waf_cloudfront_stack() {
     CHANGE_SET_NAME="pipeline-cf-update-$(date +%Y%m%d%H%M%S)"
     echo "Creating change set: $CHANGE_SET_NAME"
 
-    # Get existing parameters (use cf_region)
-    local existing_params
-    existing_params=$(aws cloudformation describe-stacks \
+    # Get existing parameters (use cf_region) - no jq dependency
+    local param_keys_cf
+    param_keys_cf=$(aws cloudformation describe-stacks \
         --stack-name "$stack_name" \
         --region "$cf_region" \
-        --query 'Stacks[0].Parameters[*].{ParameterKey:ParameterKey,UsePreviousValue:``}' \
-        --output json 2>/dev/null | jq -c '[.[] | {ParameterKey: .ParameterKey, UsePreviousValue: true}]' || echo "[]")
+        --query 'Stacks[0].Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || param_keys_cf=""
+    
+    local existing_params="["
+    local first_cf=true
+    for key in $param_keys_cf; do
+        if [ "$first_cf" = true ]; then
+            first_cf=false
+        else
+            existing_params+=","
+        fi
+        existing_params+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
+    done
+    existing_params+="]"
 
     aws cloudformation create-change-set \
         --stack-name "$stack_name" \
