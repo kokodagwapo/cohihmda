@@ -72,7 +72,11 @@ export interface VisualizationConfig {
     | "table"
     | "kpi"
     | "donut"
-    | "horizontal_bar";
+    | "horizontal_bar"
+    | "stacked_bar"
+    | "grouped_bar"
+    | "treemap"
+    | "pivot";
   title: string;
   data: any[];
   xKey?: string;
@@ -86,6 +90,7 @@ export interface VisualizationConfig {
   showLegend?: boolean;
   showGrid?: boolean;
   stacked?: boolean;
+  numberFormat?: "number" | "currency" | "percent" | "compact";
   kpiConfig?: {
     value: number | string;
     label: string;
@@ -97,6 +102,12 @@ export interface VisualizationConfig {
     columns: { key: string; label: string; format?: string }[];
     sortable?: boolean;
     pageSize?: number;
+  };
+  pivotConfig?: {
+    rowKey: string;
+    columnKey: string;
+    valueKey: string;
+    aggregation?: "sum" | "count" | "avg" | "min" | "max";
   };
 }
 
@@ -552,8 +563,8 @@ Respond with the same JSON format:
   "sql": "CORRECTED SELECT ...",
   "params": [],
   "explanation": "Brief explanation of the fix",
-  "visualizationType": "bar|line|pie|area|table|kpi|donut|horizontal_bar",
-  "chartConfig": { "title": "...", "xKey": "...", "yKey": "..." }
+  "visualizationType": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot",
+  "chartConfig": { "title": "...", "xKey": "...", "yKey": "...", "yKeys": ["..."], "pivotConfig": { "rowKey": "...", "columnKey": "...", "valueKey": "...", "aggregation": "sum" } }
 }`;
 
     const messages: OpenAIChatMessage[] = [
@@ -659,6 +670,43 @@ async function executeQuery(
 // Visualization Building
 // ============================================================================
 
+/**
+ * Validate that a key actually exists in the data columns.
+ * Falls back to fuzzy matching (case-insensitive, underscore/space-normalized),
+ * then to a positional fallback from the actual columns.
+ */
+function validateKey(
+  key: string | undefined,
+  cols: string[],
+  fallbackIndex: number,
+  preferNumeric?: boolean,
+  sampleRow?: Record<string, any>
+): string {
+  if (key && cols.includes(key)) return key;
+
+  // Fuzzy match
+  if (key) {
+    const normalized = key.toLowerCase().replace(/[_\s]/g, "");
+    const match = cols.find(
+      (c) => c.toLowerCase().replace(/[_\s]/g, "") === normalized
+    );
+    if (match) {
+      console.log(
+        `[buildVisualizationConfig] Fuzzy-matched key "${key}" → "${match}"`
+      );
+      return match;
+    }
+  }
+
+  // Fallback: for numeric preference, find first numeric column
+  if (preferNumeric && sampleRow) {
+    const numCol = cols.find((c) => typeof sampleRow[c] === "number");
+    if (numCol) return numCol;
+  }
+
+  return cols[fallbackIndex] || cols[0] || key || "value";
+}
+
 function buildVisualizationConfig(
   data: any[],
   queryConfig: GeneratedQuery
@@ -666,6 +714,16 @@ function buildVisualizationConfig(
   const chartConfig = queryConfig.chartConfig as any;
   const humanize = (key: string): string =>
     key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+
+  const cols = Object.keys(data[0] || {});
+  const sampleRow = data[0] || {};
+
+  // Classify columns
+  const sampleRows = data.slice(0, Math.min(5, data.length));
+  const numericCols = cols.filter((c) =>
+    sampleRows.some((row) => typeof row[c] === "number" && !isNaN(row[c]))
+  );
+  const nonNumericCols = cols.filter((c) => !numericCols.includes(c));
 
   const baseConfig: VisualizationConfig = {
     type: queryConfig.visualizationType,
@@ -678,27 +736,76 @@ function buildVisualizationConfig(
   switch (queryConfig.visualizationType) {
     case "bar":
     case "horizontal_bar":
+    case "stacked_bar":
+    case "grouped_bar":
     case "line":
     case "area": {
-      const xKey = chartConfig.xKey || Object.keys(data[0] || {})[0];
-      const yKey = chartConfig.yKey || Object.keys(data[0] || {})[1];
+      // Validate xKey: prefer non-numeric columns for category axis
+      const xKey = validateKey(
+        chartConfig.xKey,
+        cols,
+        0,
+        false,
+        sampleRow
+      );
+      // Validate yKey: prefer numeric columns for value axis
+      const rawYKey = chartConfig.yKey;
+      const yKey = validateKey(
+        rawYKey,
+        cols.filter((c) => c !== xKey),
+        0,
+        true,
+        sampleRow
+      );
+      // Validate yKeys if present
+      const validatedYKeys = chartConfig.yKeys
+        ?.map((k: string) => validateKey(k, cols, 0, true, sampleRow))
+        .filter((k: string) => k !== xKey);
+
+      if (
+        (chartConfig.xKey && chartConfig.xKey !== xKey) ||
+        (chartConfig.yKey && chartConfig.yKey !== yKey)
+      ) {
+        console.warn(
+          `[buildVisualizationConfig] Key validation: xKey "${chartConfig.xKey}" → "${xKey}", yKey "${chartConfig.yKey}" → "${yKey}". Columns: [${cols.join(", ")}]`
+        );
+      }
+
       return {
         ...baseConfig,
         xKey,
         yKey,
-        yKeys: chartConfig.yKeys,
+        yKeys: validatedYKeys?.length ? validatedYKeys : undefined,
         xLabel: chartConfig.xLabel || humanize(xKey),
         yLabel: chartConfig.yLabel || humanize(yKey),
+        stacked:
+          queryConfig.visualizationType === "stacked_bar"
+            ? true
+            : chartConfig.stacked,
         colors: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"],
       };
     }
 
     case "pie":
-    case "donut":
+    case "donut": {
+      const nameKey = validateKey(
+        chartConfig.nameKey,
+        cols,
+        0,
+        false,
+        sampleRow
+      );
+      const valueKey = validateKey(
+        chartConfig.valueKey,
+        cols.filter((c) => c !== nameKey),
+        0,
+        true,
+        sampleRow
+      );
       return {
         ...baseConfig,
-        nameKey: chartConfig.nameKey || Object.keys(data[0] || {})[0],
-        valueKey: chartConfig.valueKey || Object.keys(data[0] || {})[1],
+        nameKey,
+        valueKey,
         colors: [
           "#3b82f6",
           "#10b981",
@@ -709,12 +816,70 @@ function buildVisualizationConfig(
           "#14b8a6",
         ],
       };
+    }
+
+    case "treemap": {
+      const tmNameKey = validateKey(
+        chartConfig.nameKey || chartConfig.xKey,
+        cols,
+        0,
+        false,
+        sampleRow
+      );
+      const tmValueKey = validateKey(
+        chartConfig.valueKey || chartConfig.yKey,
+        cols.filter((c) => c !== tmNameKey),
+        0,
+        true,
+        sampleRow
+      );
+      return {
+        ...baseConfig,
+        nameKey: tmNameKey,
+        valueKey: tmValueKey,
+        colors: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"],
+      };
+    }
+
+    case "pivot": {
+      const pivotRowKey = validateKey(
+        chartConfig.pivotConfig?.rowKey || chartConfig.xKey,
+        cols,
+        0,
+        false,
+        sampleRow
+      );
+      const pivotColKey = validateKey(
+        chartConfig.pivotConfig?.columnKey,
+        cols.filter((c) => c !== pivotRowKey),
+        1,
+        false,
+        sampleRow
+      );
+      const pivotValKey = validateKey(
+        chartConfig.pivotConfig?.valueKey || chartConfig.yKey,
+        cols.filter((c) => c !== pivotRowKey && c !== pivotColKey),
+        0,
+        true,
+        sampleRow
+      );
+      return {
+        ...baseConfig,
+        pivotConfig: {
+          rowKey: pivotRowKey,
+          columnKey: pivotColKey,
+          valueKey: pivotValKey,
+          aggregation: chartConfig.pivotConfig?.aggregation || "sum",
+        },
+      };
+    }
 
     case "kpi": {
       const firstRow = data[0] || {};
-      const kpiValueKey = Object.keys(firstRow)[0];
+      const kpiValueKey = numericCols[0] || Object.keys(firstRow)[0];
       return {
         ...baseConfig,
+        yKey: kpiValueKey,
         kpiConfig: {
           value: firstRow[kpiValueKey],
           label: chartConfig.title || humanize(kpiValueKey),
@@ -729,7 +894,7 @@ function buildVisualizationConfig(
 
     case "table":
     default: {
-      const columns = Object.keys(data[0] || {}).map((key) => ({
+      const columns = cols.map((key) => ({
         key,
         label: humanize(key),
         format: undefined,
@@ -1394,19 +1559,21 @@ When you want to modify the widget, write a friendly plain-text explanation of w
 \`\`\`json
 {
   "sql": "SELECT ...",
-  "visualizationType": "bar"|"line"|"pie"|"area"|"table"|"kpi"|"donut"|"horizontal_bar",
+  "visualizationType": "bar"|"line"|"pie"|"area"|"table"|"kpi"|"donut"|"horizontal_bar"|"stacked_bar"|"grouped_bar"|"treemap"|"pivot",
   "chartConfig": {
     "title": "...",
     "xKey": "...",
     "yKey": "...",
-    "yKeys": [...],
+    "yKeys": ["...", "..."],
     "xLabel": "...",
     "yLabel": "...",
     "nameKey": "...",
-    "valueKey": "..."
+    "valueKey": "...",
+    "pivotConfig": { "rowKey": "...", "columnKey": "...", "valueKey": "...", "aggregation": "sum" }
   }
 }
 \`\`\`
+Notes: yKeys only for stacked_bar/grouped_bar. pivotConfig only for pivot type. nameKey/valueKey for pie/donut/treemap.
 
 When you do NOT want to modify the widget (just answering or clarifying), respond in plain text only with NO code blocks of any kind.
 

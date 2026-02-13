@@ -20,7 +20,11 @@ export interface VisualizationConfig {
     | "table"
     | "kpi"
     | "donut"
-    | "horizontal_bar";
+    | "horizontal_bar"
+    | "stacked_bar"
+    | "grouped_bar"
+    | "treemap"
+    | "pivot";
   title: string;
   data: any[];
   xKey?: string;
@@ -32,6 +36,8 @@ export interface VisualizationConfig {
   showLegend?: boolean;
   showGrid?: boolean;
   stacked?: boolean;
+  /** Number format hint for axes / tooltips / KPI display */
+  numberFormat?: "number" | "currency" | "percent" | "compact";
   kpiConfig?: {
     value: number | string;
     label: string;
@@ -43,6 +49,13 @@ export interface VisualizationConfig {
     columns: { key: string; label: string; format?: string }[];
     sortable?: boolean;
     pageSize?: number;
+  };
+  /** Pivot table configuration */
+  pivotConfig?: {
+    rowKey: string;
+    columnKey: string;
+    valueKey: string;
+    aggregation?: "sum" | "count" | "avg" | "min" | "max";
   };
 }
 

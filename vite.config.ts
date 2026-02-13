@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => ({
   // Use /coheus/ base path for GitHub Pages deployment
   base: process.env.GITHUB_PAGES === 'true' ? "/coheus/" : "/",
   build: {
-    outDir: "docs",
+    outDir: "dist",
   },
   server: {
     host: "0.0.0.0",

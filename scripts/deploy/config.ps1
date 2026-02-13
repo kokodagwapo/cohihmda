@@ -8,7 +8,7 @@ $env:AWS_REGION = "us-east-2"
 
 # Project Configuration
 $PROJECT_NAME = "coheus"
-$ENVIRONMENT = "dev"  # Change to 'staging' or 'prod' as needed
+$ENVIRONMENT = "prod"  # Change to 'staging' or 'prod' as needed
 
 # ============================================================================
 # EXISTING VPC CONFIGURATION
@@ -34,8 +34,8 @@ $STACK_WAF_CLOUDFRONT = "$PROJECT_NAME-$ENVIRONMENT-waf-cloudfront"
 $STACK_MONITORING = "$PROJECT_NAME-$ENVIRONMENT-monitoring"
 $STACK_TENANT_PROVISIONING = "$PROJECT_NAME-$ENVIRONMENT-tenant-provisioning"
 
-# ECR Repository
-$ECR_REPO = "$PROJECT_NAME-backend"
+# ECR Repository (environment-scoped to avoid collisions)
+$ECR_REPO = "$PROJECT_NAME-$ENVIRONMENT-backend"
 $ECR_IMAGE = "$AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/${ECR_REPO}:latest"
 
 # Database Configuration
@@ -50,10 +50,10 @@ $DESIRED_COUNT = 2
 # See docs/deployment/HTTPS_AND_CERTIFICATES.md and COHEUS1_DOMAIN_SETUP.md.
 # Dev:  cohi-dev.coheus1.com (frontend), cohi-dev-api.coheus1.com (API/ALB)
 # Prod: cohi.coheus1.com (frontend), cohi-api.coheus1.com (API/ALB)
-$DOMAIN_NAME = "cohi-dev.coheus1.com"
+$DOMAIN_NAME = "cohi.coheus1.com"
 $CERTIFICATE_ARN = "arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63"  # CloudFront (us-east-1); must cover $DOMAIN_NAME
 $ALB_CERTIFICATE_ARN = "arn:aws:acm:us-east-2:339712788893:certificate/ed3ea4da-effe-47ba-a974-a61964930484"  # ALB (us-east-2); catch-all for *.coheus1.com
-$BACKEND_ORIGIN_DOMAIN = "cohi-dev-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
+$BACKEND_ORIGIN_DOMAIN = "cohi-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
 $BACKEND_ORIGIN_PROTOCOL = "https-only"  # Use "https-only" when ALB has cert and BACKEND_ORIGIN_DOMAIN is set.
 
 # Alert Configuration
@@ -92,8 +92,8 @@ if ($ENVIRONMENT -eq "prod") {
     $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "TestAccCognito")  # Include your test IdP
 }
 
-# Frontend S3 Bucket
-$FRONTEND_BUCKET = "$PROJECT_NAME-frontend-$AWS_ACCOUNT_ID"
+# Frontend S3 Bucket (environment-scoped to avoid collisions)
+$FRONTEND_BUCKET = "$PROJECT_NAME-$ENVIRONMENT-frontend-$AWS_ACCOUNT_ID"
 
 # CloudFormation Template Paths (relative to repo root)
 $REPO_ROOT = (Get-Item "$PSScriptRoot/../..").FullName

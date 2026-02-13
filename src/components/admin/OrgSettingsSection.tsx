@@ -26,7 +26,6 @@ import {
   Building2,
   Upload,
   Save,
-  Clock,
   Bell,
   BellOff,
   CreditCard,
@@ -39,14 +38,13 @@ import {
   Loader2,
   Trash2,
   Image as ImageIcon,
-  Globe,
   Mail,
-  Calendar,
   Activity,
   TrendingUp,
   Zap,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAdminTenant } from "@/contexts/AdminTenantContext";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -56,11 +54,11 @@ import { useToast } from "@/hooks/use-toast";
 interface OrgSettings {
   id: string;
   name: string;
+  slug: string;
   display_name: string;
   logo_url?: string;
   primary_color?: string;
-  timezone: string;
-  date_format: string;
+  primary_contact_email?: string;
   notification_preferences: NotificationPreferences;
   created_at: string;
   updated_at: string;
@@ -122,33 +120,16 @@ interface UsageStats {
   sync_status: "healthy" | "warning" | "error";
 }
 
-// Timezone options
-const TIMEZONES = [
-  { value: "America/New_York", label: "Eastern Time (ET)" },
-  { value: "America/Chicago", label: "Central Time (CT)" },
-  { value: "America/Denver", label: "Mountain Time (MT)" },
-  { value: "America/Los_Angeles", label: "Pacific Time (PT)" },
-  { value: "America/Anchorage", label: "Alaska Time (AKT)" },
-  { value: "Pacific/Honolulu", label: "Hawaii Time (HT)" },
-  { value: "America/Phoenix", label: "Arizona (no DST)" },
-  { value: "UTC", label: "UTC" },
-];
-
-// Date format options
-const DATE_FORMATS = [
-  { value: "MM/DD/YYYY", label: "MM/DD/YYYY" },
-  { value: "DD/MM/YYYY", label: "DD/MM/YYYY" },
-  { value: "YYYY-MM-DD", label: "YYYY-MM-DD" },
-  { value: "MMM DD, YYYY", label: "MMM DD, YYYY" },
-];
 
 interface OrgSettingsSectionProps {
   tenantId?: string;
 }
 
-export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
+export function OrgSettingsSection({ tenantId: propTenantId }: OrgSettingsSectionProps) {
   const { user, isSuperAdmin, isTenantAdmin } = useAuth();
+  const { selectedTenantId } = useAdminTenant();
   const { toast } = useToast();
+  const tenantId = propTenantId || selectedTenantId || user?.tenant_id;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // State
@@ -163,8 +144,7 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const [timezone, setTimezone] = useState("America/New_York");
-  const [dateFormat, setDateFormat] = useState("MM/DD/YYYY");
+  const [contactEmail, setContactEmail] = useState("");
   const [notifications, setNotifications] = useState<NotificationPreferences>({
     email_digest: true,
     email_digest_frequency: "weekly",
@@ -182,37 +162,22 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   }, [tenantId]);
 
   const loadSettings = async () => {
+    if (!tenantId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // const response = await api.request(`/api/tenants/${tenantId}/settings`);
-
-      // Mock settings for development
-      const mockSettings: OrgSettings = {
-        id: "1",
-        name: "acme-mortgage",
-        display_name: "ACME Mortgage Co.",
-        logo_url: "",
-        timezone: "America/New_York",
-        date_format: "MM/DD/YYYY",
-        notification_preferences: {
-          email_digest: true,
-          email_digest_frequency: "weekly",
-          system_alerts: true,
-          data_sync_notifications: true,
-          performance_alerts: false,
-          security_alerts: true,
-        },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      setSettings(mockSettings);
-      setDisplayName(mockSettings.display_name);
-      setLogoUrl(mockSettings.logo_url || "");
-      setTimezone(mockSettings.timezone);
-      setDateFormat(mockSettings.date_format);
-      setNotifications(mockSettings.notification_preferences);
+      const response = await api.request<OrgSettings>(
+        `/api/tenants/${tenantId}`,
+      );
+      setSettings(response);
+      setDisplayName(response.display_name || response.name || "");
+      setLogoUrl(response.logo_url || "");
+      setContactEmail(response.primary_contact_email || "");
+      if (response.notification_preferences) {
+        setNotifications(response.notification_preferences);
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -257,37 +222,19 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   };
 
   const loadUsage = async () => {
+    if (!tenantId) return;
     try {
-      // Mock usage for development
-      const mockUsage: UsageStats = {
-        users: {
-          current: 23,
-          limit: 50,
-          percentage: 46,
-        },
-        loans: {
-          current: 4521,
-          limit: 10000,
-          percentage: 45,
-        },
-        api_calls: {
-          current: 15420,
-          limit: 100000,
-          percentage: 15,
-        },
-        storage: {
-          current: 2.4,
-          limit: 10,
-          percentage: 24,
-          unit: "GB",
-        },
-        last_sync: new Date(Date.now() - 900000).toISOString(),
-        sync_status: "healthy",
-      };
-
-      setUsage(mockUsage);
+      const response = await api.request<UsageStats>(
+        `/api/admin/tenants/${tenantId}/usage`,
+      );
+      setUsage(response);
     } catch (error: any) {
       console.error("Failed to load usage:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load usage statistics",
+        variant: "destructive",
+      });
     }
   };
 
@@ -331,6 +278,7 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   };
 
   const handleSaveSettings = async () => {
+    if (!tenantId) return;
     if (!displayName.trim()) {
       toast({
         title: "Validation Error",
@@ -342,16 +290,14 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
 
     setSaving(true);
     try {
-      // TODO: Replace with actual API call
-      // If there's a logo file, upload it first
-      // if (logoFile) {
-      //   const formData = new FormData();
-      //   formData.append('logo', logoFile);
-      //   const logoResponse = await api.uploadFile(`/api/tenants/${tenantId}/logo`, formData);
-      //   logoUrl = logoResponse.url;
-      // }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await api.request(`/api/tenants/${tenantId}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({
+          display_name: displayName.trim(),
+          logo_url: logoUrl || undefined,
+          primary_contact_email: contactEmail.trim() || undefined,
+        }),
+      });
 
       toast({
         title: "Success",
@@ -371,9 +317,15 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   };
 
   const handleSaveNotifications = async () => {
+    if (!tenantId) return;
     setSaving(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await api.request(`/api/tenants/${tenantId}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({
+          notification_preferences: notifications,
+        }),
+      });
 
       toast({
         title: "Success",
@@ -382,7 +334,7 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to update notification preferences",
+        description: error.message || "Failed to update notification preferences",
         variant: "destructive",
       });
     } finally {
@@ -488,6 +440,7 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                       accept="image/*"
                       onChange={handleLogoSelect}
                       className="hidden"
+                      title="Upload organization logo"
                     />
                     <Button
                       variant="outline"
@@ -529,39 +482,49 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 </p>
               </div>
 
-              {/* Timezone */}
+              {/* Slug (read-only) */}
+              {settings?.slug && (
+                <div className="space-y-2">
+                  <Label>Organization Slug</Label>
+                  <Input
+                    value={settings.slug}
+                    disabled
+                    className="bg-slate-50 dark:bg-slate-800 text-slate-500"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Unique identifier -- cannot be changed after creation
+                  </p>
+                </div>
+              )}
+
+              {/* Primary Contact Email */}
               <div className="space-y-2">
-                <Label>Default Timezone</Label>
-                <Select value={timezone} onValueChange={setTimezone}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TIMEZONES.map((tz) => (
-                      <SelectItem key={tz.value} value={tz.value}>
-                        {tz.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="contactEmail">Primary Contact Email</Label>
+                <Input
+                  id="contactEmail"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                />
+                <p className="text-xs text-slate-500">
+                  Main point of contact for this organization
+                </p>
               </div>
 
-              {/* Date Format */}
-              <div className="space-y-2">
-                <Label>Date Format</Label>
-                <Select value={dateFormat} onValueChange={setDateFormat}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DATE_FORMATS.map((df) => (
-                      <SelectItem key={df.value} value={df.value}>
-                        {df.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Created Date (read-only) */}
+              {settings?.created_at && (
+                <div className="space-y-2">
+                  <Label>Created</Label>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {new Date(settings.created_at).toLocaleDateString("en-US", {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </p>
+                </div>
+              )}
 
               <div className="pt-4 border-t flex justify-end">
                 <Button onClick={handleSaveSettings} disabled={saving}>

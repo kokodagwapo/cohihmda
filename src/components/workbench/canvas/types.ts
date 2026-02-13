@@ -67,6 +67,29 @@ export interface CanvasLayoutItem {
 }
 
 // ---------------------------------------------------------------------------
+// Per-widget filter state (for Cohi SQL-backed widgets)
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialisable filter state that each Cohi widget can own independently.
+ * When a widget has `savedFilters`, it controls its own date scoping
+ * instead of inheriting from the parent group.  When `savedFilters` is
+ * undefined, the widget starts with no filter (SQL's own WHERE clause).
+ */
+export interface WidgetFilterState {
+  /** Date column to filter on ('application_date' | 'funding_date' | ...) */
+  dateField?: string;
+  /** Period preset key ('L12M' | 'YTD' | 'MTD' | ...) */
+  preset?: string;
+  /** Full-year filter (e.g. 2025) */
+  year?: number;
+  /** Explicit date range */
+  dateRange?: { start: string; end: string };
+  /** Per-widget dimension filters (branch, loan officer, etc.) */
+  dimensionFilters?: Array<{ column: string; value: string }>;
+}
+
+// ---------------------------------------------------------------------------
 // GroupWidgetItem – polymorphic items that live inside a WidgetGroup
 // ---------------------------------------------------------------------------
 
@@ -81,6 +104,8 @@ export type GroupWidgetItem =
       title: string;
       vizConfig: VisualizationConfig;
       explanation?: string;
+      /** Per-widget filter state. When present, the widget uses its own filters. */
+      savedFilters?: WidgetFilterState;
     };
 
 // ---------------------------------------------------------------------------
@@ -115,6 +140,14 @@ export type CanvasWidgetPayload =
       layoutVersion?: number;
       /** Whether the group body is collapsed */
       collapsed?: boolean;
+      /** Whether the filter bar starts collapsed (compact mode for deep-dive canvases) */
+      filtersCollapsed?: boolean;
+      /**
+       * When true (default for existing canvases), all widgets share the
+       * group's master filter.  When false, each Cohi widget uses its own
+       * independent filter bar.  Registry widgets always use group filters.
+       */
+      filterSync?: boolean;
       /** Persisted filter state (year, dateRange, periodSelection, dateField, etc.) */
       savedFilters?: Partial<SectionFilters>;
     }

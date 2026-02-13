@@ -72,7 +72,7 @@ Parameters:
 
   ContainerCpu:
     Type: Number
-    Default: 1024
+    Default: 2048
     AllowedValues:
       - 256
       - 512
@@ -228,7 +228,7 @@ Resources:
   ECRRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: !Sub "${ProjectName}-backend"
+      RepositoryName: !Sub "${ProjectName}-${Environment}-backend"
       ImageScanningConfiguration:
         ScanOnPush: true
       EncryptionConfiguration:
@@ -254,7 +254,7 @@ Resources:
           }
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-backend"
+          Value: !Sub "${ProjectName}-${Environment}-backend"
 
   # ============================================================================
   # VPC and Networking (Conditional)
@@ -910,6 +910,18 @@ Outputs:
   ALBDNSName:
     Description: Application Load Balancer DNS name
     Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  ALBFullName:
+    Description: ALB full name for CloudWatch metrics
+    Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-alb-full-name"
+
+  TargetGroupFullName:
+    Description: Target group full name for CloudWatch metrics
+    Value: !GetAtt ALBTargetGroup.TargetGroupFullName
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-tg-full-name"
 
   ALBHostedZoneId:
     Description: ALB hosted zone ID (for Route 53)

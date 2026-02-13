@@ -127,26 +127,26 @@ deploy_to_s3() {
     echo "Deploying frontend to S3..."
     echo "========================================="
     echo "Bucket: $S3_BUCKET"
-    echo "Source: docs/"
+    echo "Source: dist/"
     echo ""
     
-    # Verify docs directory exists
-    if [ ! -d "docs" ]; then
-        echo "ERROR: docs/ directory not found."
+    # Verify dist directory exists
+    if [ ! -d "dist" ]; then
+        echo "ERROR: dist/ directory not found."
         echo "Frontend build may have failed."
         exit 1
     fi
     
     # Verify index.html exists
-    if [ ! -f "docs/index.html" ]; then
-        echo "ERROR: docs/index.html not found."
+    if [ ! -f "dist/index.html" ]; then
+        echo "ERROR: dist/index.html not found."
         echo "Frontend build may have failed."
         exit 1
     fi
     
     echo "Syncing static assets (with long cache)..."
     # Sync static assets with long cache headers (1 year)
-    aws s3 sync docs/ "s3://$S3_BUCKET" \
+    aws s3 sync dist/ "s3://$S3_BUCKET" \
         --delete \
         --exclude ".DS_Store" \
         --exclude "*.map" \
@@ -156,14 +156,14 @@ deploy_to_s3() {
     
     echo "Uploading index.html (no cache)..."
     # Upload index.html with no-cache headers
-    aws s3 cp docs/index.html "s3://$S3_BUCKET/index.html" \
+    aws s3 cp dist/index.html "s3://$S3_BUCKET/index.html" \
         --content-type "text/html" \
         --cache-control "no-cache, no-store, must-revalidate"
     
     # Upload 404.html if it exists
-    if [ -f "docs/404.html" ]; then
+    if [ -f "dist/404.html" ]; then
         echo "Uploading 404.html (no cache)..."
-        aws s3 cp docs/404.html "s3://$S3_BUCKET/404.html" \
+        aws s3 cp dist/404.html "s3://$S3_BUCKET/404.html" \
             --content-type "text/html" \
             --cache-control "no-cache, no-store, must-revalidate"
     fi

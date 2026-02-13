@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Loader2, Download, Calendar } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Download, Calendar, Telescope } from 'lucide-react';
 import { api } from '@/lib/api';
 import {
   FIELD_REGISTRY,
@@ -41,6 +42,8 @@ interface DetailData {
   summary: Record<string, number>;
   displayConfig?: DisplayConfig;
   dateRange?: DateRangeInfo;
+  /** ISO timestamp of when the insight was generated (data freshness) */
+  dataAsOf?: string;
   rows?: Record<string, any>[];
   // Legacy fields — kept for backward compat
   loans?: Record<string, any>[];
@@ -244,9 +247,11 @@ export const InsightDetailModal = ({
   dateFilter,
   selectedTenantId,
 }: InsightDetailModalProps) => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DetailData | null>(null);
+  const [isCreatingDeepDive, setIsCreatingDeepDive] = useState(false);
 
   useEffect(() => {
     if (isOpen && insightSource) {
@@ -272,6 +277,28 @@ export const InsightDetailModal = ({
       setLoading(false);
     }
   };
+
+  // Deep Dive in Workbench handler
+  const handleDeepDive = useCallback(async () => {
+    if (!insightId || isCreatingDeepDive) return;
+    setIsCreatingDeepDive(true);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : '';
+      const result = await api.request<{ id: string }>(
+        `/api/workbench/canvases/from-insight${tenantParam}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ insightId }),
+        }
+      );
+      onClose();
+      navigate(`/my-dashboard?canvas=${result.id}`);
+    } catch (err: any) {
+      console.error('Error creating deep-dive canvas:', err);
+    } finally {
+      setIsCreatingDeepDive(false);
+    }
+  }, [insightId, isCreatingDeepDive, selectedTenantId, onClose, navigate]);
 
   // Unified rows from new `rows` field or legacy `loans`/`officers`/`months`
   const rows = useMemo(() => {
@@ -368,12 +395,35 @@ export const InsightDetailModal = ({
                     {data.dateRange.label} &middot; {formatDateRange(data.dateRange)}
                   </span>
                 )}
+                {data?.dataAsOf && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                    Data as of {new Date(data.dataAsOf).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })},{' '}
+                    {new Date(data.dataAsOf).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
                 {insightMessage}
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {insightId && (
+                <button
+                  onClick={handleDeepDive}
+                  disabled={isCreatingDeepDive}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg hover:from-blue-600 hover:to-indigo-700 shadow-sm hover:shadow transition-all disabled:opacity-50"
+                  title="Open deep-dive analysis in Workbench"
+                >
+                  {isCreatingDeepDive ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Telescope className="w-4 h-4" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {isCreatingDeepDive ? 'Creating...' : 'Deep Dive'}
+                  </span>
+                </button>
+              )}
               {rows.length > 0 && columns.length > 0 && (
                 <button
                   onClick={exportCSV}

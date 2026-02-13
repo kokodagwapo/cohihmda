@@ -302,4 +302,191 @@ router.post(
   },
 );
 
+// ---------------------------------------------------------------------------
+// POST /from-insight  — Create a deep-dive canvas from a stored insight
+// ---------------------------------------------------------------------------
+import { generateDeepDiveWidgets, type SourceInsightMeta } from '../services/workbench/insightDeepDive.js';
+
+router.post(
+  '/from-insight',
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const { insightId } = req.body;
+      if (!insightId) {
+        return res.status(400).json({ error: 'insightId is required' });
+      }
+
+      const { tenantPool } = getTenantContext(req);
+      await ensureCanvasTable(tenantPool);
+
+      // Load the insight from generated_insights
+      const insightRes = await tenantPool.query(
+        `SELECT id, headline, source, bucket, detail_query
+         FROM public.generated_insights
+         WHERE id = $1`,
+        [insightId],
+      );
+
+      if (insightRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Insight not found' });
+      }
+
+      const row = insightRes.rows[0];
+      const meta: SourceInsightMeta = {
+        id: row.id,
+        headline: row.headline || '',
+        source: row.source || 'performance',
+        bucket: row.bucket || 'working',
+        detail_query: row.detail_query || null,
+      };
+
+      // Generate widgets
+      const widgets = await generateDeepDiveWidgets(tenantPool, meta);
+
+      // ─── Smart layout: charts get more space, tables get full width ───
+      // Separate widgets by viz type for intelligent placement
+      const chartWidgets = widgets.filter(w => ['line', 'bar', 'horizontal_bar', 'donut', 'area'].includes(w.vizConfig.type));
+      const tableWidgets = widgets.filter(w => w.vizConfig.type === 'table');
+
+      // Widget sizes are designed for the panel-open viewport (~1050px usable).
+      // The frontend auto-scales items when the Cohi panel opens/closes, but
+      // starting at the right size avoids the initial reflow.
+      const FULL_WIDTH = 1020;       // full-width widget (fits with panel open)
+      const HALF_WIDTH = 496;        // half-width for side-by-side charts (496+24+496=1016)
+      const CHART_HEIGHT = 460;      // taller charts for readability
+      const TABLE_HEIGHT = 420;      // tables need height for rows
+      const GAP = 24;
+      const LEFT_MARGIN = 12;
+
+      const ts = Date.now();
+      const layout: any[] = [];
+      let cursorY = GAP;
+
+      // ─── Charts section: first chart full-width (hero), rest in pairs ───
+      chartWidgets.forEach((w, idx) => {
+        const isHero = idx === 0;
+        const isOdd = chartWidgets.length > 1 && idx > 0;
+        const pairIdx = isOdd ? idx - 1 : 0; // pair index within the non-hero set
+        const col = isOdd ? ((pairIdx) % 2) : 0;
+
+        let x: number, y: number, width: number;
+
+        if (isHero) {
+          // First chart spans full width as the hero visualization
+          x = LEFT_MARGIN;
+          y = cursorY;
+          width = FULL_WIDTH;
+          cursorY += CHART_HEIGHT + GAP;
+        } else {
+          // Subsequent charts in 2-column layout
+          if (col === 0) {
+            // Left column — also advances cursorY for the row when we start a new pair
+          }
+          x = LEFT_MARGIN + col * (HALF_WIDTH + GAP);
+          y = cursorY;
+          width = HALF_WIDTH;
+          // Advance cursorY when we complete a row (right col or last odd item)
+          if (col === 1 || idx === chartWidgets.length - 1) {
+            cursorY += CHART_HEIGHT + GAP;
+          }
+        }
+
+        layout.push({
+          i: `deep-dive-${ts}-chart-${idx}`,
+          x,
+          y,
+          w: width,
+          h: CHART_HEIGHT,
+          type: 'widget_group' as const,
+          payload: {
+            type: 'widget_group' as const,
+            groupId: `dd-grp-${ts}-chart-${idx}`,
+            title: w.title,
+            sectionType: 'company-scorecard',
+            widgetIds: [],
+            filtersCollapsed: true,
+            items: [
+              {
+                kind: 'cohi' as const,
+                id: `cohi-dd-${ts}-chart-${idx}`,
+                sql: w.sql,
+                title: w.title,
+                vizConfig: w.vizConfig,
+                explanation: w.explanation,
+              },
+            ],
+          },
+        });
+      });
+
+      // ─── Tables section: each gets full width for readability ───
+      tableWidgets.forEach((w, idx) => {
+        layout.push({
+          i: `deep-dive-${ts}-table-${idx}`,
+          x: LEFT_MARGIN,
+          y: cursorY,
+          w: FULL_WIDTH,
+          h: TABLE_HEIGHT,
+          type: 'widget_group' as const,
+          payload: {
+            type: 'widget_group' as const,
+            groupId: `dd-grp-${ts}-table-${idx}`,
+            title: w.title,
+            sectionType: 'company-scorecard',
+            widgetIds: [],
+            filtersCollapsed: true,
+            items: [
+              {
+                kind: 'cohi' as const,
+                id: `cohi-dd-${ts}-table-${idx}`,
+                sql: w.sql,
+                title: w.title,
+                vizConfig: w.vizConfig,
+                explanation: w.explanation,
+              },
+            ],
+          },
+        });
+        cursorY += TABLE_HEIGHT + GAP;
+      });
+
+      // Build source insight metadata for the canvas
+      const sourceInsight = {
+        id: meta.id,
+        headline: meta.headline,
+        source: meta.source,
+        bucket: meta.bucket,
+        detail_query: meta.detail_query,
+      };
+
+      const content = {
+        layoutVersion: 'freeform-v1',
+        layout,
+        annotations: [],
+        background: { type: 'color', value: '#ffffff' },
+        uploadsMeta: [],
+        sourceInsight,
+      };
+
+      // Create the canvas
+      const canvasTitle = `Deep Dive: ${meta.headline.substring(0, 60)}${meta.headline.length > 60 ? '...' : ''}`;
+      const createRes = await tenantPool.query(
+        `INSERT INTO public.workbench_canvases
+           (user_id, title, layout_version, content)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, title, created_at, updated_at`,
+        [req.userId, canvasTitle, 'freeform-v1', JSON.stringify(content)],
+      );
+
+      console.log(`[Workbench] Created deep-dive canvas ${createRes.rows[0].id} for insight ${insightId}`);
+      res.json(createRes.rows[0]);
+    } catch (error: any) {
+      console.error('[Workbench] Error creating deep-dive canvas:', error.message);
+      res.status(500).json({ error: 'Failed to create deep-dive canvas', message: error.message });
+    }
+  },
+);
+
 export default router;

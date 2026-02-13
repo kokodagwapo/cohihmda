@@ -41,14 +41,14 @@ echo -e "${GREEN}📦 Building frontend...${NC}"
 npm install
 npm run build
 
-if [ ! -d "docs" ]; then
-    echo -e "${RED}❌ Build directory 'docs' not found${NC}"
+if [ ! -d "dist" ]; then
+    echo -e "${RED}❌ Build directory 'dist' not found${NC}"
     exit 1
 fi
 
 # Sync to S3
 echo -e "${GREEN}☁️  Uploading to S3...${NC}"
-aws s3 sync docs/ "s3://${S3_BUCKET}" \
+aws s3 sync dist/ "s3://${S3_BUCKET}" \
     --region "${REGION}" \
     --delete \
     --exclude ".DS_Store" \
@@ -59,12 +59,12 @@ aws s3 sync docs/ "s3://${S3_BUCKET}" \
 
 # Upload index.html and 404.html with no cache
 echo -e "${GREEN}📄 Uploading index.html and 404.html...${NC}"
-aws s3 cp docs/index.html "s3://${S3_BUCKET}/index.html" \
+aws s3 cp dist/index.html "s3://${S3_BUCKET}/index.html" \
     --region "${REGION}" \
     --content-type "text/html" \
     --cache-control "no-cache, no-store, must-revalidate"
 
-aws s3 cp docs/404.html "s3://${S3_BUCKET}/404.html" \
+aws s3 cp dist/404.html "s3://${S3_BUCKET}/404.html" \
     --region "${REGION}" \
     --content-type "text/html" \
     --cache-control "no-cache, no-store, must-revalidate"

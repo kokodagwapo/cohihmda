@@ -20,6 +20,10 @@ import {
   getFallbackSchemaContext,
 } from "../services/ai/schemaContextService.js";
 import {
+  getVerifiedMetricsSQL,
+  getTenantRevenueExpression,
+} from "../services/metrics/canonicalMetrics.js";
+import {
   createConversation,
   getConversation,
   listConversations,
@@ -491,12 +495,26 @@ The CURRENT CANVAS STATE section below includes LIVE DATA VALUES — actual numb
 - If you're unsure what the user wants, ask a clarifying question in "message" with no actions
 
 ## Time Scoping (CRITICAL)
-When users ask broad or ambiguous questions, ALWAYS scope data to a RECENT time window. Never return all-time totals for "today"-style questions.
-- "What's important?" / "How are we doing?" → Last 30-90 days, not all time
-- "Performance update" / "Show me key metrics" → THIS MONTH or THIS QUARTER vs. prior period
-- "Top performers" / "Leaderboard" → Scope to last 30-90 days of recent activity
-- "Any issues?" → Show current pipeline only (active loans, recent anomalies)
-- When in doubt, default to the LAST 90 DAYS as the time window
+**RULE 1 — Respect explicit time ranges:** When the user specifies an exact time range (e.g. "last 12 months", "last 6 months", "Q3 2025", "trailing 12"), use EXACTLY that range. Convert to concrete dates:
+- "last 12 months" → CURRENT_DATE - INTERVAL '12 months' to CURRENT_DATE
+- "last 6 months" → CURRENT_DATE - INTERVAL '6 months' to CURRENT_DATE
+- "last 3 months" → CURRENT_DATE - INTERVAL '3 months' to CURRENT_DATE
+- "YTD" / "this year" → January 1 of current year to CURRENT_DATE
+- "last year" → January 1 to December 31 of prior year
+- NEVER override an explicit user-specified time range with a default.
+
+**RULE 2 — Default for ambiguous questions:** Only when the user does NOT specify a time range, default to a recent window:
+- "What's important?" / "How are we doing?" → Last 90 days
+- "Performance update" / "Show me key metrics" → Last 90 days vs. prior 90 days
+- "Top performers" / "Leaderboard" → Last 90 days of recent activity
+- "Any issues?" → Current pipeline only (active loans)
+
+## Metric Consistency (CRITICAL)
+When computing metrics like Revenue, Pull-Through Rate, Volume, Fallout, Cycle Time:
+- **ALWAYS use the exact SQL formulas from the VERIFIED METRICS SQL section below.** Do NOT invent your own formulas.
+- Revenue is GAIN-ON-SALE (the tenant-specific expression), NOT loan_amount. They are fundamentally different metrics.
+- Pull-Through Rate = funded / completed * 100. "Completed" = loans NOT in active statuses ('Active Loan','active','locked','submitted','approved').
+- For time-series charts showing monthly trends, GROUP BY DATE_TRUNC('month', l.application_date) and use the verified metric formulas within each month's aggregation.
 
 ## SQL Generation Rules for create_widget and query_data (CRITICAL)
 1. ALWAYS use table alias "l": FROM public.loans l
@@ -652,6 +670,18 @@ router.post(
         ? await getSchemaForTenant(tenantId)
         : getFallbackSchemaContext();
 
+      // Inject verified metrics SQL so Cohi uses the same formulas as insights
+      let verifiedMetricsBlock = "";
+      if (tenantId) {
+        try {
+          const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+          const revenueExpr = await getTenantRevenueExpression(tenantPool);
+          verifiedMetricsBlock = "\n\n" + getVerifiedMetricsSQL(revenueExpr);
+        } catch (err) {
+          console.warn("[CohiWorkbench] Could not load verified metrics SQL:", err);
+        }
+      }
+
       // Build canvas context
       const canvasContext = canvasState
         ? buildCanvasContext(canvasState)
@@ -663,7 +693,7 @@ router.post(
         "{{currentDate}}",
         now.toISOString().split("T")[0]
       )
-        .replace("{{SCHEMA_CONTEXT}}", schemaContext)
+        .replace("{{SCHEMA_CONTEXT}}", schemaContext + verifiedMetricsBlock)
         .replace("{{WIDGET_CATALOG}}", widgetCatalog || "No widget catalog provided.")
         .replace("{{CANVAS_STATE}}", canvasContext);
 
@@ -864,10 +894,20 @@ router.post(
       };
 
       console.log(
-        `[CohiWorkbench] Response: ${validActions.length} actions, ${
+        `[CohiWorkbench] Response: ${validActions.length} actions (${validActions.map((a: any) => a.type).join(', ') || 'none'}), ${
           response.teachingNotes ? "with" : "no"
-        } teaching notes`
+        } teaching notes, msg length: ${finalMessage.length}`
       );
+      if (validActions.length === 0 && parsed.actions?.length > 0) {
+        console.log(
+          `[CohiWorkbench] WARNING: ${parsed.actions.length} actions were returned but all filtered out. Types: ${parsed.actions.map((a: any) => a?.type).join(', ')}`
+        );
+      }
+      if (validActions.length === 0) {
+        console.log(
+          `[CohiWorkbench] Raw response preview: ${rawResponse.substring(0, 500)}`
+        );
+      }
 
       res.json(response);
     } catch (error: any) {

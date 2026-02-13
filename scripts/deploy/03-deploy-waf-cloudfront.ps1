@@ -169,8 +169,8 @@ if (-not $SkipUpload) {
     Write-Status "Phase 3: Uploading frontend to S3..."
     
     # Upload build output to S3
-    # Note: Vite builds to 'docs/' folder based on vite.config.ts
-    aws s3 sync "$REPO_ROOT/docs/" "s3://$FRONTEND_BUCKET/" `
+    # Note: Vite builds to 'dist/' folder based on vite.config.ts
+    aws s3 sync "$REPO_ROOT/dist/" "s3://$FRONTEND_BUCKET/" `
         --delete `
         --profile $env:AWS_PROFILE `
         --region $CF_REGION

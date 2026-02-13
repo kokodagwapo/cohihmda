@@ -6,6 +6,4 @@
 
 export { TenantConfigSection } from './TenantConfigSection';
 export { FieldMappingTab } from './FieldMappingTab';
-export { FieldDictionaryTab } from './FieldDictionaryTab';
-export { FilterBuilderTab } from './FilterBuilderTab';
 export { ScoringWeightsTab } from './ScoringWeightsTab';

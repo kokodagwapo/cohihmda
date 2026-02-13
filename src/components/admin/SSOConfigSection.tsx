@@ -432,20 +432,23 @@ export function SSOConfigSection() {
   const handleToggleSSO = async (enabled: boolean) => {
     setSaving(true);
     try {
-      // TODO: Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 300));
+      const mode = enabled ? 'hybrid' : 'password_only';
+      await api.request(`/api/admin/sso/auth-mode${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'PUT',
+        body: JSON.stringify({ mode, allow_email_password: true }),
+      });
       
       setIsEnabled(enabled);
       toast({
         title: enabled ? 'SSO Enabled' : 'SSO Disabled',
         description: enabled 
-          ? 'Users can now sign in using SSO' 
+          ? 'Users can now sign in using SSO (hybrid mode — password login also available)' 
           : 'SSO has been disabled. Users must use password authentication.'
       });
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: 'Failed to update SSO status',
+        description: error.message || 'Failed to update SSO status',
         variant: 'destructive'
       });
     } finally {
@@ -463,22 +466,51 @@ export function SSOConfigSection() {
       return;
     }
 
+    // Validate email domains before saving
+    if (emailDomains.length === 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please add at least one email domain before uploading metadata',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setSaving(true);
     try {
-      // TODO: Parse metadata and extract fields
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Send metadata to backend — it will parse, create Cognito IdP, and save config
+      const payload: any = {
+        provider_type: provider,
+        email_domains: emailDomains,
+        is_enabled: isEnabled,
+        attribute_mapping: attributeMapping,
+      };
+
+      if (idpMetadataUrl) {
+        payload.metadata_url = idpMetadataUrl;
+      } else if (idpMetadataXml) {
+        payload.metadata_xml = idpMetadataXml;
+      }
+
+      const response = await api.request(`/api/admin/sso/config${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
       
       toast({
         title: 'Success',
-        description: 'IdP metadata uploaded successfully'
+        description: 'IdP metadata uploaded and SSO configured successfully'
       });
       
       setMetadataDialogOpen(false);
+      // Clear metadata inputs after successful upload
+      setIdpMetadataUrl('');
+      setIdpMetadataXml('');
       loadSSOConfig();
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to upload metadata',
+        description: error.message || 'Failed to upload metadata. Ensure the URL is HTTPS and publicly accessible.',
         variant: 'destructive'
       });
     } finally {

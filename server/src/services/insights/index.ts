@@ -4,7 +4,15 @@
  */
 
 export { collectInsightMetrics } from './insightMetricsCollector.js';
-export type { InsightMetricsPayload, PredictionData, PeriodSnapshot } from './insightMetricsCollector.js';
+export type { InsightMetricsPayload, PredictionData } from './insightMetricsCollector.js';
+// PeriodSnapshot is canonical — re-export from the shared module
+export type { PeriodSnapshot } from '../metrics/canonicalMetrics.js';
+export {
+  computePeriodSnapshot,
+  computeAllPeriodSnapshots,
+  getStandardDateRanges,
+  getVerifiedMetricsSQL,
+} from '../metrics/canonicalMetrics.js';
 
 export {
   generateLLMInsights,

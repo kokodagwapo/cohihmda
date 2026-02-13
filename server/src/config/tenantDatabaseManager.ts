@@ -190,7 +190,9 @@ class TenantDatabaseManager {
       config.database_host.startsWith("10.");
     const sslEnabled = !isLocalHost;
 
-    // Create pool for tenant database with balanced settings
+    // Create pool for tenant database with conservative settings
+    // Each tenant gets its own pool, so per-tenant max must be low to keep total connections manageable
+    // With N tenants: total = legacy(10) + management(8) + N*max_per_tenant
     const pool = new Pool({
       host: config.database_host,
       port: config.database_port,
@@ -198,11 +200,11 @@ class TenantDatabaseManager {
       user: config.database_user,
       password: config.database_password,
       ssl: sslEnabled ? { rejectUnauthorized: false } : false,
-      max: 15, // Reasonable max connections per tenant
-      min: 1, // Keep at least one connection alive
-      idleTimeoutMillis: 30000, // 30 seconds idle timeout (balanced)
+      max: 5, // Reduced from 15 — multiplied by number of tenants, so keep low
+      min: 0, // Don't hold idle connections; pool will reconnect on demand
+      idleTimeoutMillis: 15000, // 15 seconds idle timeout — release sooner for multi-tenant
       connectionTimeoutMillis: 8000, // 8 seconds connection timeout (fast fail)
-      allowExitOnIdle: false, // Keep pool alive to avoid reconnection overhead
+      allowExitOnIdle: true, // Release all connections when idle to free DB capacity
     });
 
     // Tag pool with tenant ID so per-tenant caches (e.g. revenue expression) stay isolated

@@ -18,6 +18,7 @@ import {
 } from '../services/tenantProvisioningService.js';
 import { duplicateTenantAnonymized } from '../services/tenantDuplicationService.js';
 import { z } from 'zod';
+import { pool as managementPool } from '../config/managementDatabase.js';
 
 const router = Router();
 
@@ -172,6 +173,83 @@ router.patch(
         return res.status(400).json({ error: 'Validation error', details: error.errors });
       }
       res.status(500).json({ error: 'Failed to update tenant status' });
+    }
+  }
+);
+
+/**
+ * PUT /api/tenants/:id/settings
+ * Update tenant display settings (name, logo, contact)
+ */
+router.put(
+  '/:id/settings',
+  authenticateToken,
+  requireRole('super_admin', 'platform_admin', 'tenant_admin'),
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const id = req.params.id as string;
+
+      // Tenant admins can only update their own tenant
+      if (req.userRole === 'tenant_admin' && req.tenantId !== id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const schema = z.object({
+        display_name: z.string().min(1).optional(),
+        logo_url: z.string().optional(),
+        primary_contact_email: z.string().email().optional(),
+        notification_preferences: z.record(z.any()).optional(),
+      });
+
+      const validated = schema.parse(req.body);
+
+      // Build SET clause dynamically
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let idx = 1;
+
+      if (validated.display_name !== undefined) {
+        setClauses.push(`name = $${idx}`);
+        values.push(validated.display_name);
+        idx++;
+      }
+      if (validated.logo_url !== undefined) {
+        setClauses.push(`logo_url = $${idx}`);
+        values.push(validated.logo_url);
+        idx++;
+      }
+      if (validated.primary_contact_email !== undefined) {
+        setClauses.push(`primary_contact_email = $${idx}`);
+        values.push(validated.primary_contact_email);
+        idx++;
+      }
+      if (validated.notification_preferences !== undefined) {
+        setClauses.push(`notification_preferences = $${idx}`);
+        values.push(JSON.stringify(validated.notification_preferences));
+        idx++;
+      }
+
+      if (setClauses.length === 0) {
+        return res.status(400).json({ error: 'No fields to update' });
+      }
+
+      setClauses.push(`updated_at = NOW()`);
+      values.push(id);
+
+      await managementPool.query(
+        `UPDATE tenants SET ${setClauses.join(', ')} WHERE id = $${idx}`,
+        values,
+      );
+
+      const updated = await getTenant(id);
+      res.json(updated);
+    } catch (error: any) {
+      console.error('[Tenants] Error updating tenant settings:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', details: error.errors });
+      }
+      res.status(500).json({ error: 'Failed to update tenant settings' });
     }
   }
 );

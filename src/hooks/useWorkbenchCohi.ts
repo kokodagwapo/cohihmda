@@ -6,7 +6,7 @@
  * so the LLM can suggest/add existing widgets, create new ones, or teach.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api';
 import type {
   WorkbenchChatMessage,
@@ -65,6 +65,15 @@ export interface WorkbenchCohiResponse {
   error?: string;
 }
 
+/** Metadata about an insight that spawned this canvas (from deep-dive). */
+export interface SourceInsightContext {
+  id: number;
+  headline: string;
+  source: string;
+  bucket: string;
+  detail_query?: Record<string, any> | null;
+}
+
 export interface UseWorkbenchCohiOptions {
   tenantId?: string | null;
   /** Current canvas items – used to build CanvasStateSnapshot */
@@ -73,6 +82,8 @@ export interface UseWorkbenchCohiOptions {
   widgetCatalog?: string;
   /** Canvas ID for conversation persistence */
   canvasId?: string | null;
+  /** Source insight context when canvas was created via deep-dive */
+  sourceInsight?: SourceInsightContext | null;
   onError?: (error: Error) => void;
   /** Called when the AI returns executable actions — auto-executes them on the canvas */
   onAutoExecuteActions?: (actions: WidgetAction[]) => void;
@@ -83,17 +94,36 @@ export interface UseWorkbenchCohiOptions {
 // ---------------------------------------------------------------------------
 
 export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
-  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, onError, onAutoExecuteActions } = options;
+  const { tenantId, canvasItems = [], widgetCatalog = '', canvasId, sourceInsight, onError, onAutoExecuteActions } = options;
 
   const [messages, setMessages] = useState<WorkbenchChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([
-    'Prepare a board-ready overview of this month\'s performance',
-    'Summarize pipeline health and pull-through trends',
-    'What needs my attention right now?',
-    'Build an executive dashboard with key KPIs',
-  ]);
+
+  // Build default suggestions — context-aware when spawned from an insight
+  const defaultSuggestions = useMemo(() => {
+    if (sourceInsight?.headline) {
+      return [
+        `What's driving this: "${sourceInsight.headline.substring(0, 60)}"?`,
+        'Break this down by loan officer',
+        'Show me the trend over the last 12 months',
+        'Compare this to prior year performance',
+      ];
+    }
+    return [
+      'Prepare a board-ready overview of this month\'s performance',
+      'Summarize pipeline health and pull-through trends',
+      'What needs my attention right now?',
+      'Build an executive dashboard with key KPIs',
+    ];
+  }, [sourceInsight?.headline]);
+
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>(defaultSuggestions);
+
+  // Update suggestions when sourceInsight changes
+  useEffect(() => {
+    setSuggestedQuestions(defaultSuggestions);
+  }, [defaultSuggestions]);
 
   const messageIdCounter = useRef(0);
 
@@ -139,6 +169,28 @@ export function useWorkbenchCohi(options: UseWorkbenchCohiOptions = {}) {
       cancelled = true;
     };
   }, [tenantId, canvasId]);
+
+  // -------------------------------------------------------------------------
+  // Auto-seed intro message when canvas has a sourceInsight and no history
+  // -------------------------------------------------------------------------
+  const introSeeded = useRef(false);
+  useEffect(() => {
+    if (introSeeded.current || !sourceInsight?.headline) return;
+    // Wait a tick to let conversation load finish
+    const timer = setTimeout(() => {
+      if (messages.length > 0 || introSeeded.current) return;
+      introSeeded.current = true;
+      const introMsg: WorkbenchChatMessage = {
+        id: `wb-msg-intro`,
+        role: 'assistant',
+        content: `This canvas was created to explore: **${sourceInsight.headline}**.\n\nI've set up initial visualizations for you. Ask me to dig deeper into any aspect — break down by officer, compare periods, or investigate root causes.`,
+        timestamp: new Date(),
+      };
+      setMessages([introMsg]);
+      messageIdCounter.current = 1;
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [sourceInsight, messages.length]);
 
   // -------------------------------------------------------------------------
   // Build canvas state snapshot from current items

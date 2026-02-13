@@ -60,7 +60,7 @@ definitions:
           - npm ci
           - npm run build
         artifacts:
-          - docs/**
+          - dist/**
 
     - step: &build-backend
         name: Build Backend
