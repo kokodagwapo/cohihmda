@@ -54,7 +54,7 @@ export function useSavedVisualizations(options: UseSavedVisualizationsOptions = 
     
     try {
       const response = await api.request<{ visualizations: SavedVisualization[] }>(
-        `/api/data-chat/saved-visualizations${tenantId ? `?tenant_id=${tenantId}` : ''}`
+        `/api/cohi-chat/saved-visualizations${tenantId ? `?tenant_id=${tenantId}` : ''}`
       );
       setVisualizations(response.visualizations || []);
     } catch (err: any) {
@@ -83,7 +83,7 @@ export function useSavedVisualizations(options: UseSavedVisualizationsOptions = 
   ): Promise<SavedVisualization | null> => {
     try {
       const response = await api.request<{ success: boolean; visualization: SavedVisualization }>(
-        '/api/data-chat/save-visualization',
+        '/api/cohi-chat/save-visualization',
         {
           method: 'POST',
           body: JSON.stringify({
@@ -119,7 +119,7 @@ export function useSavedVisualizations(options: UseSavedVisualizationsOptions = 
   ): Promise<boolean> => {
     try {
       const response = await api.request<{ success: boolean }>(
-        `/api/data-chat/saved-visualizations/${id}`,
+        `/api/cohi-chat/saved-visualizations/${id}`,
         {
           method: 'PUT',
           body: JSON.stringify({
@@ -149,7 +149,7 @@ export function useSavedVisualizations(options: UseSavedVisualizationsOptions = 
   const deleteVisualization = useCallback(async (id: string): Promise<boolean> => {
     try {
       const response = await api.request<{ success: boolean }>(
-        `/api/data-chat/saved-visualizations/${id}${tenantId ? `?tenant_id=${tenantId}` : ''}`,
+        `/api/cohi-chat/saved-visualizations/${id}${tenantId ? `?tenant_id=${tenantId}` : ''}`,
         {
           method: 'DELETE',
         }
@@ -172,7 +172,7 @@ export function useSavedVisualizations(options: UseSavedVisualizationsOptions = 
   const refreshVisualization = useCallback(async (id: string): Promise<VisualizationConfig | null> => {
     try {
       const response = await api.request<{ success: boolean; visualization: VisualizationConfig; data: any[] }>(
-        `/api/data-chat/refresh-visualization/${id}`,
+        `/api/cohi-chat/refresh-visualization/${id}`,
         {
           method: 'POST',
           body: JSON.stringify({ tenant_id: tenantId }),
@@ -219,7 +219,7 @@ export function useSavedVisualizations(options: UseSavedVisualizationsOptions = 
     try {
       await Promise.all(
         newOrder.map((id, index) => 
-          api.request(`/api/data-chat/saved-visualizations/${id}`, {
+          api.request(`/api/cohi-chat/saved-visualizations/${id}`, {
             method: 'PUT',
             body: JSON.stringify({
               position: index,

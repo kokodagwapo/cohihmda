@@ -25,7 +25,6 @@ function loadDataDictionary(): Map<string, string> {
 
   // Convert the constants object to a Map
   dataDictionary = new Map(Object.entries(DEFAULT_ENCOMPASS_FIELD_MAPPINGS));
-  console.log(`[EncompassFieldMapper] ✅ Loaded ${dataDictionary.size} fields from TypeScript constants`);
   
   return dataDictionary;
 }
@@ -304,7 +303,6 @@ export function getAllCoheusAliases(): string[] {
  */
 // Cache for field ID lookups to avoid repeated dictionary lookups
 const fieldIdCache = new Map<string, string | null>();
-let hasLoggedDebugInfo = false;
 
 export function getDefaultFieldId(coheusAlias: string): string | null {
   // Check cache first
@@ -317,14 +315,6 @@ export function getDefaultFieldId(coheusAlias: string): string | null {
   
   // Cache the result
   fieldIdCache.set(coheusAlias, fieldId);
-  
-  // Only log once per alias type in development mode (not per call)
-  if (process.env.NODE_ENV === 'development' && !hasLoggedDebugInfo) {
-    if (coheusAlias.toLowerCase().includes('application date') || coheusAlias.toLowerCase() === 'lock date') {
-      console.log(`[EncompassFieldMapper] getDefaultFieldId("${coheusAlias}") = ${fieldId}`);
-      hasLoggedDebugInfo = true;
-    }
-  }
   
   return fieldId;
 }
@@ -346,22 +336,8 @@ export async function buildFieldIdList(
     try {
       const fieldId = await getFieldMapping(tenantPool, losConnectionId, alias);
       fieldIds.push(fieldId);
-      
-      // DEBUG: Log Application Date and Lock Date field mapping
-      if (alias.toLowerCase().includes('application date')) {
-        console.log(`[EncompassFieldMapper] buildFieldIdList: "${alias}" -> ${fieldId}`);
-      }
-      if (alias.toLowerCase() === 'lock date') {
-        console.log(`[EncompassFieldMapper] buildFieldIdList: "${alias}" -> ${fieldId}`);
-      }
     } catch (error: any) {
-      // DEBUG: Log if Application Date fails
-      if (alias.toLowerCase().includes('application date')) {
-        console.error(`[EncompassFieldMapper] ❌ ERROR mapping "${alias}": ${error.message}`);
-      }
-      console.warn(
-        `[EncompassFieldMapper] Skipping field ${alias}: ${error.message}`
-      );
+      // Field mapping not found - skip silently
     }
   }
 

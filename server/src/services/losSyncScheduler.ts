@@ -130,27 +130,10 @@ async function runEncompassSync(job: SyncJob, tenantPool: pg.Pool): Promise<void
   const { EncompassEtlService } = await import('./etl/encompassEtlService.js');
   const etlService = new EncompassEtlService(tenantPool);
 
-  // Determine modifiedFrom for incremental sync (same logic as manual sync in los.ts)
+  // Determine modifiedFrom for incremental sync
   let modifiedFrom: Date | undefined;
 
-  if (job.lastLoanModifiedAt) {
-    // Use last_loan_modified_at — the MAX(Loan.LastModified) from previously synced loans
-    modifiedFrom = job.lastLoanModifiedAt;
-  } else if (job.lastSyncedAt) {
-    // Fallback: query MAX(last_modified_date) from loans table
-    try {
-      const maxModifiedResult = await tenantPool.query(
-        `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
-      );
-      if (maxModifiedResult.rows[0]?.max_modified) {
-        modifiedFrom = new Date(maxModifiedResult.rows[0].max_modified);
-      }
-    } catch {
-      // loans table may not exist — will do full sync
-    }
-  }
-
-  // Check if there are existing loans (if not, always do full sync)
+  // Check if there are existing loans
   let loansCount = 0;
   try {
     const countResult = await tenantPool.query('SELECT COUNT(*) as count FROM public.loans');
@@ -159,9 +142,25 @@ async function runEncompassSync(job: SyncJob, tenantPool: pg.Pool): Promise<void
     // loans table may not exist
   }
 
-  // If no existing loans, force full sync regardless of modifiedFrom
   if (loansCount === 0) {
+    // No existing loans — full sync, no date filter
     modifiedFrom = undefined;
+  } else if (job.lastLoanModifiedAt) {
+    // Best case: use last_loan_modified_at from a previous successful sync
+    modifiedFrom = job.lastLoanModifiedAt;
+  } else {
+    // Fallback: query MAX(last_modified_date) directly from loans table.
+    // Handles interrupted syncs where last_loan_modified_at was never written.
+    try {
+      const maxModifiedResult = await tenantPool.query(
+        `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
+      );
+      if (maxModifiedResult.rows[0]?.max_modified) {
+        modifiedFrom = new Date(maxModifiedResult.rows[0].max_modified);
+      }
+    } catch {
+      // will do full sync
+    }
   }
 
   // Set loanStartDate to 36 months ago (matching Qlik's vLoanStartDate)

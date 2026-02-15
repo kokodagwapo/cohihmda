@@ -1487,10 +1487,6 @@ function formatDataRows(rows: any[]): any[] {
 // Exports
 // ============================================================================
 
-// Export types with aliases for backwards compatibility
-export type DataChatMessage = CohiChatMessage;
-export type DataChatResponse = CohiChatResponse;
-
 // ============================================================================
 // Edit Widget – takes current SQL + vizConfig + user instruction, returns updated
 // ============================================================================

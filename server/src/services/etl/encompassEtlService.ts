@@ -14,6 +14,8 @@ export interface SyncResult {
   success: boolean;
   records_synced: number;
   records_failed: number;
+  loans_added: number;
+  loans_updated: number;
   errors: string[];
   duration: number;
 }
@@ -53,20 +55,11 @@ export class EncompassEtlService {
     const errors: string[] = [];
     let recordsSynced = 0;
     let recordsFailed = 0;
+    let loansAdded = 0;
+    let loansUpdated = 0;
 
     if (!this.tenantPool) {
       throw new Error("Tenant database pool not available");
-    }
-
-    // Log whether a limit is being used
-    if (options.limit) {
-      console.log(
-        `[EncompassEtlService] Using provided limit: ${options.limit} records`
-      );
-    } else {
-      console.log(
-        `[EncompassEtlService] No limit specified - will sync all matching loans`
-      );
     }
 
     try {
@@ -86,16 +79,7 @@ export class EncompassEtlService {
       // This allows processing 100K+ loans without running out of memory
       // =========================================================================
       const chunkSize = options.chunkSize || 5000;
-      const useChunkedProcessing = options.useChunkedProcessing !== false; // Default: true
-
-      console.log(
-        `[EncompassEtlService] Starting extraction for connection: ${losConnectionId}`
-      );
-      console.log(
-        `[EncompassEtlService] Chunked processing: ${
-          useChunkedProcessing ? "ENABLED" : "DISABLED"
-        }, chunk size: ${chunkSize}`
-      );
+      const useChunkedProcessing = options.useChunkedProcessing !== false;
 
       if (useChunkedProcessing) {
         // CHUNKED PROCESSING: Transform and load each chunk as it's extracted
@@ -117,117 +101,42 @@ export class EncompassEtlService {
             totalProcessed: number
           ) => {
             chunkCount++;
-            const memUsage = process.memoryUsage();
-            console.log(
-              `[EncompassEtlService] Processing chunk ${chunkIndex + 1}: ${
-                chunk.length
-              } loans (total extracted: ${totalProcessed}, heap: ${Math.round(
-                memUsage.heapUsed / 1024 / 1024
-              )}MB)`
-            );
 
-            // Transform this chunk
             const transformedChunk = await this.transform(chunk, tenantId);
-            console.log(
-              `[EncompassEtlService] Chunk ${chunkIndex + 1}: Transformed ${
-                transformedChunk.length
-              } loans`
-            );
-
-            // Load this chunk to database
             const loadResult = await this.load(tenantId, transformedChunk);
-            console.log(
-              `[EncompassEtlService] Chunk ${chunkIndex + 1}: Loaded ${
-                loadResult.successCount
-              } succeeded, ${loadResult.failureCount} failed`
-            );
 
-            // Accumulate results
             recordsSynced += loadResult.successCount;
             recordsFailed += loadResult.failureCount;
+            loansAdded += loadResult.insertCount;
+            loansUpdated += loadResult.updateCount;
             errors.push(...loadResult.errors);
 
-            // Memory after processing chunk
-            const memAfter = process.memoryUsage();
-            console.log(
-              `[EncompassEtlService] Chunk ${
-                chunkIndex + 1
-              } complete. Memory: heap=${Math.round(
-                memAfter.heapUsed / 1024 / 1024
-              )}MB, rss=${Math.round(memAfter.rss / 1024 / 1024)}MB`
-            );
+            if (loadResult.failureCount > 0) {
+              console.warn(
+                `[Sync] Chunk ${chunkIndex + 1}: ${loadResult.failureCount} failed out of ${chunk.length}`
+              );
+            }
           },
         });
 
-        console.log(
-          `[EncompassEtlService] Chunked extraction complete: ${chunkCount} chunks processed, ${recordsSynced} succeeded, ${recordsFailed} failed`
-        );
       } else {
-        // LEGACY: Non-chunked processing (all loans in memory at once)
-        console.log(
-          `[EncompassEtlService] Using legacy non-chunked processing`
-        );
         const loans = await this.extract(tenantId, losConnectionId, options);
-        console.log(
-          `[EncompassEtlService] Extracted ${loans.length} loans from Encompass API`
-        );
 
-        // Transform loans
-        console.log(`[EncompassEtlService] Transforming ${loans.length} loans`);
         const transformedLoans = await this.transform(loans, tenantId);
-        console.log(
-          `[EncompassEtlService] Transformed ${transformedLoans.length} loans`
-        );
-
-        // Load loans to database
-        console.log(
-          `[EncompassEtlService] Loading ${transformedLoans.length} loans to database`
-        );
         const loadResult = await this.load(tenantId, transformedLoans);
-        console.log(
-          `[EncompassEtlService] Load complete: ${loadResult.successCount} succeeded, ${loadResult.failureCount} failed`
-        );
         recordsSynced = loadResult.successCount;
         recordsFailed = loadResult.failureCount;
+        loansAdded = loadResult.insertCount;
+        loansUpdated = loadResult.updateCount;
         errors.push(...loadResult.errors);
       }
 
       // Verify actual database count after load
-      try {
-        const verifyResult = await this.tenantPool.query(
-          "SELECT COUNT(*) as count, COUNT(DISTINCT guid) as unique_count FROM public.loans"
-        );
-        const dbCount = parseInt(verifyResult.rows[0]?.count || "0", 10);
-        const uniqueCount = parseInt(
-          verifyResult.rows[0]?.unique_count || "0",
-          10
-        );
-        console.log(
-          `[EncompassEtlService] Database verification - Total rows: ${dbCount}, Unique GUIDs: ${uniqueCount}`
-        );
-
-        if (dbCount !== recordsSynced) {
-          console.warn(
-            `[EncompassEtlService] WARNING: Expected ${recordsSynced} loans in DB but found ${dbCount}`
-          );
-        }
-      } catch (verifyError: any) {
-        console.error(
-          "[EncompassEtlService] Error verifying database count:",
-          verifyError.message
-        );
-      }
-
       // Update sync status (tenant DB)
-      // IMPORTANT: Only update last_synced_at if we actually synced at least one loan
-      // This prevents using a recent timestamp when no loans were synced, which would
-      // cause the next sync to filter by a very recent date and return 0 loans
       const duration = Date.now() - startTime;
 
       if (recordsSynced > 0) {
-        // Query the MAX(last_modified_date) from loans table
-        // This is the key value for incremental sync - matches Qlik's RetrieveLastModDate approach
-        // Qlik uses the actual Loan.LastModified value, not when the sync was run
+        // Query the MAX(last_modified_date) for incremental sync bookmark
         let maxLastModifiedDate: Date | null = null;
         try {
           const maxModifiedResult = await this.tenantPool.query(
@@ -237,17 +146,13 @@ export class EncompassEtlService {
             maxLastModifiedDate = new Date(
               maxModifiedResult.rows[0].max_modified
             );
-            console.log(
-              `[EncompassEtlService] MAX(last_modified_date) from loans: ${maxLastModifiedDate.toISOString()}`
-            );
           }
         } catch (error: any) {
           console.warn(
-            `[EncompassEtlService] Could not query MAX(last_modified_date): ${error.message}`
+            `[Sync] Could not query MAX(last_modified_date): ${error.message}`
           );
         }
 
-        // Update both last_synced_at (when sync ran) and last_loan_modified_at (max loan modified date)
         await this.tenantPool.query(
           `UPDATE public.los_connections 
            SET last_synced_at = NOW(),
@@ -263,13 +168,7 @@ export class EncompassEtlService {
             losConnectionId,
           ]
         );
-        console.log(
-          `[EncompassEtlService] Updated last_synced_at and last_loan_modified_at=${
-            maxLastModifiedDate?.toISOString() || "null"
-          } (synced ${recordsSynced} loans)`
-        );
       } else {
-        // Don't update last_synced_at or last_loan_modified_at if no loans were synced
         await this.tenantPool.query(
           `UPDATE public.los_connections 
            SET last_sync_status = $1,
@@ -282,20 +181,76 @@ export class EncompassEtlService {
             losConnectionId,
           ]
         );
-        console.log(
-          `[EncompassEtlService] Did NOT update last_synced_at or last_loan_modified_at (0 loans synced)`
-        );
       }
+
+      // Write sync history audit row
+      let totalLoansAfter = 0;
+      try {
+        const countResult = await this.tenantPool.query(
+          "SELECT COUNT(*) as count FROM public.loans"
+        );
+        totalLoansAfter = parseInt(countResult.rows[0]?.count || "0", 10);
+      } catch { /* table may not exist */ }
+
+      const syncStatus = recordsFailed === 0 ? "success" : "partial";
+      const syncType = options.modifiedFrom ? "incremental" : "full";
+
+      try {
+        await this.tenantPool.query(
+          `INSERT INTO public.los_sync_history
+           (los_connection_id, sync_type, status, loans_added, loans_updated, loans_failed,
+            total_loans_after, modified_from, duration_ms, error_message, started_at, completed_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+          [
+            losConnectionId,
+            syncType,
+            syncStatus,
+            loansAdded,
+            loansUpdated,
+            recordsFailed,
+            totalLoansAfter,
+            options.modifiedFrom || null,
+            duration,
+            errors.length > 0 ? errors.slice(0, 5).join("; ") : null,
+            new Date(startTime),
+          ]
+        );
+      } catch (histErr: any) {
+        console.warn(`[Sync] Could not write sync history: ${histErr.message}`);
+      }
+
+      console.log(
+        `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
+      );
 
       return {
         success: recordsFailed === 0,
         records_synced: recordsSynced,
         records_failed: recordsFailed,
-        errors: errors.slice(0, 10), // Return first 10 errors
+        loans_added: loansAdded,
+        loans_updated: loansUpdated,
+        errors: errors.slice(0, 10),
         duration: Date.now() - startTime,
       };
     } catch (error: any) {
-      console.error("[EncompassEtlService] Sync failed:", error);
+      console.error("[Sync] Failed:", error.message);
+
+      // Write failed sync history
+      try {
+        await this.tenantPool.query(
+          `INSERT INTO public.los_sync_history
+           (los_connection_id, sync_type, status, loans_failed, duration_ms, error_message, started_at, completed_at)
+           VALUES ($1, $2, 'failed', $3, $4, $5, $6, NOW())`,
+          [
+            losConnectionId,
+            options.modifiedFrom ? "incremental" : "full",
+            recordsFailed,
+            Date.now() - startTime,
+            error.message,
+            new Date(startTime),
+          ]
+        );
+      } catch { /* best effort */ }
 
       // Update sync status with error (tenant DB)
       await this.tenantPool.query(
@@ -311,6 +266,8 @@ export class EncompassEtlService {
         success: false,
         records_synced: recordsSynced,
         records_failed: recordsFailed,
+        loans_added: loansAdded,
+        loans_updated: loansUpdated,
         errors: [error.message],
         duration: Date.now() - startTime,
       };
@@ -345,11 +302,7 @@ export class EncompassEtlService {
   ): Promise<LoanRecord[]> {
     const transformed: LoanRecord[] = [];
 
-    // Log first loan for debugging
-    if (loans.length > 0) {
-      console.log("[EncompassEtlService] Sample raw loan object (first loan):");
-      console.log(JSON.stringify(loans[0], null, 2));
-    }
+    
 
     for (const loan of loans) {
       try {
@@ -403,7 +356,7 @@ export class EncompassEtlService {
   private async load(
     tenantId: string,
     loans: LoanRecord[]
-  ): Promise<{ successCount: number; failureCount: number; errors: string[] }> {
+  ): Promise<{ successCount: number; failureCount: number; insertCount: number; updateCount: number; errors: string[] }> {
     // Ensure ratio fields are migrated to DECIMAL(12,2) before loading
     // This migration runs on-demand to fix schema issues
     try {
@@ -521,9 +474,7 @@ export class EncompassEtlService {
           END IF;
         END $$;
       `);
-      console.log(
-        "[EncompassEtlService] Ratio fields migration check completed before load"
-      );
+      
     } catch (error: any) {
       console.warn(
         "[EncompassEtlService] Ratio fields migration warning (continuing):",
@@ -533,6 +484,8 @@ export class EncompassEtlService {
 
     let successCount = 0;
     let failureCount = 0;
+    let insertCount = 0;
+    let updateCount = 0;
     const errors: string[] = [];
 
     // Check for duplicate GUIDs in the batch before inserting
@@ -551,15 +504,7 @@ export class EncompassEtlService {
 
     if (duplicateGuids.length > 0) {
       console.warn(
-        `[EncompassEtlService] Found ${duplicateGuids.length} duplicate GUIDs in batch:`,
-        duplicateGuids.slice(0, 10)
-      );
-      console.warn(
-        `[EncompassEtlService] Total unique GUIDs: ${guidMap.size}, Total loans: ${loans.length}`
-      );
-    } else {
-      console.log(
-        `[EncompassEtlService] All ${loans.length} loans have unique GUIDs`
+        `[Sync] ${duplicateGuids.length} duplicate GUIDs in batch (${guidMap.size} unique / ${loans.length} total)`
       );
     }
 
@@ -839,23 +784,25 @@ export class EncompassEtlService {
         }
 
         // Use guid as the unique conflict target (loan_id is deprecated)
+        // RETURNING xmax = 0 tells us if this was an INSERT (true) or UPDATE (false)
         const query = `
           INSERT INTO public.loans (${columns.join(", ")})
           VALUES (${placeholders.join(", ")})
           ON CONFLICT (guid) 
           DO UPDATE SET ${updateClauses.join(", ")}
+          RETURNING (xmax = 0) AS is_insert
         `;
 
-        await this.tenantPool!.query(query, values);
+        const result = await this.tenantPool!.query(query, values);
         successCount++;
+        if (result.rows[0]?.is_insert) {
+          insertCount++;
+        } else {
+          updateCount++;
+        }
         processedCount++;
 
-        // Log progress every 1000 loans to avoid spam
-        if (processedCount % 1000 === 0) {
-          console.log(
-            `[EncompassEtlService] Load progress: ${processedCount}/${totalLoans} loans processed (${successCount} succeeded, ${failureCount} failed)`
-          );
-        }
+        
       } catch (error: any) {
         failureCount++;
         processedCount++;
@@ -1054,8 +1001,8 @@ export class EncompassEtlService {
     }
 
     console.log(
-      `[EncompassEtlService] Load complete: ${successCount} succeeded, ${failureCount} failed out of ${totalLoans} total loans`
+      `[Sync] Loaded ${successCount}/${totalLoans}: +${insertCount} new, ~${updateCount} updated${failureCount > 0 ? `, ${failureCount} failed` : ""}`
     );
-    return { successCount, failureCount, errors };
+    return { successCount, failureCount, insertCount, updateCount, errors };
   }
 }

@@ -107,7 +107,7 @@ export async function getEncompassCredentials(
   } else {
     // Check if database has credentials first (for new connections saved via UI)
     if (apiClientId && apiClientSecret) {
-      console.log('[EncompassCredentials] Using database credentials for connection:', losConnectionId);
+      
       credentials = {
         instanceId: connection.encompass_instance_id || '',
         apiClientId: apiClientId,

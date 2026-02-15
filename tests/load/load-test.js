@@ -101,7 +101,7 @@ export default function () {
 
     sleep(0.5);
 
-    group("Data Chat API", () => {
+    group("Cohi Chat API", () => {
       const payload = JSON.stringify({
         message: "What is the pull-through rate?",
       });

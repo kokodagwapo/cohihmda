@@ -436,7 +436,7 @@ export const DEFAULT_ENCOMPASS_FIELD_MAPPINGS: Record<string, string> = {
   "Loan Source": "Fields.2024",
   GUID: "Fields.GUID",
   "Loan Folder": "Loan.LoanFolder",
-  "Last Modified Date": "Loan.LoanLastModified",
+  "Last Modified Date": "Loan.LastModified",
   "Current Milestone": "Fields.Log.MS.CurrentMilestone",
 
   // ============================================================================

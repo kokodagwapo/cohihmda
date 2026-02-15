@@ -7,6 +7,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavig
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { UserSettingsProvider } from "@/hooks/useUserSettings";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
@@ -16,11 +17,13 @@ import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import SSOCallback from "./pages/SSOCallback";
+import UserSettings from "./pages/UserSettings";
 import Loans from "./pages/Loans";
 import MyDashboard from "./pages/MyDashboard";
 import MyDashboardLegacy from "./pages/MyDashboardLegacy";
-import DataChat from "./pages/DataChat";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
@@ -85,6 +88,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <AuthProvider>
+        <UserSettingsProvider>
         <EditProvider>
           <TooltipProvider>
             <TimezoneInitializer />
@@ -98,10 +102,17 @@ const App = () => (
               <Route path="/" element={<Navigate to="/insights" replace />} />
               <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
               <Route path="/share/:token" element={<ShareLink />} />
               
               {/* Protected routes - require authentication */}
+              <Route path="/settings" element={
+                <ProtectedRoute>
+                  <UserSettings />
+                </ProtectedRoute>
+              } />
                 <Route path="/insights" element={
                   <ProtectedRoute>
                     <Dashboard />
@@ -142,11 +153,6 @@ const App = () => (
               <Route path="/workbench/favorites" element={
                 <ProtectedRoute>
                   <Favorites />
-                </ProtectedRoute>
-              } />
-              <Route path="/data-chat" element={
-                <ProtectedRoute>
-                  <DataChat />
                 </ProtectedRoute>
               } />
               
@@ -229,6 +235,7 @@ const App = () => (
           </Router>
         </TooltipProvider>
       </EditProvider>
+    </UserSettingsProvider>
     </AuthProvider>
   </ThemeProvider>
 </QueryClientProvider>

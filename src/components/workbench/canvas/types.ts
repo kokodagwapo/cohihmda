@@ -5,7 +5,7 @@
 import type { VisualizationConfig } from '@/hooks/useCohiChat';
 import type { SectionType, SectionFilters } from '@/stores/widgetSectionStore';
 
-/** Single upload record for canvas (file analyzed via /api/data-chat/analyze-file) */
+/** Single upload record for canvas (file analyzed via /api/cohi-chat/analyze-file) */
 export interface CanvasUpload {
   id: string;
   filename: string;

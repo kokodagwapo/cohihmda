@@ -5,7 +5,7 @@
  * These documents are synced to all tenant databases.
  */
 
-import { Router } from "express";
+import { Router, Response } from "express";
 import { pool as managementPool } from "../../config/managementDatabase.js";
 import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { requireRole } from "../../middleware/rbac.js";
@@ -97,6 +97,379 @@ router.get(
     } catch (error: any) {
       console.error("Error fetching categories:", error);
       res.status(500).json({ error: "Failed to fetch categories" });
+    }
+  }
+);
+
+// =============================================================================
+// Export / Import (cross-environment migration)
+// =============================================================================
+
+// Zod schema for import payload validation
+const importDocumentSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  filename: z.string().nullable(),
+  file_type: z.string().nullable(),
+  file_size_bytes: z.number().nullable(),
+  content: z.string().nullable(),
+  category: z.string().min(1),
+  tags: z.array(z.string()),
+  source_url: z.string().nullable().optional(),
+  version: z.number().int().min(1),
+  status: z.enum(["draft", "published", "archived"]),
+  chunk_count: z.number().int(),
+  token_count: z.number().int(),
+  processing_status: z.enum(["pending", "processing", "completed", "error"]),
+  created_at: z.string(),
+  updated_at: z.string(),
+  published_at: z.string().nullable(),
+});
+
+const importEmbeddingSchema = z.object({
+  chunk_index: z.number().int(),
+  chunk_text: z.string(),
+  embedding: z.string(),
+  token_count: z.number().int(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const importPayloadSchema = z.object({
+  version: z.string(),
+  documents: z.array(
+    z.object({
+      document: importDocumentSchema,
+      embeddings: z.array(importEmbeddingSchema),
+    })
+  ),
+});
+
+/**
+ * GET /api/admin/global-knowledge/export
+ * Export all published global documents with their embeddings as JSON
+ */
+router.get(
+  "/export",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const statusFilter = (req.query.status as string) || "published";
+
+      let whereClause = "";
+      const params: string[] = [];
+
+      if (statusFilter !== "all") {
+        whereClause = "WHERE status = $1";
+        params.push(statusFilter);
+      }
+
+      // Fetch documents
+      const docsResult = await managementPool.query(
+        `SELECT id, title, filename, file_type, file_size_bytes, content, category, tags,
+                source_url, version, status, chunk_count, token_count, processing_status,
+                created_at, updated_at, published_at
+         FROM global_knowledge_library
+         ${whereClause}
+         ORDER BY created_at ASC`,
+        params
+      );
+
+      if (docsResult.rows.length === 0) {
+        return res.json({
+          version: "1.0",
+          exported_at: new Date().toISOString(),
+          document_count: 0,
+          total_embeddings: 0,
+          documents: [],
+        });
+      }
+
+      // Build export payload with embeddings
+      const documents = [];
+      let totalEmbeddings = 0;
+
+      for (const doc of docsResult.rows) {
+        const embResult = await managementPool.query(
+          `SELECT chunk_index, chunk_text, embedding::text, token_count, metadata
+           FROM global_knowledge_embeddings
+           WHERE document_id = $1
+           ORDER BY chunk_index`,
+          [doc.id]
+        );
+
+        documents.push({
+          document: {
+            id: doc.id,
+            title: doc.title,
+            filename: doc.filename,
+            file_type: doc.file_type,
+            file_size_bytes: doc.file_size_bytes,
+            content: doc.content,
+            category: doc.category,
+            tags: doc.tags || [],
+            source_url: doc.source_url || null,
+            version: doc.version,
+            status: doc.status,
+            chunk_count: doc.chunk_count,
+            token_count: doc.token_count,
+            processing_status: doc.processing_status,
+            created_at: doc.created_at,
+            updated_at: doc.updated_at,
+            published_at: doc.published_at,
+          },
+          embeddings: embResult.rows.map((e: any) => ({
+            chunk_index: e.chunk_index,
+            chunk_text: e.chunk_text,
+            embedding: e.embedding,
+            token_count: e.token_count,
+            metadata: e.metadata || {},
+          })),
+        });
+
+        totalEmbeddings += embResult.rows.length;
+      }
+
+      const exportPayload = {
+        version: "1.0",
+        exported_at: new Date().toISOString(),
+        document_count: documents.length,
+        total_embeddings: totalEmbeddings,
+        documents,
+      };
+
+      // Set headers for file download
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="knowledge-export-${
+          new Date().toISOString().split("T")[0]
+        }.json"`
+      );
+
+      await auditLog({
+        userId: req.userId,
+        userEmail: req.userEmail,
+        action: "export",
+        resource: "global_knowledge_library",
+        description: `Exported ${documents.length} global knowledge documents (${totalEmbeddings} embeddings)`,
+        status: "success",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.json(exportPayload);
+    } catch (error: any) {
+      console.error("[GlobalKnowledge] Error exporting documents:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to export documents", details: error.message });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/global-knowledge/import
+ * Import documents with their embeddings from an export JSON payload.
+ * Preserves original UUIDs for idempotency. Skips docs where the target
+ * already has the same or newer version. Optionally syncs published docs
+ * to all tenant databases.
+ */
+router.post(
+  "/import",
+  authenticateToken,
+  requirePlatformAdmin,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { data, syncTenants } = req.body;
+
+      if (!data || !data.documents) {
+        return res.status(400).json({ error: "Invalid import data format. Expected { data: { version, documents: [...] } }" });
+      }
+
+      // Validate payload structure
+      const parsed = importPayloadSchema.safeParse(data);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: "Invalid import payload structure",
+          details: parsed.error.errors.slice(0, 5),
+        });
+      }
+
+      const results = {
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        failed: 0,
+        synced: 0,
+        details: [] as Array<{
+          id: string;
+          title: string;
+          action: "created" | "updated" | "skipped" | "failed";
+          error?: string;
+        }>,
+      };
+
+      for (const entry of parsed.data.documents) {
+        const { document: doc, embeddings } = entry;
+
+        try {
+          // Check if document already exists
+          const existing = await managementPool.query(
+            `SELECT id, version, status FROM global_knowledge_library WHERE id = $1`,
+            [doc.id]
+          );
+
+          await managementPool.query("BEGIN");
+
+          if (existing.rows.length > 0) {
+            const existingDoc = existing.rows[0];
+
+            // Skip if target has same or newer version
+            if (existingDoc.version >= doc.version) {
+              await managementPool.query("ROLLBACK");
+              results.skipped++;
+              results.details.push({
+                id: doc.id,
+                title: doc.title,
+                action: "skipped",
+              });
+              continue;
+            }
+
+            // Update existing document
+            await managementPool.query(
+              `UPDATE global_knowledge_library
+               SET title = $1, filename = $2, file_type = $3, file_size_bytes = $4,
+                   content = $5, category = $6, tags = $7, source_url = $8,
+                   version = $9, status = $10, chunk_count = $11, token_count = $12,
+                   processing_status = $13, updated_by = $14, updated_at = NOW()
+               WHERE id = $15`,
+              [
+                doc.title, doc.filename, doc.file_type, doc.file_size_bytes,
+                doc.content, doc.category, doc.tags, doc.source_url || null,
+                doc.version, doc.status, doc.chunk_count, doc.token_count,
+                doc.processing_status, req.userId, doc.id,
+              ]
+            );
+
+            // Delete old embeddings
+            await managementPool.query(
+              `DELETE FROM global_knowledge_embeddings WHERE document_id = $1`,
+              [doc.id]
+            );
+
+            results.updated++;
+            results.details.push({
+              id: doc.id,
+              title: doc.title,
+              action: "updated",
+            });
+          } else {
+            // Insert new document preserving original UUID
+            await managementPool.query(
+              `INSERT INTO global_knowledge_library
+               (id, title, filename, file_type, file_size_bytes, content, category, tags,
+                source_url, version, status, chunk_count, token_count, processing_status,
+                published_at, created_by, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())`,
+              [
+                doc.id, doc.title, doc.filename, doc.file_type, doc.file_size_bytes,
+                doc.content, doc.category, doc.tags, doc.source_url || null,
+                doc.version, doc.status, doc.chunk_count, doc.token_count,
+                doc.processing_status, doc.published_at, req.userId, doc.created_at,
+              ]
+            );
+
+            results.created++;
+            results.details.push({
+              id: doc.id,
+              title: doc.title,
+              action: "created",
+            });
+          }
+
+          // Insert embeddings
+          for (const emb of embeddings) {
+            await managementPool.query(
+              `INSERT INTO global_knowledge_embeddings
+               (document_id, chunk_index, chunk_text, embedding, token_count, metadata)
+               VALUES ($1, $2, $3, $4::vector, $5, $6)
+               ON CONFLICT (document_id, chunk_index) DO UPDATE
+               SET chunk_text = EXCLUDED.chunk_text, embedding = EXCLUDED.embedding,
+                   token_count = EXCLUDED.token_count, metadata = EXCLUDED.metadata`,
+              [
+                doc.id, emb.chunk_index, emb.chunk_text,
+                emb.embedding, emb.token_count,
+                JSON.stringify(emb.metadata || {}),
+              ]
+            );
+          }
+
+          await managementPool.query("COMMIT");
+
+          // Sync to tenants if requested and doc is published
+          if (syncTenants && doc.status === "published") {
+            try {
+              await syncDocumentToAllTenants(doc.id, req.userId || null);
+              results.synced++;
+            } catch (syncErr: any) {
+              console.error(
+                `[GlobalKnowledge] Sync failed for "${doc.title}":`,
+                syncErr.message
+              );
+            }
+          }
+        } catch (error: any) {
+          try {
+            await managementPool.query("ROLLBACK");
+          } catch {}
+          results.failed++;
+          results.details.push({
+            id: doc.id,
+            title: doc.title,
+            action: "failed",
+            error: error.message,
+          });
+          console.error(
+            `[GlobalKnowledge] Import failed for "${doc.title}":`,
+            error.message
+          );
+        }
+      }
+
+      await auditLog({
+        userId: req.userId,
+        userEmail: req.userEmail,
+        action: "import",
+        resource: "global_knowledge_library",
+        description: `Imported global knowledge: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped, ${results.failed} failed`,
+        changes: {
+          created: results.created,
+          updated: results.updated,
+          skipped: results.skipped,
+          failed: results.failed,
+          synced: results.synced,
+        },
+        status: "success",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      });
+
+      res.json({
+        message: "Import complete",
+        results,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res
+          .status(400)
+          .json({ error: "Invalid import data", details: error.errors });
+      }
+      console.error("[GlobalKnowledge] Error importing documents:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to import documents", details: error.message });
     }
   }
 );

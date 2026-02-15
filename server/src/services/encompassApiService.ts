@@ -156,9 +156,7 @@ export class EncompassApiService {
 
     this.tenantPool = tenantPool;
 
-    console.log(
-      `[EncompassApiService] Initialized with API server: ${baseApiServer}`,
-    );
+    
   }
 
   private transformInstanceIdForUsername(instanceId: string): string {
@@ -198,11 +196,6 @@ export class EncompassApiService {
         const cachedToken = result.rows[0];
         const now = Date.now();
         if (cachedToken.expires_at > now) {
-          console.log(
-            `[EncompassApiService] Using cached token for ${cacheKey}, expires in ${Math.round(
-              (cachedToken.expires_at - now) / 1000,
-            )}s`,
-          );
           return cachedToken.token;
         } else {
           console.log(
@@ -244,9 +237,7 @@ export class EncompassApiService {
          DO UPDATE SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at, updated_at = NOW()`,
         [cacheKey, token, expiresAt],
       );
-      console.log(
-        `[EncompassApiService] Cached token for ${cacheKey}, expires in ${expiresInSeconds}s`,
-      );
+      
     } catch (error: any) {
       console.error(
         "[EncompassApiService] Error caching token:",
@@ -271,9 +262,7 @@ export class EncompassApiService {
         `DELETE FROM public.encompass_token_cache WHERE cache_key = $1`,
         [cacheKey],
       );
-      console.log(
-        `[EncompassApiService] Invalidated cached token for ${cacheKey}`,
-      );
+      
     } catch (error: any) {
       console.error(
         "[EncompassApiService] Error invalidating token:",
@@ -362,15 +351,6 @@ export class EncompassApiService {
     // Log metrics to PostgreSQL
     await this.logConcurrencyMetrics(metrics, losConnectionId);
 
-    // Log to console
-    console.log(
-      `[ENCOMPASS_CONCURRENCY] lender=${losConnectionId || "unknown"} ` +
-        `limit=${limit} remaining=${remaining} utilized=${utilized} ` +
-        `utilization=${(utilizationRatio * 100).toFixed(1)}% ` +
-        `threshold=${(this.MAX_CONCURRENCY_RATIO * 100).toFixed(1)}% ` +
-        `exceeded=${metrics.exceeded_threshold}`,
-    );
-
     // Throttle if threshold exceeded
     if (metrics.exceeded_threshold) {
       const waitTime = this.CONCURRENCY_POLL_INTERVAL;
@@ -399,37 +379,17 @@ export class EncompassApiService {
     losConnectionId: string,
     forceRefresh: boolean = false,
   ): Promise<string> {
-    console.log(
-      `[EncompassApiService] getEncompassAccessToken called with forceRefresh=${forceRefresh}`,
-    );
-
     const clientDetails = await getEncompassCredentials(
       tenantId,
       losConnectionId,
     );
 
-    console.log(`[EncompassApiService] Client details:`, {
-      instanceId: clientDetails.InstanceId,
-      extractionMethod: clientDetails.ExtractionMethod,
-      apiServer: clientDetails.ApiServer,
-      hasApiClientId: !!clientDetails.ApiClientId,
-      hasClientSecret: !!clientDetails.ClientSecret,
-    });
-
     // Check cache first unless force refresh
     if (!forceRefresh) {
       const cachedToken = await this.getCachedToken(clientDetails);
       if (cachedToken) {
-        console.log(`[EncompassApiService] Using cached token`);
         return cachedToken;
       }
-      console.log(
-        `[EncompassApiService] No valid cached token, fetching new token`,
-      );
-    } else {
-      console.log(
-        `[EncompassApiService] Skipping cache due to forceRefresh=true`,
-      );
     }
 
     const {
@@ -447,7 +407,7 @@ export class EncompassApiService {
     const apiServerBase = ApiServer || "https://api.elliemae.com";
     const tokenUrl = `${apiServerBase}/oauth2/v1/token`;
 
-    console.log(`[EncompassApiService] Using token URL: ${tokenUrl}`);
+    
     let instanceIdForToken = InstanceId;
     if (InstanceId && InstanceId.startsWith("30")) {
       instanceIdForToken = InstanceId.replace("30", "BE");
@@ -514,16 +474,7 @@ export class EncompassApiService {
         effectiveSAUsername = `${SAUsername}@encompass:${InstanceId}`;
       }
 
-      console.log("[EncompassApiService] ROPC/API credentials check:", {
-        instanceId: InstanceId,
-        saUsername: SAUsername ? `${SAUsername.substring(0, 3)}***` : "MISSING",
-        effectiveSAUsername: effectiveSAUsername
-          ? `${effectiveSAUsername.substring(0, 10)}***`
-          : "MISSING",
-        hasPassword: !!SAPassword,
-        hasApiClientId: !!ApiClientId,
-        hasClientSecret: !!ClientSecret,
-      });
+      
 
       const params = new URLSearchParams();
       params.append("grant_type", "password");
@@ -535,7 +486,7 @@ export class EncompassApiService {
       const requestHeaders = {
         "Content-Type": "application/x-www-form-urlencoded",
       };
-      console.log("[EncompassApiService] Fetching new ROPC/API Flow token");
+      
 
       try {
         const response = await axios.post<EncompassTokenResponse>(
@@ -826,12 +777,7 @@ export class EncompassApiService {
     );
 
     try {
-      console.log(`[EncompassApiService] Executing API operation with token`);
       const response = await operation(accessToken);
-
-      console.log(
-        `[EncompassApiService] API operation successful, checking concurrency...`,
-      );
 
       // Check concurrency headers and throttle if needed
       const concurrency = await this.checkConcurrencyAndThrottle(
@@ -839,27 +785,13 @@ export class EncompassApiService {
         losConnectionId,
       );
 
-      if (concurrency) {
-        console.log(`[EncompassApiService] Concurrency metrics:`, {
-          limit: concurrency.limit,
-          remaining: concurrency.remaining,
-          utilized: concurrency.utilized,
-          utilization_ratio: concurrency.utilization_ratio,
-          exceeded_threshold: concurrency.exceeded_threshold,
-        });
-      } else {
-        console.log(`[EncompassApiService] No concurrency headers in response`);
-      }
-
       return {
         data: response.data,
         concurrency: concurrency || undefined,
       };
     } catch (error: any) {
       if (axios.isAxiosError(error) && error.response?.status === 401) {
-        console.log(
-          `[EncompassApiService] Received 401, invalidating token and retrying with fresh token`,
-        );
+        console.warn(`[Sync] Token expired (401), refreshing...`);
         const clientDetails = await getEncompassCredentials(
           tenantId,
           losConnectionId,
@@ -1054,10 +986,6 @@ export class EncompassApiService {
       folderNames?: string[]; // Array of folder names to sync
     } = {},
   ): Promise<EncompassApiResponse<EncompassLoan[]>> {
-    console.log(
-      `[EncompassApiService] Fetching loans for connection: ${losConnectionId} using v1 pipeline`,
-    );
-
     // Get client details to retrieve API server URL
     const clientDetails = await getEncompassCredentials(
       tenantId,
@@ -1070,25 +998,12 @@ export class EncompassApiService {
       baseURL: `${apiServer}/encompass`,
     });
 
-    console.log(
-      `[EncompassApiService] Using API server: ${apiServer} for pipeline call`,
-    );
-
     // Build query parameters
     const params: any = {
       cursorType: "randomAccess", // Required for v1 pipeline
     };
     if (options.limit) {
       params.limit = options.limit;
-      console.log(
-        `[EncompassApiService] Using provided limit: ${options.limit}`,
-      );
-    } else {
-      // No default limit - fetch all loans matching the criteria
-      // The date filters (loanStartDate = 36 months ago) control the scope
-      console.log(
-        `[EncompassApiService] No limit provided - will fetch all matching loans`,
-      );
     }
 
     // Build field GUIDs array - only numeric field IDs get "Fields." prefix
@@ -1200,34 +1115,10 @@ export class EncompassApiService {
     // Convert body to JSON string
     const bodyJson = JSON.stringify(body);
 
-    // Log the request body for debugging (detailed comparison with Qlik)
-    console.log(`[EncompassApiService] ========== FILTER DEBUG ==========`);
+    // Log concise sync summary
     console.log(
-      `[EncompassApiService] Request body (full):`,
-      JSON.stringify(body, null, 2),
+      `[Sync] Pipeline request: ${fieldGuids.length} fields, modifiedFrom=${options.modifiedFrom?.toISOString() || "none"}, folders=${folderNames?.length || 0}, startDate=${loanStartDate.toISOString().split("T")[0]}`,
     );
-    console.log(`[EncompassApiService] Request params:`, params);
-    console.log(
-      `[EncompassApiService] Filter terms count: ${filterTerms.length}`,
-    );
-    filterTerms.forEach((term, idx) => {
-      console.log(
-        `[EncompassApiService] Filter term ${idx + 1}:`,
-        JSON.stringify(term, null, 2),
-      );
-    });
-    console.log(`[EncompassApiService] Options summary:`, {
-      modifiedFrom: options.modifiedFrom?.toISOString() || "none",
-      loanStartDate: loanStartDate.toISOString(),
-      loanStartDateField: loanStartDateField,
-      folderName: options.folderName, // Deprecated
-      folderNames: options.folderNames || [],
-      fieldsCount: fieldGuids.length,
-      dateRangeMonths: Math.round(
-        (Date.now() - loanStartDate.getTime()) / (1000 * 60 * 60 * 24 * 30),
-      ),
-    });
-    console.log(`[EncompassApiService] =================================`);
 
     // NOTE: v1 pipeline endpoint does NOT use instanceId in query params
     // The instanceId is only used for token generation, not for pipeline calls
@@ -1257,10 +1148,6 @@ export class EncompassApiService {
         if (totalCount === undefined || start < totalCount) {
           pageParams.start = start;
         } else {
-          // If start exceeds totalCount, don't make the request
-          console.log(
-            `[EncompassApiService] Page ${pageNumber} - Start (${start}) exceeds totalCount (${totalCount}), stopping pagination`,
-          );
           break;
         }
       } else {
@@ -1308,11 +1195,6 @@ export class EncompassApiService {
           params: pageParams, // Contains limit, cursorType, and cursor (if present)
         });
 
-        // Log response for debugging
-        console.log(
-          `[EncompassApiService] Page ${pageNumber} - Response status: ${response.status}`,
-        );
-
         // Check for x-total-count header (case-insensitive)
         const totalCountHeader =
           response.headers["x-total-count"] ||
@@ -1323,35 +1205,16 @@ export class EncompassApiService {
           response.headers["X-Cursor"] ||
           response.headers["X-CURSOR"];
 
-        console.log(
-          `[EncompassApiService] Page ${pageNumber} - Response headers:`,
-          {
-            "x-total-count": totalCountHeader || "NOT FOUND",
-            "x-cursor": cursorHeader || "NOT FOUND",
-            "all-headers": Object.keys(response.headers).filter(
-              (k) =>
-                k.toLowerCase().includes("total") ||
-                k.toLowerCase().includes("cursor"),
-            ),
-          },
-        );
-
         // Get total count from first page
         if (pageNumber === 1 && totalCountHeader) {
           totalCount = parseInt(totalCountHeader, 10);
-          if (!isNaN(totalCount)) {
-            console.log(
-              `[EncompassApiService] ✅ Total loans available (x-total-count): ${totalCount}`,
-            );
-          } else {
+          if (isNaN(totalCount)) {
             console.warn(
-              `[EncompassApiService] ⚠️ x-total-count header found but not a valid number: "${totalCountHeader}"`,
+              `[Sync] Invalid x-total-count header: "${totalCountHeader}"`,
             );
           }
         } else if (pageNumber === 1) {
-          console.warn(
-            `[EncompassApiService] ⚠️ x-total-count header NOT FOUND in first page response`,
-          );
+          console.warn(`[Sync] x-total-count header not found in response`);
         }
 
         // Get cursor for next page (case-insensitive)
@@ -1377,26 +1240,7 @@ export class EncompassApiService {
         }
       }
 
-      // Log sample GUIDs from this page for debugging
-      if (pageLoans.length > 0) {
-        const sampleGuids = pageLoans.slice(0, 3).map((loan) => {
-          const guid =
-            loan["Fields.GUID"] || loan["GUID"] || loan.loanGuid || loan.guid;
-          return guid || "NO_GUID";
-        });
-        console.log(
-          `[EncompassApiService] Page ${pageNumber} - Sample GUIDs:`,
-          sampleGuids,
-        );
-      }
-
-      const beforePushLength = allLoans.length;
       allLoans.push(...pageLoans);
-      const afterPushLength = allLoans.length;
-
-      console.log(
-        `[EncompassApiService] Page ${pageNumber} - Fetched ${pageLoans.length} loans (${newUniqueGuids} new unique), pushed to array (${beforePushLength} -> ${afterPushLength}), unique GUIDs: ${uniqueLoanGuids.size}${totalCount ? ` / ${totalCount}` : ""}`,
-      );
 
       // Stop pagination if:
       // 1. No cursor (API indicates no more pages)
@@ -1434,28 +1278,14 @@ export class EncompassApiService {
         }
       }
 
-      console.log(
-        `[EncompassApiService] Page ${pageNumber} - Cursor: ${cursor || "NONE"}, Start: ${start}, Loans this page: ${pageLoans.length}, Unique GUIDs: ${uniqueLoanGuids.size}${totalCount ? ` / ${totalCount}` : ""}, Will continue: ${shouldContinue}${isStuck ? " (STUCK - no new GUIDs)" : ""}`,
-      );
-
       if (!shouldContinue) {
-        const reason = !cursor
-          ? "no cursor"
-          : pageLoans.length === 0
-            ? "empty page"
-            : hasReachedLimit
-              ? `reached limit (${totalLimit})`
-              : hasFetchedAll
-                ? "fetched all unique loans"
-                : isStuck
-                  ? "stuck - no new unique GUIDs"
-                  : "unknown";
-        console.log(
-          `[EncompassApiService] Stopping pagination - Reason: ${reason}, total fetched: ${allLoans.length}, unique GUIDs: ${uniqueLoanGuids.size}${totalCount ? ` (expected: ${totalCount})` : ""}${totalLimit ? ` (limit: ${totalLimit})` : ""}`,
-        );
         break;
       }
     } while (cursor);
+
+    console.log(
+      `[Sync] Fetched ${allLoans.length} loans in ${pageNumber} page(s)${totalCount ? ` (${totalCount} available)` : ""}`,
+    );
 
     // Deduplicate loans by GUID to catch any API bugs
     const uniqueLoansMap = new Map<string, EncompassLoan>();
@@ -1508,29 +1338,14 @@ export class EncompassApiService {
 
     // Apply limit if specified (slice to exact limit after deduplication)
     if (totalLimit !== undefined && uniqueLoans.length > totalLimit) {
-      console.log(
-        `[EncompassApiService] Limiting results from ${uniqueLoans.length} to ${totalLimit} loans`,
-      );
       uniqueLoans = uniqueLoans.slice(0, totalLimit);
     }
 
-    // Log duplicate analysis
-    const duplicates = Array.from(guidCounts.entries()).filter(
-      ([_, count]) => count > 1,
-    );
-    if (duplicates.length > 0) {
+    if (uniqueLoans.length !== allLoans.length) {
       console.warn(
-        `[EncompassApiService] Found ${duplicates.length} duplicate GUIDs (appearing ${duplicates.map(([guid, count]) => `${count}x`).join(", ")})`,
-      );
-      console.warn(
-        `[EncompassApiService] Sample duplicate GUIDs:`,
-        duplicates.slice(0, 5).map(([guid]) => guid),
+        `[Sync] Deduplicated: ${allLoans.length} -> ${uniqueLoans.length} loans`,
       );
     }
-
-    console.log(
-      `[EncompassApiService] Completed pagination - Total loans fetched: ${allLoans.length}, Unique loans: ${uniqueLoans.length}${totalCount ? ` (expected: ${totalCount})` : ""}${totalLimit ? ` (limit: ${totalLimit})` : ""}`,
-    );
 
     return {
       data: uniqueLoans,

@@ -7,7 +7,6 @@
 import pg from "pg";
 import { pool as managementPool } from "./managementDatabase.js";
 import { decryptField } from "../services/encryption.js";
-import { createTenantDatabaseSchema } from "./tenantDatabaseSchema.js";
 
 const { Pool } = pg;
 
@@ -27,7 +26,6 @@ export interface TenantDatabaseConfig {
 interface CachedPool {
   pool: pg.Pool;
   lastAccessed: number;
-  schemaEnsured: boolean;
   failureCount: number;
 }
 
@@ -128,6 +126,7 @@ class TenantDatabaseManager {
    * Get or create tenant database pool
    * Accepts either tenant UUID or slug
    * Validates connection health and auto-recovers from stale pools
+   * Note: Schema migrations are NOT run here. Run `npm run migrate:all` as part of deployments.
    */
   async getTenantPool(tenantIdOrSlug: string): Promise<pg.Pool> {
     // Get tenant config first to get the actual tenant ID
@@ -163,12 +162,6 @@ class TenantDatabaseManager {
         // Reset failure count on success
         cached.failureCount = 0;
         cached.lastAccessed = Date.now();
-
-        // Ensure schema is applied (only once per pool lifecycle)
-        if (!cached.schemaEnsured) {
-          await this.ensureSchema(cached.pool, tenantId);
-          cached.schemaEnsured = true;
-        }
 
         // Ensure pool is tagged for per-tenant caches (e.g. pools created before this fix)
         const poolWithKey = cached.pool as pg.Pool & { _connectionKey?: string };
@@ -254,14 +247,10 @@ class TenantDatabaseManager {
       );
     }
 
-    // Ensure schema is up to date (creates tables if missing)
-    await this.ensureSchema(pool, tenantId);
-
     // Cache pool
     this.tenantPools.set(tenantId, {
       pool,
       lastAccessed: Date.now(),
-      schemaEnsured: true,
       failureCount: 0,
     });
 
@@ -328,25 +317,6 @@ class TenantDatabaseManager {
       }
       this.tenantPools.delete(tenantId);
       console.log(`[TenantDB] Evicted pool for tenant ${tenantId}`);
-    }
-  }
-
-  /**
-   * Ensure tenant database schema is up to date
-   * This runs the CREATE TABLE IF NOT EXISTS statements to add any missing tables
-   */
-  private async ensureSchema(pool: pg.Pool, tenantId: string): Promise<void> {
-    try {
-      console.log(`[TenantDB] Ensuring schema for tenant ${tenantId}...`);
-      await createTenantDatabaseSchema(pool);
-      console.log(`[TenantDB] Schema ensured for tenant ${tenantId}`);
-    } catch (error: any) {
-      console.error(
-        `[TenantDB] Error ensuring schema for tenant ${tenantId}:`,
-        error.message
-      );
-      // Don't throw - we still want to return the pool even if schema update fails
-      // The schema updates use IF NOT EXISTS so failures usually mean partial success
     }
   }
 
@@ -468,20 +438,17 @@ if (typeof setInterval !== "undefined") {
     });
   }, 5 * 60 * 1000); // 5 minutes
 
-  // Log pool stats every 10 minutes for debugging
+  // Log pool stats every 30 minutes (only if issues detected)
   setInterval(() => {
     const stats = tenantDbManager.getPoolStats();
-    if (stats.length > 0) {
-      console.log(`[TenantDB] Pool stats: ${stats.length} pools cached`);
-      stats.forEach((s) => {
-        if (s.failureCount > 0 || s.age > 10 * 60 * 1000) {
-          console.log(
-            `  - ${s.tenantId}: age=${Math.round(s.age / 1000)}s, failures=${
-              s.failureCount
-            }`
-          );
-        }
+    const problemPools = stats.filter((s) => s.failureCount > 0);
+    if (problemPools.length > 0) {
+      console.warn(`[TenantDB] ${problemPools.length} pool(s) with failures`);
+      problemPools.forEach((s) => {
+        console.warn(
+          `  - ${s.tenantId}: failures=${s.failureCount}`
+        );
       });
     }
-  }, 10 * 60 * 1000); // 10 minutes
+  }, 30 * 60 * 1000); // 30 minutes
 }

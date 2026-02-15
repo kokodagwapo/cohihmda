@@ -1463,14 +1463,6 @@ const Dashboard = () => {
        }} />
        */}
 
-        {/* Floating Data Chat Button - Links to full page */}
-        {/* <Link
-        to="/data-chat"
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all hover:scale-105 group"
-      >
-        <Sparkles className="w-5 h-5" />
-        <span className="font-medium">Ask about your data</span>
-      </Link> */}
       </DashboardLayout>
     </DashboardContainer>
   );

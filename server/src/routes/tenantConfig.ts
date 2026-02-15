@@ -1999,26 +1999,7 @@ router.put(
           .json({ error: "At least one formula component is required" });
       }
 
-      // Ensure table exists (for tenants that were created before this feature)
-      await tenantPool.query(`
-      CREATE TABLE IF NOT EXISTS public.tenant_calculations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        calculation_type VARCHAR(50) NOT NULL DEFAULT 'revenue',
-        name VARCHAR(100) NOT NULL,
-        description TEXT,
-        formula_components JSONB NOT NULL DEFAULT '[]',
-        sql_expression TEXT,
-        is_active BOOLEAN DEFAULT TRUE,
-        is_validated BOOLEAN DEFAULT FALSE,
-        last_validated_at TIMESTAMPTZ,
-        validation_result TEXT,
-        created_by UUID REFERENCES public.users(id),
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_by UUID REFERENCES public.users(id),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(calculation_type, name)
-      )
-    `);
+      // Table created by migration 036_tenant_calculations.sql
 
       // Deactivate any existing active formulas of this type
       await tenantPool.query(

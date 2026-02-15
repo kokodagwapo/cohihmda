@@ -1,12 +1,15 @@
 /**
  * User Preferences API Routes
- * Handles user preference storage and retrieval
- * Migrated from Supabase database queries
+ * Handles user preference storage and retrieval, and password change.
  */
 
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
 import { pool, retryQuery, isDatabaseConnectionError, handleDatabaseError } from '../config/database.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { auditLog } from '../services/auditLogger.js';
+import { logError, logInfo } from '../services/logger.js';
 
 const router = Router();
 
@@ -261,6 +264,151 @@ router.put('/profile', authenticateToken, async (req: AuthRequest, res) => {
     }
     
     res.status(500).json({ error: 'Failed to update user profile' });
+  }
+});
+
+// =============================================================================
+// PASSWORD CHANGE (authenticated users only)
+// =============================================================================
+
+const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+/**
+ * PUT /api/user/password
+ * Change the authenticated user's password.
+ * Only available for password-based auth (rejected for SSO-only users).
+ */
+router.put('/password', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId;
+    const isSuperAdmin = req.isSuperAdmin;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Reject if authenticated via SSO (JWT has authMethod field set by cognitoAuth.ts)
+    const authHeader = req.headers['authorization'];
+    const token = authHeader?.split(' ')[1];
+    if (token) {
+      try {
+        const jwt = await import('jsonwebtoken');
+        const decoded = jwt.default.decode(token) as any;
+        if (decoded?.authMethod === 'cognito_sso') {
+          return res.status(403).json({
+            error: 'Password change is not available for SSO users. Your password is managed by your identity provider.',
+          });
+        }
+      } catch {
+        // Ignore decode errors -- proceed with password change
+      }
+    }
+
+    const { currentPassword, newPassword } = passwordChangeSchema.parse(req.body);
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'New password must be different from current password' });
+    }
+
+    let updated = false;
+
+    if (isSuperAdmin) {
+      // Super admin -- update in management database
+      const { pool: managementPool } = await import('../config/managementDatabase.js');
+      if (!managementPool) {
+        return res.status(500).json({ error: 'Management database not available' });
+      }
+
+      const userResult = await managementPool.query(
+        `SELECT encrypted_password FROM coheus_users WHERE id = $1 AND is_active = true`,
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, userResult.rows[0].encrypted_password);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      await managementPool.query(
+        `UPDATE coheus_users 
+         SET encrypted_password = $1, password_changed_at = NOW(), failed_login_attempts = 0, locked_until = NULL
+         WHERE id = $2`,
+        [hashedPassword, userId]
+      );
+      updated = true;
+    } else {
+      // Tenant user -- update in tenant database
+      const userResult = await retryQuery(
+        () => pool.query(
+          `SELECT encrypted_password FROM public.users WHERE id = $1 AND is_active = true`,
+          [userId]
+        ),
+        3,
+        1000
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, userResult.rows[0].encrypted_password);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      await retryQuery(
+        () => pool.query(
+          `UPDATE public.users 
+           SET encrypted_password = $1, failed_login_attempts = 0, locked_until = NULL
+           WHERE id = $2`,
+          [hashedPassword, userId]
+        ),
+        3,
+        1000
+      );
+      updated = true;
+    }
+
+    if (updated) {
+      // Audit log
+      await auditLog({
+        userId,
+        userEmail: req.userEmail || null,
+        userRole: req.userRole || null,
+        tenantId: req.tenantId || null,
+        action: 'password_change',
+        resource: 'auth',
+        description: 'User changed their password',
+        status: 'success',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      }).catch(() => {});
+
+      logInfo('[UserPrefs] Password changed', { userId, isSuperAdmin });
+      return res.json({ success: true, message: 'Password changed successfully' });
+    }
+
+    return res.status(500).json({ error: 'Failed to update password' });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    logError('[UserPrefs] Password change error', error, { userId: req.userId });
+    
+    if (handleDatabaseError(error, res, 'Failed to change password')) {
+      return;
+    }
+    
+    return res.status(500).json({ error: 'Failed to change password' });
   }
 });
 

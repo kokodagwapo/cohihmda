@@ -5,7 +5,6 @@
 
 import pg from "pg";
 import { pool as managementPool } from "../config/managementDatabase.js";
-import { createTenantDatabaseSchema } from "../config/tenantDatabaseSchema.js";
 import { encryptField, decryptField } from "./encryption.js";
 import { MigrationRunner, getMigrationsDir } from "../migrations/runner.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
@@ -129,10 +128,8 @@ export async function createTenant(
     });
 
     try {
-      // Step 1: Create base schema
-      await createTenantDatabaseSchema(tenantPool);
-
-      // Step 2: Run tenant migrations to apply any additional schema changes
+      // Run all tenant migrations to create the full schema from scratch.
+      // Migrations are the single source of truth for the database schema.
       console.log(
         `[TenantProvisioning] Running tenant migrations for ${databaseName}...`,
       );

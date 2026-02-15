@@ -88,9 +88,9 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
       return res.status(400).json({ error: 'Question is required' });
     }
 
-    // Check section access (using data_chat for backwards compatibility)
+    // Check section access
     const queryContext = buildQueryContext(req);
-    const hasAccess = await checkSectionAccess('data_chat', queryContext);
+    const hasAccess = await checkSectionAccess('cohi_chat', queryContext);
     
     if (!hasAccess) {
       return res.status(403).json({ 

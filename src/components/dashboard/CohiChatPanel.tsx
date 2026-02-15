@@ -220,7 +220,7 @@ function formatInsightValue(value: number): string {
 // Types
 // ============================================================================
 
-interface DataChatPanelProps {
+interface CohiChatPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onOpen?: () => void;
@@ -783,7 +783,7 @@ const MiniSparkline: React.FC<{ data: number[]; color: string }> = ({
 // Main Component
 // ============================================================================
 
-export const DataChatPanel: React.FC<DataChatPanelProps> = ({
+export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   isOpen,
   onClose,
   onOpen,
@@ -1192,7 +1192,7 @@ export const DataChatPanel: React.FC<DataChatPanelProps> = ({
           input.trim() || `Analyze this ${uploadedFile.name}`
         );
 
-        const response = await fetch("/api/data-chat/analyze-file", {
+        const response = await fetch("/api/cohi-chat/analyze-file", {
           method: "POST",
           body: formData,
         });
@@ -3204,4 +3204,4 @@ const EnhancedChatMessageBubble: React.FC<EnhancedChatMessageBubbleProps> = ({
   );
 };
 
-export default DataChatPanel;
+export default CohiChatPanel;

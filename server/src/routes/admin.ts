@@ -2364,9 +2364,11 @@ router.post(
       const tenantId = tenant_id as string;
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
-      // Verify connection exists
+      // Get full connection details (need sync state for incremental sync)
       const connResult = await tenantPool.query(
-        "SELECT id, los_type, connection_method FROM public.los_connections WHERE id = $1",
+        `SELECT id, los_type, connection_method, last_synced_at, last_loan_modified_at,
+                encompass_selected_folders
+         FROM public.los_connections WHERE id = $1`,
         [connectionId]
       );
 
@@ -2383,9 +2385,77 @@ router.post(
         );
         const etlService = new EncompassEtlService(tenantPool);
 
+        // Determine modifiedFrom for incremental sync (same logic as manual sync in los.ts)
+        let modifiedFrom: Date | undefined;
+        const lastLoanModifiedAt = conn.last_loan_modified_at;
+        const lastSyncedAt = conn.last_synced_at;
+
+        // Check if there are existing loans
+        let loansCount = 0;
+        try {
+          const countResult = await tenantPool.query(
+            "SELECT COUNT(*) as count FROM public.loans"
+          );
+          loansCount = parseInt(countResult.rows[0]?.count || "0", 10);
+        } catch {
+          // loans table may not exist
+        }
+
+        if (lastLoanModifiedAt && loansCount > 0) {
+          // Best case: use last_loan_modified_at from a previous successful sync
+          modifiedFrom = new Date(lastLoanModifiedAt);
+        } else if (loansCount > 0) {
+          // Fallback: query MAX(last_modified_date) directly from loans table.
+          // This handles the case where a previous sync was interrupted before
+          // last_loan_modified_at could be written, but loans were already loaded.
+          try {
+            const maxResult = await tenantPool.query(
+              `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
+            );
+            if (maxResult.rows[0]?.max_modified) {
+              modifiedFrom = new Date(maxResult.rows[0].max_modified);
+            }
+          } catch {
+            // will do full sync
+          }
+        }
+        // If no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
+
+        // Set loanStartDate to 36 months ago (matching Qlik's vLoanStartDate)
+        const threeYearsAgo = new Date();
+        threeYearsAgo.setMonth(threeYearsAgo.getMonth() - 36);
+        threeYearsAgo.setDate(1);
+        threeYearsAgo.setHours(0, 0, 0, 0);
+
+        // Parse selected folders
+        let selectedFolders: string[] = [];
+        if (conn.encompass_selected_folders) {
+          try {
+            selectedFolders = typeof conn.encompass_selected_folders === "string"
+              ? JSON.parse(conn.encompass_selected_folders)
+              : conn.encompass_selected_folders;
+          } catch {
+            selectedFolders = [];
+          }
+        }
+
+        logInfo("Admin trigger sync", {
+          connectionId,
+          tenantId,
+          modifiedFrom: modifiedFrom?.toISOString() || "full sync",
+          loansCount,
+          folders: selectedFolders.length,
+        });
+
         // Run sync asynchronously
         etlService
-          .syncLoans(tenantId, connectionId, { fullSync: false })
+          .syncLoans(tenantId, connectionId, {
+            fullSync: false,
+            modifiedFrom,
+            loanStartDate: threeYearsAgo,
+            loanStartDateField: "Fields.Log.MS.Date.Started",
+            folderNames: selectedFolders.length > 0 ? selectedFolders : undefined,
+          })
           .catch((error) => {
             logError("Background sync error (admin trigger)", error, {
               userId: req.userId,
@@ -2396,7 +2466,9 @@ router.post(
 
         return res.json({
           success: true,
-          message: "Encompass sync started",
+          message: modifiedFrom
+            ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
+            : "Full sync started (no previous sync data)",
         });
       } else if (conn.connection_method === "api") {
         const { syncLoansFromAPI } = await import(
@@ -2424,6 +2496,53 @@ router.post(
         connectionId: req.params.connectionId,
       });
       return res.status(500).json({ error: "Failed to trigger sync" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/sync-management/:connectionId/history
+ * Get sync history for a specific connection
+ */
+router.get(
+  "/sync-management/:connectionId/history",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const tenantId = req.query.tenant_id as string;
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+
+      if (!tenantId) {
+        return res.status(400).json({ error: "tenant_id query parameter is required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      const result = await tenantPool.query(
+        `SELECT id, los_connection_id, sync_type, status,
+                loans_added, loans_updated, loans_failed,
+                total_loans_after, modified_from, duration_ms,
+                error_message, started_at, completed_at
+         FROM public.los_sync_history
+         WHERE los_connection_id = $1
+         ORDER BY started_at DESC
+         LIMIT $2`,
+        [connectionId, limit]
+      );
+
+      return res.json({ history: result.rows });
+    } catch (error: any) {
+      // Table may not exist yet for older tenants
+      if (error.code === "42P01") {
+        return res.json({ history: [] });
+      }
+      logError("Error fetching sync history", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res.status(500).json({ error: "Failed to fetch sync history" });
     }
   }
 );

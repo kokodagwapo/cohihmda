@@ -441,6 +441,3 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     newSession,
   };
 }
-
-// Export with alias for backwards compatibility
-export { useCohiChat as useDataChat };

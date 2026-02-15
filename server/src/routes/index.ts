@@ -21,7 +21,6 @@ import awsHostingRoutes from "./aws-hosting.js";
 import encompassRoutes from "./encompass.js";
 import tenantRoutes from "./tenants.js";
 import tenantConfigRoutes from "./tenantConfig.js";
-import dataChatRoutes from "./dataChat.js";
 import cohiChatRoutes from "./cohiChat.js";
 import cohiWorkbenchRoutes from "./cohiWorkbench.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
@@ -77,8 +76,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/encompass", encompassRoutes);
   app.use("/api/tenants", tenantRoutes);
   app.use("/api/tenant-config", tenantConfigRoutes);
-  app.use("/api/data-chat", dataChatRoutes); // Legacy route - kept for backwards compatibility
-  app.use("/api/cohi-chat", cohiChatRoutes); // New hybrid chat service
+  app.use("/api/cohi-chat", cohiChatRoutes); // Cohi Chat service
   app.use("/api/cohi-chat/workbench", cohiWorkbenchRoutes); // Workbench AI assistant
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);

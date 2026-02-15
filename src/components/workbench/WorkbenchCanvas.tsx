@@ -1508,7 +1508,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         const formData = new FormData();
         formData.append('file', file);
         formData.append('question', 'Analyze this file');
-        const response = await fetch('/api/data-chat/analyze-file', {
+        const response = await fetch('/api/cohi-chat/analyze-file', {
           method: 'POST',
           body: formData,
         });
