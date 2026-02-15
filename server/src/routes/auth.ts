@@ -730,11 +730,60 @@ const passwordResetConfirmSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters"),
 });
 
-// In-memory store for reset tokens (use Redis in production)
-const resetTokens = new Map<
-  string,
-  { email: string; tenantSlug?: string; expiresAt: number }
->();
+/**
+ * Store a password reset token in the management database.
+ * The raw token is never stored -- only its SHA-256 hash.
+ */
+async function storeResetToken(
+  token: string,
+  email: string,
+  tenantSlug?: string
+): Promise<void> {
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  const mgmtPool = getManagementPool();
+  await mgmtPool.query(
+    `INSERT INTO password_reset_tokens (email, token_hash, tenant_slug, expires_at)
+     VALUES ($1, $2, $3, $4)`,
+    [email, tokenHash, tenantSlug || null, expiresAt]
+  );
+
+  // Cleanup expired tokens (non-blocking)
+  mgmtPool
+    .query(
+      `DELETE FROM password_reset_tokens WHERE expires_at < NOW() - INTERVAL '24 hours'`
+    )
+    .catch(() => {});
+}
+
+/**
+ * Look up and consume a password reset token.
+ * Returns the associated data if valid, null otherwise.
+ */
+async function consumeResetToken(
+  token: string
+): Promise<{ email: string; tenantSlug: string | null } | null> {
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const mgmtPool = getManagementPool();
+
+  const result = await mgmtPool.query(
+    `UPDATE password_reset_tokens
+     SET used_at = NOW()
+     WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+     RETURNING email, tenant_slug`,
+    [tokenHash]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return {
+    email: result.rows[0].email,
+    tenantSlug: result.rows[0].tenant_slug,
+  };
+}
 
 /**
  * Request Password Reset
@@ -775,18 +824,18 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       });
     }
 
-    // Generate reset token
+    // Generate reset token and store in database
     const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
 
-    resetTokens.set(token, {
-      email: user.email,
-      tenantSlug: foundTenantSlug,
-      expiresAt,
-    });
+    try {
+      await storeResetToken(token, user.email, foundTenantSlug);
+    } catch (storeError: any) {
+      logError("[Auth] Failed to store reset token", storeError, { email });
+      return res.status(500).json({ error: "Internal server error" });
+    }
 
     // Send reset email
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:5173").split(",")[0].trim();
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {
@@ -826,9 +875,9 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
   try {
     const { token, newPassword } = passwordResetConfirmSchema.parse(req.body);
 
-    // Validate token
-    const resetData = resetTokens.get(token);
-    if (!resetData || resetData.expiresAt < Date.now()) {
+    // Validate and consume token (atomic -- marks as used in the same query)
+    const resetData = await consumeResetToken(token);
+    if (!resetData) {
       return res.status(400).json({ error: "Invalid or expired reset token" });
     }
 
@@ -872,9 +921,6 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
         .status(400)
         .json({ error: "Failed to update password. Please try again." });
     }
-
-    // Remove used token
-    resetTokens.delete(token);
 
     // Audit log
     await auditLog({

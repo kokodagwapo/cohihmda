@@ -66,7 +66,7 @@ import { useAdminTenant } from '@/contexts/AdminTenantContext';
 /**
  * SSO Provider types supported
  */
-type SSOProvider = 'saml' | 'oidc' | 'azure_ad' | 'okta' | 'google' | 'coheus_bridge';
+type SSOProvider = 'saml' | 'oidc' | 'azure_ad' | 'cyberark' | 'okta' | 'google' | 'coheus_bridge';
 
 /**
  * SSO Configuration interface
@@ -137,31 +137,44 @@ interface SSOLoginEntry {
 }
 
 // Provider display info
-const PROVIDERS = {
-  saml: { name: 'SAML 2.0', icon: Shield, color: 'text-blue-500' },
-  oidc: { name: 'OpenID Connect', icon: Key, color: 'text-purple-500' },
-  azure_ad: { name: 'Azure AD', icon: Shield, color: 'text-sky-500' },
+const PROVIDERS: Record<SSOProvider, { name: string; icon: any; color: string; description?: string }> = {
+  azure_ad: { name: 'Microsoft Entra ID', icon: Shield, color: 'text-sky-500', description: 'Recommended for organizations using Microsoft 365 / Entra ID (formerly Azure AD)' },
+  cyberark: { name: 'CyberArk Identity', icon: Shield, color: 'text-teal-500', description: 'For organizations using CyberArk Identity (Idaptive) as their IdP' },
+  saml: { name: 'SAML 2.0 (Generic)', icon: Shield, color: 'text-blue-500', description: 'Standard SAML 2.0 — use if your IdP is not listed above' },
+  oidc: { name: 'OpenID Connect', icon: Key, color: 'text-purple-500', description: 'Standard OIDC — for IdPs that support OpenID Connect' },
   okta: { name: 'Okta', icon: Shield, color: 'text-indigo-500' },
   google: { name: 'Google Workspace', icon: Shield, color: 'text-red-500' },
-  coheus_bridge: { name: 'Coheus Bridge', icon: Link2, color: 'text-orange-500', description: 'SSO via existing Coheus Qlik Sense session' }
+  coheus_bridge: { name: 'Coheus Bridge', icon: Link2, color: 'text-orange-500', description: 'SSO via existing Coheus Qlik Sense session (legacy migration only)' }
 };
 
-// Default attribute names for common IdPs
+// Default SAML/OIDC attribute claim URIs for common IdPs
+// These map the IdP's outgoing claim names to Cognito user pool attributes
 const DEFAULT_ATTRIBUTE_NAMES: Record<SSOProvider, AttributeMapping> = {
+  azure_ad: {
+    // Microsoft Entra ID uses standard WS-Fed / SAML 2.0 claim URIs
+    email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
+    first_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
+    last_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
+    full_name: 'http://schemas.microsoft.com/identity/claims/displayname',
+  },
+  cyberark: {
+    // CyberArk Identity sends short attribute names by default (configurable per-app)
+    email: 'LoginName',
+    first_name: 'FirstName',
+    last_name: 'LastName',
+    full_name: 'DisplayName',
+  },
   saml: {
+    // Generic SAML 2.0 — uses standard WS-Identity claim URIs
     email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
     first_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
     last_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
   },
   oidc: {
+    // Standard OIDC claim names
     email: 'email',
     first_name: 'given_name',
     last_name: 'family_name',
-  },
-  azure_ad: {
-    email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
-    first_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
-    last_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
   },
   okta: {
     email: 'email',
@@ -346,7 +359,7 @@ export function SSOConfigSection() {
       };
       
       // Add SAML config
-      if (provider === 'saml' || provider === 'azure_ad' || provider === 'okta') {
+      if (provider === 'saml' || provider === 'azure_ad' || provider === 'cyberark' || provider === 'okta') {
         if (idpMetadataUrl) {
           payload.metadata_url = idpMetadataUrl;
         } else if (idpMetadataXml) {
@@ -746,7 +759,7 @@ export function SSOConfigSection() {
               )}
 
               {/* SAML Configuration */}
-              {(provider === 'saml' || provider === 'azure_ad' || provider === 'okta') && (
+              {(provider === 'saml' || provider === 'azure_ad' || provider === 'cyberark' || provider === 'okta') && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label>IdP Metadata</Label>

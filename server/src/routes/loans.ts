@@ -678,8 +678,8 @@ router.get(
       const sortDirection = sort_order === "asc" ? "ASC" : "DESC";
 
       // Execute main query - select only the columns needed for list views
-      // Note: raw_data column has been removed from the schema
-      // Only select columns that exist in the tenant schema (from tenantDatabaseSchema.ts)
+      // Note: raw_data column has been removed from the schema (migration 009)
+      // Only select columns that exist in the tenant schema (see migrations/tenant/)
       const query = `
       SELECT 
         loan_id, loan_number, loan_amount, interest_rate,
@@ -7123,7 +7123,7 @@ router.post(
           : null;
 
       // Fetch ONLY active loans with essential columns for processing
-      // Column names from tenantDatabaseSchema.ts
+      // Column names from tenant migrations (see migrations/tenant/)
       // Use EXACT same criteria as metricsService.ts active_loans definition:
       //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
       const activeLoansQuery = `

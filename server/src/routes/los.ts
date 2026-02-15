@@ -801,73 +801,8 @@ router.post(
         });
       }
 
-      // Ensure los_connections table exists (create schema if needed)
-      try {
-        // Check if table exists first
-        const tableCheck = await tenantPool.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'los_connections'
-        )
-      `);
-
-        if (!tableCheck.rows[0]?.exists) {
-          logInfo("Creating los_connections table for tenant", { tenantId });
-          const { createTenantDatabaseSchema } = await import(
-            "../config/tenantDatabaseSchema.js"
-          );
-          await createTenantDatabaseSchema(tenantPool);
-        } else {
-          // Table exists, check if encompass_api_server column exists and add it if missing
-          const columnCheck = await tenantPool.query(`
-          SELECT EXISTS (
-            SELECT FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = 'los_connections'
-            AND column_name = 'encompass_api_server'
-          )
-        `);
-
-          if (!columnCheck.rows[0]?.exists) {
-            logInfo(
-              "Adding encompass_api_server column to los_connections table",
-              { tenantId }
-            );
-            await tenantPool.query(`
-            ALTER TABLE public.los_connections 
-            ADD COLUMN IF NOT EXISTS encompass_api_server TEXT DEFAULT 'https://api.elliemae.com'
-          `);
-          }
-
-          // Check if encompass_selected_folders column exists and add it if missing
-          const foldersColumnCheck = await tenantPool.query(`
-          SELECT EXISTS (
-            SELECT FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = 'los_connections'
-            AND column_name = 'encompass_selected_folders'
-          )
-        `);
-
-          if (!foldersColumnCheck.rows[0]?.exists) {
-            logInfo(
-              "Adding encompass_selected_folders column to los_connections table",
-              { tenantId }
-            );
-            await tenantPool.query(`
-            ALTER TABLE public.los_connections 
-            ADD COLUMN IF NOT EXISTS encompass_selected_folders JSONB DEFAULT '[]'::jsonb
-          `);
-          }
-        }
-      } catch (schemaError: any) {
-        logError("Error ensuring tenant schema exists", schemaError, {
-          tenantId,
-          error: schemaError.message,
-        });
-        // Continue anyway - table might already exist
-      }
+      // Note: Schema is managed by migrations (npm run migrate:all).
+      // If los_connections table is missing, run tenant migrations first.
 
       // Encrypt sensitive fields
       const encryptedFields: any = {};
@@ -1780,11 +1715,11 @@ router.post(
         } else if (
           !fullSync &&
           !lastLoanModifiedAt &&
-          lastSyncedAt &&
           loansCount > 0
         ) {
-          // Fallback: if we don't have last_loan_modified_at but have last_synced_at and loans,
-          // query the database directly for MAX(last_modified_date)
+          // Fallback: if we don't have last_loan_modified_at but have loans in the DB,
+          // query the database directly for MAX(last_modified_date).
+          // This handles interrupted syncs where last_loan_modified_at was never written.
           try {
             const maxModifiedResult = await tenantPool.query(
               `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`

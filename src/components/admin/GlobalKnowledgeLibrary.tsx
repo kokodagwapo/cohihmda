@@ -8,6 +8,7 @@
 import { useState, useRef } from "react";
 import {
   Upload,
+  Download,
   Search,
   Filter,
   MoreVertical,
@@ -71,7 +72,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useGlobalKnowledge, GlobalDocument } from "@/hooks/useGlobalKnowledge";
+import { useGlobalKnowledge, GlobalDocument, KnowledgeExportPayload } from "@/hooks/useGlobalKnowledge";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
@@ -92,6 +93,8 @@ export function GlobalKnowledgeLibrary() {
     restoreDocument,
     getSyncStatus,
     resyncDocument,
+    exportDocuments,
+    importDocuments,
   } = useGlobalKnowledge();
 
   const { toast } = useToast();
@@ -123,6 +126,14 @@ export function GlobalKnowledgeLibrary() {
   // Sync status
   const [syncStatus, setSyncStatus] = useState<any[]>([]);
   const [loadingSyncStatus, setLoadingSyncStatus] = useState(false);
+
+  // Import/Export state
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importData, setImportData] = useState<KnowledgeExportPayload | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [importSyncTenants, setImportSyncTenants] = useState(true);
 
   // Action loading states
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -306,6 +317,88 @@ export function GlobalKnowledgeLibrary() {
     }
   };
 
+  // Handle export
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const result = await exportDocuments();
+      toast({
+        title: "Export complete",
+        description: `Exported ${result?.document_count} documents (${result?.total_embeddings} embeddings).`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Handle import file selection
+  const handleImportFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (!parsed.version || !parsed.documents) {
+          toast({
+            title: "Invalid file",
+            description: "This file does not appear to be a valid knowledge export.",
+            variant: "destructive",
+          });
+          return;
+        }
+        setImportData(parsed as KnowledgeExportPayload);
+        setImportDialogOpen(true);
+      } catch {
+        toast({
+          title: "Invalid file",
+          description: "Could not parse the JSON file.",
+          variant: "destructive",
+        });
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset the input so the same file can be re-selected
+    e.target.value = "";
+  };
+
+  // Handle import confirm
+  const handleImportConfirm = async () => {
+    if (!importData) return;
+
+    setIsImporting(true);
+    try {
+      const result = await importDocuments(importData, {
+        syncTenants: importSyncTenants,
+      });
+      if (result) {
+        const r = result.results;
+        toast({
+          title: "Import complete",
+          description: `Created: ${r.created}, Updated: ${r.updated}, Skipped: ${r.skipped}, Failed: ${r.failed}${r.synced > 0 ? `, Synced to tenants: ${r.synced}` : ""}`,
+        });
+      }
+      setImportDialogOpen(false);
+      setImportData(null);
+    } catch (err: any) {
+      toast({
+        title: "Import failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // Filter documents
   const filteredDocs = documents.filter((doc) => {
     if (statusFilter !== "all" && doc.status !== statusFilter) return false;
@@ -405,6 +498,40 @@ export function GlobalKnowledgeLibrary() {
               <RefreshCw
                 className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
               />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => importFileInputRef.current?.click()}
+              disabled={isImporting}
+            >
+              {isImporting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4 mr-2" />
+              )}
+              Import
+            </Button>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImportFileSelect}
+              aria-label="Select knowledge export JSON file to import"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={isExporting || loading}
+            >
+              {isExporting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              Export
             </Button>
             <Button
               onClick={() => setUploadDialogOpen(true)}
@@ -970,6 +1097,136 @@ export function GlobalKnowledgeLibrary() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Import Preview Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setImportDialogOpen(false);
+          setImportData(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Import Knowledge Documents</DialogTitle>
+            <DialogDescription>
+              Review the documents that will be imported. Documents with the same
+              ID and a newer version will be updated; older versions will be
+              skipped.
+            </DialogDescription>
+          </DialogHeader>
+
+          {importData && (
+            <div className="space-y-4 py-4">
+              <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400">
+                <span>
+                  <strong>{importData.document_count}</strong> documents
+                </span>
+                <span>
+                  <strong>{importData.total_embeddings}</strong> embeddings
+                </span>
+                <span>
+                  Exported:{" "}
+                  {new Date(importData.exported_at).toLocaleDateString()}
+                </span>
+              </div>
+
+              <div className="max-h-[300px] overflow-y-auto space-y-2">
+                {importData.documents.map((entry) => {
+                  const doc = entry.document;
+                  const existingDoc = documents.find((d) => d.id === doc.id);
+                  const willSkip =
+                    existingDoc && existingDoc.version >= doc.version;
+
+                  return (
+                    <div
+                      key={doc.id}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        willSkip
+                          ? "bg-slate-50 dark:bg-slate-800/20 border-slate-200 dark:border-slate-700 opacity-60"
+                          : existingDoc
+                          ? "bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800"
+                          : "bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <FileText className="h-4 w-4 text-slate-500 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {doc.title}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            v{doc.version} &middot; {doc.category} &middot;{" "}
+                            {entry.embeddings.length} chunks
+                          </p>
+                        </div>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={
+                          willSkip
+                            ? "text-slate-500"
+                            : existingDoc
+                            ? "text-blue-600"
+                            : "text-green-600"
+                        }
+                      >
+                        {willSkip
+                          ? "Skip"
+                          : existingDoc
+                          ? "Update"
+                          : "New"}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="syncTenants"
+                  checked={importSyncTenants}
+                  onChange={(e) => setImportSyncTenants(e.target.checked)}
+                  className="rounded border-slate-300"
+                  aria-label="Sync published documents to all tenant databases after import"
+                />
+                <Label htmlFor="syncTenants" className="text-sm font-normal cursor-pointer">
+                  Sync published documents to all tenant databases after import
+                </Label>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setImportDialogOpen(false);
+                setImportData(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportConfirm}
+              disabled={isImporting}
+              className="bg-indigo-600 hover:bg-indigo-700"
+            >
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Import Documents
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

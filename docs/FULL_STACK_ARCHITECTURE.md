@@ -152,7 +152,7 @@ All routes are prefixed with `/api/`:
 |------------|-----------|-----------|
 | `rag.ts` | `/api/rag` | `GET/PUT /settings`, `GET/POST /sources`, `POST /documents/upload`, `GET /documents`, `GET /voice` |
 | `ragKnowledgeBase.ts` | `/api/rag/knowledge-base` | Knowledge base management |
-| `dataChat.ts` | `/api/data-chat` | Data chat/AI queries |
+| `cohiChat.ts` | `/api/cohi-chat` | Cohi Chat AI queries |
 
 #### Integrations
 
@@ -237,9 +237,9 @@ router.get('/api/loans',
 
 | Service | Purpose |
 |---------|---------|
-| `dataChatService.ts` | Natural language data queries |
+| `cohiChatService.ts` | Natural language data queries |
 | `queryBuilderService.ts` | SQL query generation from natural language |
-| `prompts/dataChatPrompt.ts` | Prompt templates for AI |
+| `prompts/cohiChatPrompt.ts` | Prompt templates for AI |
 
 #### Dashboard Services (`services/dashboard/`)
 

@@ -109,7 +109,7 @@ const AVAILABLE_FEATURES = [
   { id: 'funnel', name: 'Loan Funnel', description: 'Pipeline visualization', icon: GitBranch },
   { id: 'reports', name: 'Reports', description: 'Generated reports', icon: BarChart3 },
   { id: 'data_quality', name: 'Data Quality', description: 'Data quality dashboard', icon: AlertTriangle },
-  { id: 'data_chat', name: 'Data Chat', description: 'AI-powered data assistant', icon: MessageSquare },
+  { id: 'cohi_chat', name: 'Cohi Chat', description: 'AI-powered data assistant', icon: MessageSquare },
   { id: 'my_dashboard', name: 'My Dashboard', description: 'Personal dashboard', icon: User },
   { id: 'users', name: 'User Management', description: 'Manage users (admin only)', icon: Users },
   { id: 'settings', name: 'Settings', description: 'Organization settings (admin only)', icon: Settings },

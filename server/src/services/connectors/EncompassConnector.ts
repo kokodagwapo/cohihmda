@@ -77,7 +77,7 @@ const DEFAULT_ENCOMPASS_MAPPINGS: FieldMapping[] = [
   { source_field: 'Fields.VASUMM.X23', target_column: 'fico_score', alias: 'FICO Score', data_type: 'number' },
   
   // Tracking
-  { source_field: 'Loan.LoanLastModified', target_column: 'last_modified_date', alias: 'Last Modified Date', data_type: 'date' },
+  { source_field: 'Loan.LastModified', target_column: 'last_modified_date', alias: 'Last Modified Date', data_type: 'date' },
 ];
 
 export class EncompassConnector extends BaseConnector {

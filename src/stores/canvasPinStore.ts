@@ -1,5 +1,5 @@
 /**
- * Store for "Pin to canvas" actions from Data Chat and Industry News.
+ * Store for "Pin to canvas" actions from Cohi Chat and Industry News.
  * WorkbenchCanvas consumes pending pins and adds them as widgets.
  */
 

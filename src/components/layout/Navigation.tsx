@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Sparkles, Building2, Grid3X3 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3 } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -328,7 +328,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       return 'Top Tiering';
     }
     if (location.pathname === '/my-dashboard') return 'My Workbench';
-    if (location.pathname === '/data-chat') return 'Cohi Chat';
+    if (location.pathname === '/cohi-chat') return 'Cohi Chat';
     return 'Navigation';
   };
 
@@ -544,25 +544,6 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           >
             <LayoutPanelLeft className="w-4 h-4 flex-shrink-0" />
             <span>My Workbench</span>
-          </button>
-        </div>
-
-        {/* Cohi Chat */}
-        <div>
-          <button
-            onClick={() => {
-              navigate('/data-chat');
-              setMobileMenuOpen(false);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-              isActive('/data-chat')
-                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            )}
-          >
-            <Sparkles className="w-4 h-4 flex-shrink-0" />
-            <span>Cohi Chat</span>
           </button>
         </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +34,11 @@ import {
   Search,
   Filter,
   Database,
+  History,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  ArrowUpDown,
 } from 'lucide-react';
 
 interface SyncConnection {
@@ -54,6 +59,22 @@ interface SyncConnection {
   tenant_name: string;
   tenant_slug: string;
   loan_count: number;
+}
+
+interface SyncHistoryEntry {
+  id: string;
+  los_connection_id: string;
+  sync_type: string;
+  status: string;
+  loans_added: number;
+  loans_updated: number;
+  loans_failed: number;
+  total_loans_after: number;
+  modified_from: string | null;
+  duration_ms: number;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
 }
 
 interface SchedulerInfo {
@@ -144,6 +165,12 @@ function getStatusBadge(status: string | null, isActive: boolean) {
   }
 }
 
+// Composite key to uniquely identify a connection across tenants
+// (connection UUIDs can collide when tenants are duplicated)
+function connKey(c: { tenant_id: string; id: string }): string {
+  return `${c.tenant_id}:${c.id}`;
+}
+
 export const SyncManagementSection = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -155,10 +182,13 @@ export const SyncManagementSection = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
   const [triggeringIds, setTriggeringIds] = useState<Set<string>>(new Set());
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [historyData, setHistoryData] = useState<Record<string, SyncHistoryEntry[]>>({});
+  const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set());
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showSpinner = true) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const response = await api.request<{
         connections: SyncConnection[];
         scheduler: SchedulerInfo;
@@ -170,13 +200,15 @@ export const SyncManagementSection = () => {
       setTotalTenants(response.total_tenants);
     } catch (error: any) {
       console.error('Error loading sync management data:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load sync management data',
-        variant: 'destructive',
-      });
+      if (showSpinner) {
+        toast({
+          title: 'Error',
+          description: 'Failed to load sync management data',
+          variant: 'destructive',
+        });
+      }
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [toast]);
 
@@ -184,9 +216,41 @@ export const SyncManagementSection = () => {
     loadData();
   }, [loadData]);
 
+  // Auto-poll every 5s when any connection is actively syncing
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wasSyncingRef = useRef(false);
+  const hasSyncInProgress = connections.some(c => c.last_sync_status === 'in_progress');
+
+  // When sync transitions from in_progress -> done, refresh history for the expanded connection
+  useEffect(() => {
+    if (wasSyncingRef.current && !hasSyncInProgress && expandedKey) {
+      const conn = connections.find(c => connKey(c) === expandedKey);
+      if (conn) fetchHistory(conn);
+    }
+    wasSyncingRef.current = hasSyncInProgress;
+  }, [hasSyncInProgress, expandedKey, connections]);
+
+  useEffect(() => {
+    if (hasSyncInProgress) {
+      pollingRef.current = setInterval(() => {
+        loadData(false);
+      }, 5000);
+    } else if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [hasSyncInProgress, loadData]);
+
   const handleToggleSync = async (connection: SyncConnection) => {
     const newEnabled = !connection.sync_enabled;
-    setUpdatingIds(prev => new Set(prev).add(connection.id));
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
 
     try {
       await api.request(`/api/admin/sync-management/${connection.id}`, {
@@ -199,7 +263,7 @@ export const SyncManagementSection = () => {
 
       setConnections(prev =>
         prev.map(c =>
-          c.id === connection.id ? { ...c, sync_enabled: newEnabled } : c
+          connKey(c) === key ? { ...c, sync_enabled: newEnabled } : c
         )
       );
 
@@ -216,14 +280,15 @@ export const SyncManagementSection = () => {
     } finally {
       setUpdatingIds(prev => {
         const next = new Set(prev);
-        next.delete(connection.id);
+        next.delete(key);
         return next;
       });
     }
   };
 
   const handleFrequencyChange = async (connection: SyncConnection, frequency: string) => {
-    setUpdatingIds(prev => new Set(prev).add(connection.id));
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
 
     try {
       await api.request(`/api/admin/sync-management/${connection.id}`, {
@@ -236,7 +301,7 @@ export const SyncManagementSection = () => {
 
       setConnections(prev =>
         prev.map(c =>
-          c.id === connection.id ? { ...c, sync_frequency: frequency } : c
+          connKey(c) === key ? { ...c, sync_frequency: frequency } : c
         )
       );
 
@@ -253,33 +318,37 @@ export const SyncManagementSection = () => {
     } finally {
       setUpdatingIds(prev => {
         const next = new Set(prev);
-        next.delete(connection.id);
+        next.delete(key);
         return next;
       });
     }
   };
 
   const handleTriggerSync = async (connection: SyncConnection) => {
-    setTriggeringIds(prev => new Set(prev).add(connection.id));
+    const key = connKey(connection);
+    setTriggeringIds(prev => new Set(prev).add(key));
 
     try {
-      await api.request(`/api/admin/sync-management/${connection.id}/trigger`, {
-        method: 'POST',
-        body: JSON.stringify({
-          tenant_id: connection.tenant_id,
-        }),
-      });
+      const response = await api.request<{ success: boolean; message: string }>(
+        `/api/admin/sync-management/${connection.id}/trigger`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            tenant_id: connection.tenant_id,
+          }),
+        }
+      );
 
-      // Update local state to show in_progress
+      // Update local state to show in_progress — only for the exact connection
       setConnections(prev =>
         prev.map(c =>
-          c.id === connection.id ? { ...c, last_sync_status: 'in_progress' } : c
+          connKey(c) === key ? { ...c, last_sync_status: 'in_progress' } : c
         )
       );
 
       toast({
         title: 'Sync triggered',
-        description: `Sync started for ${connection.name} (${connection.tenant_name})`,
+        description: response.message || `Sync started for ${connection.name} (${connection.tenant_name})`,
       });
     } catch (error: any) {
       toast({
@@ -290,10 +359,41 @@ export const SyncManagementSection = () => {
     } finally {
       setTriggeringIds(prev => {
         const next = new Set(prev);
-        next.delete(connection.id);
+        next.delete(key);
         return next;
       });
     }
+  };
+
+  // Helper to fetch history for a connection
+  const fetchHistory = async (connection: SyncConnection) => {
+    const key = connKey(connection);
+    setHistoryLoading(prev => new Set(prev).add(key));
+    try {
+      const response = await api.request<{ history: SyncHistoryEntry[] }>(
+        `/api/admin/sync-management/${connection.id}/history?tenant_id=${connection.tenant_id}&limit=10`
+      );
+      setHistoryData(prev => ({ ...prev, [key]: response.history }));
+    } catch {
+      setHistoryData(prev => ({ ...prev, [key]: [] }));
+    } finally {
+      setHistoryLoading(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const toggleHistory = async (connection: SyncConnection) => {
+    const key = connKey(connection);
+    if (expandedKey === key) {
+      setExpandedKey(null);
+      return;
+    }
+    setExpandedKey(key);
+
+    await fetchHistory(connection);
   };
 
   // Derive unique tenant names for the filter dropdown
@@ -497,8 +597,13 @@ export const SyncManagementSection = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredConnections.map((connection) => (
-                    <TableRow key={`${connection.tenant_id}-${connection.id}`} className="group">
+                  {filteredConnections.map((connection) => {
+                    const key = connKey(connection);
+                    const isExpanded = expandedKey === key;
+                    const history = historyData[key] || [];
+                    const isLoadingHistory = historyLoading.has(key);
+                    return (
+                    <Fragment key={key}><TableRow className="group">
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Building2 className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
@@ -539,7 +644,7 @@ export const SyncManagementSection = () => {
                         <Select
                           value={connection.sync_frequency || 'daily'}
                           onValueChange={(val) => handleFrequencyChange(connection, val)}
-                          disabled={updatingIds.has(connection.id)}
+                          disabled={updatingIds.has(connKey(connection))}
                         >
                           <SelectTrigger className="w-[130px] h-8 text-xs font-light">
                             <SelectValue />
@@ -557,32 +662,124 @@ export const SyncManagementSection = () => {
                         <Switch
                           checked={connection.sync_enabled}
                           onCheckedChange={() => handleToggleSync(connection)}
-                          disabled={updatingIds.has(connection.id) || !connection.is_active}
+                          disabled={updatingIds.has(connKey(connection)) || !connection.is_active}
                           className="data-[state=checked]:bg-emerald-500"
                         />
                       </TableCell>
                       <TableCell className="text-center">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => handleTriggerSync(connection)}
-                          disabled={
-                            triggeringIds.has(connection.id) ||
-                            connection.last_sync_status === 'in_progress' ||
-                            !connection.is_active
-                          }
-                          title="Trigger sync now"
-                        >
-                          {triggeringIds.has(connection.id) || connection.last_sync_status === 'in_progress' ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Play className="h-4 w-4" />
-                          )}
-                        </Button>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleTriggerSync(connection)}
+                            disabled={
+                              triggeringIds.has(key) ||
+                              connection.last_sync_status === 'in_progress' ||
+                              !connection.is_active
+                            }
+                            title="Trigger sync now"
+                          >
+                            {triggeringIds.has(key) || connection.last_sync_status === 'in_progress' ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => toggleHistory(connection)}
+                            title="Sync history"
+                          >
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <History className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    {isExpanded && (
+                      <TableRow key={`${key}-history`}>
+                        <TableCell colSpan={9} className="p-0 bg-slate-50/50 dark:bg-slate-900/30">
+                          <div className="px-6 py-4">
+                            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+                              Sync History
+                            </div>
+                            {isLoadingHistory ? (
+                              <div className="flex items-center gap-2 py-4">
+                                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                                <span className="text-sm text-slate-400 font-light">Loading history...</span>
+                              </div>
+                            ) : history.length === 0 ? (
+                              <p className="text-sm text-slate-400 font-light py-2">No sync history yet</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {history.map((entry) => (
+                                  <div
+                                    key={entry.id}
+                                    className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg bg-white dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50"
+                                  >
+                                    <span className="text-slate-500 dark:text-slate-400 font-light w-[100px] flex-shrink-0" title={entry.started_at}>
+                                      {formatRelativeTime(entry.started_at)}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-[10px] w-[80px] justify-center flex-shrink-0 ${
+                                        entry.sync_type === 'incremental'
+                                          ? 'text-blue-600 border-blue-200 dark:text-blue-400 dark:border-blue-800'
+                                          : 'text-purple-600 border-purple-200 dark:text-purple-400 dark:border-purple-800'
+                                      }`}
+                                    >
+                                      {entry.sync_type}
+                                    </Badge>
+                                    <div className="flex items-center gap-3 font-light flex-1 min-w-0">
+                                      {entry.loans_added > 0 && (
+                                        <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                                          <Plus className="h-3 w-3" />{entry.loans_added} new
+                                        </span>
+                                      )}
+                                      {entry.loans_updated > 0 && (
+                                        <span className="text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
+                                          <ArrowUpDown className="h-3 w-3" />{entry.loans_updated} updated
+                                        </span>
+                                      )}
+                                      {entry.loans_failed > 0 && (
+                                        <span className="text-red-600 dark:text-red-400">
+                                          {entry.loans_failed} failed
+                                        </span>
+                                      )}
+                                      {entry.loans_added === 0 && entry.loans_updated === 0 && entry.loans_failed === 0 && (
+                                        <span className="text-slate-400">No changes</span>
+                                      )}
+                                    </div>
+                                    <span className="text-slate-400 font-light flex-shrink-0">
+                                      {(entry.total_loans_after || 0).toLocaleString()} total
+                                    </span>
+                                    <span className="text-slate-400 font-light w-[60px] text-right flex-shrink-0">
+                                      {entry.duration_ms ? `${Math.round(entry.duration_ms / 1000)}s` : '—'}
+                                    </span>
+                                    {entry.status === 'success' ? (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                                    ) : entry.status === 'partial' ? (
+                                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                                    ) : (
+                                      <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

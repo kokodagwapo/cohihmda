@@ -114,7 +114,7 @@ Defined in `tenant_roles` table with:
 | `funnel`       | Loan funnel analysis      |
 | `reports`      | Report generation         |
 | `data_quality` | Data quality monitoring   |
-| `data_chat`    | AI-powered data chat      |
+| `cohi_chat`    | AI-powered Cohi Chat      |
 | `users`        | User management           |
 | `settings`     | Tenant settings           |
 
@@ -126,7 +126,7 @@ INSERT INTO tenant_roles (name, description, section_access, permissions)
 VALUES (
   'Loan Officer',
   'Access to own loans only',
-  ARRAY['insights', 'loans', 'funnel', 'data_chat'],
+  ARRAY['insights', 'loans', 'funnel', 'cohi_chat'],
   '{"fieldRestrictions": ["branch_price_concession", "net_buy", "net_sell"]}'
 );
 ```

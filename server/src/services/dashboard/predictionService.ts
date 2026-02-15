@@ -843,7 +843,7 @@ export function prepareLoanData(loans: any[]): any[] {
         rawData['Fields.353']                     // Encompass: LTV Ratio
       ),
       dti: (() => {
-        // Tenant DB uses structured column be_dti_ratio (see tenantDatabaseSchema.ts, 002_loans_table.sql).
+        // Tenant DB uses structured column be_dti_ratio (see 002_loans_table.sql).
         // raw_data may be removed (migration 009_remove_raw_data.sql).
         if (loan.be_dti_ratio != null) return parseNumeric(loan.be_dti_ratio);
         const fromDirect = loan.dti || metadata.dti || metadata.dti_ratio;
@@ -1932,7 +1932,7 @@ export async function bucketLoanData(
 ): Promise<any[]> {
   const logContext = options?.logContext || 'loans';
   // Step 1: Calculate pullthrough rates for all roles (needs all loans)
-  // Use exact column names from tenant schema (tenantDatabaseSchema.ts)
+  // Use exact column names from tenant schema (see migrations/tenant/)
   const loPullthrough = calculatePullthroughForRole(allLoans, ['loan_officer']);
   
   // Debug logging for pullthrough calculation

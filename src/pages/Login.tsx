@@ -348,6 +348,15 @@ export const Login = () => {
                 )}
               </Button>
 
+              <div className="text-center">
+                <a
+                  href="/forgot-password"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Forgot password?
+                </a>
+              </div>
+
               {/* SSO option in hybrid mode */}
               {ssoInfo.available && (
                 <>

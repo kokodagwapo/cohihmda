@@ -56,6 +56,58 @@ export interface SyncStatus {
   syncedVersion: number | null;
 }
 
+export interface KnowledgeExportPayload {
+  version: string;
+  exported_at: string;
+  document_count: number;
+  total_embeddings: number;
+  documents: Array<{
+    document: {
+      id: string;
+      title: string;
+      filename: string | null;
+      file_type: string | null;
+      file_size_bytes: number | null;
+      content: string | null;
+      category: string;
+      tags: string[];
+      source_url: string | null;
+      version: number;
+      status: string;
+      chunk_count: number;
+      token_count: number;
+      processing_status: string;
+      created_at: string;
+      updated_at: string;
+      published_at: string | null;
+    };
+    embeddings: Array<{
+      chunk_index: number;
+      chunk_text: string;
+      embedding: string;
+      token_count: number;
+      metadata: Record<string, unknown>;
+    }>;
+  }>;
+}
+
+export interface KnowledgeImportResult {
+  message: string;
+  results: {
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    synced: number;
+    details: Array<{
+      id: string;
+      title: string;
+      action: "created" | "updated" | "skipped" | "failed";
+      error?: string;
+    }>;
+  };
+}
+
 // Polling interval for documents in processing state
 const POLL_INTERVAL_MS = 3000;
 
@@ -557,6 +609,71 @@ export function useGlobalKnowledge() {
     []
   );
 
+  // Export all documents as JSON file download
+  const exportDocuments = useCallback(async (): Promise<KnowledgeExportPayload | null> => {
+    try {
+      setLoading(true);
+
+      const exportData = await api.request<KnowledgeExportPayload>(
+        "/api/admin/global-knowledge/export"
+      );
+
+      // Trigger browser download
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `knowledge-export-${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      return exportData;
+    } catch (err: any) {
+      console.error("Error exporting documents:", err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Import documents from a previously exported JSON payload
+  const importDocuments = useCallback(
+    async (
+      data: KnowledgeExportPayload,
+      options?: { syncTenants?: boolean }
+    ): Promise<KnowledgeImportResult | null> => {
+      try {
+        setLoading(true);
+
+        const result = await api.request<KnowledgeImportResult>(
+          "/api/admin/global-knowledge/import",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              data,
+              syncTenants: options?.syncTenants ?? false,
+            }),
+          }
+        );
+
+        // Reload documents list after import
+        await fetchDocuments(lastFetchParamsRef.current);
+
+        return result;
+      } catch (err: any) {
+        console.error("Error importing documents:", err);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchDocuments]
+  );
+
   // Initial fetch
   useEffect(() => {
     fetchDocuments();
@@ -590,5 +707,7 @@ export function useGlobalKnowledge() {
     restoreDocument,
     getSyncStatus,
     resyncDocument,
+    exportDocuments,
+    importDocuments,
   };
 }

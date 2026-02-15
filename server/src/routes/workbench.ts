@@ -4,7 +4,7 @@
  * All operations persist to the tenant-specific database (via attachTenantContext).
  * Platform admins can target a specific tenant via ?tenant_id= query param.
  *
- * Table: public.workbench_canvases (created in tenantDatabaseSchema.ts)
+ * Table: public.workbench_canvases (created by migration 035_workbench_canvases.sql)
  */
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -16,35 +16,6 @@ import {
 const router = Router();
 
 // ---------------------------------------------------------------------------
-// Ensure table exists (on-demand, idempotent)
-// ---------------------------------------------------------------------------
-async function ensureCanvasTable(pool: import('pg').Pool): Promise<void> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.workbench_canvases (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id UUID NOT NULL,
-      title TEXT NOT NULL DEFAULT 'Untitled Canvas',
-      layout_version TEXT NOT NULL DEFAULT 'freeform-v1',
-      content JSONB NOT NULL DEFAULT '{}'::jsonb,
-      favorited BOOLEAN DEFAULT false,
-      shared BOOLEAN DEFAULT false,
-      share_pin TEXT,
-      share_scope TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_workbench_canvases_user_id
-      ON public.workbench_canvases(user_id)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_workbench_canvases_updated
-      ON public.workbench_canvases(updated_at DESC)
-  `);
-}
-
-// ---------------------------------------------------------------------------
 // GET /  — List canvases for the current user
 // ---------------------------------------------------------------------------
 router.get(
@@ -54,7 +25,6 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       const result = await tenantPool.query(
         `SELECT id, title, content, favorited, shared, created_at, updated_at
@@ -82,7 +52,6 @@ router.get(
   async (req: AuthRequest, res) => {
     try {
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       const result = await tenantPool.query(
         `SELECT id, title, content, favorited, shared, share_pin, share_scope,
@@ -134,7 +103,6 @@ router.post(
       };
 
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       const result = await tenantPool.query(
         `INSERT INTO public.workbench_canvases
@@ -165,7 +133,6 @@ router.put(
       const { title, content } = req.body;
 
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       // Ownership check
       const ownership = await tenantPool.query(
@@ -215,7 +182,6 @@ router.delete(
     try {
       const { id } = req.params;
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       const result = await tenantPool.query(
         'DELETE FROM public.workbench_canvases WHERE id = $1 AND user_id = $2 RETURNING id',
@@ -246,7 +212,6 @@ router.post(
       const { id } = req.params;
       const { favorited } = req.body;
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       const result = await tenantPool.query(
         `UPDATE public.workbench_canvases
@@ -280,7 +245,6 @@ router.post(
       const { id } = req.params;
       const { shared, pin, scope } = req.body;
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       const result = await tenantPool.query(
         `UPDATE public.workbench_canvases
@@ -319,7 +283,6 @@ router.post(
       }
 
       const { tenantPool } = getTenantContext(req);
-      await ensureCanvasTable(tenantPool);
 
       // Load the insight from generated_insights
       const insightRes = await tenantPool.query(

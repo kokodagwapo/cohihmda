@@ -77,36 +77,36 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<UserPermissions>> = {
     fieldRestrictions: [],
   },
   tenant_admin: {
-    sectionAccess: ['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_quality', 'users', 'settings', 'data_chat', 'my_dashboard'],
+    sectionAccess: ['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_quality', 'users', 'settings', 'cohi_chat', 'my_dashboard'],
     rowFilters: [],
     fieldRestrictions: [],
   },
   admin: {
-    sectionAccess: ['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_quality', 'data_chat', 'my_dashboard'],
+    sectionAccess: ['insights', 'loans', 'leaderboard', 'funnel', 'reports', 'data_quality', 'cohi_chat', 'my_dashboard'],
     rowFilters: [],
     fieldRestrictions: [],
   },
   loan_officer: {
-    sectionAccess: ['insights', 'loans', 'funnel', 'data_chat', 'my_dashboard'],
+    sectionAccess: ['insights', 'loans', 'funnel', 'cohi_chat', 'my_dashboard'],
     rowFilters: [
       { field: 'loan_officer', operator: 'is_current_user', dynamicSource: 'user_email' }
     ],
     fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell'],
   },
   processor: {
-    sectionAccess: ['insights', 'loans', 'funnel', 'data_chat', 'my_dashboard'],
+    sectionAccess: ['insights', 'loans', 'funnel', 'cohi_chat', 'my_dashboard'],
     rowFilters: [
       { field: 'processor', operator: 'is_current_user', dynamicSource: 'user_email' }
     ],
     fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell', 'srp_from_investor'],
   },
   viewer: {
-    sectionAccess: ['insights', 'data_chat'],
+    sectionAccess: ['insights', 'cohi_chat'],
     rowFilters: [],
     fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell', 'srp_from_investor', 'pa_srp_amt', 'pa_sell_amt'],
   },
   user: {
-    sectionAccess: ['insights', 'loans', 'data_chat', 'my_dashboard'],
+    sectionAccess: ['insights', 'loans', 'cohi_chat', 'my_dashboard'],
     rowFilters: [],
     fieldRestrictions: ['branch_price_concession', 'corporate_price_concession', 'net_buy', 'net_sell'],
   },

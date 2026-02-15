@@ -91,7 +91,7 @@ import { cn } from "@/lib/utils";
 
 // Category icons
 const categoryIcons: Record<string, React.ReactNode> = {
-  data_chat: <Database className="h-4 w-4" />,
+  cohi_chat: <Database className="h-4 w-4" />,
   insights: <Sparkles className="h-4 w-4" />,
   metrics: <Hash className="h-4 w-4" />,
   predictions: <AlertCircle className="h-4 w-4" />,
@@ -102,7 +102,7 @@ const categoryIcons: Record<string, React.ReactNode> = {
 
 // Category colors
 const categoryColors: Record<string, string> = {
-  data_chat: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  cohi_chat: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   insights: "bg-purple-500/10 text-purple-700 dark:text-purple-400",
   metrics: "bg-green-500/10 text-green-700 dark:text-green-400",
   predictions: "bg-orange-500/10 text-orange-700 dark:text-orange-400",

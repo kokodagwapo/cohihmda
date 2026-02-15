@@ -58,7 +58,7 @@ function getCognitoClient(): CognitoIdentityProviderClient {
 }
 
 // Supported provider types
-type ProviderType = "saml" | "oidc" | "azure_ad" | "okta" | "google";
+type ProviderType = "saml" | "oidc" | "azure_ad" | "cyberark" | "okta" | "google";
 
 interface SSOConfigInput {
   provider_type: ProviderType;
@@ -218,15 +218,20 @@ function parseSAMLMetadata(xml: string): ParsedSAMLMetadata {
 
 /**
  * Generate a Cognito-safe IdP name from tenant info
- * Format: {slug}_{type}_{hash} to avoid collisions between similar slugs
- * Cognito IdP names: alphanumeric plus _, -, . | max 32 characters
+ * Format: {slug}-{type}-{hash} to avoid collisions between similar slugs
+ * 
+ * Cognito IdP name constraints (regex: [^_\p{Z}][\p{L}\p{M}\p{S}\p{N}\p{P}][^_\p{Z}]+):
+ *   - 3-32 characters
+ *   - Cannot start or end with underscore or whitespace
+ *   - No underscores allowed in positions 3+
+ *   - Use dashes as separators instead
  */
 function generateCognitoIdpName(tenantSlug: string, providerType: string): string {
   const sanitized = tenantSlug.replace(/[^a-zA-Z0-9]/g, "");
   const suffix = providerType === "oidc" ? "OIDC" : "SAML";
   // Add a short hash of the full slug to prevent collisions (e.g., "acme" vs "acmecorp")
   const hash = crypto.createHash("md5").update(tenantSlug).digest("hex").substring(0, 4);
-  const name = `${sanitized}_${suffix}_${hash}`.substring(0, 32);
+  const name = `${sanitized}-${suffix}-${hash}`.substring(0, 32);
   return name;
 }
 
@@ -280,7 +285,7 @@ async function createOrUpdateCognitoIdp(
       authorize_scopes: config.oidcConfig.scopes?.join(" ") || "openid email profile",
     };
   } else {
-    // SAML-based (saml, azure_ad, okta)
+    // SAML-based (saml, azure_ad, cyberark, okta)
     cognitoProviderType = "SAML";
     if (!config.metadata) {
       throw new Error("SAML metadata required");
@@ -583,9 +588,17 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
       });
     }
     
+    // Check for existing configuration for this tenant (any idp type — one config per tenant)
+    const existingConfig = await mgmtPool.query(
+      `SELECT id, cognito_idp_name, idp_type, config FROM tenant_identity_providers WHERE tenant_id = $1 ORDER BY is_primary DESC LIMIT 1`,
+      [tenantId]
+    );
+    
     // Parse SAML metadata if provided
     let parsedMetadata: ParsedSAMLMetadata | undefined;
-    if (input.provider_type !== "oidc" && input.provider_type !== "google") {
+    const isSamlType = input.provider_type !== "oidc" && input.provider_type !== "google";
+    
+    if (isSamlType) {
       if (input.metadata_url) {
         logInfo("[SSOConfig] Fetching metadata from URL", { url: input.metadata_url, tenantSlug: tenant.slug });
         try {
@@ -611,42 +624,50 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
             details: parseError.message 
           });
         }
+      } else if (existingConfig.rows.length === 0) {
+        // Only require metadata for NEW configurations — existing ones can update without it
+        return res.status(400).json({ error: "SAML metadata (URL or XML) is required for initial setup" });
       } else {
-        return res.status(400).json({ error: "SAML metadata (URL or XML) is required" });
+        logInfo("[SSOConfig] No new metadata provided — updating config without changing Cognito IdP", { tenantSlug: tenant.slug });
       }
     }
     
-    // Create/update Cognito IdP
+    // Create/update Cognito IdP (only if we have new metadata or OIDC config)
     let cognitoIdpName: string;
-    try {
-      cognitoIdpName = await createOrUpdateCognitoIdp(tenant.slug, input.provider_type, {
-        metadata: parsedMetadata,
-        oidcConfig: input.oidc_client_id ? {
-          clientId: input.oidc_client_id,
-          clientSecret: input.oidc_client_secret || "",
-          issuerUrl: input.oidc_issuer_url || "",
-          scopes: input.oidc_scopes,
-        } : undefined,
-        attributeMapping: input.attribute_mapping,
-      });
-    } catch (cognitoError: any) {
-      logError("[SSOConfig] Cognito IdP creation failed", cognitoError, { tenantSlug: tenant.slug });
-      return res.status(500).json({ 
-        error: "Failed to configure identity provider in Cognito",
-        details: cognitoError.message 
-      });
-    }
     
-    // Check for existing configuration for this tenant + idp type
-    const existingConfig = await mgmtPool.query(
-      `SELECT id FROM tenant_identity_providers WHERE tenant_id = $1 AND idp_type = $2`,
-      [tenantId, input.provider_type]
-    );
+    if (parsedMetadata || (input.oidc_client_id && !isSamlType)) {
+      // New metadata provided — create or update the Cognito IdP
+      try {
+        cognitoIdpName = await createOrUpdateCognitoIdp(tenant.slug, input.provider_type, {
+          metadata: parsedMetadata,
+          oidcConfig: input.oidc_client_id ? {
+            clientId: input.oidc_client_id,
+            clientSecret: input.oidc_client_secret || "",
+            issuerUrl: input.oidc_issuer_url || "",
+            scopes: input.oidc_scopes,
+          } : undefined,
+          attributeMapping: input.attribute_mapping,
+        });
+      } catch (cognitoError: any) {
+        logError("[SSOConfig] Cognito IdP creation failed", cognitoError, { tenantSlug: tenant.slug });
+        return res.status(500).json({ 
+          error: "Failed to configure identity provider in Cognito",
+          details: cognitoError.message 
+        });
+      }
+    } else if (existingConfig.rows.length > 0 && existingConfig.rows[0].cognito_idp_name) {
+      // No new metadata — reuse existing Cognito IdP name
+      cognitoIdpName = existingConfig.rows[0].cognito_idp_name;
+      logInfo("[SSOConfig] Reusing existing Cognito IdP", { cognitoIdpName });
+    } else {
+      return res.status(400).json({ error: "SAML metadata or OIDC configuration is required" });
+    }
     
     // Build provider display name
     const providerNames: Record<string, string> = {
       saml: "SAML IdP",
       azure_ad: "Microsoft Entra ID",
+      cyberark: "CyberArk Identity",
       okta: "Okta",
       oidc: "OIDC Provider",
       google: "Google Workspace",
@@ -654,13 +675,20 @@ router.post("/config", authenticateToken, async (req: AuthRequest, res: Response
     };
     const providerDisplayName = providerNames[input.provider_type] || input.provider_type;
     
+    // Build config data — preserve existing IdP details if no new metadata was provided
+    const existingConfigData = existingConfig.rows.length > 0 
+      ? (typeof existingConfig.rows[0].config === 'string' 
+          ? JSON.parse(existingConfig.rows[0].config) 
+          : existingConfig.rows[0].config || {})
+      : {};
+    
     const configData = {
-      idp_entity_id: parsedMetadata?.entityId,
-      idp_sso_url: parsedMetadata?.ssoUrl,
-      idp_slo_url: parsedMetadata?.sloUrl,
-      idp_certificate: parsedMetadata?.certificate ? "present" : undefined, // Don't store full cert in JSON
-      oidc_client_id: input.oidc_client_id,
-      oidc_issuer_url: input.oidc_issuer_url,
+      idp_entity_id: parsedMetadata?.entityId || existingConfigData.idp_entity_id,
+      idp_sso_url: parsedMetadata?.ssoUrl || existingConfigData.idp_sso_url,
+      idp_slo_url: parsedMetadata?.sloUrl || existingConfigData.idp_slo_url,
+      idp_certificate: parsedMetadata?.certificate ? "present" : existingConfigData.idp_certificate,
+      oidc_client_id: input.oidc_client_id || existingConfigData.oidc_client_id,
+      oidc_issuer_url: input.oidc_issuer_url || existingConfigData.oidc_issuer_url,
       attribute_mapping: input.attribute_mapping,
     };
     

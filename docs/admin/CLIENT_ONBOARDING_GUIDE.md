@@ -570,7 +570,7 @@ The default revenue calculation formula may need adjustment based on the client'
 
 ### Step 5.5: RAG Settings (Optional)
 
-If the client will use the AI-powered data chat feature, configure:
+If the client will use the AI-powered Cohi Chat feature, configure:
 - RAG document uploads (policies, guidelines)
 - AI model settings
 - Persona-specific prompts

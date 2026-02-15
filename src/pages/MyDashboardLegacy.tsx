@@ -54,7 +54,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSavedVisualizations, SavedVisualization } from '@/hooks/useSavedVisualizations';
 import { DynamicVisualization, VisualizationConfig } from '@/components/visualizations/DynamicVisualization';
-import { DataChatPanel } from '@/components/dashboard/DataChatPanel';
+import { CohiChatPanel } from '@/components/dashboard/CohiChatPanel';
 
 // ============================================================================
 // Types
@@ -291,11 +291,11 @@ export default function MyDashboardLegacy() {
               No visualizations yet
             </h2>
             <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-md mx-auto">
-              Use the Data Chat to explore your loan data and save visualizations to your custom dashboard.
+              Use Cohi Chat to explore your loan data and save visualizations to your custom dashboard.
             </p>
             <Button onClick={() => setIsChatOpen(true)}>
               <MessageSquare className="w-4 h-4 mr-2" />
-              Open Data Chat
+              Open Cohi Chat
             </Button>
           </div>
         ) : (
@@ -317,7 +317,7 @@ export default function MyDashboardLegacy() {
       </div>
 
       {/* Chat Panel */}
-      <DataChatPanel
+      <CohiChatPanel
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
         tenantId={user?.tenant_id}

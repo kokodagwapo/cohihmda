@@ -19,17 +19,6 @@ export {
   refineCohiQuery,
 } from "./cohiChatService.js";
 
-// Legacy exports from dataChatService (for backwards compatibility)
-export type {
-  DataChatMessage,
-  DataChatResponse,
-} from "./dataChatService.js";
-
-export {
-  processDataQuestion,
-  refineQuery,
-} from "./dataChatService.js";
-
 // Export types from queryBuilderService (excluding duplicates already exported)
 export type {
   QueryContext,

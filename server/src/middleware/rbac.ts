@@ -242,9 +242,6 @@ export function requireRole(...allowedRoles: string[]) {
       const tenantId = req.tenantId || null;
       req.userTenantId = tenantId;
       
-      // Debug logging
-      logDebug('requireRole check', { userId: req.userId, role, allowedRoles, path: req.path });
-
       if (!allowedRoles.includes(role)) {
         // Log failed authorization attempt (ignore errors since audit may fail for new users)
         auditLog({

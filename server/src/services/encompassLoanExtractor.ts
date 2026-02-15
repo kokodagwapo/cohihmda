@@ -89,29 +89,14 @@ export class EncompassLoanExtractor {
     losConnectionId: string,
     options: ExtractOptions = {}
   ): Promise<LoanRecord[]> {
-    console.log(
-      `[EncompassLoanExtractor] Extracting loans for connection: ${losConnectionId}`
-    );
-
-    // Reset logging flag for new extraction
-
     if (!this.tenantPool) {
       throw new Error("Tenant pool is required for EncompassLoanExtractor");
     }
 
     // Get field swaps for this connection
     const fieldSwaps = await getFieldSwaps(this.tenantPool, losConnectionId);
-    console.log(
-      `[EncompassLoanExtractor] Loaded ${fieldSwaps.size} field swaps for connection ${losConnectionId}`
-    );
-    if (fieldSwaps.size > 0) {
-      const sampleSwaps = Array.from(fieldSwaps.entries()).slice(0, 5);
-      console.log(`[EncompassLoanExtractor] Sample field swaps:`, sampleSwaps);
-    }
 
-    // Fetch RDB field definitions to get actual field types/formats
-    // This allows us to properly convert values based on Encompass field types
-    // Use cache to avoid fetching on every sync (only fetch once per connection)
+    // Fetch RDB field definitions (cached per connection)
     const cacheKey = EncompassLoanExtractor.getCacheKey(
       tenantId,
       losConnectionId
@@ -119,26 +104,17 @@ export class EncompassLoanExtractor {
     let fieldFormatMap = EncompassLoanExtractor.rdbFormatCache.get(cacheKey);
 
     if (!fieldFormatMap) {
-      // Cache miss - fetch from API
-      fieldFormatMap = new Map<string, string>(); // fieldID -> format
+      fieldFormatMap = new Map<string, string>();
       try {
-        console.log(
-          `[EncompassLoanExtractor] Fetching RDB field definitions (cache miss for ${cacheKey})...`
-        );
         const rdbFieldsResponse = await this.apiService.getRdbFields(
           tenantId,
           losConnectionId
         );
         if (rdbFieldsResponse.data && rdbFieldsResponse.data.length > 0) {
-          console.log(
-            `[EncompassLoanExtractor] Received ${rdbFieldsResponse.data.length} RDB field definitions`
-          );
           for (const field of rdbFieldsResponse.data) {
-            // Map fieldID (with and without Fields. prefix) to format
             const fieldId = field.fieldID;
             if (field.format) {
               fieldFormatMap.set(fieldId, field.format);
-              // Also add with Fields. prefix if it doesn't have it
               if (!fieldId.startsWith("Fields.")) {
                 fieldFormatMap.set(`Fields.${fieldId}`, field.format);
               } else {
@@ -149,129 +125,32 @@ export class EncompassLoanExtractor {
               }
             }
           }
-          // Store in cache for future use
           EncompassLoanExtractor.rdbFormatCache.set(cacheKey, fieldFormatMap);
-          console.log(
-            `[EncompassLoanExtractor] Loaded ${fieldFormatMap.size} field format mappings from RDB and cached`
-          );
-          // Log sample formats for debugging
-          const sampleFormats = Array.from(fieldFormatMap.entries()).slice(
-            0,
-            10
-          );
-          console.log(
-            `[EncompassLoanExtractor] Sample field formats:`,
-            sampleFormats
-          );
         } else {
-          console.warn(
-            `[EncompassLoanExtractor] RDB field definitions returned empty array`
-          );
-          // Cache empty map to avoid repeated failed fetches
           EncompassLoanExtractor.rdbFormatCache.set(cacheKey, fieldFormatMap);
         }
       } catch (error: any) {
         console.error(
-          `[EncompassLoanExtractor] Error fetching RDB field definitions: ${error.message}`
+          `[Sync] Error fetching RDB field definitions: ${error.message}`
         );
-        console.error(`[EncompassLoanExtractor] Stack:`, error.stack);
-        // Don't cache errors - allow retry on next sync
       }
-    } else {
-      console.log(
-        `[EncompassLoanExtractor] Using cached RDB field format map (${fieldFormatMap.size} formats) for ${cacheKey}`
-      );
     }
 
     // Build list of Encompass field IDs to request
     let encompassFieldIds: string[];
     if (options.fields && options.fields.length > 0) {
-      // Use specified fields
       encompassFieldIds = await buildFieldIdList(
         this.tenantPool,
         losConnectionId,
         options.fields
       );
     } else {
-      // Get ALL fields from data dictionary (all Coheus aliases)
-      // This ensures we pull all fields that are configured in the field mapping
       const allCoheusAliases = getAllCoheusAliases();
-
-      console.log(
-        `[EncompassLoanExtractor] Building field list from ${allCoheusAliases.length} Coheus aliases`
-      );
-
-      // DEBUG: Check if Application Date alias is in the list
-      const applicationDateAlias = allCoheusAliases.find((a) =>
-        a.toLowerCase().includes("application date")
-      );
-      if (applicationDateAlias) {
-        console.log(
-          `[EncompassLoanExtractor] ✅ Found Application Date alias: "${applicationDateAlias}"`
-        );
-      } else {
-        console.warn(
-          `[EncompassLoanExtractor] ⚠️ Application Date alias NOT found in allCoheusAliases!`
-        );
-      }
-
       encompassFieldIds = await buildFieldIdList(
         this.tenantPool,
         losConnectionId,
         allCoheusAliases
       );
-
-      console.log(
-        `[EncompassLoanExtractor] Built ${encompassFieldIds.length} Encompass field IDs`
-      );
-
-      // DEBUG: Check if Fields.3142 (Application Date) is in the field list
-      if (
-        encompassFieldIds.includes("Fields.3142") ||
-        encompassFieldIds.includes("3142")
-      ) {
-        console.log(
-          `[EncompassLoanExtractor] ✅ Fields.3142 (Application Date) is in the field list to request`
-        );
-      } else {
-        console.warn(
-          `[EncompassLoanExtractor] ⚠️ Fields.3142 (Application Date) NOT in field list! Sample fields:`,
-          encompassFieldIds.slice(0, 10)
-        );
-      }
-
-      // DEBUG: Check if Fields.761 (Lock Date) is in the field list
-      if (
-        encompassFieldIds.includes("Fields.761") ||
-        encompassFieldIds.includes("761")
-      ) {
-        console.log(
-          `[EncompassLoanExtractor] ✅ Fields.761 (Lock Date) is in the field list to request`
-        );
-      } else {
-        console.warn(
-          `[EncompassLoanExtractor] ⚠️ Fields.761 (Lock Date) NOT in field list!`
-        );
-        // Check what field ID Lock Date maps to
-        const lockDateAlias = allCoheusAliases.find(
-          (a) => a.toLowerCase() === "lock date"
-        );
-        if (lockDateAlias) {
-          console.warn(
-            `[EncompassLoanExtractor] Found "Lock Date" alias: "${lockDateAlias}", checking default field ID...`
-          );
-        }
-      }
-
-      // Log summary of field IDs being requested
-      console.log(
-        `[EncompassLoanExtractor] Requesting ${encompassFieldIds.length} field IDs from Encompass API`
-      );
-      if (encompassFieldIds.length < allCoheusAliases.length) {
-        console.warn(
-          `[EncompassLoanExtractor] ⚠️ Only requesting ${encompassFieldIds.length} of ${allCoheusAliases.length} mapped fields. Some fields may be missing from field mapping.`
-        );
-      }
     }
 
     // Load additional field definitions for this connection
@@ -285,10 +164,6 @@ export class EncompassLoanExtractor {
       );
 
       if (additionalFields.length > 0) {
-        console.log(
-          `[EncompassLoanExtractor] Found ${additionalFields.length} additional fields to sync`
-        );
-
         // Add additional field IDs to the request
         for (const field of additionalFields) {
           // Add the LOS field ID if not already in the list
@@ -310,14 +185,9 @@ export class EncompassLoanExtractor {
           }
         }
 
-        console.log(
-          `[EncompassLoanExtractor] Total field IDs after adding additional fields: ${encompassFieldIds.length}`
-        );
       }
     } catch (error: any) {
-      console.warn(
-        `[EncompassLoanExtractor] Could not load additional fields (table may not exist yet): ${error.message}`
-      );
+      // Continue without additional fields
       // Continue without additional fields
     }
 
@@ -336,16 +206,7 @@ export class EncompassLoanExtractor {
       folderNames: folderNames, // Use folderNames array
     });
 
-    console.log(
-      `[EncompassLoanExtractor] Received ${response.data.length} loans from API (after pagination)`
-    );
-
-    // =========================================================================
-    // OPTIMIZATION: Pre-build lookup maps ONCE before loan iteration
-    // This prevents rebuilding these expensive data structures for every loan
-    // =========================================================================
-
-    // Import field mapper functions ONCE (not per-loan)
+    // Pre-build lookup maps ONCE before loan iteration
     const {
       getAllCoheusAliases: getAliases,
       getDefaultFieldId,
@@ -354,9 +215,6 @@ export class EncompassLoanExtractor {
     } = await import("./encompassFieldMapper.js");
 
     const allAliases = getAliases();
-    console.log(
-      `[EncompassLoanExtractor] Pre-building lookup maps for ${allAliases.length} aliases`
-    );
 
     // Pre-build columnToAliasMap ONCE (for reverse lookup)
     const columnToAliasMap = new Map<string, string>();
@@ -392,23 +250,10 @@ export class EncompassLoanExtractor {
     // Get column name aliases ONCE
     const columnAliases = getColumnNameAliases();
 
-    console.log(
-      `[EncompassLoanExtractor] Lookup maps ready: ${columnToAliasMap.size} columns, ${fieldIdToColumnMap.size} field IDs`
-    );
-
-    // =========================================================================
-    // CHUNKED PROCESSING: Process loans in chunks to limit memory usage
-    // This allows processing 100K+ loans without running out of memory
-    // =========================================================================
+    // Chunked processing to limit memory usage
     const chunkSize = options.chunkSize || 5000;
     const useChunkedProcessing = !!options.onChunkProcessed;
     const totalLoans = response.data.length;
-
-    if (useChunkedProcessing) {
-      console.log(
-        `[EncompassLoanExtractor] Using CHUNKED processing (chunk size: ${chunkSize}, total loans: ${totalLoans})`
-      );
-    }
 
     // Map Encompass loans to PostgreSQL records
     const records: LoanRecord[] = [];
@@ -439,23 +284,8 @@ export class EncompassLoanExtractor {
         }
         processedCount++;
 
-        // Log progress every 1000 loans with memory usage
-        if (processedCount % 1000 === 0) {
-          const memUsage = process.memoryUsage();
-          const heapMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-          const rssMB = Math.round(memUsage.rss / 1024 / 1024);
-          console.log(
-            `[EncompassLoanExtractor] Processed ${processedCount}/${totalLoans} loans (heap: ${heapMB}MB, rss: ${rssMB}MB)`
-          );
-        }
-
         // CHUNKED PROCESSING: When chunk is full, process it and clear memory
         if (useChunkedProcessing && currentChunk.length >= chunkSize) {
-          console.log(
-            `[EncompassLoanExtractor] Processing chunk ${chunkIndex + 1} (${
-              currentChunk.length
-            } loans, total: ${processedCount}/${totalLoans})`
-          );
 
           // Call the callback to process this chunk (e.g., write to database)
           await options.onChunkProcessed!(
@@ -473,12 +303,7 @@ export class EncompassLoanExtractor {
             global.gc();
           }
 
-          const memAfterChunk = process.memoryUsage();
-          console.log(
-            `[EncompassLoanExtractor] Chunk ${chunkIndex} complete, memory after clear: heap=${Math.round(
-              memAfterChunk.heapUsed / 1024 / 1024
-            )}MB`
-          );
+          
         }
       } catch (error: any) {
         console.error(
@@ -492,22 +317,9 @@ export class EncompassLoanExtractor {
 
     // Process any remaining loans in the final chunk
     if (useChunkedProcessing && currentChunk.length > 0) {
-      console.log(
-        `[EncompassLoanExtractor] Processing final chunk ${chunkIndex + 1} (${
-          currentChunk.length
-        } loans)`
-      );
       await options.onChunkProcessed!(currentChunk, chunkIndex, processedCount);
       currentChunk = [];
     }
-
-    // Final memory usage log
-    const finalMem = process.memoryUsage();
-    console.log(
-      `[EncompassLoanExtractor] Completed mapping ${processedCount}/${totalLoans} loans (final heap: ${Math.round(
-        finalMem.heapUsed / 1024 / 1024
-      )}MB)`
-    );
 
     // If chunked processing was used, return empty array (chunks were processed via callback)
     // Otherwise return all records (backward compatible)
@@ -951,6 +763,18 @@ export class EncompassLoanExtractor {
       return null;
     }
 
+    // "Last Modified Date" must always preserve full timestamp (TIMESTAMPTZ column)
+    // Handle it before format-based logic which would truncate to DATE
+    if (coheusAlias.toLowerCase() === "last modified date") {
+      if (typeof value === "string" && value.trim()) {
+        const date = new Date(value.trim());
+        if (!isNaN(date.getTime())) {
+          return date.toISOString();
+        }
+      }
+      return value;
+    }
+
     // Use Encompass format if available (most accurate)
     if (encompassFormat) {
       const formatUpper = encompassFormat.toUpperCase();
@@ -1044,6 +868,7 @@ export class EncompassLoanExtractor {
     // Fallback to heuristics if format not available
     // Handle dates - look for common date field patterns
     const aliasLower = coheusAlias.toLowerCase();
+
     if (
       aliasLower.includes("date") ||
       aliasLower.includes("expiration") ||
