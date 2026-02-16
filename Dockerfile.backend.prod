@@ -5,10 +5,9 @@ ARG GIT_COMMIT=unknown
 ARG GIT_BRANCH=unknown
 ARG BUILD_ENV=production
 
-# Set as environment variables for the build script
+# Set git info for version script (but NOT NODE_ENV yet -- npm ci needs dev deps)
 ENV GIT_COMMIT=$GIT_COMMIT
 ENV GIT_BRANCH=$GIT_BRANCH
-ENV NODE_ENV=$BUILD_ENV
 
 WORKDIR /app/server
 
@@ -19,11 +18,14 @@ RUN npm ci
 # Copy server source
 COPY server/ ./
 
-# Build TypeScript
+# Build TypeScript (set NODE_ENV for the build script, not for npm ci)
+ENV NODE_ENV=$BUILD_ENV
 RUN npm run build
 
 # Production stage
 FROM node:20-alpine
+
+ENV NODE_ENV=production
 
 WORKDIR /app/server
 

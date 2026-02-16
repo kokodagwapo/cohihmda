@@ -37,6 +37,7 @@ interface LoanData {
   interestRate?: number | null;
   marketRate?: number | null;
   lockMarketRate?: number | null;
+  rateReferenceType?: "lock" | "application" | null;
   marketChangeDelta?: number | null;
   lockDate?: string | null;
   lockExpirationDate?: string | null;
@@ -45,6 +46,7 @@ interface LoanData {
   closerPullthroughPct?: number | null;
   processorPullthroughPct?: number | null;
   riskSummary?: RiskSummary;
+  closeLateRisk?: boolean | null;
   creditMetricsSignalStrength?: number | null;
   loanCharacteristicsSignalStrength?: number | null;
   timeInMotionSignalStrength?: number | null;
@@ -100,8 +102,24 @@ function buildEmailBody(loan: LoanData): string {
   const commissionHigh = formatAmt(Math.min(amt * 0.01, COMMISSION_MAX));
   const officerTier = loan.officerTier === 'top' ? 'Top Tier' : loan.officerTier === 'second' ? 'Second Tier' : 'Bottom Tier';
   const officerSuffix = loan.officerTtsScore != null && !Number.isNaN(loan.officerTtsScore) ? `  ${officerTier} – ${Math.round(loan.officerTtsScore)}` : '';
+  const isPastEcd = (() => {
+    const ecdRaw = loan.estimatedClosingDate;
+    if (ecdRaw == null || ecdRaw === '') return false;
+    try {
+      const ecd = new Date(ecdRaw);
+      if (Number.isNaN(ecd.getTime())) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      ecd.setHours(0, 0, 0, 0);
+      return today > ecd;
+    } catch {
+      return false;
+    }
+  })();
   const predictedLabel = loan.riskSummary?.predictedOutcome === 'deny' ? '▲ LIKELY DECLINE' :
     loan.riskSummary?.predictedOutcome === 'withdraw' ? '↩ LIKELY WITHDRAW' :
+    isPastEcd ? '📅 PAST EST. CLOSING' :
+    loan.closeLateRisk === true ? '⏱ LIKELY CLOSE LATE' :
     loan.riskSummary?.predictedOutcome === 'at_risk' ? '⚡ AT RISK' : null;
   const riskLabel = loan.riskLevel === 'Very High' ? 'CRITICAL' : loan.riskLevel === 'Medium' ? 'AT RISK' : 'LOW';
   const lockVsMarketBucket = loan.interestLockVsMarketSignalStrength ?? (() => {
@@ -142,7 +160,7 @@ function buildEmailBody(loan: LoanData): string {
   if (predictedLabel) body += `${' '.repeat(36)}${predictedLabel}\n`;
   body += `${' '.repeat(36)}${riskLabel}\n\n`;
   body += `${sep}\n`;
-  body += `● Risk Score: ${loan.riskScore}/100 (40 = worst, 100 = best)\n`;
+  body += `● Risk Score: ${loan.riskScore}/100 (0 = lowest risk, 100 = highest risk)\n`;
   body += `${sep}\n\n`;
 
   if (hasSignals) {
@@ -159,7 +177,8 @@ function buildEmailBody(loan: LoanData): string {
 
   if (loan.lockDate != null || loan.lockMarketRate != null || loan.marketRate != null || loan.lockExpirationDate != null) {
     body += `${sep}\nRATE & MARKET\n${sep}\n`;
-    body += `Market rate at lock: ${loan.lockMarketRate != null && !Number.isNaN(loan.lockMarketRate) ? loan.lockMarketRate.toFixed(3) + '%' : '—'}\n`;
+    const rateLabel = loan.rateReferenceType === "application" ? "Rate at application" : "Market rate at lock";
+    body += `${rateLabel}: ${loan.lockMarketRate != null && !Number.isNaN(loan.lockMarketRate) ? loan.lockMarketRate.toFixed(3) + '%' : '—'}\n`;
     body += `Market rate today: ${loan.marketRate != null ? loan.marketRate.toFixed(3) + '%' : '—'}\n`;
     body += `Market Delta: ${loan.marketChangeDelta != null && !Number.isNaN(loan.marketChangeDelta) ? (loan.marketChangeDelta > 0 ? '+' : '') + loan.marketChangeDelta.toFixed(3) + '%' : '—'}\n`;
     body += `Lock Status: ${(loan.lockDate != null && loan.lockDate !== '') ? (loan.lockExpirationDate ? formatLockExpirationForEmail(loan.lockExpirationDate) : '—') : 'Locked: No'}\n\n`;

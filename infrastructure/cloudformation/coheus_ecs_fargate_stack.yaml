@@ -170,6 +170,13 @@ Parameters:
     Default: ""
     Description: Cognito domain (e.g., your-app.auth.us-east-2.amazoncognito.com)
 
+  # FRED API (market rates)
+  FredApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: FRED API key for fetching mortgage market rates (optional)
+
 Conditions:
   CreateNewVPC: !Equals [!Ref NetworkMode, "new"]
   IsDevEnvironment: !Equals [!Ref Environment, "dev"]
@@ -711,6 +718,9 @@ Resources:
               Value: !If [HasCognito, !Ref AWS::Region, ""]
             - Name: COGNITO_DOMAIN
               Value: !If [HasCognito, !Ref CognitoDomain, ""]
+            # FRED API for market rate data
+            - Name: FRED_API_KEY
+              Value: !Ref FredApiKey
           Secrets:
             - Name: DB_USER
               ValueFrom: !Sub "${AuroraSecretArn}:username::"

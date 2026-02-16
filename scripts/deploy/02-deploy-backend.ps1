@@ -93,6 +93,14 @@ if ($COGNITO_USER_POOL_ID) {
     Write-Status "Cognito SSO not configured for $ENVIRONMENT - skipping" "Yellow"
 }
 
+# FRED API key (optional - market rate sync disabled if not provided)
+if ($FRED_API_KEY) {
+    Write-Status "FRED API key configured"
+    $params += "ParameterKey=FredApiKey,ParameterValue=$FRED_API_KEY"
+} else {
+    Write-Status "FRED API key not configured - market rate sync will be disabled" "Yellow"
+}
+
 # ============================================================================
 # PHASE 1: Deploy CloudFormation with DesiredCount=0 (creates ECR, no tasks)
 # ============================================================================
