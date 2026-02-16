@@ -503,6 +503,8 @@ export function AdditionalFieldsTab({
     setIsSaving(true);
     try {
       const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
+
+      // Update display name and description
       await api.request<{ field: AdditionalField }>(
         `/api/tenant-config/additional-fields/${selectedField.id}${tenantParam}`,
         {
@@ -514,9 +516,26 @@ export function AdditionalFieldsTab({
         }
       );
 
+      // If data type changed, update it separately (this ALTERs the column)
+      if (formData.dataType !== selectedField.dataType) {
+        await api.request<{ field: AdditionalField }>(
+          `/api/tenant-config/additional-fields/${selectedField.id}/data-type${tenantParam}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              dataType: formData.dataType,
+            }),
+          }
+        );
+      }
+
       toast({
         title: "Success",
-        description: "Field updated successfully",
+        description:
+          formData.dataType !== selectedField.dataType
+            ? `Field updated and data type changed to ${formData.dataType}. Run a data sync to repopulate values.`
+            : "Field updated successfully",
+        duration: formData.dataType !== selectedField.dataType ? 6000 : 3000,
       });
 
       setIsEditDialogOpen(false);
@@ -1225,6 +1244,38 @@ export function AdditionalFieldsTab({
                   handleInputChange("displayName", e.target.value)
                 }
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editDataType">Data Type</Label>
+              <Select
+                value={formData.dataType}
+                onValueChange={(value) => handleInputChange("dataType", value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select data type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DATA_TYPES.map((dt) => (
+                    <SelectItem key={dt.value} value={dt.value}>
+                      <div className="flex flex-col">
+                        <span>{dt.label}</span>
+                        <span className="text-xs text-slate-500">
+                          {dt.description}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedField &&
+                formData.dataType !== selectedField.dataType && (
+                  <p className="text-xs text-amber-600">
+                    Changing data type will ALTER the database column. Existing
+                    data will be converted if possible. Run a data sync
+                    afterward.
+                  </p>
+                )}
             </div>
 
             <div className="grid gap-2">

@@ -1276,7 +1276,6 @@ export const LeaderBoardSection = ({
                     {/* Quick Stats Row */}
                     <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 py-2 border-t border-slate-100 dark:border-slate-800">
                       <span>Rank #{leader.rank}</span>
-                      <span>{leader.streakDays} day streak</span>
                       <span>{periodLabels[period].short}</span>
                     </div>
 
