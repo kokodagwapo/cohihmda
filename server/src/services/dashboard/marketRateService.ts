@@ -403,48 +403,54 @@ export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
  * @returns Market rate or null if not found
  */
 export async function getMarketRateForDate(date: string | Date): Promise<number | null> {
-  const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return null;
+  const dateStr = dateObj.toISOString().split('T')[0];
 
-  // Check cache first (if initialized and not expired)
-  if (cacheInitialized && Date.now() < cacheExpiry) {
-    const cachedRate = marketRateCache.get(dateStr);
-    if (cachedRate !== undefined) {
-      return cachedRate;
+  // Try exact date first, then walk back up to 7 days (FRED publishes weekly on Thursdays)
+  for (let offset = 0; offset <= 7; offset++) {
+    const lookupDate = new Date(dateObj);
+    lookupDate.setDate(lookupDate.getDate() - offset);
+    const lookupStr = lookupDate.toISOString().split('T')[0];
+
+    // Check cache first (if initialized and not expired)
+    if (cacheInitialized && Date.now() < cacheExpiry) {
+      const cachedRate = marketRateCache.get(lookupStr);
+      if (cachedRate !== undefined) {
+        // Cache the result under the original date too for future hits
+        if (offset > 0) marketRateCache.set(dateStr, cachedRate);
+        return cachedRate;
+      }
     }
-    // Date not in cache - fall back to DB (handles weekends/holidays or cache populated before sync)
-    // Don't return null immediately; DB may have the rate
-  }
 
-  // Cache not initialized or expired - query database
-  try {
-    const result = await pool.query(
-      'SELECT rate FROM public.market_rates WHERE rate_date = $1',
-      [dateStr]
-    );
+    // Query database for this date
+    try {
+      const result = await pool.query(
+        'SELECT rate FROM public.market_rates WHERE rate_date = $1',
+        [lookupStr]
+      );
 
-    if (result.rows.length === 0) {
-      // Silently return null - missing market rate data is expected for some dates
+      if (result.rows.length > 0) {
+        const rate = parseFloat(result.rows[0].rate);
+        marketRateCache.set(lookupStr, rate);
+        if (offset > 0) marketRateCache.set(dateStr, rate);
+        return rate;
+      }
+    } catch (error: any) {
+      if (error?.message?.includes('does not exist') || 
+          error?.code === '42P01' ||
+          error?.message?.includes('timeout')) {
+        return null;
+      }
+      if (offset === 0) {
+        console.error(`[FRED API] ❌ Error getting rate for ${lookupStr}:`, error.message);
+        logError(`Failed to get market rate for date ${lookupStr}: ${error.message}`, error);
+      }
       return null;
     }
-
-    const rate = parseFloat(result.rows[0].rate);
-    // Cache the result for future use
-    marketRateCache.set(dateStr, rate);
-    return rate;
-  } catch (error: any) {
-    // If table doesn't exist or connection timeout, silently return null (don't spam errors)
-    if (error?.message?.includes('does not exist') || 
-        error?.code === '42P01' ||
-        error?.message?.includes('timeout')) {
-      // Table doesn't exist or connection issues - this is expected in development
-      // Return null silently to allow bucketing to continue
-      return null;
-    }
-    // For other errors, log but don't block
-    console.error(`[FRED API] ❌ Error getting rate for ${dateStr}:`, error.message);
-    logError(`Failed to get market rate for date ${dateStr}: ${error.message}`, error);
-    return null;
   }
+
+  return null;
 }
 
 /**
