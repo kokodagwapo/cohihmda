@@ -10,7 +10,7 @@
 import { pool } from '../../config/managementDatabase.js';
 import { logInfo, logError } from '../logger.js';
 
-const FRED_API_KEY = process.env.FRED_API_KEY;
+const getFredApiKey = () => process.env.FRED_API_KEY;
 const FRED_API_BASE_URL = 'https://api.stlouisfed.org/fred/series/observations';
 const FRED_SERIES_ID = 'OBMMIC30YF'; // 30-Year Fixed Rate Conforming Mortgage Index
 
@@ -42,7 +42,8 @@ export async function fetchMarketRatesFromFRED(
   startDate?: string,
   endDate?: string
 ): Promise<MarketRate[]> {
-  if (!FRED_API_KEY) {
+  const apiKey = getFredApiKey();
+  if (!apiKey) {
     throw new Error('FRED_API_KEY is not configured. Please set it in environment variables.');
   }
 
@@ -56,7 +57,7 @@ export async function fetchMarketRatesFromFRED(
 
   const url = new URL(FRED_API_BASE_URL);
   url.searchParams.append('series_id', FRED_SERIES_ID);
-  url.searchParams.append('api_key', FRED_API_KEY);
+  url.searchParams.append('api_key', apiKey);
   url.searchParams.append('file_type', 'json');
   url.searchParams.append('observation_start', observationStart);
   url.searchParams.append('observation_end', observationEnd);
@@ -66,8 +67,8 @@ export async function fetchMarketRatesFromFRED(
     console.log('[FRED API] Starting FRED API call...');
     console.log('[FRED API] Series ID:', FRED_SERIES_ID);
     console.log('[FRED API] Date Range:', observationStart, 'to', observationEnd);
-    console.log('[FRED API] API Key configured:', !!FRED_API_KEY);
-    console.log('[FRED API] Full URL:', url.toString().replace(FRED_API_KEY || '', '***REDACTED***'));
+    console.log('[FRED API] API Key configured:', !!apiKey);
+    console.log('[FRED API] Full URL:', url.toString().replace(apiKey || '', '***REDACTED***'));
     logInfo(`Fetching market rates from FRED API (${observationStart} to ${observationEnd})`);
 
     const response = await fetch(url.toString());
@@ -321,7 +322,7 @@ export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
     return 0;
   }
 
-  if (!FRED_API_KEY) {
+  if (!getFredApiKey()) {
     console.log('[FRED API] ⚠️ FRED_API_KEY not configured, skipping market rate sync');
     return 0;
   }
@@ -444,6 +445,45 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
     logError(`Failed to get market rate for date ${dateStr}: ${error.message}`, error);
     return null;
   }
+}
+
+/**
+ * Compute market delta for historical outcome (lock rate - close rate at outcome date).
+ * Used by outcome numeric profile service. Same convention as predictionService: positive = rates fell.
+ * @param lockDate - Lock or application date
+ * @param outcomeDate - Outcome date (e.g. current_status_date)
+ * @returns lockMarketRate - closeMarketRate, or null if either rate unavailable
+ */
+export async function computeMarketDeltaForDates(
+  lockDate: string | Date | null,
+  outcomeDate: string | Date | null
+): Promise<number | null> {
+  if (!lockDate || !outcomeDate) return null;
+  const lockObj = typeof lockDate === 'string' ? new Date(lockDate) : lockDate;
+  const outObj = typeof outcomeDate === 'string' ? new Date(outcomeDate) : outcomeDate;
+  if (isNaN(lockObj.getTime()) || isNaN(outObj.getTime()) || outObj < lockObj) return null;
+  const lockStr = lockObj.toISOString().split('T')[0];
+  const outStr = outObj.toISOString().split('T')[0];
+  let lockRate = await getMarketRateForDate(lockStr);
+  if (lockRate === null) {
+    for (let d = 1; d <= 7; d++) {
+      const d2 = new Date(lockObj);
+      d2.setDate(d2.getDate() - d);
+      lockRate = await getMarketRateForDate(d2.toISOString().split('T')[0]);
+      if (lockRate !== null) break;
+    }
+  }
+  let closeRate = await getMarketRateForDate(outStr);
+  if (closeRate === null) {
+    for (let d = 1; d <= 7; d++) {
+      const d2 = new Date(outObj);
+      d2.setDate(d2.getDate() - d);
+      closeRate = await getMarketRateForDate(d2.toISOString().split('T')[0]);
+      if (closeRate !== null) break;
+    }
+  }
+  if (lockRate === null || closeRate === null) return null;
+  return lockRate - closeRate;
 }
 
 /**

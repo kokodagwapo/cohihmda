@@ -1,5 +1,8 @@
 import React, { memo } from 'react';
 
+/** Reason code from fallout sequencer (bucket_type = feature or Outcome/TurnTime, bucket_value = Zone1–Zone4 or label). */
+export type ReasonCodeEntry = { bucket_type: string; bucket_value: string; risk_score?: number };
+
 interface LoanRiskDistributionProps {
   ficoScore: number | null;
   ltvRatio: number | null;
@@ -15,6 +18,32 @@ interface LoanRiskDistributionProps {
   interestRate?: number | null;
   marketRate?: number | null;
   marketChangeDelta?: number | null;
+  /** When present, zone-based colors are used for FICO/LTV/DTI/Time in Motion: Zone1=red, Zone2=orange, Zone3=yellow, Zone4=no color. */
+  reasonCodes?: ReasonCodeEntry[] | null;
+}
+
+/** Get zone number (1–4) from reason_codes for a given bucket_type (e.g. fico_score, ltv_ratio, be_dti_ratio, days_active). */
+export function getZoneFromReasonCodes(
+  reasonCodes: ReasonCodeEntry[] | null | undefined,
+  bucketType: string
+): 1 | 2 | 3 | 4 | null {
+  if (!reasonCodes || !Array.isArray(reasonCodes)) return null;
+  const entry = reasonCodes.find((r) => (r?.bucket_type ?? '') === bucketType);
+  const bv = (entry?.bucket_value ?? '').toString();
+  if (bv === 'Zone1') return 1;
+  if (bv === 'Zone2') return 2;
+  if (bv === 'Zone3') return 3;
+  if (bv === 'Zone4') return 4;
+  return null;
+}
+
+/** Zone-based text color: Zone1=red, Zone2=orange, Zone3=yellow, Zone4=no color (caller uses default). */
+export function getZoneColorClass(zone: 1 | 2 | 3 | 4 | null, isDarkMode: boolean): string | undefined {
+  if (zone == null) return undefined;
+  if (zone === 1) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+  if (zone === 2) return isDarkMode ? 'text-orange-400' : 'text-orange-600';
+  if (zone === 3) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+  return undefined; // Zone4 = no color
 }
 
 function MetricItem({
@@ -51,6 +80,7 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   interestRate,
   marketRate,
   marketChangeDelta,
+  reasonCodes,
 }) => {
   const hasFico = ficoScore != null && ficoScore > 0;
   const hasLtv = ltvRatio != null && ltvRatio > 0;
@@ -67,28 +97,48 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   const hasAny = hasFico || hasLtv || hasDti || hasLoanType || hasLoanPurpose || hasChannel || hasMilestone || hasTimeInMotion || hasEstimatedClosing || hasLoPullthrough || hasLockVsMarket;
   if (!hasAny) return null;
 
+  // Zone-based colors when reason_codes present: Zone1=red, Zone2=orange, Zone3=yellow, Zone4=no color
+  const zoneFico = getZoneFromReasonCodes(reasonCodes, 'fico_score');
+  const zoneLtv = getZoneFromReasonCodes(reasonCodes, 'ltv_ratio');
+  const zoneDti = getZoneFromReasonCodes(reasonCodes, 'be_dti_ratio');
+  const zoneTimeInMotion = getZoneFromReasonCodes(reasonCodes, 'days_active');
+
+  const defaultMetricColor = isDarkMode ? 'text-slate-200' : 'text-slate-800';
+
   const getFicoColor = (score: number) => {
+    const zoneColor = getZoneColorClass(zoneFico ?? null, isDarkMode);
+    if (zoneColor != null) return zoneColor;
+    if (reasonCodes != null && reasonCodes.length > 0) return defaultMetricColor;
     if (score < 640) return 'text-rose-500';
     if (score < 700) return 'text-amber-500';
-    return 'text-emerald-500';
+    return defaultMetricColor;
   };
 
   const getLtvColor = (ratio: number) => {
+    const zoneColor = getZoneColorClass(zoneLtv ?? null, isDarkMode);
+    if (zoneColor != null) return zoneColor;
+    if (reasonCodes != null && reasonCodes.length > 0) return defaultMetricColor;
     if (ratio > 95) return 'text-rose-500';
     if (ratio > 80) return 'text-amber-500';
-    return 'text-emerald-500';
+    return defaultMetricColor;
   };
 
   const getDtiColor = (ratio: number) => {
+    const zoneColor = getZoneColorClass(zoneDti ?? null, isDarkMode);
+    if (zoneColor != null) return zoneColor;
+    if (reasonCodes != null && reasonCodes.length > 0) return defaultMetricColor;
     if (ratio > 50) return 'text-rose-500';
     if (ratio > 43) return 'text-amber-500';
-    return 'text-emerald-500';
+    return defaultMetricColor;
   };
 
   const getTimeInMotionColor = (days: number) => {
+    const zoneColor = getZoneColorClass(zoneTimeInMotion ?? null, isDarkMode);
+    if (zoneColor != null) return zoneColor;
+    if (reasonCodes != null && reasonCodes.length > 0) return defaultMetricColor;
     if (days > 45) return 'text-rose-500';
     if (days >= 30) return 'text-amber-500';
-    return 'text-emerald-500';
+    return defaultMetricColor;
   };
 
   const getPullthroughColor = (pct: number) => {

@@ -3,6 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { LoanDrilldownModal } from '@/components/dashboard/LoanDrilldownModal';
+import { LoanCardContent, type LoanCardContentLoan } from '@/components/dashboard/LoanCardContent';
 import { AlethiaInsightsBlock, AlethiaSectionCard } from '@/components/dashboard/AlethiaInsightsBlock';
 import { transformLoanToCard, type LoanCard } from '@/utils/loanDataTransform';
 import { PeriodValue, getLoanAmountNumber, inferLoanStatus, isFundedInPeriod } from '@/utils/closingFalloutFilters';
@@ -61,6 +62,9 @@ export interface ClosingFalloutMetricModalProps {
   fallbackActiveVolume?: number;
   /** Fallback active count when loansRaw is empty (from statsData.active) */
   fallbackActiveCount?: number;
+  /** When label is "High Risk", list of loans (card shape) and total volume for modal */
+  highRiskLoans?: LoanCardContentLoan[];
+  highRiskVolume?: number;
 }
 
 export function ClosingFalloutMetricModal({
@@ -76,8 +80,10 @@ export function ClosingFalloutMetricModal({
   subLabel,
   fallbackActiveVolume,
   fallbackActiveCount,
+  highRiskLoans,
+  highRiskVolume = 0,
 }: ClosingFalloutMetricModalProps) {
-  const [selectedLoan, setSelectedLoan] = useState<LoanCard | null>(null);
+  const [selectedLoan, setSelectedLoan] = useState<LoanCard | LoanCardContentLoan | null>(null);
 
   const metricKey = useMemo(() => (label ? normalizeMetricLabel(label) : null), [label]);
   const content = metricKey ? METRIC_CONTENT[metricKey] : null;
@@ -111,7 +117,10 @@ export function ClosingFalloutMetricModal({
     };
   }, [loansRaw, dateFilter]);
 
+  const isHighRiskMode = label === 'High Risk' && highRiskLoans != null;
+
   const priorityLoansRaw = useMemo(() => {
+    if (isHighRiskMode) return [];
     if (!metricKey || !loansRaw) return [];
 
     let base: any[] = loansRaw;
@@ -128,14 +137,18 @@ export function ClosingFalloutMetricModal({
       .sort((a, b) => b.risk - a.risk)
       .slice(0, 8)
       .map((x) => x.loan);
-  }, [metricKey, loansRaw, dateFilter]);
+  }, [metricKey, loansRaw, dateFilter, isHighRiskMode]);
 
   const priorityLoans = useMemo(() => {
     return priorityLoansRaw.map(transformLoanToCard);
   }, [priorityLoansRaw]);
 
-  const title = content?.title || label || '';
-  const description = content?.description || '';
+  const title = isHighRiskMode
+    ? 'High Risk Loans'
+    : (content?.title || label || '');
+  const description = isHighRiskMode
+    ? 'Loans predicted to withdraw, decline, or close late with risk score 80 or higher. Sorted by risk score.'
+    : (content?.description || '');
 
   const alethiaInsights = useMemo(() => {
     if (!metricKey) return null;
@@ -222,32 +235,36 @@ export function ClosingFalloutMetricModal({
                 <div className={`p-5 rounded-xl text-center overflow-hidden border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
                   <p className={`text-[10px] font-medium uppercase tracking-widest mb-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Computed Volume</p>
                   <p className={`text-2xl sm:text-3xl font-extralight tracking-tight tabular-nums ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                    {metricKey === 'Active Loans Today'
-                      ? formatMoneyShort((computed.active.volume || fallbackActiveVolume) ?? 0)
-                      : metricKey === 'Funded Loans'
-                        ? formatMoneyShort(computed.funded.volume)
-                        : metricKey === 'Predicted Fallout'
-                          ? formatMoneyShort(computed.fallout.volume)
-                          : metricKey === 'Predicted Closing'
-                            ? (() => {
-                                const activeCount = (computed.active.count || fallbackActiveCount) ?? 0;
-                                const activeVolume = (computed.active.volume || fallbackActiveVolume) ?? 0;
-                                const predictedCount = headlineValue ?? 0;
-                                const vol = activeCount > 0 && predictedCount > 0
-                                  ? (predictedCount / activeCount) * activeVolume
-                                  : 0;
-                                return formatMoneyShort(vol);
-                              })()
-                            : formatMoneyShort((computed.active.volume || fallbackActiveVolume) ?? 0)}
+                    {isHighRiskMode
+                      ? formatMoneyShort(highRiskVolume ?? 0)
+                      : metricKey === 'Active Loans Today'
+                        ? formatMoneyShort((computed.active.volume || fallbackActiveVolume) ?? 0)
+                        : metricKey === 'Funded Loans'
+                          ? formatMoneyShort(computed.funded.volume)
+                          : metricKey === 'Predicted Fallout'
+                            ? formatMoneyShort(computed.fallout.volume)
+                            : metricKey === 'Predicted Closing'
+                              ? (() => {
+                                  const activeCount = (computed.active.count || fallbackActiveCount) ?? 0;
+                                  const activeVolume = (computed.active.volume || fallbackActiveVolume) ?? 0;
+                                  const predictedCount = headlineValue ?? 0;
+                                  const vol = activeCount > 0 && predictedCount > 0
+                                    ? (predictedCount / activeCount) * activeVolume
+                                    : 0;
+                                  return formatMoneyShort(vol);
+                                })()
+                              : formatMoneyShort((computed.active.volume || fallbackActiveVolume) ?? 0)}
                   </p>
                   <p className={`mt-2 text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {metricKey === 'Predicted Fallout'
-                      ? `${computed.fallout.withdrawnCount} withdrawn · ${computed.fallout.deniedCount} denied`
-                      : metricKey === 'Funded Loans'
-                        ? `${computed.funded.count} funded loans in period`
-                        : metricKey === 'Predicted Closing'
-                          ? `${headlineValue ?? 0} loans predicted to close`
-                          : `${(computed.active.count || fallbackActiveCount) ?? 0} active/locked loans`}
+                    {isHighRiskMode
+                      ? `${highRiskLoans?.length ?? 0} high-risk loans`
+                      : metricKey === 'Predicted Fallout'
+                        ? `${computed.fallout.withdrawnCount} withdrawn · ${computed.fallout.deniedCount} denied`
+                        : metricKey === 'Funded Loans'
+                          ? `${computed.funded.count} funded loans in period`
+                          : metricKey === 'Predicted Closing'
+                            ? `${headlineValue ?? 0} loans predicted to close`
+                            : `${(computed.active.count || fallbackActiveCount) ?? 0} active/locked loans`}
                   </p>
                 </div>
               </div>
@@ -261,13 +278,40 @@ export function ClosingFalloutMetricModal({
                       <p className={`text-[11px] font-normal mt-1 truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Click a loan for details</p>
                     </div>
                     <span className={`text-[10px] px-2.5 py-1 rounded-md font-medium flex-shrink-0 ${isDarkMode ? 'bg-white/10 text-slate-300' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
-                      {loansLoading ? 'Loading…' : `${priorityLoans.length} loans`}
+                      {isHighRiskMode
+                        ? `${highRiskLoans?.length ?? 0} loans`
+                        : (loansLoading ? 'Loading…' : `${priorityLoans.length} loans`)}
                     </span>
                   </div>
                 </div>
 
                 <div className="p-4">
-                  {loansError ? (
+                  {isHighRiskMode ? (
+                    highRiskLoans == null || highRiskLoans.length === 0 ? (
+                      <div className={`text-sm py-10 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>No loans match this metric.</div>
+                    ) : (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
+                        {highRiskLoans.map((loan) => (
+                          <div
+                            key={loan.id}
+                            onClick={() => setSelectedLoan(loan)}
+                            className={`p-3 sm:p-4 lg:p-5 rounded-lg sm:rounded-xl overflow-hidden cursor-pointer transition-all hover:shadow-md active:scale-[0.99] ${
+                              isDarkMode
+                                ? 'bg-slate-800/50 border border-slate-700 hover:bg-slate-800'
+                                : 'bg-white border border-slate-200 shadow-[0_1px_4px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'
+                            }`}
+                          >
+                            <LoanCardContent
+                              loan={loan}
+                              isDarkMode={isDarkMode}
+                              showTapForDetails
+                              compact
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : loansError ? (
                     <div className="text-sm text-rose-500 py-6 text-center">{loansError}</div>
                   ) : loansLoading ? (
                     <div className={`text-sm py-10 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Loading loans…</div>

@@ -82,7 +82,7 @@ if ($ENVIRONMENT -eq "prod") {
     $COGNITO_CLIENT_SECRET = $COGNITO_CLIENT_SECRET_PROD
     $COGNITO_DOMAIN = $COGNITO_DOMAIN_PROD
     $COGNITO_FRONTEND_URL = "https://cohi.coheus1.com"  # Prod frontend
-    $COGNITO_IDENTITY_PROVIDERS = @("COGNITO")  # Add tenant IdPs here as they're configured
+    $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "CoheusEntraID")  # Platform SSO via Entra ID
 } else {
     $COGNITO_USER_POOL_ID = $COGNITO_USER_POOL_ID_DEV
     $COGNITO_CLIENT_ID = $COGNITO_CLIENT_ID_DEV
@@ -91,6 +91,9 @@ if ($ENVIRONMENT -eq "prod") {
     $COGNITO_FRONTEND_URL = "https://cohi-dev.coheus1.com"  # Dev frontend
     $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "TestAccCognito")  # Include your test IdP
 }
+
+# FRED API Key (mortgage market rates)
+$FRED_API_KEY = "58a508e93dc99372365ad789baa41e75"
 
 # Frontend S3 Bucket (environment-scoped to avoid collisions)
 $FRONTEND_BUCKET = "$PROJECT_NAME-$ENVIRONMENT-frontend-$AWS_ACCOUNT_ID"
