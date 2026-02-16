@@ -551,7 +551,47 @@ function buildDetailFilters(
     }
 
     case "performance": {
-      return { type: "performance" };
+      // Extract officer names mentioned in the insight so the detail drilldown
+      // can filter to just those officers (same approach as tiering).
+      const perfHl = insight.headline.toLowerCase();
+
+      // Gather all known actor names from tiering data
+      const tieringActors = metrics.tiering?.byActorType?.flatMap(t =>
+        [...(t.topPerformers || []), ...(t.bottomPerformers || [])].map(p => p.name)
+      ) || [];
+      const periodActors = metrics.tiering?.byActorType?.flatMap(t =>
+        (t.periodChanges || []).map(c => c.name)
+      ) || [];
+      const knownPerfNames = [...new Set([...tieringActors, ...periodActors])];
+
+      // Match names from headline + understory
+      const perfText = `${insight.headline} ${insight.understory}`;
+      const mentionedPerfNames = knownPerfNames.filter(name =>
+        perfText.toLowerCase().includes(name.toLowerCase())
+      );
+
+      // Store per-officer snapshot values from tiering data for consistency
+      const allTierActors = metrics.tiering?.byActorType?.flatMap(t =>
+        [...(t.topPerformers || []), ...(t.bottomPerformers || [])]
+      ) || [];
+      const perfSnapshots: Record<string, { units: number; revenue: number; volume: number; pullThrough: number }> = {};
+      for (const name of mentionedPerfNames) {
+        const actor = allTierActors.find(a => a.name.toLowerCase() === name.toLowerCase());
+        if (actor) {
+          perfSnapshots[actor.name] = {
+            units: actor.units,
+            revenue: actor.revenue,
+            volume: actor.volume,
+            pullThrough: actor.pullThrough,
+          };
+        }
+      }
+
+      return {
+        type: "performance",
+        ...(mentionedPerfNames.length > 0 ? { actorNames: mentionedPerfNames } : {}),
+        ...(Object.keys(perfSnapshots).length > 0 ? { actorSnapshots: perfSnapshots } : {}),
+      };
     }
 
     case "comparisons": {

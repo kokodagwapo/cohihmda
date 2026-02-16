@@ -552,66 +552,148 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
       case 'performance': {
         const loOfficer = loans.whereExpr('loan_officer', 'l');
         const loOfficerId = loans.whereExpr('loan_officer_id', 'l');
+        const revenueExprPerf = await getTenantRevenueExpression(tenantPool);
+        const closeDateExprPerf = 'COALESCE(l.funding_date::date, l.closing_date)';
 
+        // Use canonical metric definitions: application_date scoping, proper funded/completed
         const performanceQuery = `
           SELECT 
             COALESCE(e.first_name || ' ' || e.last_name, ${loOfficer}, 'Unknown') as loan_officer,
-            COUNT(*) as total_loans,
-            COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END) as funded_loans,
-            SUM(l.loan_amount) as total_volume,
-            SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as funded_volume,
+            COUNT(*) as total_apps,
+            COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+              THEN 1 END) as completed,
+            COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
+              AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+              THEN 1 END) as funded,
+            SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
+              THEN l.loan_amount ELSE 0 END) as funded_volume,
+            SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
+              THEN (${revenueExprPerf}) ELSE 0 END) as funded_revenue,
             AVG(CASE 
-              WHEN l.funding_date IS NOT NULL AND l.application_date IS NOT NULL 
-              THEN DATE(l.funding_date) - DATE(l.application_date) 
+              WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
+              THEN ${closeDateExprPerf} - l.application_date
               ELSE NULL 
-            END) as avg_cycle_time
+            END) as avg_cycle_time,
+            COUNT(CASE WHEN l.current_loan_status ILIKE '%withdraw%' OR l.current_loan_status ILIKE '%cancelled%'
+              OR l.current_loan_status ILIKE '%canceled%' OR l.current_loan_status ILIKE '%not accepted%'
+              OR l.current_loan_status ILIKE '%incomplete%' THEN 1 END) as lost,
+            COUNT(CASE WHEN l.current_loan_status ILIKE '%denied%'
+              OR l.current_loan_status ILIKE '%declined%' THEN 1 END) as denied
           FROM public.loans l
           LEFT JOIN public.employees e ON e.id::TEXT = ${loOfficerId}
           WHERE l.application_date >= $1
           GROUP BY COALESCE(e.first_name || ' ' || e.last_name, ${loOfficer}, 'Unknown')
           HAVING COUNT(*) >= 1
-          ORDER BY SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END) DESC
+          ORDER BY SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL) THEN l.loan_amount ELSE 0 END) DESC
           LIMIT 50
         `;
 
         const performance = await tenantPool.query(performanceQuery, [startDate]);
 
-        // Compute weighted average cycle time across all officers
-        let totalCycleWeightedSum = 0;
-        let totalCycleWeightCount = 0;
-        for (const row of performance.rows) {
-          const ct = parseFloat(row.avg_cycle_time);
-          const funded = parseInt(row.funded_loans);
-          if (!isNaN(ct) && funded > 0) {
-            totalCycleWeightedSum += ct * funded;
-            totalCycleWeightCount += funded;
+        // If specific officers were mentioned in the insight, filter to those
+        const actorNames: string[] | undefined = filters?.actorNames;
+        const isFilteredPerf = actorNames && actorNames.length > 0;
+        const displayRows = isFilteredPerf
+          ? performance.rows.filter((r: any) =>
+              actorNames!.some((n: string) => (r.loan_officer || '').toLowerCase() === n.toLowerCase())
+            )
+          : performance.rows;
+
+        // Build officers array with canonical metric definitions
+        const officers = displayRows.map((row: any) => {
+          const completed = parseInt(row.completed) || 0;
+          const funded = parseInt(row.funded) || 0;
+          return {
+            name: row.loan_officer,
+            totalLoans: parseInt(row.total_apps) || 0,
+            fundedLoans: funded,
+            completed,
+            pullThrough: completed > 0
+              ? Math.round((funded / completed) * 1000) / 10
+              : 0,
+            totalVolume: parseFloat(row.funded_volume) || 0,
+            fundedVolume: parseFloat(row.funded_volume) || 0,
+            fundedRevenue: parseFloat(row.funded_revenue) || 0,
+            avgCycleTime: row.avg_cycle_time ? Math.round(parseFloat(row.avg_cycle_time)) : null,
+            lostOpportunityUnits: parseInt(row.lost) || 0,
+            deniedUnits: parseInt(row.denied) || 0,
+          };
+        });
+
+        // Build summary — use actorSnapshots if available for consistency with headline
+        const snapshots: Record<string, { units: number; revenue: number; volume: number; pullThrough: number }> | undefined =
+          filters?.actorSnapshots;
+
+        let summary: Record<string, any>;
+        let overrideSummaryMetrics: string[] | null = null;
+
+        if (isFilteredPerf && officers.length > 0 && officers.length <= 10 && snapshots) {
+          // Officer-specific summary using stored snapshots for headline consistency
+          const officersWithMetrics = officers.map((o: any) => {
+            const snap = snapshots?.[o.name];
+            return {
+              ...o,
+              fundedLoans: snap?.units ?? o.fundedLoans,
+              fundedVolume: snap?.volume ?? o.fundedVolume,
+              fundedRevenue: snap?.revenue ?? o.fundedRevenue,
+              pullThrough: snap?.pullThrough ?? o.pullThrough,
+            };
+          });
+
+          const totalUnits = officersWithMetrics.reduce((s: number, o: any) => s + o.fundedLoans, 0);
+          const totalVol = officersWithMetrics.reduce((s: number, o: any) => s + o.fundedVolume, 0);
+          const totalRev = officersWithMetrics.reduce((s: number, o: any) => s + o.fundedRevenue, 0);
+          const avgPT = officersWithMetrics.length > 0
+            ? Math.round(officersWithMetrics.reduce((s: number, o: any) => s + o.pullThrough, 0) / officersWithMetrics.length * 10) / 10
+            : 0;
+          const avgCycle = officersWithMetrics.length > 0
+            ? Math.round(officersWithMetrics.reduce((s: number, o: any) => s + (o.avgCycleTime || 0), 0) / officersWithMetrics.length)
+            : 0;
+          const totalLost = officersWithMetrics.reduce((s: number, o: any) => s + o.lostOpportunityUnits, 0);
+          const totalDenied = officersWithMetrics.reduce((s: number, o: any) => s + o.deniedUnits, 0);
+
+          summary = {
+            officerUnits: totalUnits,
+            officerVolume: totalVol,
+            officerRevenue: totalRev,
+            officerPullThrough: avgPT,
+            ...(avgCycle > 0 ? { officerCycleTime: avgCycle } : {}),
+            ...(totalLost > 0 ? { officerLost: totalLost } : {}),
+            ...(totalDenied > 0 ? { officerDenied: totalDenied } : {}),
+          };
+          overrideSummaryMetrics = Object.keys(summary);
+        } else {
+          // Compute weighted average cycle time across all officers
+          let totalCycleWeightedSum = 0;
+          let totalCycleWeightCount = 0;
+          for (const o of officers) {
+            const ct = o.avgCycleTime || 0;
+            const funded = o.fundedLoans;
+            if (ct > 0 && funded > 0) {
+              totalCycleWeightedSum += ct * funded;
+              totalCycleWeightCount += funded;
+            }
           }
+
+          summary = {
+            totalOfficers: officers.length,
+            totalFunded: officers.reduce((sum: number, o: any) => sum + o.fundedLoans, 0),
+            totalVolume: officers.reduce((sum: number, o: any) => sum + o.fundedVolume, 0),
+            totalRevenue: officers.reduce((sum: number, o: any) => sum + o.fundedRevenue, 0),
+            avgCycleTime: totalCycleWeightCount > 0
+              ? Math.round(totalCycleWeightedSum / totalCycleWeightCount)
+              : null,
+          };
         }
-        const overallAvgCycleTime = totalCycleWeightCount > 0
-          ? Math.round(totalCycleWeightedSum / totalCycleWeightCount)
-          : null;
+
+        const titleSuffix = isFilteredPerf ? ` — ${actorNames!.join(', ')}` : '';
 
         result = {
           ...result,
-          title: 'Performance by Loan Officer',
-          summary: {
-            totalOfficers: performance.rows.length,
-            totalLoans: performance.rows.reduce((sum: number, r: any) => sum + parseInt(r.total_loans), 0),
-            totalFunded: performance.rows.reduce((sum: number, r: any) => sum + parseInt(r.funded_loans), 0),
-            totalVolume: performance.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.total_volume) || 0), 0),
-            avgCycleTime: overallAvgCycleTime,
-          },
-          officers: performance.rows.map((row: any) => ({
-            name: row.loan_officer,
-            totalLoans: parseInt(row.total_loans),
-            fundedLoans: parseInt(row.funded_loans),
-            pullThrough: parseInt(row.total_loans) > 0
-              ? Math.round((parseInt(row.funded_loans) / parseInt(row.total_loans)) * 100)
-              : 0,
-            totalVolume: parseFloat(row.total_volume) || 0,
-            fundedVolume: parseFloat(row.funded_volume) || 0,
-            avgCycleTime: row.avg_cycle_time ? Math.round(parseFloat(row.avg_cycle_time)) : null
-          }))
+          title: `Performance by Loan Officer${titleSuffix}`,
+          summary,
+          officers,
+          _overrideSummaryMetrics: overrideSummaryMetrics,
         };
         break;
       }
