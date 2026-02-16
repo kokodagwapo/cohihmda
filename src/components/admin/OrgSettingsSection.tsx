@@ -1,29 +1,31 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
+import { useState, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Alert,
-  AlertDescription,
-} from '@/components/ui/alert';
-import { 
   Building2,
   Upload,
   Save,
-  Clock,
   Bell,
   BellOff,
   CreditCard,
@@ -36,16 +38,15 @@ import {
   Loader2,
   Trash2,
   Image as ImageIcon,
-  Globe,
   Mail,
-  Calendar,
   Activity,
   TrendingUp,
-  Zap
-} from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { api } from '@/lib/api';
-import { useToast } from '@/hooks/use-toast';
+  Zap,
+} from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useAdminTenant } from "@/contexts/AdminTenantContext";
+import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 /**
  * Organization settings interface
@@ -53,11 +54,11 @@ import { useToast } from '@/hooks/use-toast';
 interface OrgSettings {
   id: string;
   name: string;
+  slug: string;
   display_name: string;
   logo_url?: string;
   primary_color?: string;
-  timezone: string;
-  date_format: string;
+  primary_contact_email?: string;
   notification_preferences: NotificationPreferences;
   created_at: string;
   updated_at: string;
@@ -68,7 +69,7 @@ interface OrgSettings {
  */
 interface NotificationPreferences {
   email_digest: boolean;
-  email_digest_frequency: 'daily' | 'weekly' | 'monthly';
+  email_digest_frequency: "daily" | "weekly" | "monthly";
   system_alerts: boolean;
   data_sync_notifications: boolean;
   performance_alerts: boolean;
@@ -81,8 +82,8 @@ interface NotificationPreferences {
 interface Subscription {
   id: string;
   plan_name: string;
-  plan_tier: 'starter' | 'professional' | 'enterprise';
-  status: 'active' | 'past_due' | 'cancelled' | 'trialing';
+  plan_tier: "starter" | "professional" | "enterprise";
+  status: "active" | "past_due" | "cancelled" | "trialing";
   current_period_start: string;
   current_period_end: string;
   user_limit: number;
@@ -116,59 +117,41 @@ interface UsageStats {
     unit: string;
   };
   last_sync: string;
-  sync_status: 'healthy' | 'warning' | 'error';
+  sync_status: "healthy" | "warning" | "error";
 }
 
-// Timezone options
-const TIMEZONES = [
-  { value: 'America/New_York', label: 'Eastern Time (ET)' },
-  { value: 'America/Chicago', label: 'Central Time (CT)' },
-  { value: 'America/Denver', label: 'Mountain Time (MT)' },
-  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
-  { value: 'America/Anchorage', label: 'Alaska Time (AKT)' },
-  { value: 'Pacific/Honolulu', label: 'Hawaii Time (HT)' },
-  { value: 'America/Phoenix', label: 'Arizona (no DST)' },
-  { value: 'UTC', label: 'UTC' },
-];
-
-// Date format options
-const DATE_FORMATS = [
-  { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
-  { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
-  { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
-  { value: 'MMM DD, YYYY', label: 'MMM DD, YYYY' },
-];
 
 interface OrgSettingsSectionProps {
   tenantId?: string;
 }
 
-export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
+export function OrgSettingsSection({ tenantId: propTenantId }: OrgSettingsSectionProps) {
   const { user, isSuperAdmin, isTenantAdmin } = useAuth();
+  const { selectedTenantId } = useAdminTenant();
   const { toast } = useToast();
+  const tenantId = propTenantId || selectedTenantId || user?.tenant_id;
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   // State
   const [settings, setSettings] = useState<OrgSettings | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
+
   // Form state
-  const [displayName, setDisplayName] = useState('');
-  const [logoUrl, setLogoUrl] = useState('');
+  const [displayName, setDisplayName] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const [timezone, setTimezone] = useState('America/New_York');
-  const [dateFormat, setDateFormat] = useState('MM/DD/YYYY');
+  const [contactEmail, setContactEmail] = useState("");
   const [notifications, setNotifications] = useState<NotificationPreferences>({
     email_digest: true,
-    email_digest_frequency: 'weekly',
+    email_digest_frequency: "weekly",
     system_alerts: true,
     data_sync_notifications: true,
     performance_alerts: false,
-    security_alerts: true
+    security_alerts: true,
   });
 
   // Load settings on mount
@@ -179,43 +162,27 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   }, [tenantId]);
 
   const loadSettings = async () => {
+    if (!tenantId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // const response = await api.request(`/api/tenants/${tenantId}/settings`);
-      
-      // Mock settings for development
-      const mockSettings: OrgSettings = {
-        id: '1',
-        name: 'acme-mortgage',
-        display_name: 'ACME Mortgage Co.',
-        logo_url: '',
-        timezone: 'America/New_York',
-        date_format: 'MM/DD/YYYY',
-        notification_preferences: {
-          email_digest: true,
-          email_digest_frequency: 'weekly',
-          system_alerts: true,
-          data_sync_notifications: true,
-          performance_alerts: false,
-          security_alerts: true
-        },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      setSettings(mockSettings);
-      setDisplayName(mockSettings.display_name);
-      setLogoUrl(mockSettings.logo_url || '');
-      setTimezone(mockSettings.timezone);
-      setDateFormat(mockSettings.date_format);
-      setNotifications(mockSettings.notification_preferences);
-      
+      const response = await api.request<OrgSettings>(
+        `/api/tenants/${tenantId}`,
+      );
+      setSettings(response);
+      setDisplayName(response.display_name || response.name || "");
+      setLogoUrl(response.logo_url || "");
+      setContactEmail(response.primary_contact_email || "");
+      if (response.notification_preferences) {
+        setNotifications(response.notification_preferences);
+      }
     } catch (error: any) {
       toast({
-        title: 'Error',
-        description: 'Failed to load organization settings',
-        variant: 'destructive'
+        title: "Error",
+        description: "Failed to load organization settings",
+        variant: "destructive",
       });
     } finally {
       setLoading(false);
@@ -224,64 +191,30 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
 
   const loadSubscription = async () => {
     try {
-      // Mock subscription for development
-      const mockSubscription: Subscription = {
-        id: 'sub_1',
-        plan_name: 'Professional',
-        plan_tier: 'professional',
-        status: 'active',
-        current_period_start: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
-        current_period_end: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
-        user_limit: 50,
-        loan_limit: 10000,
-        features: [
-          'Unlimited dashboard views',
-          'Custom roles & permissions',
-          'SSO integration',
-          'API access',
-          'Priority support',
-          'Data export'
-        ]
-      };
-      
-      setSubscription(mockSubscription);
+      const response = await api.request<Subscription>(
+        `/api/admin/subscription${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`,
+      );
+      setSubscription(response || null);
     } catch (error: any) {
-      console.error('Failed to load subscription:', error);
+      console.error("Failed to load subscription:", error);
+      setSubscription(null);
     }
   };
 
   const loadUsage = async () => {
+    if (!tenantId) return;
     try {
-      // Mock usage for development
-      const mockUsage: UsageStats = {
-        users: {
-          current: 23,
-          limit: 50,
-          percentage: 46
-        },
-        loans: {
-          current: 4521,
-          limit: 10000,
-          percentage: 45
-        },
-        api_calls: {
-          current: 15420,
-          limit: 100000,
-          percentage: 15
-        },
-        storage: {
-          current: 2.4,
-          limit: 10,
-          percentage: 24,
-          unit: 'GB'
-        },
-        last_sync: new Date(Date.now() - 900000).toISOString(),
-        sync_status: 'healthy'
-      };
-      
-      setUsage(mockUsage);
+      const response = await api.request<UsageStats>(
+        `/api/admin/tenants/${tenantId}/usage`,
+      );
+      setUsage(response);
     } catch (error: any) {
-      console.error('Failed to load usage:', error);
+      console.error("Failed to load usage:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load usage statistics",
+        variant: "destructive",
+      });
     }
   };
 
@@ -290,22 +223,22 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
     if (file) {
       if (file.size > 2 * 1024 * 1024) {
         toast({
-          title: 'File too large',
-          description: 'Logo must be less than 2MB',
-          variant: 'destructive'
+          title: "File too large",
+          description: "Logo must be less than 2MB",
+          variant: "destructive",
         });
         return;
       }
-      
-      if (!file.type.startsWith('image/')) {
+
+      if (!file.type.startsWith("image/")) {
         toast({
-          title: 'Invalid file type',
-          description: 'Please select an image file',
-          variant: 'destructive'
+          title: "Invalid file type",
+          description: "Please select an image file",
+          variant: "destructive",
         });
         return;
       }
-      
+
       setLogoFile(file);
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -318,46 +251,45 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   const handleRemoveLogo = () => {
     setLogoFile(null);
     setLogoPreview(null);
-    setLogoUrl('');
+    setLogoUrl("");
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
   const handleSaveSettings = async () => {
+    if (!tenantId) return;
     if (!displayName.trim()) {
       toast({
-        title: 'Validation Error',
-        description: 'Organization name is required',
-        variant: 'destructive'
+        title: "Validation Error",
+        description: "Organization name is required",
+        variant: "destructive",
       });
       return;
     }
 
     setSaving(true);
     try {
-      // TODO: Replace with actual API call
-      // If there's a logo file, upload it first
-      // if (logoFile) {
-      //   const formData = new FormData();
-      //   formData.append('logo', logoFile);
-      //   const logoResponse = await api.uploadFile(`/api/tenants/${tenantId}/logo`, formData);
-      //   logoUrl = logoResponse.url;
-      // }
-      
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      toast({
-        title: 'Success',
-        description: 'Organization settings saved successfully'
+      await api.request(`/api/tenants/${tenantId}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({
+          display_name: displayName.trim(),
+          logo_url: logoUrl || undefined,
+          primary_contact_email: contactEmail.trim() || undefined,
+        }),
       });
-      
+
+      toast({
+        title: "Success",
+        description: "Organization settings saved successfully",
+      });
+
       loadSettings();
     } catch (error: any) {
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to save settings',
-        variant: 'destructive'
+        title: "Error",
+        description: error.message || "Failed to save settings",
+        variant: "destructive",
       });
     } finally {
       setSaving(false);
@@ -365,19 +297,25 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
   };
 
   const handleSaveNotifications = async () => {
+    if (!tenantId) return;
     setSaving(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
+      await api.request(`/api/tenants/${tenantId}/settings`, {
+        method: "PUT",
+        body: JSON.stringify({
+          notification_preferences: notifications,
+        }),
+      });
+
       toast({
-        title: 'Success',
-        description: 'Notification preferences updated'
+        title: "Success",
+        description: "Notification preferences updated",
       });
     } catch (error: any) {
       toast({
-        title: 'Error',
-        description: 'Failed to update notification preferences',
-        variant: 'destructive'
+        title: "Error",
+        description: error.message || "Failed to update notification preferences",
+        variant: "destructive",
       });
     } finally {
       setSaving(false);
@@ -386,20 +324,29 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
-      case 'trialing': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
-      case 'past_due': return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
-      case 'cancelled': return 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400';
-      default: return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+      case "active":
+        return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
+      case "trialing":
+        return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+      case "past_due":
+        return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+      case "cancelled":
+        return "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400";
+      default:
+        return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
     }
   };
 
   const getSyncStatusColor = (status: string) => {
     switch (status) {
-      case 'healthy': return 'text-emerald-500';
-      case 'warning': return 'text-amber-500';
-      case 'error': return 'text-rose-500';
-      default: return 'text-slate-400';
+      case "healthy":
+        return "text-emerald-500";
+      case "warning":
+        return "text-amber-500";
+      case "error":
+        return "text-rose-500";
+      default:
+        return "text-slate-400";
     }
   };
 
@@ -428,7 +375,8 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
           Organization Settings
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Manage your organization profile, preferences, and view subscription details
+          Manage your organization profile, preferences, and view subscription
+          details
         </p>
       </div>
 
@@ -456,9 +404,9 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 <div className="flex items-center gap-4">
                   <div className="w-20 h-20 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center bg-slate-50 dark:bg-slate-800 overflow-hidden">
                     {logoPreview || logoUrl ? (
-                      <img 
-                        src={logoPreview || logoUrl} 
-                        alt="Logo preview" 
+                      <img
+                        src={logoPreview || logoUrl}
+                        alt="Logo preview"
                         className="w-full h-full object-contain"
                       />
                     ) : (
@@ -472,6 +420,7 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                       accept="image/*"
                       onChange={handleLogoSelect}
                       className="hidden"
+                      title="Upload organization logo"
                     />
                     <Button
                       variant="outline"
@@ -513,39 +462,49 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 </p>
               </div>
 
-              {/* Timezone */}
+              {/* Slug (read-only) */}
+              {settings?.slug && (
+                <div className="space-y-2">
+                  <Label>Organization Slug</Label>
+                  <Input
+                    value={settings.slug}
+                    disabled
+                    className="bg-slate-50 dark:bg-slate-800 text-slate-500"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Unique identifier -- cannot be changed after creation
+                  </p>
+                </div>
+              )}
+
+              {/* Primary Contact Email */}
               <div className="space-y-2">
-                <Label>Default Timezone</Label>
-                <Select value={timezone} onValueChange={setTimezone}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TIMEZONES.map(tz => (
-                      <SelectItem key={tz.value} value={tz.value}>
-                        {tz.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="contactEmail">Primary Contact Email</Label>
+                <Input
+                  id="contactEmail"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                />
+                <p className="text-xs text-slate-500">
+                  Main point of contact for this organization
+                </p>
               </div>
 
-              {/* Date Format */}
-              <div className="space-y-2">
-                <Label>Date Format</Label>
-                <Select value={dateFormat} onValueChange={setDateFormat}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DATE_FORMATS.map(df => (
-                      <SelectItem key={df.value} value={df.value}>
-                        {df.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Created Date (read-only) */}
+              {settings?.created_at && (
+                <div className="space-y-2">
+                  <Label>Created</Label>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {new Date(settings.created_at).toLocaleDateString("en-US", {
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </p>
+                </div>
+              )}
 
               <div className="pt-4 border-t flex justify-end">
                 <Button onClick={handleSaveSettings} disabled={saving}>
@@ -562,7 +521,9 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
         <TabsContent value="notifications" className="space-y-6 mt-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Notification Preferences</CardTitle>
+              <CardTitle className="text-lg">
+                Notification Preferences
+              </CardTitle>
               <CardDescription>
                 Configure how and when you receive notifications
               </CardDescription>
@@ -580,9 +541,14 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Select 
+                  <Select
                     value={notifications.email_digest_frequency}
-                    onValueChange={(v: any) => setNotifications(prev => ({ ...prev, email_digest_frequency: v }))}
+                    onValueChange={(v: any) =>
+                      setNotifications((prev) => ({
+                        ...prev,
+                        email_digest_frequency: v,
+                      }))
+                    }
                     disabled={!notifications.email_digest}
                   >
                     <SelectTrigger className="w-28">
@@ -596,7 +562,12 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                   </Select>
                   <Switch
                     checked={notifications.email_digest}
-                    onCheckedChange={(checked) => setNotifications(prev => ({ ...prev, email_digest: checked }))}
+                    onCheckedChange={(checked) =>
+                      setNotifications((prev) => ({
+                        ...prev,
+                        email_digest: checked,
+                      }))
+                    }
                   />
                 </div>
               </div>
@@ -614,7 +585,12 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 </div>
                 <Switch
                   checked={notifications.system_alerts}
-                  onCheckedChange={(checked) => setNotifications(prev => ({ ...prev, system_alerts: checked }))}
+                  onCheckedChange={(checked) =>
+                    setNotifications((prev) => ({
+                      ...prev,
+                      system_alerts: checked,
+                    }))
+                  }
                 />
               </div>
 
@@ -631,7 +607,12 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 </div>
                 <Switch
                   checked={notifications.data_sync_notifications}
-                  onCheckedChange={(checked) => setNotifications(prev => ({ ...prev, data_sync_notifications: checked }))}
+                  onCheckedChange={(checked) =>
+                    setNotifications((prev) => ({
+                      ...prev,
+                      data_sync_notifications: checked,
+                    }))
+                  }
                 />
               </div>
 
@@ -648,7 +629,12 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 </div>
                 <Switch
                   checked={notifications.performance_alerts}
-                  onCheckedChange={(checked) => setNotifications(prev => ({ ...prev, performance_alerts: checked }))}
+                  onCheckedChange={(checked) =>
+                    setNotifications((prev) => ({
+                      ...prev,
+                      performance_alerts: checked,
+                    }))
+                  }
                 />
               </div>
 
@@ -665,7 +651,12 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 </div>
                 <Switch
                   checked={notifications.security_alerts}
-                  onCheckedChange={(checked) => setNotifications(prev => ({ ...prev, security_alerts: checked }))}
+                  onCheckedChange={(checked) =>
+                    setNotifications((prev) => ({
+                      ...prev,
+                      security_alerts: checked,
+                    }))
+                  }
                 />
               </div>
 
@@ -693,8 +684,11 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                       </CardDescription>
                     </div>
                     <Badge className={getStatusColor(subscription.status)}>
-                      {subscription.status === 'active' && <CheckCircle2 className="h-3 w-3 mr-1" />}
-                      {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
+                      {subscription.status === "active" && (
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                      )}
+                      {subscription.status.charAt(0).toUpperCase() +
+                        subscription.status.slice(1)}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -708,7 +702,10 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                         {subscription.plan_name}
                       </h3>
                       <p className="text-sm text-slate-500">
-                        Renews on {new Date(subscription.current_period_end).toLocaleDateString()}
+                        Renews on{" "}
+                        {new Date(
+                          subscription.current_period_end,
+                        ).toLocaleDateString()}
                       </p>
                     </div>
                   </div>
@@ -717,7 +714,9 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800">
                       <div className="flex items-center gap-2 mb-2">
                         <Users className="h-4 w-4 text-slate-400" />
-                        <span className="text-sm text-slate-600 dark:text-slate-400">User Limit</span>
+                        <span className="text-sm text-slate-600 dark:text-slate-400">
+                          User Limit
+                        </span>
                       </div>
                       <p className="text-2xl font-semibold text-slate-900 dark:text-white">
                         {subscription.user_limit}
@@ -726,7 +725,9 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-800">
                       <div className="flex items-center gap-2 mb-2">
                         <FileText className="h-4 w-4 text-slate-400" />
-                        <span className="text-sm text-slate-600 dark:text-slate-400">Loan Limit</span>
+                        <span className="text-sm text-slate-600 dark:text-slate-400">
+                          Loan Limit
+                        </span>
                       </div>
                       <p className="text-2xl font-semibold text-slate-900 dark:text-white">
                         {subscription.loan_limit.toLocaleString()}
@@ -740,7 +741,10 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     </h4>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {subscription.features.map((feature, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400"
+                        >
                           <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                           {feature}
                         </div>
@@ -753,7 +757,8 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
               <Alert>
                 <CreditCard className="h-4 w-4" />
                 <AlertDescription>
-                  To upgrade your plan or manage billing, please contact your account manager or visit the billing portal.
+                  To upgrade your plan or manage billing, please contact your
+                  account manager or visit the billing portal.
                 </AlertDescription>
               </Alert>
             </>
@@ -769,24 +774,30 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <Activity className={`h-5 w-5 ${getSyncStatusColor(usage.sync_status)}`} />
+                      <Activity
+                        className={`h-5 w-5 ${getSyncStatusColor(usage.sync_status)}`}
+                      />
                       <div>
                         <p className="font-medium text-slate-900 dark:text-white">
                           Data Sync Status
                         </p>
                         <p className="text-sm text-slate-500">
-                          Last sync: {new Date(usage.last_sync).toLocaleString()}
+                          Last sync:{" "}
+                          {new Date(usage.last_sync).toLocaleString()}
                         </p>
                       </div>
                     </div>
-                    <Badge className={
-                      usage.sync_status === 'healthy' 
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : usage.sync_status === 'warning'
-                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                        : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-                    }>
-                      {usage.sync_status.charAt(0).toUpperCase() + usage.sync_status.slice(1)}
+                    <Badge
+                      className={
+                        usage.sync_status === "healthy"
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                          : usage.sync_status === "warning"
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                            : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                      }
+                    >
+                      {usage.sync_status.charAt(0).toUpperCase() +
+                        usage.sync_status.slice(1)}
                     </Badge>
                   </div>
                 </CardContent>
@@ -800,7 +811,9 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <Users className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">Users</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
+                          Users
+                        </span>
                       </div>
                       <span className="text-sm text-slate-500">
                         {usage.users.current} / {usage.users.limit}
@@ -819,10 +832,13 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <FileText className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">Loans</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
+                          Loans
+                        </span>
                       </div>
                       <span className="text-sm text-slate-500">
-                        {usage.loans.current.toLocaleString()} / {usage.loans.limit.toLocaleString()}
+                        {usage.loans.current.toLocaleString()} /{" "}
+                        {usage.loans.limit.toLocaleString()}
                       </span>
                     </div>
                     <Progress value={usage.loans.percentage} className="h-2" />
@@ -838,13 +854,19 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <BarChart3 className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">API Calls (this month)</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
+                          API Calls (this month)
+                        </span>
                       </div>
                       <span className="text-sm text-slate-500">
-                        {usage.api_calls.current.toLocaleString()} / {usage.api_calls.limit.toLocaleString()}
+                        {usage.api_calls.current.toLocaleString()} /{" "}
+                        {usage.api_calls.limit.toLocaleString()}
                       </span>
                     </div>
-                    <Progress value={usage.api_calls.percentage} className="h-2" />
+                    <Progress
+                      value={usage.api_calls.percentage}
+                      className="h-2"
+                    />
                     <p className="text-xs text-slate-500 mt-2">
                       {usage.api_calls.percentage}% of limit used
                     </p>
@@ -857,13 +879,19 @@ export function OrgSettingsSection({ tenantId }: OrgSettingsSectionProps) {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <Database className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">Storage</span>
+                        <span className="font-medium text-slate-900 dark:text-white">
+                          Storage
+                        </span>
                       </div>
                       <span className="text-sm text-slate-500">
-                        {usage.storage.current} / {usage.storage.limit} {usage.storage.unit}
+                        {usage.storage.current} / {usage.storage.limit}{" "}
+                        {usage.storage.unit}
                       </span>
                     </div>
-                    <Progress value={usage.storage.percentage} className="h-2" />
+                    <Progress
+                      value={usage.storage.percentage}
+                      className="h-2"
+                    />
                     <p className="text-xs text-slate-500 mt-2">
                       {usage.storage.percentage}% of limit used
                     </p>

@@ -1,5 +1,15 @@
 FROM node:20-alpine AS builder
 
+# Build arguments for version info (passed from CI/CD)
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_ENV=production
+
+# Set as environment variables for the build script
+ENV GIT_COMMIT=$GIT_COMMIT
+ENV GIT_BRANCH=$GIT_BRANCH
+ENV NODE_ENV=$BUILD_ENV
+
 WORKDIR /app/server
 
 # Copy package files
@@ -21,6 +31,9 @@ WORKDIR /app/server
 COPY --from=builder /app/server/node_modules ./node_modules
 COPY --from=builder /app/server/dist ./dist
 COPY --from=builder /app/server/package*.json ./
+
+# Copy migration SQL files (needed for database migrations)
+COPY --from=builder /app/server/migrations ./migrations
 
 EXPOSE 3001
 

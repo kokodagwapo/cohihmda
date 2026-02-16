@@ -328,22 +328,17 @@ export class ApiClient {
     } else {
     }
 
-    // Use longer timeout for file uploads (5 minutes for large CSV files)
-    // Increased timeout to 60 seconds to match CloudFront origin timeout and handle slow backend responses
-    // Some endpoints like /api/loans/funnel can take 30-60 seconds with complex database queries
+    // Request timeouts — must exceed CloudFront OriginReadTimeout (180s max).
+    // The frontend should never be the layer that kills a request.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
-    const isSlowEndpoint =
-      endpoint.includes("/loans/funnel") ||
-      endpoint.includes("/dashboard/analytics") ||
-      endpoint.includes("/dashboard/insights");
+    const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
-        ? 600000
-        : isSlowEndpoint
-        ? 60000
-        : 30000;
-    // 10 minutes for imports/uploads, 60 seconds for slow endpoints, 30 seconds for regular requests
+        ? 600000   // 10 minutes for file uploads/imports
+        : isChatEndpoint
+        ? 300000   // 5 minutes for AI chat (streaming)
+        : 200000;  // 3 min 20s — above CloudFront's 180s max
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();
@@ -439,7 +434,11 @@ export class ApiClient {
 
       // Handle abort/timeout errors
       if (error.name === "AbortError" || error.message?.includes("timeout")) {
-        const timeoutDuration = isSlowEndpoint ? "60 seconds" : "30 seconds";
+        const timeoutDuration = isChatEndpoint
+          ? "2 minutes"
+          : isSlowEndpoint
+          ? "60 seconds"
+          : "30 seconds";
         if (retries < 1) {
           console.warn(
             `Request timeout for ${endpoint} after ${timeoutDuration}. Retrying... (attempt ${
@@ -459,6 +458,11 @@ export class ApiClient {
         }
         // Provide more helpful error message for slow endpoints
         const baseUrlInfo = this.baseUrl || "CloudFront proxy";
+        if (isChatEndpoint) {
+          throw new Error(
+            `Request timed out after ${timeoutDuration}. The AI is taking longer than expected to process your question. Please try again.`
+          );
+        }
         if (isSlowEndpoint) {
           throw new Error(
             `Request timed out after ${timeoutDuration}. This endpoint may be processing a large dataset. The backend may be slow or unavailable. Please try again in a moment.`

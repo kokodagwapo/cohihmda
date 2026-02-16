@@ -176,7 +176,7 @@ try {
     Write-Host "  NEXT STEPS:" -ForegroundColor Yellow
     Write-Host "    1. Build and deploy frontend:"
     Write-Host "       npm run build"
-    Write-Host "       aws s3 sync docs/ s3://$FRONTEND_BUCKET/ --profile $env:AWS_PROFILE"
+    Write-Host "       aws s3 sync dist/ s3://$FRONTEND_BUCKET/ --profile $env:AWS_PROFILE"
     Write-Host ""
     Write-Host "    2. Run database migrations"
     Write-Host ""

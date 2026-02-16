@@ -112,20 +112,15 @@ export const TenantSelector = ({
     );
   }
 
-  // Compact mode for header placement
+  // Compact mode for header placement (nav-style)
   if (compact) {
     const selectedTenantName = tenants.find(
       (t) => t.id === selectedTenantId
     )?.name;
 
     return (
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            Viewing:
-          </span>
-        </div>
+      <div className="flex items-center gap-2">
+        <Building2 className="h-4 w-4 text-slate-500 dark:text-slate-400 flex-shrink-0" />
         <Select
           value={selectedTenantId || "__default__"}
           onValueChange={(value) => {
@@ -137,9 +132,9 @@ export const TenantSelector = ({
           }}
           disabled={loading}
         >
-          <SelectTrigger className="w-48 h-8 text-sm font-light">
+          <SelectTrigger className="w-[140px] h-8 rounded-lg border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200 focus:ring-2 focus:ring-slate-400/20">
             <SelectValue
-              placeholder={loading ? "Loading..." : "Select tenant..."}
+              placeholder={loading ? "Loading..." : "Tenant"}
             />
           </SelectTrigger>
           <SelectContent>

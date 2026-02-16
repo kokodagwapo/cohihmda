@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
-import { OperationsScorecardView } from '@/components/dashboard/views/OperationsScorecardView';
+import { OperationsScorecardView } from '@/components/views/OperationsScorecardView';
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 
 const OperationScorecard = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

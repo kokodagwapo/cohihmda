@@ -293,7 +293,7 @@ router.delete('/connections/:id', authenticateToken, apiLimiter, async (req: Aut
  */
 router.post('/connections/:id/test', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const result = await testVendorConnection(id);
 
     if (result.success) {
@@ -313,7 +313,7 @@ router.post('/connections/:id/test', authenticateToken, apiLimiter, async (req: 
  */
 router.post('/connections/:id/sync', authenticateToken, apiLimiter, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     const connectionResult = await pool.query(
       'SELECT * FROM public.vendor_connections WHERE id = $1',

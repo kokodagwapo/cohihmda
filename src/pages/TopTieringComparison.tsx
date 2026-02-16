@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
-import { TopTieringComparisonView } from '@/components/dashboard/views/TopTieringComparisonView';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringComparisonView } from '@/components/views/TopTieringComparisonView';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import { useChannelStore } from '@/stores/channelStore';
 import { useTenantStore } from '@/stores/tenantStore';
 

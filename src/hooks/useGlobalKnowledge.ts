@@ -1,0 +1,713 @@
+/**
+ * Hook for managing global knowledge library
+ * Used by platform admins to manage documents that sync to all tenants
+ */
+
+import { useState, useEffect, useCallback, useRef } from "react";
+import { api } from "@/lib/api";
+
+export interface GlobalDocument {
+  id: string;
+  title: string;
+  filename: string | null;
+  file_type: string | null;
+  category: string;
+  tags: string[];
+  source_url: string | null;
+  version: number;
+  status: "draft" | "published" | "archived";
+  chunk_count: number;
+  token_count: number;
+  processing_status: "pending" | "processing" | "completed" | "error";
+  processing_error: string | null;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  archived_at: string | null;
+  archive_reason: string | null;
+  created_by_email: string | null;
+  published_by_email: string | null;
+  archived_by_email: string | null;
+  content?: string;
+}
+
+export interface GlobalCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  sort_order: number;
+}
+
+export interface SyncResult {
+  tenantId: string;
+  tenantName?: string;
+  success: boolean;
+  chunksCreated?: number;
+  error?: string;
+}
+
+export interface SyncStatus {
+  tenantId: string;
+  tenantName: string;
+  lastSyncedAt: string | null;
+  lastAction: string | null;
+  lastStatus: string | null;
+  syncedVersion: number | null;
+}
+
+export interface KnowledgeExportPayload {
+  version: string;
+  exported_at: string;
+  document_count: number;
+  total_embeddings: number;
+  documents: Array<{
+    document: {
+      id: string;
+      title: string;
+      filename: string | null;
+      file_type: string | null;
+      file_size_bytes: number | null;
+      content: string | null;
+      category: string;
+      tags: string[];
+      source_url: string | null;
+      version: number;
+      status: string;
+      chunk_count: number;
+      token_count: number;
+      processing_status: string;
+      created_at: string;
+      updated_at: string;
+      published_at: string | null;
+    };
+    embeddings: Array<{
+      chunk_index: number;
+      chunk_text: string;
+      embedding: string;
+      token_count: number;
+      metadata: Record<string, unknown>;
+    }>;
+  }>;
+}
+
+export interface KnowledgeImportResult {
+  message: string;
+  results: {
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    synced: number;
+    details: Array<{
+      id: string;
+      title: string;
+      action: "created" | "updated" | "skipped" | "failed";
+      error?: string;
+    }>;
+  };
+}
+
+// Polling interval for documents in processing state
+const POLL_INTERVAL_MS = 3000;
+
+export function useGlobalKnowledge() {
+  const [documents, setDocuments] = useState<GlobalDocument[]>([]);
+  const [categories, setCategories] = useState<GlobalCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    limit: 50,
+    offset: 0,
+  });
+
+  // Track if we need to poll for processing documents
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const lastFetchParamsRef = useRef<{
+    status?: string;
+    category?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }>({});
+
+  // Fetch documents
+  const fetchDocuments = useCallback(
+    async (
+      params: {
+        status?: string;
+        category?: string;
+        search?: string;
+        limit?: number;
+        offset?: number;
+      } = {},
+      isPolling: boolean = false
+    ) => {
+      try {
+        // Only show loading on initial fetch, not polling
+        if (!isPolling) {
+          setLoading(true);
+        }
+        setError(null);
+
+        // Store params for polling
+        lastFetchParamsRef.current = params;
+
+        const queryParams = new URLSearchParams();
+        if (params.status) queryParams.append("status", params.status);
+        if (params.category) queryParams.append("category", params.category);
+        if (params.search) queryParams.append("search", params.search);
+        queryParams.append("limit", String(params.limit || 50));
+        queryParams.append("offset", String(params.offset || 0));
+
+        const response = await api.request<{
+          documents: GlobalDocument[];
+          pagination: typeof pagination;
+        }>(`/api/admin/global-knowledge?${queryParams.toString()}`);
+
+        setDocuments(response.documents);
+        setPagination(response.pagination);
+
+        // Check if any documents are still processing
+        const hasProcessing = response.documents.some(
+          (doc) =>
+            doc.processing_status === "pending" ||
+            doc.processing_status === "processing"
+        );
+
+        // Start or stop polling based on processing state
+        if (hasProcessing && !pollingRef.current) {
+          console.log(
+            "[GlobalKnowledge] Starting poll for processing documents..."
+          );
+          pollingRef.current = setInterval(() => {
+            fetchDocuments(lastFetchParamsRef.current, true);
+          }, POLL_INTERVAL_MS);
+        } else if (!hasProcessing && pollingRef.current) {
+          console.log(
+            "[GlobalKnowledge] All documents processed, stopping poll"
+          );
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      } catch (err: any) {
+        setError(err.message || "Failed to fetch documents");
+        console.error("Error fetching global documents:", err);
+      } finally {
+        if (!isPolling) {
+          setLoading(false);
+        }
+      }
+    },
+    []
+  );
+
+  // Fetch categories
+  const fetchCategories = useCallback(async () => {
+    try {
+      const response = await api.request<{ categories: GlobalCategory[] }>(
+        "/api/admin/global-knowledge/categories"
+      );
+      console.log(
+        "[useGlobalKnowledge] Fetched categories:",
+        response.categories?.length || 0
+      );
+      setCategories(response.categories || []);
+    } catch (err: any) {
+      console.error("[useGlobalKnowledge] Error fetching categories:", err);
+      setError("Failed to fetch categories");
+    }
+  }, []);
+
+  // Get single document
+  const getDocument = useCallback(
+    async (id: string): Promise<GlobalDocument | null> => {
+      try {
+        const response = await api.request<{ document: GlobalDocument }>(
+          `/api/admin/global-knowledge/${id}`
+        );
+        return response.document;
+      } catch (err: any) {
+        console.error("Error fetching document:", err);
+        return null;
+      }
+    },
+    []
+  );
+
+  // Create document
+  const createDocument = useCallback(
+    async (data: {
+      title: string;
+      category: string;
+      content?: string;
+      tags?: string[];
+    }): Promise<GlobalDocument | null> => {
+      try {
+        const response = await api.request<{ document: GlobalDocument }>(
+          "/api/admin/global-knowledge",
+          { method: "POST", body: JSON.stringify(data) }
+        );
+
+        // Add to list immediately
+        setDocuments((prev) => [response.document, ...prev]);
+
+        return response.document;
+      } catch (err: any) {
+        console.error("Error creating document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Upload document
+  const uploadDocument = useCallback(
+    async (
+      file: File,
+      metadata: {
+        title?: string;
+        category?: string;
+        tags?: string[];
+        source_url?: string;
+      }
+    ): Promise<GlobalDocument | null> => {
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (metadata.title) formData.append("title", metadata.title);
+        if (metadata.category) formData.append("category", metadata.category);
+        if (metadata.tags)
+          formData.append("tags", JSON.stringify(metadata.tags));
+        if (metadata.source_url)
+          formData.append("source_url", metadata.source_url);
+
+        // Get auth token from localStorage
+        const token = localStorage.getItem("auth_token");
+
+        const response = await fetch("/api/admin/global-knowledge/upload", {
+          method: "POST",
+          body: formData,
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to upload document");
+        }
+
+        const data = await response.json();
+
+        // Add the new document to the list immediately
+        setDocuments((prev) => [data.document, ...prev]);
+
+        // Start polling for processing updates
+        if (!pollingRef.current) {
+          console.log(
+            "[GlobalKnowledge] Starting poll for new document processing..."
+          );
+          pollingRef.current = setInterval(() => {
+            fetchDocuments(lastFetchParamsRef.current, true);
+          }, POLL_INTERVAL_MS);
+        }
+
+        return data.document;
+      } catch (err: any) {
+        console.error("Error uploading document:", err);
+        throw err;
+      }
+    },
+    [fetchDocuments]
+  );
+
+  // Update document
+  const updateDocument = useCallback(
+    async (
+      id: string,
+      data: Partial<{
+        title: string;
+        category: string;
+        content: string;
+        tags: string[];
+        source_url: string | null;
+      }>
+    ): Promise<GlobalDocument | null> => {
+      try {
+        const response = await api.request<{ document: GlobalDocument }>(
+          `/api/admin/global-knowledge/${id}`,
+          { method: "PUT", body: JSON.stringify(data) }
+        );
+
+        // Optimistic update
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id ? { ...doc, ...response.document } : doc
+          )
+        );
+
+        return response.document;
+      } catch (err: any) {
+        console.error("Error updating document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Delete document
+  const deleteDocument = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      await api.request(`/api/admin/global-knowledge/${id}`, {
+        method: "DELETE",
+      });
+
+      // Optimistic update - remove from list
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+
+      return true;
+    } catch (err: any) {
+      console.error("Error deleting document:", err);
+      throw err;
+    }
+  }, []);
+
+  // Process document (generate embeddings)
+  const processDocument = useCallback(
+    async (
+      id: string
+    ): Promise<{ chunkCount: number; tokenCount: number } | null> => {
+      // Optimistic update - show processing immediately
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.id === id
+            ? { ...doc, processing_status: "processing" as const }
+            : doc
+        )
+      );
+
+      try {
+        const response = await api.request<{
+          chunkCount: number;
+          tokenCount: number;
+        }>(`/api/admin/global-knowledge/${id}/process`, { method: "POST" });
+
+        // Update with actual results
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  processing_status: "completed" as const,
+                  chunk_count: response.chunkCount,
+                  token_count: response.tokenCount,
+                }
+              : doc
+          )
+        );
+
+        return response;
+      } catch (err: any) {
+        // Revert on error
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? { ...doc, processing_status: "error" as const }
+              : doc
+          )
+        );
+        console.error("Error processing document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Publish document
+  const publishDocument = useCallback(
+    async (
+      id: string
+    ): Promise<{
+      syncResults: {
+        total: number;
+        success: number;
+        failed: number;
+        details: SyncResult[];
+      };
+    } | null> => {
+      try {
+        const response = await api.request<{
+          syncResults: {
+            total: number;
+            success: number;
+            failed: number;
+            details: SyncResult[];
+          };
+        }>(`/api/admin/global-knowledge/${id}/publish`, { method: "POST" });
+
+        // Optimistic update - show published immediately
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  status: "published" as const,
+                  published_at: new Date().toISOString(),
+                }
+              : doc
+          )
+        );
+
+        return response;
+      } catch (err: any) {
+        console.error("Error publishing document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Archive document
+  const archiveDocument = useCallback(
+    async (
+      id: string,
+      reason?: string
+    ): Promise<{
+      syncResults: {
+        total: number;
+        success: number;
+        failed: number;
+        details: SyncResult[];
+      };
+    } | null> => {
+      try {
+        const response = await api.request<{
+          syncResults: {
+            total: number;
+            success: number;
+            failed: number;
+            details: SyncResult[];
+          };
+        }>(`/api/admin/global-knowledge/${id}/archive`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+
+        // Optimistic update
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  status: "archived" as const,
+                  archived_at: new Date().toISOString(),
+                  archive_reason: reason || null,
+                }
+              : doc
+          )
+        );
+
+        return response;
+      } catch (err: any) {
+        console.error("Error archiving document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Restore document
+  const restoreDocument = useCallback(
+    async (
+      id: string
+    ): Promise<{
+      syncResults: {
+        total: number;
+        success: number;
+        failed: number;
+        details: SyncResult[];
+      };
+    } | null> => {
+      try {
+        const response = await api.request<{
+          syncResults: {
+            total: number;
+            success: number;
+            failed: number;
+            details: SyncResult[];
+          };
+        }>(`/api/admin/global-knowledge/${id}/restore`, { method: "POST" });
+
+        // Optimistic update
+        setDocuments((prev) =>
+          prev.map((doc) =>
+            doc.id === id
+              ? {
+                  ...doc,
+                  status: "published" as const,
+                  archived_at: null,
+                  archive_reason: null,
+                }
+              : doc
+          )
+        );
+
+        return response;
+      } catch (err: any) {
+        console.error("Error restoring document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Get sync status
+  const getSyncStatus = useCallback(
+    async (id: string): Promise<SyncStatus[]> => {
+      try {
+        const response = await api.request<{ syncStatus: SyncStatus[] }>(
+          `/api/admin/global-knowledge/${id}/sync-status`
+        );
+        return response.syncStatus;
+      } catch (err: any) {
+        console.error("Error fetching sync status:", err);
+        return [];
+      }
+    },
+    []
+  );
+
+  // Resync document
+  const resyncDocument = useCallback(
+    async (
+      id: string
+    ): Promise<{
+      syncResults: {
+        total: number;
+        success: number;
+        failed: number;
+        details: SyncResult[];
+      };
+    } | null> => {
+      try {
+        const response = await api.request<{
+          syncResults: {
+            total: number;
+            success: number;
+            failed: number;
+            details: SyncResult[];
+          };
+        }>(`/api/admin/global-knowledge/${id}/resync`, { method: "POST" });
+        return response;
+      } catch (err: any) {
+        console.error("Error resyncing document:", err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  // Export all documents as JSON file download
+  const exportDocuments = useCallback(async (): Promise<KnowledgeExportPayload | null> => {
+    try {
+      setLoading(true);
+
+      const exportData = await api.request<KnowledgeExportPayload>(
+        "/api/admin/global-knowledge/export"
+      );
+
+      // Trigger browser download
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `knowledge-export-${new Date().toISOString().split("T")[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      return exportData;
+    } catch (err: any) {
+      console.error("Error exporting documents:", err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Import documents from a previously exported JSON payload
+  const importDocuments = useCallback(
+    async (
+      data: KnowledgeExportPayload,
+      options?: { syncTenants?: boolean }
+    ): Promise<KnowledgeImportResult | null> => {
+      try {
+        setLoading(true);
+
+        const result = await api.request<KnowledgeImportResult>(
+          "/api/admin/global-knowledge/import",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              data,
+              syncTenants: options?.syncTenants ?? false,
+            }),
+          }
+        );
+
+        // Reload documents list after import
+        await fetchDocuments(lastFetchParamsRef.current);
+
+        return result;
+      } catch (err: any) {
+        console.error("Error importing documents:", err);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchDocuments]
+  );
+
+  // Initial fetch
+  useEffect(() => {
+    fetchDocuments();
+    fetchCategories();
+
+    // Cleanup polling on unmount
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [fetchDocuments, fetchCategories]);
+
+  return {
+    documents,
+    categories,
+    loading,
+    error,
+    pagination,
+    fetchDocuments,
+    fetchCategories,
+    getDocument,
+    createDocument,
+    uploadDocument,
+    updateDocument,
+    deleteDocument,
+    processDocument,
+    publishDocument,
+    archiveDocument,
+    restoreDocument,
+    getSyncStatus,
+    resyncDocument,
+    exportDocuments,
+    importDocuments,
+  };
+}

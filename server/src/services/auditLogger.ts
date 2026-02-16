@@ -24,7 +24,7 @@ export interface AuditLogEntry {
   metadata?: Record<string, any>;
 
   // Result
-  status?: "success" | "failure" | "error";
+  status?: "success" | "failure" | "error" | "partial";
   errorMessage?: string;
 
   // Request Info
@@ -165,7 +165,8 @@ export async function logFailedLogin(params: {
     | "invalid_password"
     | "user_not_found"
     | "account_locked"
-    | "rate_limited";
+    | "rate_limited"
+    | "user_inactive";
   metadata?: Record<string, any>;
 }): Promise<void> {
   try {

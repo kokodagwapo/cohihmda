@@ -119,7 +119,7 @@ router.post('/import/loans', authenticateToken, upload.single('file'), async (re
  */
 router.get('/import/progress/:jobId', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { jobId } = req.params;
+    const jobId = req.params.jobId as string;
     logInfo(`📊 Progress requested for job ${jobId}`, { userId: req.userId, jobId });
     const progress = getImportProgress(jobId);
 

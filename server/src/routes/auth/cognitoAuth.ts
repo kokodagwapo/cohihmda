@@ -20,6 +20,7 @@ import {
 } from "../../services/cognito/cognitoService.js";
 import { auditLog, createSession } from "../../services/auditLogger.js";
 import { logError, logInfo, logDebug, logWarn } from "../../services/logger.js";
+import { authLimiter } from "../../middleware/rateLimiter.js";
 
 const { Pool } = pg;
 const router = Router();
@@ -105,7 +106,7 @@ interface SsoState {
  * FRONTEND_URL may contain comma-separated values for CORS, but we need just the first one
  */
 function getPrimaryFrontendUrl(): string {
-  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5000";
   // Handle comma-separated URLs (take the first one)
   return frontendUrl.split(",")[0].trim();
 }
@@ -125,7 +126,7 @@ router.get("/config", (req, res) => {
 /**
  * Start SSO flow - redirects to Cognito
  */
-router.get("/authorize", async (req, res) => {
+router.get("/authorize", authLimiter, async (req, res) => {
   try {
     if (!isCognitoConfigured()) {
       return res.status(503).json({ error: "SSO is not configured" });
@@ -166,7 +167,7 @@ router.get("/authorize", async (req, res) => {
 /**
  * Cognito callback - exchange code for tokens
  */
-router.post("/callback", async (req, res) => {
+router.post("/callback", authLimiter, async (req, res) => {
   try {
     if (!isCognitoConfigured()) {
       return res.status(503).json({ error: "SSO is not configured" });
@@ -328,7 +329,7 @@ router.get("/logout", (req, res) => {
 /**
  * Lookup tenant by email domain (for SSO routing)
  */
-router.get("/lookup-tenant", async (req, res) => {
+router.get("/lookup-tenant", authLimiter, async (req, res) => {
   try {
     const email = req.query.email as string;
     if (!email) {
@@ -365,6 +366,20 @@ router.get("/lookup-tenant", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
+      // No tenant-level SSO — check if this is a platform SSO domain
+      if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
+        const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
+        logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
+        return res.json({
+          sso_available: true,
+          tenant_slug: null,
+          tenant_name: "Cohi Platform",
+          idp_name: platformIdpName || undefined, // If not set, Cognito shows hosted UI with all IdPs
+          allow_password: true, // Platform users can also use password
+          auth_mode: "hybrid",
+        });
+      }
+
       // No SSO configured for this domain, allow email/password
       return res.json({
         sso_available: false,
@@ -395,12 +410,14 @@ router.get("/lookup-tenant", async (req, res) => {
 });
 
 // Domains that are allowed to auto-provision platform users via SSO
-// Add your company domain(s) here
-const PLATFORM_JIT_DOMAINS = [
-  'teraverde.com',
-  'coheus.io',
-  'coheus.com',
-];
+// Configured via PLATFORM_JIT_DOMAINS env var (comma-separated)
+// Only these domains get automatic super_admin access on first SSO login
+const PLATFORM_JIT_DOMAINS: string[] = (
+  process.env.PLATFORM_JIT_DOMAINS || "teraverde.com"
+)
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
 
 /**
  * Find or create user from SSO

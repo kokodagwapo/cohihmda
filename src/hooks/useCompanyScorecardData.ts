@@ -54,6 +54,9 @@ export interface ScorecardTotals {
   originatedRevenue: number;      // Revenue for originated loans only (matches Qlik CompanyScorecard_Originated Revenue $)
   govtUnits: number;
   purchaseUnits: number;
+  // HMDA (excludes Active loans to match Qlik)
+  hmdaVolume: number;             // Volume All Final HMDA Status
+  hmdaUnits: number;              // Units All Final HMDA Status
   // Withdrawn Totals
   withdrawnVolume: number;        // Withdrawn $ (sum of loan amounts for withdrawn loans)
   withdrawnProformaRevenue: number; // W/D ProForma Revenue
@@ -78,6 +81,9 @@ export interface BranchData {
   revenue: number;
   govtUnits: number;
   purchaseUnits: number;
+  // HMDA (excludes Active loans to match Qlik)
+  hmdaVolume: number;             // Volume All Final HMDA Status
+  hmdaUnits: number;              // Units All Final HMDA Status
   // Withdrawn Totals
   withdrawnVolume: number;        // Withdrawn $
   withdrawnProformaRevenue: number; // W/D ProForma Revenue
@@ -88,6 +94,7 @@ export interface BranchData {
 export interface ScorecardData {
   totals: ScorecardTotals;
   byBranch: BranchData[];
+  byLoanOfficer: BranchData[]; // Same shape as BranchData; name = loan officer name
   branches: string[];
   loanOfficers: string[];
 }
@@ -112,6 +119,9 @@ const SCORECARD_METRICS = [
   'originated_revenue',         // Revenue for originated loans only (matches Qlik CompanyScorecard_Originated Revenue $)
   'govt_originated_units',      // Gov't ORIGINATED units (matches Qlik Company Scorecard - uses Pull Through Originated Flag)
   'purchase_originated_units',  // Purchase ORIGINATED units (matches Qlik Company Scorecard - uses Pull Through Originated Flag)
+  // HMDA metrics (exclude Active loans to match Qlik)
+  'hmda_volume',                // Volume All Final HMDA Status (excludes Active)
+  'hmda_units',                 // Units All Final HMDA Status (excludes Active)
   // Withdrawn Totals
   'withdrawn_volume',           // Withdrawn $ (sum of loan amounts for withdrawn loans)
   'withdrawn_proforma_revenue', // W/D ProForma Revenue
@@ -119,48 +129,44 @@ const SCORECARD_METRICS = [
   'denied_volume'               // Denied $ (sum of loan amounts for denied loans)
 ];
 
-function transformGroupedToByBranch(groupedData: MetricsByGroup): BranchData[] {
-  // Get all unique branch names from any metric
-  const branchNames = new Set<string>();
+function transformGroupedToRows(groupedData: MetricsByGroup, sortByVolume = true): BranchData[] {
+  const names = new Set<string>();
   Object.values(groupedData).forEach(metricResults => {
     metricResults.forEach(result => {
-      if (result.groupKey) {
-        branchNames.add(result.groupKey);
-      }
+      if (result.groupKey) names.add(result.groupKey);
     });
   });
 
-  // Create a map for quick lookup
-  const getMetricValue = (metricId: string, branchName: string): number => {
+  const getMetricValue = (metricId: string, groupKey: string): number => {
     const results = groupedData[metricId] || [];
-    const match = results.find(r => r.groupKey === branchName);
+    const match = results.find(r => r.groupKey === groupKey);
     return match?.value || 0;
   };
 
-  // Transform to BranchData array
-  return Array.from(branchNames).map(branchName => ({
-    name: branchName,
-    loansStarted: getMetricValue('loans_started', branchName),           // Denominator: by started_date
-    totalLoansWithRespa: getMetricValue('scorecard_total_loans', branchName),  // Numerator: by application_date
-    originatedLoans: getMetricValue('scorecard_originated_loans', branchName), // Originated filtered by application_date
-    falloutWithdrawn: getMetricValue('fallout_withdrawn', branchName),
-    falloutDenied: getMetricValue('fallout_denied', branchName),
-    volume: getMetricValue('originated_volume', branchName), // Originated volume - for display in summary table
-    tieringVolume: getMetricValue('total_volume', branchName), // Total volume - used for tier calculation
-    pullThroughRate: getMetricValue('pull_through_rate', branchName),
-    waFico: getMetricValue('wa_fico', branchName),
-    waLtv: getMetricValue('wa_ltv', branchName),
-    waDti: getMetricValue('wa_dti', branchName),
-    wac: getMetricValue('wac', branchName),
-    revenue: getMetricValue('originated_revenue', branchName), // Originated revenue - for display in summary table
-    govtUnits: getMetricValue('govt_originated_units', branchName), // Gov't ORIGINATED units (Qlik Company Scorecard)
-    purchaseUnits: getMetricValue('purchase_originated_units', branchName), // Purchase ORIGINATED units (Qlik Company Scorecard)
-    // Withdrawn Totals
-    withdrawnVolume: getMetricValue('withdrawn_volume', branchName), // Withdrawn $
-    withdrawnProformaRevenue: getMetricValue('withdrawn_proforma_revenue', branchName), // W/D ProForma Revenue
-    // Denied Totals
-    deniedVolume: getMetricValue('denied_volume', branchName) // Denied $
-  })).sort((a, b) => b.tieringVolume - a.tieringVolume); // Sort by tiering volume (total volume) descending
+  const rows = Array.from(names).map(groupKey => ({
+    name: groupKey,
+    loansStarted: getMetricValue('loans_started', groupKey),
+    totalLoansWithRespa: getMetricValue('scorecard_total_loans', groupKey),
+    originatedLoans: getMetricValue('scorecard_originated_loans', groupKey),
+    falloutWithdrawn: getMetricValue('fallout_withdrawn', groupKey),
+    falloutDenied: getMetricValue('fallout_denied', groupKey),
+    volume: getMetricValue('originated_volume', groupKey),
+    tieringVolume: getMetricValue('total_volume', groupKey),
+    pullThroughRate: getMetricValue('pull_through_rate', groupKey),
+    waFico: getMetricValue('wa_fico', groupKey),
+    waLtv: getMetricValue('wa_ltv', groupKey),
+    waDti: getMetricValue('wa_dti', groupKey),
+    wac: getMetricValue('wac', groupKey),
+    revenue: getMetricValue('originated_revenue', groupKey),
+    govtUnits: getMetricValue('govt_originated_units', groupKey),
+    purchaseUnits: getMetricValue('purchase_originated_units', groupKey),
+    hmdaVolume: getMetricValue('hmda_volume', groupKey),
+    hmdaUnits: getMetricValue('hmda_units', groupKey),
+    withdrawnVolume: getMetricValue('withdrawn_volume', groupKey),
+    withdrawnProformaRevenue: getMetricValue('withdrawn_proforma_revenue', groupKey),
+    deniedVolume: getMetricValue('denied_volume', groupKey),
+  }));
+  return sortByVolume ? rows.sort((a, b) => b.tieringVolume - a.tieringVolume) : rows;
 }
 
 function transformTotalsResponse(metrics: Record<string, MetricResult>): ScorecardTotals {
@@ -189,6 +195,9 @@ function transformTotalsResponse(metrics: Record<string, MetricResult>): Scoreca
     originatedRevenue: getValue('originated_revenue'), // Revenue for originated loans only
     govtUnits: getValue('govt_originated_units'), // Gov't ORIGINATED units (Qlik Company Scorecard)
     purchaseUnits: getValue('purchase_originated_units'), // Purchase ORIGINATED units (Qlik Company Scorecard)
+    // HMDA (excludes Active loans)
+    hmdaVolume: getValue('hmda_volume'), // Volume All Final HMDA Status
+    hmdaUnits: getValue('hmda_units'), // Units All Final HMDA Status
     // Withdrawn Totals
     withdrawnVolume: getValue('withdrawn_volume'), // Withdrawn $
     withdrawnProformaRevenue: getValue('withdrawn_proforma_revenue'), // W/D ProForma Revenue
@@ -224,46 +233,43 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
         additionalFilters.consolidated_channel = filters.channel;
       }
 
-      // Build request body with optional dateField override
-      // When dateField is specified, all metrics will use this date field instead of their defaults
+      // Build request body - each metric uses its own defaultDateField
+      // (matching Qlik where each expression has its own DateType, e.g. Application, Started, Funding)
       const requestBody = {
         metricIds: SCORECARD_METRICS,
         dateRange: { start: dateRangeStart, end: dateRangeEnd },
-        ...(filters.dateField && { dateField: filters.dateField }), // Override date field for all metrics
         ...(Object.keys(additionalFilters).length > 0 && { additionalFilters })
       };
 
       // Build URL with tenant_id as query param (required by tenant context middleware)
       const tenantQueryParam = filters.tenantId ? `?tenant_id=${encodeURIComponent(filters.tenantId)}` : '';
 
-      // Fetch in parallel: grouped by branch, totals, and filter options
-      const [groupedResponse, totalsResponse, branchesResponse, losResponse] = await Promise.all([
-        // Grouped metrics by branch
+      // Fetch in parallel: grouped by branch, grouped by loan_officer, totals, and filter options
+      const [groupedByBranchResponse, groupedByLOResponse, totalsResponse, branchesResponse, losResponse] = await Promise.all([
         api.request<{ metrics: MetricsByGroup; groupedBy: string }>(`/api/metrics/query${tenantQueryParam}`, {
           method: 'POST',
-          body: JSON.stringify({
-            ...requestBody,
-            groupBy: 'branch'
-          })
+          body: JSON.stringify({ ...requestBody, groupBy: 'branch' })
         }),
-        // Total metrics (non-grouped)
+        api.request<{ metrics: MetricsByGroup; groupedBy: string }>(`/api/metrics/query${tenantQueryParam}`, {
+          method: 'POST',
+          body: JSON.stringify({ ...requestBody, groupBy: 'loan_officer' })
+        }),
         api.request<{ metrics: Record<string, MetricResult> }>(`/api/metrics/query${tenantQueryParam}`, {
           method: 'POST',
           body: JSON.stringify(requestBody)
         }),
-        // Branch dropdown values
         api.request<{ values: string[] }>(`/api/loans/distinct-values/branch${tenantQueryParam}`),
-        // Loan officer dropdown values
         api.request<{ values: string[] }>(`/api/loans/distinct-values/loan_officer${tenantQueryParam}`)
       ]);
 
-      // Transform responses
-      const byBranch = transformGroupedToByBranch(groupedResponse.metrics);
+      const byBranch = transformGroupedToRows(groupedByBranchResponse.metrics);
+      const byLoanOfficer = transformGroupedToRows(groupedByLOResponse.metrics);
       const totals = transformTotalsResponse(totalsResponse.metrics);
 
       setData({
         totals,
         byBranch,
+        byLoanOfficer,
         branches: branchesResponse.values || [],
         loanOfficers: losResponse.values || []
       });
@@ -274,7 +280,7 @@ export function useCompanyScorecardData(filters: ScorecardFilters) {
     } finally {
       setLoading(false);
     }
-  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.dateField, filters.tenantId]);
+  }, [filters.year, filters.branch, filters.loanOfficer, filters.channel, filters.dateRange?.start, filters.dateRange?.end, filters.tenantId]);
 
   useEffect(() => {
     fetchData();

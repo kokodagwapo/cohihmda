@@ -173,6 +173,8 @@ CREATE INDEX IF NOT EXISTS idx_scoring_weights_type ON scoring_weights(scorecard
 CREATE INDEX IF NOT EXISTS idx_scoring_weights_persona ON scoring_weights(persona_id) WHERE persona_id IS NOT NULL;
 
 -- Seed default scoring weights
+-- Use partial unique index match for ON CONFLICT since persona_id NULLs
+-- are not equal in standard UNIQUE constraints
 INSERT INTO scoring_weights (scorecard_type, persona_id, metric_name, weight, description)
 VALUES 
   ('sales', NULL, 'pull_through', 0.30, 'Pull-through percentage weight'),
@@ -182,7 +184,7 @@ VALUES
   ('operations', NULL, 'turn_time', 0.40, 'Turn time weight'),
   ('operations', NULL, 'pull_through', 0.30, 'Pull-through percentage weight'),
   ('operations', NULL, 'volume', 0.30, 'Volume processed weight')
-ON CONFLICT (scorecard_type, persona_id, metric_name) DO NOTHING;
+ON CONFLICT (scorecard_type, metric_name) WHERE persona_id IS NULL DO NOTHING;
 
 -- =============================================================================
 -- COMPLEXITY_COMPONENTS - Loan complexity score configuration

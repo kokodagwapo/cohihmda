@@ -1,6 +1,0 @@
-/*** ODAG LoanData Script ***/
-/*** REPLACE LoanData base script ***/
-
-// vCCA_ScriptPath is set on the script tab named "CCA for TVI"
-
-$(Must_Include=$(vScriptPath)Script Tabs/Front-end Dashboards/ODAG Loan Data.qvs);

@@ -61,10 +61,13 @@ export interface MigrationRunnerOptions {
 }
 
 /**
- * Calculate SHA256 checksum of migration content
+ * Calculate SHA256 checksum of migration content.
+ * Normalizes line endings (CRLF -> LF) before hashing so checksums
+ * are consistent across Windows (CRLF) and Linux/Mac (LF).
  */
 function calculateChecksum(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex').substring(0, 16);
+  const normalized = content.replace(/\r\n/g, '\n');
+  return crypto.createHash('sha256').update(normalized).digest('hex').substring(0, 16);
 }
 
 /**
@@ -347,15 +350,20 @@ export function createPool(config: {
   database: string;
   user: string;
   password: string;
-  ssl?: boolean;
+  ssl?: boolean | { rejectUnauthorized: boolean };
 }): pg.Pool {
+  // Normalize ssl config - if it's an object, use it directly; if boolean true, create object
+  const sslConfig = config.ssl 
+    ? (typeof config.ssl === 'object' ? config.ssl : { rejectUnauthorized: false })
+    : false;
+  
   return new Pool({
     host: config.host,
     port: config.port,
     database: config.database,
     user: config.user,
     password: config.password,
-    ssl: config.ssl ? { rejectUnauthorized: false } : false,
+    ssl: sslConfig,
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,

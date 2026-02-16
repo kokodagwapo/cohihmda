@@ -14,13 +14,19 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
+import { MoreVertical, Copy, Trash2, EyeOff, Check, ArrowUpToLine, ArrowDownToLine, FolderInput, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** Optional: for dashboard_section widgets, allow hiding sub-sections (e.g. Executive summary). */
 export interface HideableSection {
   id: string;
   label: string;
+}
+
+/** Descriptor for a target group that this widget can be moved into */
+export interface TargetGroup {
+  id: string;
+  title: string;
 }
 
 interface CanvasWidgetCardProps {
@@ -43,6 +49,14 @@ interface CanvasWidgetCardProps {
   onBringToFront?: () => void;
   /** Send this widget to back (bottom layer). */
   onSendToBack?: () => void;
+  /** Available widget groups that this item can be moved into */
+  availableGroups?: TargetGroup[];
+  /** Called when the user selects a group to move this item into */
+  onMoveToGroup?: (groupId: string) => void;
+  /** Called when the user wants to wrap this standalone item in a new group */
+  onWrapInGroup?: () => void;
+  /** Called when the user wants to edit this widget with Cohi AI */
+  onEditWithCohi?: () => void;
 }
 
 export function CanvasWidgetCard({
@@ -60,10 +74,15 @@ export function CanvasWidgetCard({
   onSendToBack,
   displayMode = 'full',
   onChangeDisplayMode,
+  availableGroups = [],
+  onMoveToGroup,
+  onWrapInGroup,
+  onEditWithCohi,
 }: CanvasWidgetCardProps) {
   const hasHideableSections = hideableSections.length > 0 && typeof onToggleSection === 'function';
   const hasLayerActions = typeof onBringToFront === 'function' || typeof onSendToBack === 'function';
   const hasDisplayModes = typeof onChangeDisplayMode === 'function';
+  const hasGroupActions = (availableGroups.length > 0 && typeof onMoveToGroup === 'function') || typeof onWrapInGroup === 'function';
   return (
     <div
       role="button"
@@ -163,6 +182,45 @@ export function CanvasWidgetCard({
                     Send to back
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {hasGroupActions && (
+              <>
+                {availableGroups.length > 0 && onMoveToGroup && (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="gap-2">
+                      <FolderInput className="h-4 w-4" />
+                      Move to group
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {availableGroups.map((group) => (
+                        <DropdownMenuItem
+                          key={group.id}
+                          onClick={(e) => { e.stopPropagation(); onMoveToGroup(group.id); }}
+                          className="gap-2"
+                        >
+                          {group.title}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )}
+                {onWrapInGroup && (
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onWrapInGroup(); }} className="gap-2">
+                    <FolderInput className="h-4 w-4" />
+                    Wrap in new group
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {onEditWithCohi && (
+              <>
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEditWithCohi(); }} className="gap-2">
+                  <Sparkles className="h-4 w-4 text-violet-500" />
+                  Edit with Cohi
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
             )}

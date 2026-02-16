@@ -4,6 +4,7 @@ import { X, AlertTriangle, CheckCircle, Loader2, Sparkles } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { useTenantStore } from '@/stores/tenantStore';
 
 interface RiskSummary {
   risks: string[];
@@ -106,6 +107,7 @@ export function LoanRiskDetailModal({
   loan,
   isDarkMode,
 }: LoanRiskDetailModalProps) {
+  const { selectedTenantId } = useTenantStore();
   const [aiRecommendations, setAiRecommendations] = useState<string[] | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -118,8 +120,9 @@ export function LoanRiskDetailModal({
     setAiLoading(true);
     setAiError(null);
     try {
+      const tenantQuery = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : '';
       const response = await api.request<{ recommendations: string[] }>(
-        `/api/loans/${encodeURIComponent(loanId)}/recommendations`,
+        `/api/predictions/${encodeURIComponent(loanId)}/recommendations${tenantQuery}`,
         { method: 'GET' }
       );
       setAiRecommendations(response.recommendations || []);

@@ -33,6 +33,8 @@ interface SuperAdminUser {
   full_name: string | null;
   role: "super_admin" | "platform_admin" | "support";
   is_active: boolean;
+  locked_until?: Date | null;
+  failed_login_attempts?: number;
 }
 
 interface TenantUser {
@@ -51,6 +53,8 @@ interface TenantUser {
   tenant_id: string;
   tenant_name: string;
   tenant_slug: string;
+  locked_until?: Date | null;
+  failed_login_attempts?: number;
 }
 
 type AuthUser =
@@ -116,7 +120,7 @@ async function getTenantPool(tenantSlug: string): Promise<pg.Pool | null> {
       `SELECT database_name, database_host, database_port, database_user, database_password_encrypted, status
        FROM coheus_tenants 
        WHERE slug = $1 AND status = 'active'`,
-      [tenantSlug],
+      [tenantSlug]
     );
 
     if (result.rows.length === 0) {
@@ -206,9 +210,7 @@ function getRemainingLockoutMinutes(lockedUntil: Date): number {
 /**
  * Find user in management DB (super admins)
  */
-async function findSuperAdmin(
-  email: string,
-): Promise<
+async function findSuperAdmin(email: string): Promise<
   | (SuperAdminUser & {
       failed_login_attempts: number;
       locked_until: Date | null;
@@ -222,7 +224,7 @@ async function findSuperAdmin(
               failed_login_attempts, locked_until
        FROM coheus_users 
        WHERE email = $1`,
-      [email],
+      [email]
     );
 
     if (result.rows.length === 0) {
@@ -241,7 +243,7 @@ async function findSuperAdmin(
  */
 async function findTenantUser(
   email: string,
-  tenantSlug?: string,
+  tenantSlug?: string
 ): Promise<
   | (TenantUser & { failed_login_attempts: number; locked_until: Date | null })
   | null
@@ -260,13 +262,13 @@ async function findTenantUser(
     if (tenantSlug) {
       const result = await mgmtPool.query(
         `SELECT id, slug, name, database_name FROM coheus_tenants WHERE slug = $1 AND status = 'active'`,
-        [tenantSlug],
+        [tenantSlug]
       );
       tenants = result.rows;
     } else {
       // Search all tenants - in production, might want to limit this
       const result = await mgmtPool.query(
-        `SELECT id, slug, name, database_name FROM coheus_tenants WHERE status = 'active' ORDER BY name`,
+        `SELECT id, slug, name, database_name FROM coheus_tenants WHERE status = 'active' ORDER BY name`
       );
       tenants = result.rows;
     }
@@ -282,7 +284,7 @@ async function findTenantUser(
                   failed_login_attempts, locked_until
            FROM users 
            WHERE email = $1`,
-          [email],
+          [email]
         );
 
         if (userResult.rows.length > 0) {
@@ -388,17 +390,15 @@ router.post("/signin", authLimiter, async (req, res) => {
         failureReason: "user_inactive",
       }).catch(() => {});
 
-      return res
-        .status(401)
-        .json({
-          error: "Account is disabled. Please contact your administrator.",
-        });
+      return res.status(401).json({
+        error: "Account is disabled. Please contact your administrator.",
+      });
     }
 
     // Verify password
     const isValidPassword = await bcrypt.compare(
       password,
-      user.encrypted_password,
+      user.encrypted_password
     );
     if (!isValidPassword) {
       // Increment failed login attempts
@@ -415,7 +415,7 @@ router.post("/signin", authLimiter, async (req, res) => {
               failed_login_attempts = $1, 
               locked_until = $2 
              WHERE id = $3`,
-            [newFailedAttempts, lockoutEnd, user.id],
+            [newFailedAttempts, lockoutEnd, user.id]
           );
         } else if ("tenant_slug" in user) {
           const tenantPool = await getTenantPool(user.tenant_slug);
@@ -425,7 +425,7 @@ router.post("/signin", authLimiter, async (req, res) => {
                 failed_login_attempts = $1, 
                 locked_until = $2 
                WHERE id = $3`,
-              [newFailedAttempts, lockoutEnd, user.id],
+              [newFailedAttempts, lockoutEnd, user.id]
             );
           }
         }
@@ -433,7 +433,7 @@ router.post("/signin", authLimiter, async (req, res) => {
         logError(
           "[Auth] Failed to update login attempts",
           updateError as Error,
-          { email },
+          { email }
         );
       }
 
@@ -459,7 +459,9 @@ router.post("/signin", authLimiter, async (req, res) => {
 
       const attemptsRemaining = MAX_FAILED_ATTEMPTS - newFailedAttempts;
       return res.status(401).json({
-        error: `Invalid email or password. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? "" : "s"} remaining before account lockout.`,
+        error: `Invalid email or password. ${attemptsRemaining} attempt${
+          attemptsRemaining === 1 ? "" : "s"
+        } remaining before account lockout.`,
         attemptsRemaining,
       });
     }
@@ -470,14 +472,14 @@ router.post("/signin", authLimiter, async (req, res) => {
         const mgmtPool = getManagementPool();
         await mgmtPool.query(
           `UPDATE coheus_users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
-          [user.id],
+          [user.id]
         );
       } else if ("tenant_slug" in user) {
         const tenantPool = await getTenantPool(user.tenant_slug);
         if (tenantPool) {
           await tenantPool.query(
             `UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
-            [user.id],
+            [user.id]
           );
         }
       }
@@ -509,14 +511,14 @@ router.post("/signin", authLimiter, async (req, res) => {
         const mgmtPool = getManagementPool();
         await mgmtPool.query(
           `UPDATE coheus_users SET last_login_at = NOW() WHERE id = $1`,
-          [user.id],
+          [user.id]
         );
       } else if ("tenant_slug" in user) {
         const tenantPool = await getTenantPool(user.tenant_slug);
         if (tenantPool) {
           await tenantPool.query(
             `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
-            [user.id],
+            [user.id]
           );
         }
       }
@@ -547,7 +549,9 @@ router.post("/signin", authLimiter, async (req, res) => {
       tenantId: "tenant_id" in user ? user.tenant_id : null,
       action: "login",
       resource: "auth",
-      description: `User logged in successfully${isSuperAdmin ? " (super admin)" : ""}`,
+      description: `User logged in successfully${
+        isSuperAdmin ? " (super admin)" : ""
+      }`,
       status: "success",
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
@@ -603,7 +607,7 @@ router.get("/me", async (req, res) => {
       const result = await mgmtPool.query(
         `SELECT id, email, full_name, role, is_active, last_login_at, created_at
          FROM coheus_users WHERE id = $1`,
-        [decoded.userId],
+        [decoded.userId]
       );
       if (result.rows.length > 0) {
         user = {
@@ -620,14 +624,14 @@ router.get("/me", async (req, res) => {
         const result = await tenantPool.query(
           `SELECT id, email, full_name, role, is_active, last_login_at, created_at
            FROM users WHERE id = $1`,
-          [decoded.userId],
+          [decoded.userId]
         );
         if (result.rows.length > 0) {
           // Get tenant info
           const mgmtPool = getManagementPool();
           const tenantResult = await mgmtPool.query(
             `SELECT id, name, slug FROM coheus_tenants WHERE slug = $1`,
-            [decoded.tenantSlug],
+            [decoded.tenantSlug]
           );
           const tenant = tenantResult.rows[0];
 
@@ -702,7 +706,7 @@ router.get("/tenants", async (req, res) => {
   try {
     const mgmtPool = getManagementPool();
     const result = await mgmtPool.query(
-      `SELECT slug, name FROM coheus_tenants WHERE status = 'active' ORDER BY name`,
+      `SELECT slug, name FROM coheus_tenants WHERE status = 'active' ORDER BY name`
     );
 
     return res.json({ tenants: result.rows });
@@ -726,11 +730,60 @@ const passwordResetConfirmSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters"),
 });
 
-// In-memory store for reset tokens (use Redis in production)
-const resetTokens = new Map<
-  string,
-  { email: string; tenantSlug?: string; expiresAt: number }
->();
+/**
+ * Store a password reset token in the management database.
+ * The raw token is never stored -- only its SHA-256 hash.
+ */
+async function storeResetToken(
+  token: string,
+  email: string,
+  tenantSlug?: string
+): Promise<void> {
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  const mgmtPool = getManagementPool();
+  await mgmtPool.query(
+    `INSERT INTO password_reset_tokens (email, token_hash, tenant_slug, expires_at)
+     VALUES ($1, $2, $3, $4)`,
+    [email, tokenHash, tenantSlug || null, expiresAt]
+  );
+
+  // Cleanup expired tokens (non-blocking)
+  mgmtPool
+    .query(
+      `DELETE FROM password_reset_tokens WHERE expires_at < NOW() - INTERVAL '24 hours'`
+    )
+    .catch(() => {});
+}
+
+/**
+ * Look up and consume a password reset token.
+ * Returns the associated data if valid, null otherwise.
+ */
+async function consumeResetToken(
+  token: string
+): Promise<{ email: string; tenantSlug: string | null } | null> {
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const mgmtPool = getManagementPool();
+
+  const result = await mgmtPool.query(
+    `UPDATE password_reset_tokens
+     SET used_at = NOW()
+     WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+     RETURNING email, tenant_slug`,
+    [tokenHash]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return {
+    email: result.rows[0].email,
+    tenantSlug: result.rows[0].tenant_slug,
+  };
+}
 
 /**
  * Request Password Reset
@@ -771,27 +824,28 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       });
     }
 
-    // Generate reset token
+    // Generate reset token and store in database
     const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
 
-    resetTokens.set(token, {
-      email: user.email,
-      tenantSlug: foundTenantSlug,
-      expiresAt,
-    });
+    try {
+      await storeResetToken(token, user.email, foundTenantSlug);
+    } catch (storeError: any) {
+      logError("[Auth] Failed to store reset token", storeError, { email });
+      return res.status(500).json({ error: "Internal server error" });
+    }
 
     // Send reset email
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:5173").split(",")[0].trim();
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {
-      const { sendPasswordResetEmail } =
-        await import("../services/emailService.js");
+      const { sendPasswordResetEmail } = await import(
+        "../services/emailService.js"
+      );
       await sendPasswordResetEmail(
         user.email,
         resetUrl,
-        user.full_name || undefined,
+        user.full_name || undefined
       );
       logInfo("[Auth] Password reset email sent", { email });
     } catch (emailError: any) {
@@ -821,9 +875,9 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
   try {
     const { token, newPassword } = passwordResetConfirmSchema.parse(req.body);
 
-    // Validate token
-    const resetData = resetTokens.get(token);
-    if (!resetData || resetData.expiresAt < Date.now()) {
+    // Validate and consume token (atomic -- marks as used in the same query)
+    const resetData = await consumeResetToken(token);
+    if (!resetData) {
       return res.status(400).json({ error: "Invalid or expired reset token" });
     }
 
@@ -839,7 +893,7 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
       `UPDATE coheus_users SET encrypted_password = $1, failed_login_attempts = 0, locked_until = NULL
        WHERE email = $2 AND is_active = true
        RETURNING id`,
-      [hashedPassword, resetData.email],
+      [hashedPassword, resetData.email]
     );
 
     if (superAdminResult.rowCount && superAdminResult.rowCount > 0) {
@@ -854,7 +908,7 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
           `UPDATE users SET encrypted_password = $1, failed_login_attempts = 0, locked_until = NULL
            WHERE email = $2 AND is_active = true
            RETURNING id`,
-          [hashedPassword, resetData.email],
+          [hashedPassword, resetData.email]
         );
         if (tenantResult.rowCount && tenantResult.rowCount > 0) {
           updated = true;
@@ -867,9 +921,6 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
         .status(400)
         .json({ error: "Failed to update password. Please try again." });
     }
-
-    // Remove used token
-    resetTokens.delete(token);
 
     // Audit log
     await auditLog({
@@ -929,7 +980,7 @@ router.post("/impersonate", async (req, res) => {
     }
 
     const { targetUserId, targetTenantSlug } = impersonateSchema.parse(
-      req.body,
+      req.body
     );
 
     // Get target user from tenant DB
@@ -940,7 +991,7 @@ router.post("/impersonate", async (req, res) => {
 
     const userResult = await tenantPool.query(
       `SELECT id, email, full_name, role, is_active FROM users WHERE id = $1`,
-      [targetUserId],
+      [targetUserId]
     );
 
     if (userResult.rows.length === 0) {
@@ -959,7 +1010,7 @@ router.post("/impersonate", async (req, res) => {
     const mgmtPool = getManagementPool();
     const tenantResult = await mgmtPool.query(
       `SELECT id, name, slug FROM coheus_tenants WHERE slug = $1`,
-      [targetTenantSlug],
+      [targetTenantSlug]
     );
     const tenant = tenantResult.rows[0];
 

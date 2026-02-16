@@ -116,10 +116,85 @@ export const useTenants = () => {
     [loadTenants]
   );
 
+  const [duplicating, setDuplicating] = useState(false);
+  const [duplicationProgress, setDuplicationProgress] = useState<string | null>(null);
+
+  const duplicateTenant = useCallback(
+    async (tenantId: string, name: string, slug: string) => {
+      try {
+        setDuplicating(true);
+        setDuplicationProgress("Starting duplication...");
+
+        // 1. Start the async job (returns 202 immediately)
+        const startResult = await api.request<{ jobSlug: string }>(`/api/tenants/${tenantId}/duplicate`, {
+          method: "POST",
+          body: JSON.stringify({ name, slug }),
+        });
+
+        const jobSlug = startResult.jobSlug || slug;
+        setDuplicationProgress("Copying data (this may take a few minutes)...");
+
+        // 2. Poll for completion
+        let attempts = 0;
+        const maxAttempts = 120; // 10 minutes max (5s intervals)
+        while (attempts < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+          attempts++;
+
+          try {
+            const status = await api.request<{
+              status: 'running' | 'completed' | 'failed';
+              elapsedSeconds?: number;
+              result?: any;
+              error?: string;
+            }>(`/api/tenants/duplication-status/${jobSlug}`);
+
+            if (status.status === 'completed') {
+              toastRef.current({
+                title: "Success",
+                description: `Tenant duplicated successfully as "${name}" with anonymized data`,
+              });
+              await loadTenants();
+              return status.result;
+            }
+
+            if (status.status === 'failed') {
+              throw new Error(status.error || 'Duplication failed');
+            }
+
+            // Still running — update progress
+            const elapsed = status.elapsedSeconds || (attempts * 5);
+            setDuplicationProgress(`Copying data... (${elapsed}s elapsed)`);
+          } catch (pollError: any) {
+            // 404 means the job was already cleaned up (shouldn't happen while running)
+            if (pollError.message?.includes('404') || pollError.message?.includes('No duplication job')) {
+              throw new Error('Duplication job disappeared unexpectedly');
+            }
+            throw pollError;
+          }
+        }
+
+        throw new Error('Duplication timed out after 10 minutes');
+      } catch (error: any) {
+        console.error("Error duplicating tenant:", error);
+        toastRef.current({
+          title: "Error",
+          description: error.message || "Failed to duplicate tenant",
+          variant: "destructive",
+        });
+        throw error;
+      } finally {
+        setDuplicating(false);
+        setDuplicationProgress(null);
+      }
+    },
+    [loadTenants]
+  );
+
   const deleteTenant = useCallback(
     async (tenantId: string) => {
       try {
-        await api.request(`/api/admin/tenants/${tenantId}`, {
+        await api.request(`/api/tenants/${tenantId}`, {
           method: "DELETE",
         });
         toastRef.current({
@@ -144,9 +219,12 @@ export const useTenants = () => {
     tenants,
     loading,
     error,
+    duplicating,
+    duplicationProgress,
     loadTenants,
     createTenant,
     updateTenant,
     deleteTenant,
+    duplicateTenant,
   };
 };

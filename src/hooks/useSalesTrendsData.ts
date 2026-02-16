@@ -134,10 +134,17 @@ export interface UseSalesTrendsDataReturn {
  * @param tenantId - Tenant ID for multi-tenant support (optional)
  * @returns Sales trends data, loading state, error, and refetch function
  */
+/** Optional explicit date range override (from DatePeriodPicker custom selection) */
+export interface SalesTrendsCustomDateRange {
+  start: string; // YYYY-MM-DD
+  end: string;   // YYYY-MM-DD
+}
+
 export function useSalesTrendsData(
   dateRange: DateRangeOption = '3-months',
   channelGroup: string = 'Retail',
-  tenantId?: string | null
+  tenantId?: string | null,
+  customDateRange?: SalesTrendsCustomDateRange
 ): UseSalesTrendsDataReturn {
   const [data, setData] = useState<SalesTrendsData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -152,6 +159,11 @@ export function useSalesTrendsData(
       let url = `/api/loans/sales-trends?date_range=${dateRange}&channel_group=${encodeURIComponent(channelGroup)}`;
       if (tenantId) {
         url += `&tenant_id=${encodeURIComponent(tenantId)}`;
+      }
+      // When a custom date range is provided (e.g. from DatePeriodPicker),
+      // send start_date / end_date so the API can use them instead of the preset string.
+      if (customDateRange) {
+        url += `&start_date=${encodeURIComponent(customDateRange.start)}&end_date=${encodeURIComponent(customDateRange.end)}`;
       }
       console.log('[SalesTrends] Fetching data from', url);
       
@@ -169,7 +181,7 @@ export function useSalesTrendsData(
     } finally {
       setLoading(false);
     }
-  }, [dateRange, channelGroup, tenantId]);
+  }, [dateRange, channelGroup, tenantId, customDateRange?.start, customDateRange?.end]);
 
   useEffect(() => {
     fetchData();

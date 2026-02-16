@@ -1,83 +1,195 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, TrendingUp, Users, DollarSign, Clock, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Download, Calendar, Telescope } from 'lucide-react';
 import { api } from '@/lib/api';
+import {
+  FIELD_REGISTRY,
+  SUMMARY_REGISTRY,
+  DEFAULT_COLUMNS,
+  DEFAULT_SUMMARY_METRICS,
+  type FieldFormat,
+} from '@/config/insightFieldRegistry';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 interface InsightDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   insightSource: string;
   insightMessage: string;
+  insightId?: number;
   dateFilter: string;
+  selectedTenantId?: string | null;
 }
 
-interface LoanRow {
-  loanId: string;
-  loanAmount: number;
-  loanType?: string;
-  status?: string;
-  ficoScore?: number | null;
-  ltv?: number | null;
-  dti?: number | null;
-  applicationDate?: string;
-  loanOfficer?: string;
-  predictedOutcome?: string;
-  confidence?: number;
-  riskFactors?: string[];
-  riskReason?: string;
-  daysInPipeline?: number;
-  lockDate?: string;
+interface DisplayConfig {
+  columns: string[];
+  summaryMetrics: string[];
 }
 
-interface OfficerRow {
-  name: string;
-  totalLoans: number;
-  fundedLoans: number;
-  pullThrough: number;
-  totalVolume: number;
-  fundedVolume: number;
-  avgCycleTime?: number | null;
-}
-
-interface MonthRow {
-  month: string;
-  loansStarted: number;
-  loansFunded: number;
-  totalVolume: number;
-  fundedVolume: number;
-  avgCycleTime?: number | null;
-  pullThrough: number;
+interface DateRangeInfo {
+  label: string;
+  startDate: string;
+  endDate: string;
 }
 
 interface DetailData {
   source: string;
   title: string;
   summary: Record<string, number>;
-  loans?: LoanRow[];
-  officers?: OfficerRow[];
-  months?: MonthRow[];
+  displayConfig?: DisplayConfig;
+  dateRange?: DateRangeInfo;
+  /** ISO timestamp of when the insight was generated (data freshness) */
+  dataAsOf?: string;
+  rows?: Record<string, any>[];
+  // Legacy fields — kept for backward compat
+  loans?: Record<string, any>[];
+  officers?: Record<string, any>[];
+  months?: Record<string, any>[];
 }
 
-const formatCurrency = (value: number) => {
-  if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
-  if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
-  return `$${value.toFixed(0)}`;
-};
+// ============================================================================
+// Formatting helpers
+// ============================================================================
 
-const formatDate = (dateStr: string | undefined) => {
-  if (!dateStr) return '-';
-  try {
-    return new Date(dateStr).toLocaleDateString();
-  } catch {
-    return dateStr;
+function formatCell(value: any, format: FieldFormat): string {
+  if (value == null || value === '') return '-';
+
+  switch (format) {
+    case 'currency': {
+      const num = Number(value);
+      if (isNaN(num)) return '-';
+      if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+      if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
+      return `$${num.toFixed(0)}`;
+    }
+    case 'percent': {
+      const num = Number(value);
+      if (isNaN(num)) return '-';
+      return `${num.toFixed(1)}%`;
+    }
+    case 'rate': {
+      const num = Number(value);
+      if (isNaN(num)) return '-';
+      return `${num.toFixed(3)}%`;
+    }
+    case 'number': {
+      const num = Number(value);
+      if (isNaN(num)) return '-';
+      return num.toLocaleString();
+    }
+    case 'days': {
+      const num = Number(value);
+      if (isNaN(num)) return '-';
+      return `${Math.round(num)}d`;
+    }
+    case 'bps': {
+      const num = Number(value);
+      if (isNaN(num)) return '-';
+      return `${num} bps`;
+    }
+    case 'date': {
+      if (!value) return '-';
+      try {
+        return new Date(value).toLocaleDateString();
+      } catch {
+        return String(value);
+      }
+    }
+    case 'mono':
+      return String(value);
+    case 'badge':
+      return String(value);
+    case 'boolean':
+      return value ? 'Yes' : 'No';
+    case 'text':
+    default:
+      return String(value);
   }
-};
+}
 
-// Summary card component
-const SummaryCard = ({ label, value, icon: Icon, color = 'blue' }: { 
-  label: string; 
-  value: string | number; 
-  icon?: any;
+/** Plain-text version for CSV (no HTML, no $ prefix rounding quirks) */
+function formatCellPlain(value: any, format: FieldFormat): string {
+  if (value == null || value === '') return '';
+
+  switch (format) {
+    case 'currency':
+    case 'number':
+    case 'bps':
+    case 'days': {
+      const num = Number(value);
+      return isNaN(num) ? '' : String(num);
+    }
+    case 'percent':
+    case 'rate': {
+      const num = Number(value);
+      return isNaN(num) ? '' : String(num);
+    }
+    case 'date': {
+      if (!value) return '';
+      try {
+        return new Date(value).toISOString().split('T')[0];
+      } catch {
+        return String(value);
+      }
+    }
+    case 'boolean':
+      return value ? 'Yes' : 'No';
+    default:
+      return String(value).replace(/,/g, ' '); // escape commas for CSV
+  }
+}
+
+/** Build a human-readable date range string like "Jan 1 – Feb 9, 2026" */
+function formatDateRange(dr?: DateRangeInfo): string {
+  if (!dr) return '';
+  try {
+    const start = new Date(dr.startDate);
+    const end = new Date(dr.endDate);
+    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+    const optsYear: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+    const sameYear = start.getFullYear() === end.getFullYear();
+    if (sameYear) {
+      return `${start.toLocaleDateString('en-US', opts)} – ${end.toLocaleDateString('en-US', optsYear)}`;
+    }
+    return `${start.toLocaleDateString('en-US', optsYear)} – ${end.toLocaleDateString('en-US', optsYear)}`;
+  } catch {
+    return dr.label || '';
+  }
+}
+
+function formatSummaryValue(value: any, format: string): string {
+  if (value == null) return '-';
+  const num = Number(value);
+  switch (format) {
+    case 'currency': {
+      if (isNaN(num)) return '-';
+      if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+      if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
+      return `$${num.toFixed(0)}`;
+    }
+    case 'percent':
+      return isNaN(num) ? '-' : `${num.toFixed(1)}%`;
+    case 'days':
+      return isNaN(num) ? '-' : `${Math.round(num)}d`;
+    case 'bps':
+      return isNaN(num) ? '-' : `${num} bps`;
+    case 'number':
+    default:
+      return isNaN(num) ? String(value) : num.toLocaleString();
+  }
+}
+
+// ============================================================================
+// Summary Card component
+// ============================================================================
+
+const SummaryCard = ({ label, value, color = 'blue' }: {
+  label: string;
+  value: string | number;
   color?: 'blue' | 'green' | 'red' | 'amber' | 'purple';
 }) => {
   const colorClasses = {
@@ -87,63 +199,168 @@ const SummaryCard = ({ label, value, icon: Icon, color = 'blue' }: {
     amber: 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300',
     purple: 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300',
   };
-  
+
   return (
     <div className={`rounded-lg p-3 ${colorClasses[color]}`}>
-      <div className="flex items-center gap-2 mb-1">
-        {Icon && <Icon className="w-4 h-4" />}
-        <span className="text-xs font-medium opacity-80">{label}</span>
-      </div>
-      <div className="text-lg font-semibold">{value}</div>
+      <span className="text-xs font-medium opacity-80">{label}</span>
+      <div className="text-lg font-semibold mt-0.5">{value}</div>
     </div>
   );
 };
 
-export const InsightDetailModal = ({ 
-  isOpen, 
-  onClose, 
-  insightSource, 
+// ============================================================================
+// Badge cell renderer (for predictedOutcome, riskReason, etc.)
+// ============================================================================
+
+function BadgeCell({ value }: { value: string }) {
+  const lower = (value || '').toLowerCase();
+  const isDanger =
+    lower.includes('deny') ||
+    lower.includes('risk') ||
+    lower.includes('critical');
+  const isWarning =
+    lower.includes('withdraw') || lower.includes('warn');
+
+  const cls = isDanger
+    ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+    : isWarning
+    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+    : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+
+  return (
+    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
+      {value}
+    </span>
+  );
+}
+
+// ============================================================================
+// Main component
+// ============================================================================
+
+export const InsightDetailModal = ({
+  isOpen,
+  onClose,
+  insightSource,
   insightMessage,
-  dateFilter 
+  insightId,
+  dateFilter,
+  selectedTenantId,
 }: InsightDetailModalProps) => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DetailData | null>(null);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [isCreatingDeepDive, setIsCreatingDeepDive] = useState(false);
 
   useEffect(() => {
     if (isOpen && insightSource) {
       fetchDetails();
     }
-  }, [isOpen, insightSource, dateFilter]);
+  }, [isOpen, insightSource, insightId, dateFilter]);
 
   const fetchDetails = async () => {
     setLoading(true);
     setError(null);
-    
     try {
+      const tenantParam = selectedTenantId ? `&tenant_id=${selectedTenantId}` : '';
+      const idParam = insightId ? `&insightId=${insightId}` : '';
+      const headlineParam = !insightId && insightMessage ? `&headline=${encodeURIComponent(insightMessage)}` : '';
       const result = await api.request<DetailData>(
-        `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}`
+        `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}${tenantParam}${idParam}${headlineParam}`
       );
       setData(result);
     } catch (err: any) {
-      console.error('Error fetching insight details:', err);
+      console.error('Error fetching insight details see:', err);
       setError(err.message || 'Failed to load details');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+  // Deep Dive in Workbench handler
+  const handleDeepDive = useCallback(async () => {
+    if (!insightId || isCreatingDeepDive) return;
+    setIsCreatingDeepDive(true);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : '';
+      const result = await api.request<{ id: string }>(
+        `/api/workbench/canvases/from-insight${tenantParam}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ insightId }),
+        }
+      );
+      onClose();
+      navigate(`/my-dashboard?canvas=${result.id}`);
+    } catch (err: any) {
+      console.error('Error creating deep-dive canvas:', err);
+    } finally {
+      setIsCreatingDeepDive(false);
+    }
+  }, [insightId, isCreatingDeepDive, selectedTenantId, onClose, navigate]);
+
+  // Unified rows from new `rows` field or legacy `loans`/`officers`/`months`
+  const rows = useMemo(() => {
+    if (!data) return [];
+    return data.rows || data.loans || data.officers || data.months || [];
+  }, [data]);
+
+  // Resolve columns: prefer LLM-chosen columns → but validate they actually exist
+  // in the row data. If <2 of the LLM columns have data, fall back to defaults.
+  // RULE: If the rows contain loanId, it MUST always be the first column.
+  const columns = useMemo(() => {
+    let cols: string[];
+    const llmCols = data?.displayConfig?.columns;
+    if (llmCols?.length && rows.length > 0) {
+      const sampleRow = rows[0];
+      const validCols = llmCols.filter(k => sampleRow[k] !== undefined);
+      cols = validCols.length >= 2 ? validCols : (DEFAULT_COLUMNS[insightSource] || []);
+    } else {
+      cols = DEFAULT_COLUMNS[insightSource] || [];
+    }
+
+    // Enforce: if this is loan-level data, loanId is always first
+    if (rows.length > 0 && rows[0].loanId !== undefined) {
+      const without = cols.filter(c => c !== 'loanId');
+      cols = ['loanId', ...without];
+    }
+
+    return cols;
+  }, [data, insightSource, rows]);
+
+  // Resolve summary metrics: prefer LLM-chosen → validate against actual summary → fall back
+  const summaryMetricKeys = useMemo(() => {
+    const llmMetrics = data?.displayConfig?.summaryMetrics;
+    if (llmMetrics?.length && data?.summary) {
+      const validMetrics = llmMetrics.filter(k => data.summary[k] != null);
+      if (validMetrics.length >= 1) return validMetrics;
+    }
+    return DEFAULT_SUMMARY_METRICS[insightSource] || [];
+  }, [data, insightSource]);
+
+  // ==============================
+  // CSV Export
+  // ==============================
+
+  const exportCSV = () => {
+    if (!columns.length || !rows.length) return;
+    const headers = columns.map(k => FIELD_REGISTRY[k]?.label || k);
+    const csvRows = rows.map(row =>
+      columns.map(k => {
+        const field = FIELD_REGISTRY[k];
+        const raw = row[k];
+        return `"${formatCellPlain(raw, field?.format || 'text').replace(/"/g, '""')}"`;
+      }).join(',')
+    );
+    const csv = [headers.join(','), ...csvRows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `insight-${insightSource}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (!isOpen) return null;
@@ -162,25 +379,69 @@ export const InsightDetailModal = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="relative w-full max-w-4xl max-h-[85vh] overflow-hidden bg-white dark:bg-slate-900 rounded-2xl shadow-2xl"
+          className="relative w-full max-w-5xl max-h-[85vh] overflow-hidden bg-white dark:bg-slate-900 rounded-2xl shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="sticky top-0 z-10 flex items-center justify-between p-4 sm:p-6 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-            <div>
-              <h2 className="text-lg sm:text-xl font-semibold text-slate-900 dark:text-white">
-                {data?.title || 'Insight Details'}
-              </h2>
+            <div className="flex-1 min-w-0 mr-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-lg sm:text-xl font-semibold text-slate-900 dark:text-white truncate">
+                  {data?.title || 'Insight Details'}
+                </h2>
+                {data?.dateRange && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 whitespace-nowrap">
+                    <Calendar className="w-3 h-3" />
+                    {data.dateRange.label} &middot; {formatDateRange(data.dateRange)}
+                  </span>
+                )}
+                {data?.dataAsOf && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                    Data as of {new Date(data.dataAsOf).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })},{' '}
+                    {new Date(data.dataAsOf).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
                 {insightMessage}
               </p>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5 text-slate-500" />
-            </button>
+            <div className="flex items-center gap-2">
+              {insightId && (
+                <button
+                  onClick={handleDeepDive}
+                  disabled={isCreatingDeepDive}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg hover:from-blue-600 hover:to-indigo-700 shadow-sm hover:shadow transition-all disabled:opacity-50"
+                  title="Open deep-dive analysis in Workbench"
+                >
+                  {isCreatingDeepDive ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Telescope className="w-4 h-4" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {isCreatingDeepDive ? 'Creating...' : 'Deep Dive'}
+                  </span>
+                </button>
+              )}
+              {rows.length > 0 && columns.length > 0 && (
+                <button
+                  onClick={exportCSV}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  title="Export to CSV"
+                >
+                  <Download className="w-4 h-4" />
+                  <span className="hidden sm:inline">Export</span>
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
           </div>
 
           {/* Content */}
@@ -203,268 +464,116 @@ export const InsightDetailModal = ({
               </div>
             ) : data ? (
               <div className="space-y-6">
-                {/* Summary Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {insightSource === 'predictions' && (
-                    <>
-                      <SummaryCard label="Total At Risk" value={data.summary.totalAtRisk} icon={AlertTriangle} color="red" />
-                      <SummaryCard label="Likely Withdraw" value={data.summary.likelyWithdraw} icon={TrendingUp} color="amber" />
-                      <SummaryCard label="Likely Deny" value={data.summary.likelyDeny} icon={AlertTriangle} color="red" />
-                      <SummaryCard label="At-Risk Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
-                    </>
-                  )}
-                  {insightSource === 'credit_risk' && (
-                    <>
-                      <SummaryCard label="High Risk Loans" value={data.summary.totalHighRisk} icon={AlertTriangle} color="red" />
-                      <SummaryCard label="Low FICO (<620)" value={data.summary.lowFico} color="amber" />
-                      <SummaryCard label="High LTV (>95%)" value={data.summary.highLtv} color="amber" />
-                      <SummaryCard label="High DTI (>50%)" value={data.summary.highDti} color="amber" />
-                    </>
-                  )}
-                  {insightSource === 'lost_opportunity' && (
-                    <>
-                      <SummaryCard label="Total Lost" value={data.summary.totalLost} icon={AlertTriangle} color="red" />
-                      <SummaryCard label="Withdrawn" value={data.summary.withdrawn} color="amber" />
-                      <SummaryCard label="Denied" value={data.summary.denied} color="red" />
-                      <SummaryCard label="Lost Revenue" value={formatCurrency(data.summary.estimatedLostRevenue)} icon={DollarSign} color="purple" />
-                    </>
-                  )}
-                  {insightSource === 'pipeline' && (
-                    <>
-                      <SummaryCard label="Active Loans" value={data.summary.totalActive} icon={TrendingUp} color="blue" />
-                      <SummaryCard label="Locked" value={data.summary.locked} color="green" />
-                      <SummaryCard label="Over 30 Days" value={data.summary.over30Days} icon={Clock} color="amber" />
-                      <SummaryCard label="Pipeline Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
-                    </>
-                  )}
-                  {insightSource === 'performance' && (
-                    <>
-                      <SummaryCard label="Loan Officers" value={data.summary.totalOfficers} icon={Users} color="blue" />
-                      <SummaryCard label="Total Loans" value={data.summary.totalLoans} color="blue" />
-                      <SummaryCard label="Funded Loans" value={data.summary.totalFunded} color="green" />
-                      <SummaryCard label="Total Volume" value={formatCurrency(data.summary.totalVolume)} icon={DollarSign} color="purple" />
-                    </>
-                  )}
-                  {insightSource === 'comparisons' && (
-                    <>
-                      <SummaryCard label="Months Analyzed" value={data.summary.monthsAnalyzed} icon={Clock} color="blue" />
-                      <SummaryCard label="Total Loans" value={data.summary.totalLoans} color="blue" />
-                      <SummaryCard label="Total Funded" value={data.summary.totalFunded} color="green" />
-                    </>
-                  )}
-                </div>
+                {/* ========== Dynamic Summary Cards ========== */}
+                {summaryMetricKeys.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {summaryMetricKeys.map(metricKey => {
+                      const config = SUMMARY_REGISTRY[metricKey];
+                      const value = data.summary?.[metricKey];
+                      if (value == null || !config) return null;
+                      return (
+                        <SummaryCard
+                          key={metricKey}
+                          label={config.label}
+                          value={formatSummaryValue(value, config.format)}
+                          color={config.color}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
 
-                {/* Data Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 dark:border-slate-700">
-                        {/* Predictions table headers */}
-                        {insightSource === 'predictions' && (
-                          <>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Outcome</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Confidence</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
-                            <th className="text-center py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Details</th>
-                          </>
-                        )}
-                        {/* Credit risk table headers */}
-                        {insightSource === 'credit_risk' && (
-                          <>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Risk Reason</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">FICO</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">LTV</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">DTI</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
-                          </>
-                        )}
-                        {/* Lost opportunity table headers */}
-                        {insightSource === 'lost_opportunity' && (
-                          <>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Status</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Type</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">App Date</th>
-                          </>
-                        )}
-                        {/* Pipeline table headers */}
-                        {insightSource === 'pipeline' && (
-                          <>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan ID</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Amount</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Type</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Days</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Locked</th>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
-                          </>
-                        )}
-                        {/* Performance table headers */}
-                        {insightSource === 'performance' && (
-                          <>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Loan Officer</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Total</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Funded</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Pull-Through</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Volume</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Cycle Time</th>
-                          </>
-                        )}
-                        {/* Comparisons table headers */}
-                        {insightSource === 'comparisons' && (
-                          <>
-                            <th className="text-left py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Month</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Started</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Funded</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Pull-Through</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Volume</th>
-                            <th className="text-right py-3 px-2 font-medium text-slate-600 dark:text-slate-400">Cycle Time</th>
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* Predictions rows */}
-                      {insightSource === 'predictions' && data.loans?.map((loan, idx) => (
-                        <tr 
-                          key={loan.loanId || idx}
-                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
-                          <td className="py-3 px-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                              loan.predictedOutcome === 'withdraw' 
-                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                                : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
-                            }`}>
-                              {loan.predictedOutcome}
-                            </span>
-                          </td>
-                          <td className="py-3 px-2 text-right font-semibold">{loan.confidence}%</td>
-                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
-                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
-                          <td className="py-3 px-2 text-center">
-                            <button
-                              onClick={() => toggleRow(loan.loanId)}
-                              className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded"
-                            >
-                              {expandedRows.has(loan.loanId) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {/* Credit risk rows */}
-                      {insightSource === 'credit_risk' && data.loans?.map((loan, idx) => (
-                        <tr 
-                          key={loan.loanId || idx}
-                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
-                          <td className="py-3 px-2">
-                            <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
-                              {loan.riskReason}
-                            </span>
-                          </td>
-                          <td className={`py-3 px-2 text-right ${loan.ficoScore && loan.ficoScore < 620 ? 'text-rose-600 font-semibold' : ''}`}>
-                            {loan.ficoScore || '-'}
-                          </td>
-                          <td className={`py-3 px-2 text-right ${loan.ltv && loan.ltv > 95 ? 'text-rose-600 font-semibold' : ''}`}>
-                            {loan.ltv ? `${loan.ltv.toFixed(1)}%` : '-'}
-                          </td>
-                          <td className={`py-3 px-2 text-right ${loan.dti && loan.dti > 50 ? 'text-rose-600 font-semibold' : ''}`}>
-                            {loan.dti ? `${loan.dti.toFixed(1)}%` : '-'}
-                          </td>
-                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
-                        </tr>
-                      ))}
-                      {/* Lost opportunity rows */}
-                      {insightSource === 'lost_opportunity' && data.loans?.map((loan, idx) => (
-                        <tr 
-                          key={loan.loanId || idx}
-                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
-                          <td className="py-3 px-2">{loan.status}</td>
-                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
-                          <td className="py-3 px-2">{loan.loanType || '-'}</td>
-                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
-                          <td className="py-3 px-2">{formatDate(loan.applicationDate)}</td>
-                        </tr>
-                      ))}
-                      {/* Pipeline rows */}
-                      {insightSource === 'pipeline' && data.loans?.map((loan, idx) => (
-                        <tr 
-                          key={loan.loanId || idx}
-                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <td className="py-3 px-2 font-mono text-xs">{loan.loanId}</td>
-                          <td className="py-3 px-2 text-right">{formatCurrency(loan.loanAmount)}</td>
-                          <td className="py-3 px-2">{loan.loanType || '-'}</td>
-                          <td className={`py-3 px-2 text-right ${loan.daysInPipeline && loan.daysInPipeline > 45 ? 'text-rose-600 font-semibold' : ''}`}>
-                            {loan.daysInPipeline || '-'}
-                          </td>
-                          <td className="py-3 px-2">
-                            {loan.lockDate ? (
-                              <span className="text-emerald-600">Yes</span>
-                            ) : (
-                              <span className="text-slate-400">No</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-2">{loan.loanOfficer || '-'}</td>
-                        </tr>
-                      ))}
-                      {/* Performance rows */}
-                      {insightSource === 'performance' && data.officers?.map((officer, idx) => (
-                        <tr 
-                          key={officer.name || idx}
-                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <td className="py-3 px-2 font-medium">{officer.name}</td>
-                          <td className="py-3 px-2 text-right">{officer.totalLoans}</td>
-                          <td className="py-3 px-2 text-right">{officer.fundedLoans}</td>
-                          <td className={`py-3 px-2 text-right font-semibold ${
-                            officer.pullThrough >= 70 ? 'text-emerald-600' : 
-                            officer.pullThrough >= 50 ? 'text-amber-600' : 'text-rose-600'
-                          }`}>
-                            {officer.pullThrough}%
-                          </td>
-                          <td className="py-3 px-2 text-right">{formatCurrency(officer.fundedVolume)}</td>
-                          <td className="py-3 px-2 text-right">{officer.avgCycleTime ? `${officer.avgCycleTime}d` : '-'}</td>
-                        </tr>
-                      ))}
-                      {/* Comparisons rows */}
-                      {insightSource === 'comparisons' && data.months?.map((month, idx) => (
-                        <tr 
-                          key={month.month || idx}
-                          className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <td className="py-3 px-2 font-medium">{month.month}</td>
-                          <td className="py-3 px-2 text-right">{month.loansStarted}</td>
-                          <td className="py-3 px-2 text-right">{month.loansFunded}</td>
-                          <td className={`py-3 px-2 text-right font-semibold ${
-                            month.pullThrough >= 70 ? 'text-emerald-600' : 
-                            month.pullThrough >= 50 ? 'text-amber-600' : 'text-rose-600'
-                          }`}>
-                            {month.pullThrough}%
-                          </td>
-                          <td className="py-3 px-2 text-right">{formatCurrency(month.fundedVolume)}</td>
-                          <td className="py-3 px-2 text-right">{month.avgCycleTime ? `${month.avgCycleTime}d` : '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  
-                  {/* Empty state */}
-                  {(!data.loans?.length && !data.officers?.length && !data.months?.length) && (
-                    <div className="text-center py-8 text-slate-500">
-                      No detailed data available for this insight.
+                {/* ========== Dynamic Data Table ========== */}
+                {columns.length > 0 && rows.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Detail ({rows.length} {rows.length === 1 ? 'row' : 'rows'})
+                      </span>
                     </div>
-                  )}
-                </div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-700">
+                          {columns.map(colKey => {
+                            const field = FIELD_REGISTRY[colKey];
+                            if (!field) return null;
+                            return (
+                              <th
+                                key={colKey}
+                                className={`py-3 px-2 font-medium text-slate-600 dark:text-slate-400 text-${field.align}`}
+                              >
+                                {field.label}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, idx) => (
+                          <tr
+                            key={row.loanId || row.name || row.month || idx}
+                            className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                          >
+                            {columns.map(colKey => {
+                              const field = FIELD_REGISTRY[colKey];
+                              if (!field) return <td key={colKey} />;
+                              const raw = row[colKey];
+
+                              // Special rendering for certain formats
+                              if (field.format === 'mono') {
+                                return (
+                                  <td key={colKey} className="py-3 px-2 font-mono text-xs">
+                                    {formatCell(raw, field.format)}
+                                  </td>
+                                );
+                              }
+                              if (field.format === 'badge') {
+                                return (
+                                  <td key={colKey} className="py-3 px-2">
+                                    <BadgeCell value={String(raw || '-')} />
+                                  </td>
+                                );
+                              }
+                              if (field.format === 'boolean') {
+                                return (
+                                  <td key={colKey} className="py-3 px-2 text-center">
+                                    {raw ? (
+                                      <span className="text-emerald-600">Yes</span>
+                                    ) : (
+                                      <span className="text-slate-400">No</span>
+                                    )}
+                                  </td>
+                                );
+                              }
+
+                              return (
+                                <td
+                                  key={colKey}
+                                  className={`py-3 px-2 text-${field.align}`}
+                                >
+                                  {formatCell(raw, field.format)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : columns.length === 0 && rows.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500">
+                    {insightSource === 'margin'
+                      ? 'Margin is an aggregate metric. See summary cards above for current and prior month comparison.'
+                      : 'No detailed data available for this insight.'}
+                  </div>
+                ) : null}
+
+                {/* Data as-of timestamp */}
+                {data?.dateRange && (
+                  <div className="text-xs text-slate-400 text-right pt-2">
+                    Data as of {new Date(data.dateRange.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </div>
+                )}
               </div>
             ) : null}
           </div>

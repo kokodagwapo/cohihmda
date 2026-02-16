@@ -3,11 +3,11 @@
  * Provides tenant database pool and tenant info to request handlers
  */
 
-import { Request, Response, NextFunction } from 'express';
-import { AuthRequest } from './auth.js';
-import { pool as managementPool } from '../config/managementDatabase.js';
-import { tenantDbManager } from '../config/tenantDatabaseManager.js';
-import pg from 'pg';
+import { Request, Response, NextFunction } from "express";
+import { AuthRequest } from "./auth.js";
+import { pool as managementPool } from "../config/managementDatabase.js";
+import { tenantDbManager } from "../config/tenantDatabaseManager.js";
+import pg from "pg";
 
 export interface TenantContext {
   tenantId: string;
@@ -43,7 +43,7 @@ async function ensurePlatformUserShadow(
   try {
     // Check if user already exists in tenant database
     const existing = await tenantPool.query(
-      'SELECT id FROM public.users WHERE id = $1',
+      "SELECT id FROM public.users WHERE id = $1",
       [userId]
     );
 
@@ -57,13 +57,15 @@ async function ensurePlatformUserShadow(
           AND column_name = 'is_platform_user'
         ) as exists
       `);
-      
+
       const hasPlatformUserColumn = columnCheck.rows[0]?.exists;
-      const email = userEmail || `platform-${userId.substring(0, 8)}@coheus.internal`;
-      
+      const email =
+        userEmail || `platform-${userId.substring(0, 8)}@coheus.internal`;
+
       if (hasPlatformUserColumn) {
         // Modern schema with is_platform_user column
-        await tenantPool.query(`
+        await tenantPool.query(
+          `
           INSERT INTO public.users (id, email, role, is_platform_user, created_at, updated_at)
           VALUES ($1, $2, $3, true, NOW(), NOW())
           ON CONFLICT (id) DO UPDATE SET
@@ -71,21 +73,30 @@ async function ensurePlatformUserShadow(
             role = EXCLUDED.role,
             is_platform_user = true,
             updated_at = NOW()
-        `, [userId, email, userRole]);
+        `,
+          [userId, email, userRole]
+        );
       } else {
         // Legacy schema - try with minimal columns
         // Note: This may fail if encrypted_password is NOT NULL
-        await tenantPool.query(`
+        await tenantPool.query(
+          `
           INSERT INTO public.users (id, email, role, encrypted_password, created_at, updated_at)
           VALUES ($1, $2, $3, '', NOW(), NOW())
           ON CONFLICT (id) DO UPDATE SET
             email = EXCLUDED.email,
             role = EXCLUDED.role,
             updated_at = NOW()
-        `, [userId, email, userRole]);
+        `,
+          [userId, email, userRole]
+        );
       }
-      
-      console.log('[TenantContext] Created shadow user for platform staff:', { userId, tenantId, userRole });
+
+      console.log("[TenantContext] Created shadow user for platform staff:", {
+        userId,
+        tenantId,
+        userRole,
+      });
     }
 
     // Add to cache
@@ -96,8 +107,12 @@ async function ensurePlatformUserShadow(
   } catch (error: unknown) {
     // Don't fail the request if shadow user creation fails
     // This could happen if users table schema doesn't support it yet
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.warn('[TenantContext] Failed to create shadow user (non-fatal):', errorMessage);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    console.warn(
+      "[TenantContext] Failed to create shadow user (non-fatal):",
+      errorMessage
+    );
   }
 }
 
@@ -122,22 +137,35 @@ export async function attachTenantContext(
   try {
     // Check if tenant_id is provided in query params (for admin tenant selection)
     const queryTenantId = req.query.tenant_id as string | undefined;
-    
+
     // Use role and tenant from JWT (set by authenticateToken middleware)
     // This avoids expensive database lookups since we already have the info
-    const userRole = req.userRole || 'user';
+    const userRole = req.userRole || "user";
     const jwtTenantId = req.tenantId || null;
-    
-    console.log('[TenantContext] Using JWT data:', { userId: req.userId, userRole, jwtTenantId, queryTenantId });
+
+    console.log("[TenantContext] Using JWT data:", {
+      userId: req.userId,
+      userRole,
+      jwtTenantId,
+      queryTenantId,
+    });
 
     // Only platform staff can use the tenant_id query param to select different tenants
     // Tenant admins and regular users always use their JWT tenant (security: prevents cross-tenant access)
-    const isPlatformStaff = ['super_admin', 'platform_admin', 'support'].includes(userRole);
+    const isPlatformStaff = [
+      "super_admin",
+      "platform_admin",
+      "support",
+    ].includes(userRole);
     let tenantId: string | null = null;
-    
+
     if (queryTenantId && isPlatformStaff) {
       // Platform staff can select any tenant
-      console.log('[TenantContext] Platform staff selecting tenant:', { userId: req.userId, userRole, queryTenantId });
+      console.log("[TenantContext] Platform staff selecting tenant:", {
+        userId: req.userId,
+        userRole,
+        queryTenantId,
+      });
       // Verify tenant exists
       const tenantCheck = await managementPool.query(
         `SELECT id FROM coheus_tenants WHERE id = $1 AND status = 'active'`,
@@ -145,39 +173,66 @@ export async function attachTenantContext(
       );
       if (tenantCheck.rows.length > 0) {
         tenantId = queryTenantId;
-        console.log('[TenantContext] Tenant verified, using query tenant:', tenantId);
+        console.log(
+          "[TenantContext] Tenant verified, using query tenant:",
+          tenantId
+        );
       } else {
-        console.warn('[TenantContext] Tenant not found or inactive:', queryTenantId);
-        return res.status(404).json({ error: 'Tenant not found or inactive' });
+        console.warn(
+          "[TenantContext] Tenant not found or inactive:",
+          queryTenantId
+        );
+        res.status(404).json({ error: "Tenant not found or inactive" });
+        return;
       }
     } else if (queryTenantId && !isPlatformStaff) {
       // Non-platform users cannot use tenant_id query param - silently ignore it
       // Their tenant comes from JWT (secure, cannot be tampered)
-      console.warn('[TenantContext] Non-platform user attempted to use tenant_id query param (ignored):', { userId: req.userId, userRole, queryTenantId });
+      console.warn(
+        "[TenantContext] Non-platform user attempted to use tenant_id query param (ignored):",
+        { userId: req.userId, userRole, queryTenantId }
+      );
     }
 
     // If no query tenant, use tenant_id from JWT (for tenant users)
     if (!tenantId && jwtTenantId) {
-      console.log('[TenantContext] Using tenant from JWT:', jwtTenantId);
+      console.log("[TenantContext] Using tenant from JWT:", jwtTenantId);
       tenantId = jwtTenantId;
     }
 
     if (!tenantId) {
       // Super admins without a tenant_id query param should not be blocked
       // They just need to select a tenant in the UI
-      if (userRole === 'super_admin' || userRole === 'platform_admin' || userRole === 'support') {
-        console.log('[TenantContext] Platform user without tenant selected:', { userId: req.userId, userRole });
-        return res.status(400).json({ 
-          error: 'No tenant selected', 
-          message: 'Please select a tenant to view data',
-          requiresTenantSelection: true
+      if (
+        userRole === "super_admin" ||
+        userRole === "platform_admin" ||
+        userRole === "support"
+      ) {
+        console.log("[TenantContext] Platform user without tenant selected:", {
+          userId: req.userId,
+          userRole,
         });
+        res.status(400).json({
+          error: "No tenant selected",
+          message: "Please select a tenant to view data",
+          requiresTenantSelection: true,
+        });
+        return;
       }
-      console.warn('[TenantContext] No tenant found for user:', { userId: req.userId, userRole, queryTenantId });
-      return res.status(403).json({ error: 'Tenant not found for user' });
+      console.warn("[TenantContext] No tenant found for user:", {
+        userId: req.userId,
+        userRole,
+        queryTenantId,
+      });
+      res.status(403).json({ error: "Tenant not found for user" });
+      return;
     }
 
-    console.log('[TenantContext] Using tenant:', { userId: req.userId, tenantId, userRole });
+    console.log("[TenantContext] Using tenant:", {
+      userId: req.userId,
+      tenantId,
+      userRole,
+    });
 
     // Get tenant database pool
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -188,7 +243,13 @@ export async function attachTenantContext(
     // For platform staff, ensure they have a shadow user record in the tenant database
     // This allows them to use features like chat history, saved dashboards, etc.
     if (isPlatformStaff && req.userId) {
-      await ensurePlatformUserShadow(tenantPool, req.userId, req.userEmail, userRole, tenantId);
+      await ensurePlatformUserShadow(
+        tenantPool,
+        req.userId,
+        req.userEmail,
+        userRole,
+        tenantId
+      );
     }
 
     // Attach to request
@@ -205,8 +266,9 @@ export async function attachTenantContext(
 
     next();
   } catch (error: any) {
-    console.error('[TenantContext] Error attaching tenant context:', error);
-    return res.status(500).json({ error: 'Failed to attach tenant context' });
+    console.error("[TenantContext] Error attaching tenant context:", error);
+    res.status(500).json({ error: "Failed to attach tenant context" });
+    return;
   }
 }
 
@@ -215,7 +277,14 @@ export async function attachTenantContext(
  */
 export function getTenantContext(req: Request): TenantContext {
   if (!req.tenantContext) {
-    throw new Error('Tenant context not attached to request');
+    throw new Error("Tenant context not attached to request");
   }
   return req.tenantContext;
+}
+
+/**
+ * Request type with tenant context attached
+ */
+export interface TenantRequest extends AuthRequest {
+  tenantContext?: TenantContext;
 }

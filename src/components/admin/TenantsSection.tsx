@@ -31,7 +31,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Eye, Edit, Plus, Trash2 } from 'lucide-react';
+import { Search, Eye, Edit, Plus, Trash2, Copy, Loader2 } from 'lucide-react';
 import type { Tenant } from '@/hooks/admin/useTenants';
 
 interface TenantsSectionProps {
@@ -41,6 +41,9 @@ interface TenantsSectionProps {
   onCreateTenant: (data: Partial<Tenant>) => Promise<void>;
   onUpdateTenant: (id: string, data: Partial<Tenant>) => Promise<void>;
   onDeleteTenant: (id: string) => Promise<void>;
+  onDuplicateTenant?: (id: string, name: string, slug: string) => Promise<any>;
+  duplicating?: boolean;
+  duplicationProgress?: string | null;
   onRefresh: () => Promise<void>;
 }
 
@@ -51,13 +54,18 @@ export const TenantsSection = ({
   onCreateTenant,
   onUpdateTenant,
   onDeleteTenant,
+  onDuplicateTenant,
+  duplicating = false,
+  duplicationProgress,
   onRefresh,
 }: TenantsSectionProps) => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [formData, setFormData] = useState({ name: '' });
+  const [duplicateFormData, setDuplicateFormData] = useState({ name: '', slug: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredTenants = tenants.filter(tenant =>
@@ -78,6 +86,37 @@ export const TenantsSection = ({
   const handleDeleteClick = (tenant: Tenant) => {
     setSelectedTenant(tenant);
     setIsDeleteDialogOpen(true);
+  };
+
+  const handleDuplicateClick = (tenant: Tenant) => {
+    setSelectedTenant(tenant);
+    const defaultName = `${tenant.name} (Anonymized)`;
+    const defaultSlug = defaultName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    setDuplicateFormData({ name: defaultName, slug: defaultSlug });
+    setIsDuplicateDialogOpen(true);
+  };
+
+  const handleDuplicateNameChange = (name: string) => {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    setDuplicateFormData({ name, slug });
+  };
+
+  const handleDuplicate = async () => {
+    if (!selectedTenant || !duplicateFormData.name.trim() || !duplicateFormData.slug.trim()) return;
+    if (!onDuplicateTenant) return;
+
+    try {
+      setIsSubmitting(true);
+      await onDuplicateTenant(selectedTenant.id, duplicateFormData.name, duplicateFormData.slug);
+      await onRefresh();
+      setIsDuplicateDialogOpen(false);
+      setSelectedTenant(null);
+      setDuplicateFormData({ name: '', slug: '' });
+    } catch (error) {
+      console.error('Error duplicating tenant:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCreate = async () => {
@@ -203,6 +242,22 @@ export const TenantsSection = ({
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
+                        {onDuplicateTenant && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-8 w-8 p-0 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950"
+                            onClick={() => handleDuplicateClick(tenant)}
+                            title="Duplicate & Anonymize"
+                            disabled={duplicating}
+                          >
+                            {duplicating && selectedTenant?.id === tenant.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
                         <Button 
                           variant="ghost" 
                           size="sm" 
@@ -331,6 +386,93 @@ export const TenantsSection = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Duplicate & Anonymize Dialog */}
+      <Dialog open={isDuplicateDialogOpen} onOpenChange={(open) => {
+        // Prevent closing while duplication is in progress
+        if (!open && isSubmitting) return;
+        setIsDuplicateDialogOpen(open);
+      }}>
+        <DialogContent className="sm:max-w-[500px]" onPointerDownOutside={(e) => { if (isSubmitting) e.preventDefault(); }}>
+          <DialogHeader>
+            <DialogTitle>Duplicate & Anonymize Tenant</DialogTitle>
+            <DialogDescription>
+              Create a copy of "{selectedTenant?.name}" with all configuration and loan data.
+              Personnel names, branch numbers, and other identifying information will be replaced
+              with anonymized pseudonyms.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="duplicate-tenant-name">New Tenant Name</Label>
+              <Input
+                id="duplicate-tenant-name"
+                value={duplicateFormData.name}
+                onChange={(e) => handleDuplicateNameChange(e.target.value)}
+                placeholder="e.g. Acme Lending (Demo)"
+                className="text-base font-extralight"
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="duplicate-tenant-slug">Slug</Label>
+              <Input
+                id="duplicate-tenant-slug"
+                value={duplicateFormData.slug}
+                onChange={(e) => setDuplicateFormData(prev => ({ ...prev, slug: e.target.value }))}
+                placeholder="e.g. acme-lending-demo"
+                className="text-base font-extralight font-mono"
+                disabled={isSubmitting}
+              />
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Lowercase letters, numbers, and hyphens only. Used for the database name.
+              </p>
+            </div>
+            {isSubmitting && duplicationProgress ? (
+              <div className="rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 flex items-center gap-3">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <p className="text-sm text-blue-800 dark:text-blue-200 font-medium">
+                  {duplicationProgress}
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3">
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  This operation copies all loans, employees, and configuration from the source tenant.
+                  Personnel names, employee IDs, branches, and org IDs will be anonymized. 
+                  This may take a few minutes for large datasets.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsDuplicateDialogOpen(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDuplicate}
+              disabled={isSubmitting || !duplicateFormData.name.trim() || !duplicateFormData.slug.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Duplicating...
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4 mr-2" />
+                  Duplicate & Anonymize
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 };

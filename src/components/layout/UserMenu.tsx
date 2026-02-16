@@ -31,7 +31,6 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Sun,
   Wand2,
   BarChart3,
@@ -198,17 +197,6 @@ export function UserMenu({
             Insights
           </DropdownMenuItem>
 
-          <DropdownMenuItem
-            onClick={() => onNavigate("/data-chat")}
-            className={cn(
-              "h-10 rounded-md px-2",
-              isActive("/data-chat") && "bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium",
-            )}
-          >
-            <Sparkles className="mr-2 h-4 w-4" />
-            Data Chat
-          </DropdownMenuItem>
-
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className="h-10 rounded-md px-2">
               <Wand2 className="mr-2 h-4 w-4" />
@@ -231,6 +219,17 @@ export function UserMenu({
               </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+
+          <DropdownMenuItem
+            onClick={() => onNavigate("/settings")}
+            className={cn(
+              "h-10 rounded-md px-2",
+              isActive("/settings") && "bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium",
+            )}
+          >
+            <Settings className="mr-2 h-4 w-4" />
+            Settings
+          </DropdownMenuItem>
         </DropdownMenuGroup>
 
         <DropdownMenuSeparator className="my-2" />

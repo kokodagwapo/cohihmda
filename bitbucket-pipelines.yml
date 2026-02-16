@@ -1,0 +1,316 @@
+# ============================================================================
+# Bitbucket Pipelines Configuration for Coheus
+# ============================================================================
+# Deployment triggers:
+#   - dev branch   → Deploy to dev environment
+#   - main branch  → Deploy to production environment
+#
+# Authentication: AWS OIDC (no static credentials needed)
+#
+# Required Repository Variables:
+#   - AWS_ROLE_ARN                 - IAM role ARN for OIDC
+#   - AWS_REGION                   - AWS region (default: us-east-2)
+#
+# Required Deployment Variables (per environment: dev, production):
+#   - S3_BUCKET                    - Frontend S3 bucket name
+#   - CLOUDFRONT_DISTRIBUTION_ID   - For cache invalidation
+#   - ECR_REPOSITORY_URI           - ECR repository for backend images
+#   - ECS_CLUSTER                  - ECS cluster name
+#   - ECS_SERVICE                  - ECS service name
+#   - VITE_API_URL                 - Backend API URL for frontend build
+#   - CF_STACK_BACKEND             - CloudFormation stack name (e.g., coheus-dev-backend)
+# ============================================================================
+
+image: node:20
+
+options:
+  docker: true
+  size: 2x
+
+definitions:
+  caches:
+    npm: ~/.npm
+    server-npm: server/node_modules
+
+  services:
+    docker:
+      memory: 3072
+
+  scripts:
+    setup-oidc: &setup-oidc |
+      echo "Setting up AWS credentials using OIDC..."
+      echo $BITBUCKET_STEP_OIDC_TOKEN > /tmp/oidc-token
+      chmod 600 /tmp/oidc-token
+      if [ -z "$AWS_ROLE_ARN" ]; then
+        echo "ERROR: AWS_ROLE_ARN repository variable is not set"
+        exit 1
+      fi
+      export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/oidc-token
+      export AWS_ROLE_SESSION_NAME="bitbucket-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-build}-${BITBUCKET_BUILD_NUMBER}"
+      export AWS_REGION="${AWS_REGION:-us-east-2}"
+      echo "Using AWS Role: $AWS_ROLE_ARN"
+
+  steps:
+    # Build steps (no deployment environment)
+    - step: &build-frontend
+        name: Build Frontend
+        caches:
+          - npm
+        script:
+          - npm ci
+          - npm run build
+        artifacts:
+          - dist/**
+
+    - step: &build-backend
+        name: Build Backend
+        caches:
+          - server-npm
+        script:
+          - cd server && npm ci && npm run build
+        artifacts:
+          - server/dist/**
+          - server/node_modules/**
+          - server/package.json
+
+    # Deploy steps with automatic change detection
+    - step: &deploy-dev
+        name: Deploy to Dev
+        oidc: true
+        deployment: dev
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          # Check what changed in this commit
+          - |
+            FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
+            BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config)' || true)
+            echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
+            echo "Backend changed: ${BACKEND_CHANGED:-none}"
+            echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
+          # Deploy infrastructure first if changed (updates task definitions, memory, etc.)
+          - |
+            if [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Deploying Infrastructure (CloudFormation)..."
+              chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+              ./scripts/bitbucket/deploy-infrastructure.sh
+            else
+              echo ">>> Skipping Infrastructure (no changes)"
+            fi
+          # Deploy frontend if changed
+          - |
+            if [ -n "$FRONTEND_CHANGED" ]; then
+              echo ">>> Deploying Frontend..."
+              chmod +x ./scripts/bitbucket/deploy-frontend.sh
+              ./scripts/bitbucket/deploy-frontend.sh
+            else
+              echo ">>> Skipping Frontend (no changes)"
+            fi
+          # Deploy backend if changed (or if infra changed - to pick up new task definition)
+          - |
+            if [ -n "$BACKEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Deploying Backend..."
+              chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+              ./scripts/bitbucket/deploy-backend-ecs.sh
+            else
+              echo ">>> Skipping Backend (no changes)"
+            fi
+
+    - step: &deploy-prod
+        name: Deploy to Production
+        oidc: true
+        deployment: production
+        trigger: manual
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          # Check what changed in this commit
+          - |
+            FRONTEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(src/|public/|index\.html|package\.json|vite\.config|tailwind\.config|tsconfig)' || true)
+            BACKEND_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(server/|Dockerfile\.backend)' || true)
+            INFRA_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E '^(infrastructure/cloudformation/|scripts/deploy/config)' || true)
+            echo "Frontend changed: ${FRONTEND_CHANGED:-none}"
+            echo "Backend changed: ${BACKEND_CHANGED:-none}"
+            echo "Infrastructure changed: ${INFRA_CHANGED:-none}"
+          # Deploy infrastructure first if changed (updates task definitions, memory, etc.)
+          - |
+            if [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Deploying Infrastructure (CloudFormation)..."
+              chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+              ./scripts/bitbucket/deploy-infrastructure.sh
+            else
+              echo ">>> Skipping Infrastructure (no changes)"
+            fi
+          # Deploy frontend if changed
+          - |
+            if [ -n "$FRONTEND_CHANGED" ]; then
+              echo ">>> Deploying Frontend..."
+              chmod +x ./scripts/bitbucket/deploy-frontend.sh
+              ./scripts/bitbucket/deploy-frontend.sh
+            else
+              echo ">>> Skipping Frontend (no changes)"
+            fi
+          # Deploy backend if changed (or if infra changed - to pick up new task definition)
+          - |
+            if [ -n "$BACKEND_CHANGED" ] || [ -n "$INFRA_CHANGED" ]; then
+              echo ">>> Deploying Backend..."
+              chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+              ./scripts/bitbucket/deploy-backend-ecs.sh
+            else
+              echo ">>> Skipping Backend (no changes)"
+            fi
+
+    # Individual deploy steps for custom pipelines
+    - step: &deploy-frontend-dev
+        name: Deploy Frontend to Dev
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+
+    - step: &deploy-frontend-prod
+        name: Deploy Frontend to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-frontend.sh
+          - ./scripts/bitbucket/deploy-frontend.sh
+
+    - step: &deploy-backend-dev
+        name: Deploy Backend to Dev
+        oidc: true
+        deployment: dev
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
+    - step: &deploy-backend-prod
+        name: Deploy Backend to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        services:
+          - docker
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-backend-ecs.sh
+          - ./scripts/bitbucket/deploy-backend-ecs.sh
+
+    - step: &deploy-infra-dev
+        name: Deploy Infrastructure to Dev
+        oidc: true
+        deployment: dev
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+
+    - step: &deploy-infra-prod
+        name: Deploy Infrastructure to Prod
+        oidc: true
+        deployment: production
+        trigger: manual
+        script:
+          - *setup-oidc
+          - chmod +x ./scripts/bitbucket/deploy-infrastructure.sh
+          - ./scripts/bitbucket/deploy-infrastructure.sh
+
+pipelines:
+  # Branch-based deployments
+  branches:
+    dev:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+      - step: *deploy-dev
+
+    main:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+      - step: *deploy-prod
+
+  # Pull request validation (only for PRs targeting dev or main)
+  pull-requests:
+    dev:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+    main:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+
+  # Custom pipelines for individual deployments
+  custom:
+    # Frontend only
+    frontend-dev:
+      - step: *build-frontend
+      - step: *deploy-frontend-dev
+
+    frontend-prod:
+      - step: *build-frontend
+      - step: *deploy-frontend-prod
+
+    # Backend only
+    backend-dev:
+      - step: *build-backend
+      - step: *deploy-backend-dev
+
+    backend-prod:
+      - step: *build-backend
+      - step: *deploy-backend-prod
+
+    # Infrastructure only (CloudFormation updates)
+    infrastructure-dev:
+      - step: *deploy-infra-dev
+
+    infrastructure-prod:
+      - step: *deploy-infra-prod
+
+    # Full deploy (skip build if you want)
+    deploy-all-dev:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+      - step: *deploy-dev
+
+    deploy-all-prod:
+      - parallel:
+          - step: *build-frontend
+          - step: *build-backend
+      - step: *deploy-prod
+
+    # Database migrations
+    run-migrations-dev:
+      - step:
+          name: Run Migrations (Dev)
+          oidc: true
+          deployment: dev
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh
+
+    run-migrations-prod:
+      - step:
+          name: Run Migrations (Prod)
+          oidc: true
+          deployment: production
+          trigger: manual
+          script:
+            - *setup-oidc
+            - apt-get update && apt-get install -y curl
+            - chmod +x ./scripts/bitbucket/run-migrations.sh
+            - ./scripts/bitbucket/run-migrations.sh

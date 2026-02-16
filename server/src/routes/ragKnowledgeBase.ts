@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { pool } from '../config/database.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
 import { requireRole } from '../middleware/rbac.js';
 import { z } from 'zod';
 import { auditLog } from '../services/auditLogger.js';
@@ -21,8 +21,8 @@ const knowledgeEntrySchema = z.object({
 const updateKnowledgeEntrySchema = knowledgeEntrySchema.partial();
 
 /**
- * Middleware to check superadmin access (with dev-friendly override)
- * Allows access in development or if user is super_admin
+ * Middleware to check superadmin/admin access (with dev-friendly override)
+ * Uses auth token role instead of querying legacy public.users
  */
 async function requireSuperAdminOrDev(req: AuthRequest, res: any, next: any) {
   try {
@@ -35,36 +35,17 @@ async function requireSuperAdminOrDev(req: AuthRequest, res: any, next: any) {
                           process.env.ALLOW_DEV_ACCESS === 'true';
 
     if (isDevelopment) {
-      // In dev, still check role but allow if admin/super_admin
-      try {
-        const result = await pool.query(
-          `SELECT 
-            CASE 
-              WHEN u.role = 'super_admin' THEN 'super_admin'
-              WHEN u.role = 'admin' THEN 'super_admin'
-              ELSE u.role
-            END as role
-           FROM public.users u
-           WHERE u.id = $1`,
-          [req.userId]
-        );
-
-        if (result.rows.length > 0) {
-          const role = result.rows[0].role;
-          // Allow admin/super_admin in dev, or if explicitly allowed
-          if (role === 'super_admin' || role === 'admin') {
-            return next();
-          }
-        }
-      } catch (error) {
-        // If we can't check role in dev, allow access (for local development)
-        console.log('Dev mode: Allowing access without role check');
+      const role = req.userRole || 'user';
+      if (req.isSuperAdmin || role === 'super_admin' || role === 'platform_admin' || role === 'admin' || role === 'tenant_admin') {
         return next();
       }
+      // In dev, allow access even without admin role for local development
+      console.log('Dev mode: Allowing access without admin role');
+      return next();
     }
 
     // In production, use strict requireRole
-    return requireRole('super_admin')(req, res, next);
+    return requireRole('super_admin', 'platform_admin', 'tenant_admin')(req, res, next);
   } catch (error: any) {
     console.error('Superadmin check error:', error);
     res.status(500).json({ error: 'Access check failed' });
@@ -75,14 +56,14 @@ async function requireSuperAdminOrDev(req: AuthRequest, res: any, next: any) {
  * GET /api/rag/knowledge-base
  * List all knowledge base entries (superadmin only)
  */
-router.get('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
+router.get('/', authenticateToken, attachTenantContext, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
-    const { category, search, tenant_id } = req.query;
+    const { tenantPool } = getTenantContext(req);
+    const { category, search } = req.query;
 
     let query = `
       SELECT 
         kb.id,
-        kb.tenant_id,
         kb.title,
         kb.category,
         kb.priority,
@@ -92,14 +73,8 @@ router.get('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthReque
         kb.created_at,
         kb.updated_at,
         kb.created_by,
-        kb.updated_by,
-        u1.email as created_by_email,
-        u2.email as updated_by_email,
-        t.name as tenant_name
-      FROM public.rag_knowledge_base kb
-      LEFT JOIN public.users u1 ON kb.created_by = u1.id
-      LEFT JOIN public.users u2 ON kb.updated_by = u2.id
-      LEFT JOIN public.tenants t ON kb.tenant_id = t.id
+        kb.updated_by
+      FROM rag_knowledge_base kb
       WHERE 1=1
     `;
     const params: any[] = [];
@@ -126,16 +101,9 @@ router.get('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthReque
       paramIndex++;
     }
 
-    // Filter by tenant (optional, for multi-tenant support)
-    if (tenant_id && typeof tenant_id === 'string') {
-      query += ` AND kb.tenant_id = $${paramIndex}`;
-      params.push(tenant_id);
-      paramIndex++;
-    }
-
     query += ` ORDER BY kb.priority DESC, kb.created_at DESC`;
 
-    const result = await pool.query(query, params);
+    const result = await tenantPool.query(query, params);
 
     // Audit log
     await auditLog({
@@ -160,11 +128,12 @@ router.get('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthReque
  * GET /api/rag/knowledge-base/categories
  * Get all unique categories
  */
-router.get('/categories', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
+router.get('/categories', authenticateToken, attachTenantContext, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
-    const result = await pool.query(
+    const { tenantPool } = getTenantContext(req);
+    const result = await tenantPool.query(
       `SELECT DISTINCT category 
-       FROM public.rag_knowledge_base 
+       FROM rag_knowledge_base 
        WHERE category IS NOT NULL 
        ORDER BY category ASC`
     );
@@ -180,20 +149,14 @@ router.get('/categories', authenticateToken, requireSuperAdminOrDev, async (req:
  * GET /api/rag/knowledge-base/:id
  * Get a single knowledge base entry
  */
-router.get('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
+router.get('/:id', authenticateToken, attachTenantContext, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
+    const { tenantPool } = getTenantContext(req);
     const { id } = req.params;
 
-    const result = await pool.query(
-      `SELECT 
-        kb.*,
-        u1.email as created_by_email,
-        u2.email as updated_by_email,
-        t.name as tenant_name
-      FROM public.rag_knowledge_base kb
-      LEFT JOIN public.users u1 ON kb.created_by = u1.id
-      LEFT JOIN public.users u2 ON kb.updated_by = u2.id
-      LEFT JOIN public.tenants t ON kb.tenant_id = t.id
+    const result = await tenantPool.query(
+      `SELECT kb.*
+      FROM rag_knowledge_base kb
       WHERE kb.id = $1`,
       [id]
     );
@@ -213,27 +176,17 @@ router.get('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRe
  * POST /api/rag/knowledge-base
  * Create a new knowledge base entry
  */
-router.post('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
+router.post('/', authenticateToken, attachTenantContext, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
+    const { tenantPool } = getTenantContext(req);
     const data = knowledgeEntrySchema.parse(req.body);
 
-    // Get user's tenant_id if not provided
-    let tenantId = data.tenant_id;
-    if (!tenantId) {
-      const profileResult = await pool.query(
-        'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-        [req.userId]
-      );
-      tenantId = profileResult.rows[0]?.tenant_id || null;
-    }
-
-    const result = await pool.query(
-      `INSERT INTO public.rag_knowledge_base (
-        tenant_id, title, category, priority, content, keywords, is_active, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    const result = await tenantPool.query(
+      `INSERT INTO rag_knowledge_base (
+        title, category, priority, content, keywords, is_active, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *`,
       [
-        tenantId,
         data.title,
         data.category,
         data.priority ?? 100,
@@ -272,14 +225,15 @@ router.post('/', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequ
  * PUT /api/rag/knowledge-base/:id
  * Update a knowledge base entry
  */
-router.put('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
+router.put('/:id', authenticateToken, attachTenantContext, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const { tenantPool } = getTenantContext(req);
+    const id = req.params.id as string;
     const updates = updateKnowledgeEntrySchema.parse(req.body);
 
     // Check if entry exists
-    const existingResult = await pool.query(
-      'SELECT * FROM public.rag_knowledge_base WHERE id = $1',
+    const existingResult = await tenantPool.query(
+      'SELECT * FROM rag_knowledge_base WHERE id = $1',
       [id]
     );
 
@@ -315,13 +269,13 @@ router.put('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRe
     values.push(id);
 
     const query = `
-      UPDATE public.rag_knowledge_base
+      UPDATE rag_knowledge_base
       SET ${updateFields.join(', ')}
       WHERE id = $${paramIndex}
       RETURNING *
     `;
 
-    const result = await pool.query(query, values);
+    const result = await tenantPool.query(query, values);
 
     // Audit log
     await auditLog({
@@ -351,13 +305,14 @@ router.put('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRe
  * DELETE /api/rag/knowledge-base/:id
  * Delete a knowledge base entry
  */
-router.delete('/:id', authenticateToken, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
+router.delete('/:id', authenticateToken, attachTenantContext, requireSuperAdminOrDev, async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const { tenantPool } = getTenantContext(req);
+    const id = req.params.id as string;
 
     // Check if entry exists
-    const existingResult = await pool.query(
-      'SELECT title FROM public.rag_knowledge_base WHERE id = $1',
+    const existingResult = await tenantPool.query(
+      'SELECT title FROM rag_knowledge_base WHERE id = $1',
       [id]
     );
 
@@ -365,7 +320,7 @@ router.delete('/:id', authenticateToken, requireSuperAdminOrDev, async (req: Aut
       return res.status(404).json({ error: 'Knowledge base entry not found' });
     }
 
-    await pool.query('DELETE FROM public.rag_knowledge_base WHERE id = $1', [id]);
+    await tenantPool.query('DELETE FROM rag_knowledge_base WHERE id = $1', [id]);
 
     // Audit log
     await auditLog({

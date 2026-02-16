@@ -34,8 +34,8 @@ $STACK_WAF_CLOUDFRONT = "$PROJECT_NAME-$ENVIRONMENT-waf-cloudfront"
 $STACK_MONITORING = "$PROJECT_NAME-$ENVIRONMENT-monitoring"
 $STACK_TENANT_PROVISIONING = "$PROJECT_NAME-$ENVIRONMENT-tenant-provisioning"
 
-# ECR Repository
-$ECR_REPO = "$PROJECT_NAME-backend"
+# ECR Repository (environment-scoped to avoid collisions)
+$ECR_REPO = "$PROJECT_NAME-$ENVIRONMENT-backend"
 $ECR_IMAGE = "$AWS_ACCOUNT_ID.dkr.ecr.$env:AWS_REGION.amazonaws.com/${ECR_REPO}:latest"
 
 # Database Configuration
@@ -43,17 +43,17 @@ $DB_INSTANCE_CLASS = "db.t3.small"
 
 # ECS Configuration
 $CONTAINER_CPU = 512
-$CONTAINER_MEMORY = 1024
+$CONTAINER_MEMORY = 4096
 $DESIRED_COUNT = 2
 
 # Domain Configuration (coheus1.com subdomains)
 # See docs/deployment/HTTPS_AND_CERTIFICATES.md and COHEUS1_DOMAIN_SETUP.md.
 # Dev:  cohi-dev.coheus1.com (frontend), cohi-dev-api.coheus1.com (API/ALB)
 # Prod: cohi.coheus1.com (frontend), cohi-api.coheus1.com (API/ALB)
-$DOMAIN_NAME = "cohi-dev.coheus1.com"
+$DOMAIN_NAME = "cohi.coheus1.com"
 $CERTIFICATE_ARN = "arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63"  # CloudFront (us-east-1); must cover $DOMAIN_NAME
 $ALB_CERTIFICATE_ARN = "arn:aws:acm:us-east-2:339712788893:certificate/ed3ea4da-effe-47ba-a974-a61964930484"  # ALB (us-east-2); catch-all for *.coheus1.com
-$BACKEND_ORIGIN_DOMAIN = "cohi-dev-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
+$BACKEND_ORIGIN_DOMAIN = "cohi-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
 $BACKEND_ORIGIN_PROTOCOL = "https-only"  # Use "https-only" when ALB has cert and BACKEND_ORIGIN_DOMAIN is set.
 
 # Alert Configuration
@@ -69,11 +69,11 @@ $COGNITO_CLIENT_ID_DEV = "3b3ntlo09hcc46gec2esd6iii5"
 $COGNITO_CLIENT_SECRET_DEV = "rgf0qcvtbuhuvdsrd28tanenke7u70duq4r6l7j35gc0bk8amrb"
 $COGNITO_DOMAIN_DEV = "us-east-2larr8isfk.auth.us-east-2.amazoncognito.com"
 
-# Prod Cognito Configuration (update these when you create prod pool)
-$COGNITO_USER_POOL_ID_PROD = ""  # TODO: Create prod Cognito pool
-$COGNITO_CLIENT_ID_PROD = ""
-$COGNITO_CLIENT_SECRET_PROD = ""
-$COGNITO_DOMAIN_PROD = ""
+# Prod Cognito Configuration
+$COGNITO_USER_POOL_ID_PROD = "us-east-2_hhOr4kNDX"
+$COGNITO_CLIENT_ID_PROD = "1snnpc5vrr0epd68qacu3apmub"
+$COGNITO_CLIENT_SECRET_PROD = "cg180ks433ffdb8gcue8b71p1kdc5v3m9v01pg5sked0s7hj5ee"
+$COGNITO_DOMAIN_PROD = "coheus-prod.auth.us-east-2.amazoncognito.com"
 
 # Select Cognito config based on environment
 if ($ENVIRONMENT -eq "prod") {
@@ -92,8 +92,8 @@ if ($ENVIRONMENT -eq "prod") {
     $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "TestAccCognito")  # Include your test IdP
 }
 
-# Frontend S3 Bucket
-$FRONTEND_BUCKET = "$PROJECT_NAME-frontend-$AWS_ACCOUNT_ID"
+# Frontend S3 Bucket (environment-scoped to avoid collisions)
+$FRONTEND_BUCKET = "$PROJECT_NAME-$ENVIRONMENT-frontend-$AWS_ACCOUNT_ID"
 
 # CloudFormation Template Paths (relative to repo root)
 $REPO_ROOT = (Get-Item "$PSScriptRoot/../..").FullName

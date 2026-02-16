@@ -3,23 +3,27 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { UserSettingsProvider } from "@/hooks/useUserSettings";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { useUserTimezone } from "@/hooks/useUserTimezone";
 import Index from "./pages/Index";
+import ShareLink from "./pages/ShareLink";
 import Dashboard from "./pages/Dashboard";
 import DashboardLegacy from "./pages/DashboardLegacy";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import SSOCallback from "./pages/SSOCallback";
+import UserSettings from "./pages/UserSettings";
 import Loans from "./pages/Loans";
 import MyDashboard from "./pages/MyDashboard";
 import MyDashboardLegacy from "./pages/MyDashboardLegacy";
-import DataChat from "./pages/DataChat";
 import NotFound from "./pages/NotFound";
 import { SubscriptionSuccess } from "./pages/SubscriptionSuccess";
 import { SubscriptionCancel } from "./pages/SubscriptionCancel";
@@ -67,10 +71,24 @@ function Handle404Redirect() {
   return null;
 }
 
+/**
+ * Redirects /workbench?canvas=xxx to /my-dashboard/xxx (slug-based).
+ * Falls back to /my-dashboard if no canvas param is present.
+ */
+function WorkbenchRedirect() {
+  const [searchParams] = useSearchParams();
+  const canvasId = searchParams.get('canvas');
+  if (canvasId) {
+    return <Navigate to={`/my-dashboard/${canvasId}`} replace />;
+  }
+  return <Navigate to="/my-dashboard" replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <AuthProvider>
+        <UserSettingsProvider>
         <EditProvider>
           <TooltipProvider>
             <TimezoneInitializer />
@@ -81,11 +99,20 @@ const App = () => (
               <ScrollToTop />
               <Routes>
               {/* Public routes */}
-              <Route path="/" element={<Index />} />
+              <Route path="/" element={<Navigate to="/insights" replace />} />
+              <Route path="/landing" element={<Index />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/auth/sso/callback" element={<SSOCallback />} />
+              <Route path="/share/:token" element={<ShareLink />} />
               
               {/* Protected routes - require authentication */}
+              <Route path="/settings" element={
+                <ProtectedRoute>
+                  <UserSettings />
+                </ProtectedRoute>
+              } />
                 <Route path="/insights" element={
                   <ProtectedRoute>
                     <Dashboard />
@@ -101,7 +128,7 @@ const App = () => (
                   <Loans />
                 </ProtectedRoute>
               } />
-              <Route path="/my-dashboard" element={
+              <Route path="/my-dashboard/:canvasId?" element={
                 <ProtectedRoute>
                   <MyDashboard />
                 </ProtectedRoute>
@@ -111,6 +138,8 @@ const App = () => (
                   <MyDashboardLegacy />
                 </ProtectedRoute>
               } />
+              {/* Redirect /workbench to /my-dashboard (preserves search params like ?canvas=...) */}
+              <Route path="/workbench" element={<WorkbenchRedirect />} />
               <Route path="/workbench/shared" element={
                 <ProtectedRoute>
                   <SharedWithMe />
@@ -124,11 +153,6 @@ const App = () => (
               <Route path="/workbench/favorites" element={
                 <ProtectedRoute>
                   <Favorites />
-                </ProtectedRoute>
-              } />
-              <Route path="/data-chat" element={
-                <ProtectedRoute>
-                  <DataChat />
                 </ProtectedRoute>
               } />
               
@@ -211,6 +235,7 @@ const App = () => (
           </Router>
         </TooltipProvider>
       </EditProvider>
+    </UserSettingsProvider>
     </AuthProvider>
   </ThemeProvider>
 </QueryClientProvider>

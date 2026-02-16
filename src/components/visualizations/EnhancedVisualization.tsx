@@ -119,6 +119,15 @@ interface EnhancedVisualizationProps {
   onDrilldown?: (item: any, level: string) => void;
   showInsights?: boolean;
   loading?: boolean;
+  /**
+   * When true, forces a compact layout suitable for narrow containers (< 500px).
+   * - Insights panel always stacks below the chart (never side-by-side)
+   * - Chart margins are reduced
+   * - Axis font sizes are smaller
+   * - Pie/donut legend is hidden to save space
+   * Use this when rendering inside a sidebar or narrow panel.
+   */
+  compact?: boolean;
 }
 
 // ============================================================================
@@ -692,7 +701,8 @@ const AnimatedBarChart: React.FC<{
   showLegend?: boolean;
   onBarClick?: (data: any, index: number) => void;
   chartTheme?: ChartTheme;
-}> = ({ data, xKey, yKey, colors, height, showGrid, showLegend, onBarClick, chartTheme }) => {
+  compact?: boolean;
+}> = ({ data, xKey, yKey, colors, height, showGrid, showLegend, onBarClick, chartTheme, compact }) => {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const t = chartTheme || CHART_THEME.light;
 
@@ -703,7 +713,7 @@ const AnimatedBarChart: React.FC<{
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+      <BarChart data={data} margin={compact ? { top: 10, right: 10, left: 5, bottom: 45 } : { top: 20, right: 30, left: 20, bottom: 60 }}>
         <defs>
           {PASTEL_COLORS.map((g, i) => (
             <linearGradient key={i} id={`barGradient${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -721,17 +731,18 @@ const AnimatedBarChart: React.FC<{
         )}
         <XAxis
           dataKey={xKey}
-          tick={{ fontSize: 11, fill: t.axis, fontWeight: 500 }}
+          tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }}
           tickLine={false}
           axisLine={{ stroke: t.grid, strokeWidth: 1 }}
-          angle={-45}
+          angle={compact ? -60 : -45}
           textAnchor="end"
-          height={60}
+          height={compact ? 50 : 60}
         />
         <YAxis
-          tick={{ fontSize: 11, fill: t.axis, fontWeight: 500 }}
+          tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }}
           tickLine={false}
           axisLine={false}
+          width={compact ? 40 : undefined}
           tickFormatter={(v) => formatValue(v)}
         />
         <Tooltip content={<AnimatedTooltip />} cursor={{ fill: t.cursor }} />
@@ -774,13 +785,14 @@ const AnimatedHorizontalBarChart: React.FC<{
   showGrid?: boolean;
   onBarClick?: (data: any, index: number) => void;
   chartTheme?: ChartTheme;
-}> = ({ data, categoryKey, valueKey, colors, height, showGrid, onBarClick, chartTheme }) => {
+  compact?: boolean;
+}> = ({ data, categoryKey, valueKey, colors, height, showGrid, onBarClick, chartTheme, compact }) => {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const t = chartTheme || CHART_THEME.light;
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart layout="vertical" data={data} margin={{ top: 10, right: 30, left: 80, bottom: 10 }}>
+      <BarChart layout="vertical" data={data} margin={compact ? { top: 5, right: 10, left: 5, bottom: 5 } : { top: 10, right: 30, left: 80, bottom: 10 }}>
         <defs>
           {PASTEL_COLORS.map((g, i) => (
             <linearGradient key={i} id={`hBarGradient${i}`} x1="0" y1="0" x2="1" y2="0">
@@ -795,8 +807,8 @@ const AnimatedHorizontalBarChart: React.FC<{
         {showGrid && (
           <CartesianGrid strokeDasharray="3 3" stroke={t.grid} strokeOpacity={0.5} horizontal={false} />
         )}
-        <XAxis type="number" tick={{ fontSize: 11, fill: t.axis }} tickLine={false} axisLine={{ stroke: t.grid }} tickFormatter={(v) => formatValue(v)} />
-        <YAxis type="category" dataKey={categoryKey} width={70} tick={{ fontSize: 11, fill: t.axis }} tickLine={false} axisLine={{ stroke: t.grid }} />
+        <XAxis type="number" tick={{ fontSize: compact ? 9 : 11, fill: t.axis }} tickLine={false} axisLine={{ stroke: t.grid }} tickFormatter={(v) => formatValue(v)} />
+        <YAxis type="category" dataKey={categoryKey} width={compact ? 50 : 70} tick={{ fontSize: compact ? 9 : 11, fill: t.axis }} tickLine={false} axisLine={{ stroke: t.grid }} />
         <Tooltip content={<AnimatedTooltip />} cursor={{ fill: t.cursor }} />
         <Bar
           dataKey={valueKey}
@@ -839,11 +851,12 @@ const AnimatedAreaChart: React.FC<{
   showLegend?: boolean;
   stacked?: boolean;
   chartTheme?: ChartTheme;
-}> = ({ data, xKey, yKeys, colors, height, showGrid, showLegend, stacked, chartTheme }) => {
+  compact?: boolean;
+}> = ({ data, xKey, yKeys, colors, height, showGrid, showLegend, stacked, chartTheme, compact }) => {
   const t = chartTheme || CHART_THEME.light;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+      <AreaChart data={data} margin={compact ? { top: 10, right: 10, left: 5, bottom: 10 } : { top: 20, right: 30, left: 20, bottom: 20 }}>
         <defs>
           {PASTEL_COLORS.map((g, i) => (
             <linearGradient key={i} id={`areaGradient${i}`} x1="0" y1="0" x2="0" y2="1">
@@ -856,8 +869,8 @@ const AnimatedAreaChart: React.FC<{
         {showGrid && (
           <CartesianGrid strokeDasharray="3 3" stroke={t.grid} strokeOpacity={0.5} vertical={false} />
         )}
-        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={{ stroke: t.grid, strokeWidth: 1 }} />
-        <YAxis tick={{ fontSize: 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={false} tickFormatter={(v) => formatValue(v)} />
+        <XAxis dataKey={xKey} tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={{ stroke: t.grid, strokeWidth: 1 }} />
+        <YAxis tick={{ fontSize: compact ? 9 : 11, fill: t.axis, fontWeight: 500 }} tickLine={false} axisLine={false} width={compact ? 40 : undefined} tickFormatter={(v) => formatValue(v)} />
         <Tooltip content={<AnimatedTooltip />} cursor={{ stroke: t.grid, strokeWidth: 1, strokeDasharray: '4 4' }} />
         {showLegend && <Legend />}
         {yKeys.map((key, index) => (
@@ -889,7 +902,8 @@ const AnimatedPieChart: React.FC<{
   colors: string[];
   height: number;
   onSliceClick?: (data: any, index: number) => void;
-}> = ({ data, nameKey, valueKey, colors, height, onSliceClick }) => {
+  compact?: boolean;
+}> = ({ data, nameKey, valueKey, colors, height, onSliceClick, compact }) => {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   
   return (
@@ -938,15 +952,27 @@ const AnimatedPieChart: React.FC<{
           ))}
         </Pie>
         <Tooltip content={<AnimatedTooltip />} />
-        <Legend 
-          verticalAlign="middle" 
-          align="right"
-          layout="vertical"
-          wrapperStyle={{ paddingLeft: 20 }}
-          formatter={(value) => (
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{value}</span>
-          )}
-        />
+        {compact ? (
+          <Legend
+            verticalAlign="bottom"
+            align="center"
+            layout="horizontal"
+            wrapperStyle={{ fontSize: 10, paddingTop: 4 }}
+            formatter={(value) => (
+              <span className="text-[10px] font-medium text-slate-600 dark:text-slate-400">{value}</span>
+            )}
+          />
+        ) : (
+          <Legend 
+            verticalAlign="middle" 
+            align="right"
+            layout="vertical"
+            wrapperStyle={{ paddingLeft: 20 }}
+            formatter={(value) => (
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{value}</span>
+            )}
+          />
+        )}
       </PieChart>
     </ResponsiveContainer>
   );
@@ -963,6 +989,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
   onDrilldown,
   showInsights = true,
   loading = false,
+  compact = false,
 }) => {
   const { theme } = useTheme();
   const chartTheme = CHART_THEME[theme === 'dark' ? 'dark' : 'light'];
@@ -1016,6 +1043,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             showGrid={config.showGrid}
             showLegend={config.showLegend}
             chartTheme={chartTheme}
+            compact={compact}
             onBarClick={(data) => config.drilldownEnabled && onDrilldown?.(data, 'loan_officer')}
           />
         );
@@ -1033,6 +1061,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             showLegend={config.showLegend}
             stacked={config.stacked}
             chartTheme={chartTheme}
+            compact={compact}
           />
         );
         
@@ -1044,6 +1073,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             valueKey={yKey}
             colors={colors}
             height={height}
+            compact={compact}
             onSliceClick={(data) => config.drilldownEnabled && onDrilldown?.(data, 'loan_officer')}
           />
         );
@@ -1072,6 +1102,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             valueKey={yKey}
             colors={colors}
             height={height}
+            compact={compact}
             onSliceClick={(data) => config.drilldownEnabled && onDrilldown?.(data, 'loan_officer')}
           />
         );
@@ -1086,6 +1117,7 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             height={height}
             showGrid={config.showGrid}
             chartTheme={chartTheme}
+            compact={compact}
             onBarClick={(data) => config.drilldownEnabled && onDrilldown?.(data, 'loan_officer')}
           />
         );
@@ -1101,10 +1133,11 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
             showGrid={config.showGrid}
             showLegend={config.showLegend}
             chartTheme={chartTheme}
+            compact={compact}
           />
         );
     }
-  }, [config, theme, xKey, yKey, yKeys, colors, height, drilldownStack, handleDrilldown, handleBack, onDrilldown]);
+  }, [config, theme, xKey, yKey, yKeys, colors, height, drilldownStack, handleDrilldown, handleBack, onDrilldown, compact]);
   
   return (
     <motion.div
@@ -1122,14 +1155,28 @@ export const EnhancedVisualization: React.FC<EnhancedVisualizationProps> = ({
           )}
         </div>
 
-        {/* Chart + Insights: chart first (full width or 2/3), insights in a clear right column */}
-        <div className={showInsights && config.insights?.length ? "flex flex-col lg:flex-row lg:gap-6" : ""}>
-          <div className={showInsights && config.insights?.length ? "flex-1 min-w-0 min-h-[220px] sm:min-h-[260px] p-4 sm:p-5 lg:p-5" : "p-4 sm:p-5"}>
+        {/* Chart + Insights: chart first (full width or 2/3), insights in a clear right column.
+            In compact mode, always stack vertically so the chart gets full container width. */}
+        <div className={showInsights && config.insights?.length
+          ? compact
+            ? "flex flex-col"
+            : "flex flex-col lg:flex-row lg:gap-6"
+          : ""
+        }>
+          <div className={showInsights && config.insights?.length
+            ? compact
+              ? "flex-1 min-w-0 min-h-[180px] p-3"
+              : "flex-1 min-w-0 min-h-[220px] sm:min-h-[260px] p-4 sm:p-5 lg:p-5"
+            : compact ? "p-3" : "p-4 sm:p-5"
+          }>
             {renderChart}
           </div>
 
           {showInsights && config.insights && config.insights.length > 0 && (
-            <div className="w-full lg:w-[280px] lg:flex-shrink-0 lg:border-l border-slate-200/70 dark:border-slate-700/70 pt-4 pb-4 px-4 sm:px-5 lg:pt-5 lg:pb-5 lg:pl-0 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-200/70 lg:border-t-0">
+            <div className={compact
+              ? "w-full pt-3 pb-3 px-3 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-200/70 dark:border-slate-700/70"
+              : "w-full lg:w-[280px] lg:flex-shrink-0 lg:border-l border-slate-200/70 dark:border-slate-700/70 pt-4 pb-4 px-4 sm:px-5 lg:pt-5 lg:pb-5 lg:pl-0 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-200/70 lg:border-t-0"
+            }>
               <CohiInsightsPanel
                 insights={config.insights}
                 onInsightClick={config.drilldownEnabled && onDrilldown

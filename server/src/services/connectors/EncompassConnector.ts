@@ -19,10 +19,10 @@ import {
 import { EncompassLoanExtractor, LoanRecord, ExtractOptions } from '../encompassLoanExtractor.js';
 import { EncompassApiService } from '../encompassApiService.js';
 import {
-  getFieldMapping,
   getAllCoheusAliases,
   coheusAliasToColumnName
 } from '../encompassFieldMapper.js';
+import { getDefaultEncompassFieldId } from '../../config/defaultEncompassFieldMappings.js';
 
 /**
  * Default field mappings for Encompass
@@ -77,7 +77,7 @@ const DEFAULT_ENCOMPASS_MAPPINGS: FieldMapping[] = [
   { source_field: 'Fields.VASUMM.X23', target_column: 'fico_score', alias: 'FICO Score', data_type: 'number' },
   
   // Tracking
-  { source_field: 'Loan.LoanLastModified', target_column: 'last_modified_date', alias: 'Last Modified Date', data_type: 'date' },
+  { source_field: 'Loan.LastModified', target_column: 'last_modified_date', alias: 'Last Modified Date', data_type: 'date' },
 ];
 
 export class EncompassConnector extends BaseConnector {
@@ -289,11 +289,11 @@ export class EncompassConnector extends BaseConnector {
     const aliases = getAllCoheusAliases();
     
     return aliases.map(alias => {
-      const mapping = getFieldMapping(alias);
+      const fieldId = getDefaultEncompassFieldId(alias);
       return {
-        id: mapping?.fieldId || alias,
+        id: fieldId || alias,
         name: alias,
-        description: `Encompass field: ${mapping?.fieldId || 'Unknown'}`,
+        description: `Encompass field: ${fieldId || 'Unknown'}`,
         data_type: 'string', // Would need RDB lookup for actual types
         category: this.getFieldCategory(alias),
         is_custom: false,

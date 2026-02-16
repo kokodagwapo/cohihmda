@@ -57,7 +57,6 @@ import {
   Activity,
   Gauge,
   LayoutDashboard,
-  ListChecks,
   Target,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -198,18 +197,6 @@ interface DataQualityMetrics {
 /**
  * Validation rule
  */
-interface ValidationRule {
-  id: string;
-  name: string;
-  description: string;
-  field_name: string;
-  rule_type: "required" | "format" | "range" | "date" | "logic" | "custom";
-  configuration: Record<string, any>;
-  severity: Severity;
-  is_active: boolean;
-  created_at: string;
-}
-
 // Issue type labels
 const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
   missing_required: "Missing Required Field",
@@ -442,7 +429,6 @@ export function DataQualitySection() {
   // State
   const [metrics, setMetrics] = useState<DataQualityMetrics | null>(null);
   const [issues, setIssues] = useState<DataQualityIssue[]>([]);
-  const [rules, setRules] = useState<ValidationRule[]>([]);
   const [crucialFields, setCrucialFields] = useState<CrucialFieldStatus[]>([]);
   const [rangeAnalysis, setRangeAnalysis] = useState<RangeAnalysis | null>(
     null
@@ -477,7 +463,6 @@ export function DataQualitySection() {
   const [selectedIssue, setSelectedIssue] = useState<DataQualityIssue | null>(
     null
   );
-  const [rulesDialogOpen, setRulesDialogOpen] = useState(false);
 
   // Warning loans dialog state
   const [warningLoansOpen, setWarningLoansOpen] = useState(false);
@@ -505,7 +490,6 @@ export function DataQualitySection() {
         loadMetrics(),
         loadWarningsGrouped(),
         loadStatusInconsistencies(),
-        loadRules(),
         loadCrucialFields(),
         loadRangeAnalysis(),
       ]);
@@ -630,55 +614,13 @@ export function DataQualitySection() {
         return;
       }
     } catch (error) {
-      console.warn("Failed to load metrics from API, using mock data", error);
+      console.error("Failed to load data quality metrics", error);
+      toast({
+        title: "Error",
+        description: "Failed to load data quality metrics. Please try again.",
+        variant: "destructive",
+      });
     }
-
-    // Fallback to mock metrics for development
-    const mockMetrics: DataQualityMetrics = {
-      total_loans: 4521,
-      loans_with_issues: 342,
-      total_issues: 567,
-      critical_issues: 45,
-      warning_issues: 234,
-      info_issues: 288,
-      quality_score: 87,
-      field_coverage: {
-        loan_number: 100,
-        loan_amount: 99.8,
-        interest_rate: 99.5,
-        property_state: 98.2,
-        loan_officer: 95.6,
-        closing_date: 78.4,
-        funding_date: 72.1,
-      },
-      issues_by_type: {
-        missing_required: 156,
-        invalid_format: 89,
-        out_of_range: 67,
-        future_date: 45,
-        past_date: 34,
-        logical_error: 78,
-        duplicate: 12,
-        anomaly: 86,
-      },
-      issues_by_field: {
-        closing_date: 134,
-        funding_date: 98,
-        interest_rate: 67,
-        loan_officer: 45,
-        ltv_ratio: 89,
-        fico_score: 56,
-      },
-      trend: [
-        { date: "2024-01-01", score: 82, issues: 678 },
-        { date: "2024-01-08", score: 83, issues: 645 },
-        { date: "2024-01-15", score: 85, issues: 612 },
-        { date: "2024-01-22", score: 86, issues: 589 },
-        { date: "2024-01-29", score: 87, issues: 567 },
-      ],
-    };
-
-    setMetrics(mockMetrics);
   };
 
   /**
@@ -861,81 +803,6 @@ export function DataQualitySection() {
     }
   };
 
-  const loadRules = async () => {
-    // Mock rules for development
-    const mockRules: ValidationRule[] = [
-      {
-        id: "r1",
-        name: "Required Loan Number",
-        description: "Loan number must be present on all loans",
-        field_name: "loan_number",
-        rule_type: "required",
-        configuration: {},
-        severity: "critical",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "r2",
-        name: "Interest Rate Range",
-        description: "Interest rate must be between 0% and 15%",
-        field_name: "interest_rate",
-        rule_type: "range",
-        configuration: { min: 0, max: 15 },
-        severity: "critical",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "r3",
-        name: "Valid LTV Ratio",
-        description: "LTV ratio must be between 0% and 100%",
-        field_name: "ltv_ratio",
-        rule_type: "range",
-        configuration: { min: 0, max: 100 },
-        severity: "warning",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "r4",
-        name: "Valid FICO Score",
-        description: "FICO score must be between 300 and 850",
-        field_name: "fico_score",
-        rule_type: "range",
-        configuration: { min: 300, max: 850 },
-        severity: "info",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "r5",
-        name: "ZIP Code Format",
-        description: "Property ZIP must be valid 5 or 9 digit format",
-        field_name: "property_zip",
-        rule_type: "format",
-        configuration: { pattern: "^\\d{5}(-\\d{4})?$" },
-        severity: "warning",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: "r6",
-        name: "Future Closing Date Check",
-        description:
-          "Alert if closing date is more than 6 months in the future",
-        field_name: "closing_date",
-        rule_type: "date",
-        configuration: { max_future_months: 6 },
-        severity: "warning",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-    ];
-
-    setRules(mockRules);
-  };
-
   const loadCrucialFields = async () => {
     try {
       // Try to fetch from API
@@ -951,38 +818,8 @@ export function DataQualitySection() {
         return;
       }
     } catch (error) {
-      console.warn(
-        "Failed to load crucial fields from API, using mock data",
-        error
-      );
+      console.error("Failed to load crucial fields status", error);
     }
-
-    // Fallback to mock crucial fields status for development
-    const mockCrucialFields: CrucialFieldStatus[] = CRUCIAL_FIELDS.map(
-      (field) => {
-        // Generate mock population rates
-        const populationRate = Math.random() * 100;
-        const totalCount = 4521;
-        const populatedCount = Math.round(totalCount * (populationRate / 100));
-
-        return {
-          name: field.name,
-          column: field.column,
-          priority: field.priority,
-          populationRate: Math.round(populationRate * 10) / 10,
-          populatedCount,
-          totalCount,
-          status:
-            populationRate >= 80
-              ? "good"
-              : populationRate >= 50
-              ? "warning"
-              : "critical",
-        };
-      }
-    );
-
-    setCrucialFields(mockCrucialFields);
   };
 
   const loadRangeAnalysis = async () => {
@@ -998,65 +835,8 @@ export function DataQualitySection() {
         return;
       }
     } catch (error) {
-      console.warn(
-        "Failed to load range analysis from API, using mock data",
-        error
-      );
+      console.error("Failed to load range analysis", error);
     }
-
-    // Fallback to mock range analysis for development
-    const mockRangeAnalysis: RangeAnalysis = {
-      fico: {
-        inRange: 4234,
-        outOfRange: 287,
-        distribution: [
-          { range: "300-579", count: 45 },
-          { range: "580-669", count: 312 },
-          { range: "670-739", count: 1456 },
-          { range: "740-799", count: 1823 },
-          { range: "800-850", count: 598 },
-          { range: "Out of Range", count: 287 },
-        ],
-      },
-      ltv: {
-        inRange: 4389,
-        outOfRange: 132,
-        distribution: [
-          { range: "0-60%", count: 876 },
-          { range: "61-70%", count: 1234 },
-          { range: "71-80%", count: 1567 },
-          { range: "81-90%", count: 589 },
-          { range: "91-100%", count: 123 },
-          { range: "Over 100%", count: 132 },
-        ],
-      },
-      dti: {
-        inRange: 4298,
-        outOfRange: 223,
-        distribution: [
-          { range: "0-20%", count: 456 },
-          { range: "21-35%", count: 1678 },
-          { range: "36-43%", count: 1456 },
-          { range: "44-50%", count: 567 },
-          { range: "51-100%", count: 141 },
-          { range: "Over 100%", count: 223 },
-        ],
-      },
-      interestRate: {
-        inRange: 4456,
-        outOfRange: 65,
-        distribution: [
-          { range: "0-3%", count: 234 },
-          { range: "3-5%", count: 1567 },
-          { range: "5-7%", count: 1876 },
-          { range: "7-10%", count: 654 },
-          { range: "10-15%", count: 125 },
-          { range: "Over 15%", count: 65 },
-        ],
-      },
-    };
-
-    setRangeAnalysis(mockRangeAnalysis);
   };
 
   const handleRefresh = async () => {
@@ -1073,10 +853,55 @@ export function DataQualitySection() {
   };
 
   const handleExportIssues = () => {
-    // TODO: Implement export functionality
+    if (filteredIssues.length === 0) {
+      toast({
+        title: "No Data",
+        description: "No issues to export",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const headers = [
+      "Loan Number",
+      "Field",
+      "Severity",
+      "Type",
+      "Description",
+      "Expected",
+      "Actual",
+      "Status",
+      "Created",
+    ];
+    const csvRows = [headers.join(",")];
+
+    for (const issue of filteredIssues) {
+      const row = [
+        issue.loan_number || "",
+        issue.field_alias,
+        issue.severity,
+        issue.issue_type,
+        `"${(issue.description || "").replace(/"/g, '""')}"`,
+        `"${(issue.expected_value || "").replace(/"/g, '""')}"`,
+        `"${(issue.actual_value || "").replace(/"/g, '""')}"`,
+        issue.status || "open",
+        issue.created_at || "",
+      ];
+      csvRows.push(row.join(","));
+    }
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `data-quality-issues-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
     toast({
-      title: "Export Started",
-      description: "Preparing data quality report for download",
+      title: "Export Complete",
+      description: `Exported ${filteredIssues.length} issues to CSV`,
     });
   };
 
@@ -1086,13 +911,17 @@ export function DataQualitySection() {
   };
 
   const handleResolveIssue = async (issueId: string) => {
-    // TODO: Implement resolve functionality
+    // Mark issue as acknowledged locally (actual resolution requires data fixes)
+    setIssues((prev) =>
+      prev.map((issue) =>
+        issue.id === issueId ? { ...issue, status: "acknowledged" as any } : issue,
+      ),
+    );
     toast({
-      title: "Issue Resolved",
-      description: "The issue has been marked as resolved",
+      title: "Issue Acknowledged",
+      description: "The issue has been marked as acknowledged",
     });
     setIssueDetailsOpen(false);
-    await loadIssues();
   };
 
   // Filter issues
@@ -1286,13 +1115,6 @@ export function DataQualitySection() {
           >
             <Gauge className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Ranges</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="rules"
-            className="flex items-center gap-1.5 text-xs sm:text-sm py-2"
-          >
-            <ListChecks className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Rules</span>
           </TabsTrigger>
         </TabsList>
 
@@ -2540,61 +2362,6 @@ export function DataQualitySection() {
           </Alert>
         </TabsContent>
 
-        {/* Validation Rules Tab */}
-        <TabsContent value="rules" className="space-y-4 mt-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">Validation Rules</CardTitle>
-                <CardDescription>
-                  Rules used to detect data quality issues
-                </CardDescription>
-              </div>
-              <Button variant="outline" size="sm">
-                <Sparkles className="h-4 w-4 mr-2" />
-                AI Suggestions
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {rules.map((rule) => (
-                  <div
-                    key={rule.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-slate-200 dark:border-slate-700"
-                  >
-                    <div className="flex items-center gap-4">
-                      <Badge className={SEVERITY_COLORS[rule.severity]}>
-                        {rule.severity}
-                      </Badge>
-                      <div>
-                        <p className="font-medium text-slate-900 dark:text-white">
-                          {rule.name}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {rule.description}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">{rule.field_name}</Badge>
-                      <Badge variant={rule.is_active ? "default" : "secondary"}>
-                        {rule.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Alert>
-            <Sparkles className="h-4 w-4" />
-            <AlertDescription>
-              AI-powered anomaly detection is analyzing your data to identify
-              patterns and suggest additional validation rules.
-            </AlertDescription>
-          </Alert>
-        </TabsContent>
       </Tabs>
 
       {/* Issue Details Dialog */}

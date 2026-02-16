@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DataChatPanel } from '@/components/dashboard/DataChatPanel';
+import { CohiChatPanel } from '@/components/dashboard/CohiChatPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTenantStore } from '@/stores/tenantStore';
 
@@ -26,7 +26,7 @@ export function GlobalCohiChat() {
   const effectiveTenantId = selectedTenantId || user?.tenant_id || undefined;
 
   return (
-    <DataChatPanel
+    <CohiChatPanel
       isOpen={isOpen}
       onOpen={() => setIsOpen(true)}
       onClose={() => setIsOpen(false)}

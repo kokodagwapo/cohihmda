@@ -4,13 +4,18 @@
 # ============================================================================
 # Deploys frontend build artifacts to S3 and invalidates CloudFront cache
 #
+# Authentication: Uses AWS OIDC (credentials set up by pipeline before this script)
+#
 # Required Environment Variables (set in Bitbucket Deployment Variables):
-#   - AWS_ACCESS_KEY_ID        - AWS credentials (repository variable)
-#   - AWS_SECRET_ACCESS_KEY    - AWS credentials (repository variable)
-#   - AWS_DEFAULT_REGION       - AWS region (repository variable, e.g., us-east-2)
+#   - AWS_ROLE_ARN             - IAM role ARN for OIDC (repository variable)
+#   - AWS_REGION               - AWS region (repository variable, e.g., us-east-2)
 #   - S3_BUCKET                - S3 bucket name for frontend assets
 #   - CLOUDFRONT_DISTRIBUTION_ID - CloudFront distribution ID for cache invalidation
 #   - VITE_API_URL             - (optional) Backend API URL, used during build
+#
+# OIDC Environment (set by pipeline setup-oidc script):
+#   - AWS_WEB_IDENTITY_TOKEN_FILE - Path to OIDC token
+#   - AWS_ROLE_SESSION_NAME    - Session name for assume role
 # ============================================================================
 
 set -euo pipefail
@@ -26,12 +31,15 @@ echo ""
 validate_env_vars() {
     local missing_vars=()
     
-    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-        missing_vars+=("AWS_ACCESS_KEY_ID")
+    # Check for OIDC authentication
+    if [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        echo "ERROR: No AWS credentials found."
+        echo "Ensure OIDC is configured (AWS_WEB_IDENTITY_TOKEN_FILE) or static credentials (AWS_ACCESS_KEY_ID)."
+        exit 1
     fi
     
-    if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-        missing_vars+=("AWS_SECRET_ACCESS_KEY")
+    if [ -z "${AWS_ROLE_ARN:-}" ] && [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        missing_vars+=("AWS_ROLE_ARN")
     fi
     
     if [ -z "${S3_BUCKET:-}" ]; then
@@ -49,6 +57,11 @@ validate_env_vars() {
     fi
     
     echo "Environment variables validated."
+    if [ -n "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ]; then
+        echo "Authentication: OIDC"
+    else
+        echo "Authentication: Static credentials"
+    fi
 }
 
 # ============================================================================
@@ -114,26 +127,26 @@ deploy_to_s3() {
     echo "Deploying frontend to S3..."
     echo "========================================="
     echo "Bucket: $S3_BUCKET"
-    echo "Source: docs/"
+    echo "Source: dist/"
     echo ""
     
-    # Verify docs directory exists
-    if [ ! -d "docs" ]; then
-        echo "ERROR: docs/ directory not found."
+    # Verify dist directory exists
+    if [ ! -d "dist" ]; then
+        echo "ERROR: dist/ directory not found."
         echo "Frontend build may have failed."
         exit 1
     fi
     
     # Verify index.html exists
-    if [ ! -f "docs/index.html" ]; then
-        echo "ERROR: docs/index.html not found."
+    if [ ! -f "dist/index.html" ]; then
+        echo "ERROR: dist/index.html not found."
         echo "Frontend build may have failed."
         exit 1
     fi
     
     echo "Syncing static assets (with long cache)..."
     # Sync static assets with long cache headers (1 year)
-    aws s3 sync docs/ "s3://$S3_BUCKET" \
+    aws s3 sync dist/ "s3://$S3_BUCKET" \
         --delete \
         --exclude ".DS_Store" \
         --exclude "*.map" \
@@ -143,14 +156,14 @@ deploy_to_s3() {
     
     echo "Uploading index.html (no cache)..."
     # Upload index.html with no-cache headers
-    aws s3 cp docs/index.html "s3://$S3_BUCKET/index.html" \
+    aws s3 cp dist/index.html "s3://$S3_BUCKET/index.html" \
         --content-type "text/html" \
         --cache-control "no-cache, no-store, must-revalidate"
     
     # Upload 404.html if it exists
-    if [ -f "docs/404.html" ]; then
+    if [ -f "dist/404.html" ]; then
         echo "Uploading 404.html (no cache)..."
-        aws s3 cp docs/404.html "s3://$S3_BUCKET/404.html" \
+        aws s3 cp dist/404.html "s3://$S3_BUCKET/404.html" \
             --content-type "text/html" \
             --cache-control "no-cache, no-store, must-revalidate"
     fi

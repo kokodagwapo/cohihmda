@@ -7,7 +7,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
-import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, CheckCircle2, XCircle, Clock, Network, BarChart3, Folder, Trash2, AlertTriangle, StopCircle } from 'lucide-react';
+import { Loader2, Link2, RefreshCw, Play, Plus, Pause, Edit, CheckCircle2, XCircle, Clock, Network, BarChart3, Folder, Trash2, AlertTriangle, StopCircle, Save } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'react-router-dom';
 import { CreateLOSConnectionDialog } from './CreateLOSConnectionDialog';
@@ -82,6 +84,42 @@ export const LOSSettingsSection = ({
   const [folderSelectionConnectionId, setFolderSelectionConnectionId] = useState<string | null>(null);
   const [clearingDatabase, setClearingDatabase] = useState(false);
   
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<any>(null);
+  const [editFormData, setEditFormData] = useState({ name: '', sync_enabled: true });
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditDialog = (connection: any) => {
+    setEditingConnection(connection);
+    setEditFormData({
+      name: connection.name || '',
+      sync_enabled: connection.sync_enabled ?? connection.is_active ?? true,
+    });
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingConnection || !onUpdate) return;
+    setEditSaving(true);
+    try {
+      await onUpdate(editingConnection.id, editFormData, selectedTenantId || undefined);
+      toast({ title: 'Success', description: 'Connection updated successfully' });
+      setEditDialogOpen(false);
+      if (onLoadLosData) {
+        await onLoadLosData(selectedTenantId || undefined);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update connection',
+        variant: 'destructive',
+      });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   // Sync progress tracking
   const [syncProgress, setSyncProgress] = useState<Map<string, SyncProgress>>(new Map());
   const syncPollIntervalRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -768,13 +806,7 @@ export const LOSSettingsSection = ({
                               variant="ghost"
                               size="sm"
                               className="h-8 w-8 p-0"
-                              onClick={() => {
-                                // TODO: Open edit dialog
-                                toast({
-                                  title: 'Edit Connection',
-                                  description: 'Edit functionality coming soon. For now, delete and recreate the connection.',
-                                });
-                              }}
+                              onClick={() => openEditDialog(connection)}
                               title="Edit"
                             >
                               <Edit className="h-4 w-4" />
@@ -821,6 +853,67 @@ export const LOSSettingsSection = ({
         }}
         tenantId={selectedTenantId || undefined}
       />
+
+      {/* Edit Connection Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Connection</DialogTitle>
+            <DialogDescription>
+              Update connection settings for {editingConnection?.name || 'this connection'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Connection Name</Label>
+              <Input
+                id="edit-name"
+                value={editFormData.name}
+                onChange={(e) =>
+                  setEditFormData((prev) => ({ ...prev, name: e.target.value }))
+                }
+                placeholder="Connection name"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Sync Enabled</Label>
+                <p className="text-xs text-slate-500">
+                  Enable automatic data synchronization
+                </p>
+              </div>
+              <Checkbox
+                checked={editFormData.sync_enabled}
+                onCheckedChange={(checked) =>
+                  setEditFormData((prev) => ({
+                    ...prev,
+                    sync_enabled: checked === true,
+                  }))
+                }
+              />
+            </div>
+            {editingConnection && (
+              <div className="text-xs text-slate-500 space-y-1 pt-2 border-t">
+                <p>Type: {editingConnection.los_type || 'N/A'}</p>
+                <p>Created: {editingConnection.created_at ? new Date(editingConnection.created_at).toLocaleDateString() : 'N/A'}</p>
+                <p className="text-slate-400 italic">
+                  API credentials cannot be changed here. Delete and recreate the connection to change credentials.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={editSaving || !editFormData.name.trim()}>
+              {editSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              <Save className="h-4 w-4 mr-2" />
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Folder Selection Dialog */}
       {folderSelectionConnectionId && selectedTenantId && (

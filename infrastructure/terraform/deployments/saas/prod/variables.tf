@@ -76,7 +76,7 @@ variable "ecs_cpu" {
 variable "ecs_memory" {
   description = "ECS task memory in MB"
   type        = number
-  default     = 1024
+  default     = 4096
 }
 
 variable "ecs_desired_count" {

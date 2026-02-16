@@ -66,7 +66,7 @@ import { useAdminTenant } from '@/contexts/AdminTenantContext';
 /**
  * SSO Provider types supported
  */
-type SSOProvider = 'saml' | 'oidc' | 'azure_ad' | 'okta' | 'google' | 'coheus_bridge';
+type SSOProvider = 'saml' | 'oidc' | 'azure_ad' | 'cyberark' | 'okta' | 'google' | 'coheus_bridge';
 
 /**
  * SSO Configuration interface
@@ -137,31 +137,44 @@ interface SSOLoginEntry {
 }
 
 // Provider display info
-const PROVIDERS = {
-  saml: { name: 'SAML 2.0', icon: Shield, color: 'text-blue-500' },
-  oidc: { name: 'OpenID Connect', icon: Key, color: 'text-purple-500' },
-  azure_ad: { name: 'Azure AD', icon: Shield, color: 'text-sky-500' },
+const PROVIDERS: Record<SSOProvider, { name: string; icon: any; color: string; description?: string }> = {
+  azure_ad: { name: 'Microsoft Entra ID', icon: Shield, color: 'text-sky-500', description: 'Recommended for organizations using Microsoft 365 / Entra ID (formerly Azure AD)' },
+  cyberark: { name: 'CyberArk Identity', icon: Shield, color: 'text-teal-500', description: 'For organizations using CyberArk Identity (Idaptive) as their IdP' },
+  saml: { name: 'SAML 2.0 (Generic)', icon: Shield, color: 'text-blue-500', description: 'Standard SAML 2.0 — use if your IdP is not listed above' },
+  oidc: { name: 'OpenID Connect', icon: Key, color: 'text-purple-500', description: 'Standard OIDC — for IdPs that support OpenID Connect' },
   okta: { name: 'Okta', icon: Shield, color: 'text-indigo-500' },
   google: { name: 'Google Workspace', icon: Shield, color: 'text-red-500' },
-  coheus_bridge: { name: 'Coheus Bridge', icon: Link2, color: 'text-orange-500', description: 'SSO via existing Coheus Qlik Sense session' }
+  coheus_bridge: { name: 'Coheus Bridge', icon: Link2, color: 'text-orange-500', description: 'SSO via existing Coheus Qlik Sense session (legacy migration only)' }
 };
 
-// Default attribute names for common IdPs
+// Default SAML/OIDC attribute claim URIs for common IdPs
+// These map the IdP's outgoing claim names to Cognito user pool attributes
 const DEFAULT_ATTRIBUTE_NAMES: Record<SSOProvider, AttributeMapping> = {
+  azure_ad: {
+    // Microsoft Entra ID uses standard WS-Fed / SAML 2.0 claim URIs
+    email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
+    first_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
+    last_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
+    full_name: 'http://schemas.microsoft.com/identity/claims/displayname',
+  },
+  cyberark: {
+    // CyberArk Identity sends short attribute names by default (configurable per-app)
+    email: 'LoginName',
+    first_name: 'FirstName',
+    last_name: 'LastName',
+    full_name: 'DisplayName',
+  },
   saml: {
+    // Generic SAML 2.0 — uses standard WS-Identity claim URIs
     email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
     first_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
     last_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
   },
   oidc: {
+    // Standard OIDC claim names
     email: 'email',
     first_name: 'given_name',
     last_name: 'family_name',
-  },
-  azure_ad: {
-    email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress',
-    first_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname',
-    last_name: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname',
   },
   okta: {
     email: 'email',
@@ -346,7 +359,7 @@ export function SSOConfigSection() {
       };
       
       // Add SAML config
-      if (provider === 'saml' || provider === 'azure_ad' || provider === 'okta') {
+      if (provider === 'saml' || provider === 'azure_ad' || provider === 'cyberark' || provider === 'okta') {
         if (idpMetadataUrl) {
           payload.metadata_url = idpMetadataUrl;
         } else if (idpMetadataXml) {
@@ -432,20 +445,23 @@ export function SSOConfigSection() {
   const handleToggleSSO = async (enabled: boolean) => {
     setSaving(true);
     try {
-      // TODO: Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 300));
+      const mode = enabled ? 'hybrid' : 'password_only';
+      await api.request(`/api/admin/sso/auth-mode${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'PUT',
+        body: JSON.stringify({ mode, allow_email_password: true }),
+      });
       
       setIsEnabled(enabled);
       toast({
         title: enabled ? 'SSO Enabled' : 'SSO Disabled',
         description: enabled 
-          ? 'Users can now sign in using SSO' 
+          ? 'Users can now sign in using SSO (hybrid mode — password login also available)' 
           : 'SSO has been disabled. Users must use password authentication.'
       });
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: 'Failed to update SSO status',
+        description: error.message || 'Failed to update SSO status',
         variant: 'destructive'
       });
     } finally {
@@ -463,22 +479,51 @@ export function SSOConfigSection() {
       return;
     }
 
+    // Validate email domains before saving
+    if (emailDomains.length === 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please add at least one email domain before uploading metadata',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setSaving(true);
     try {
-      // TODO: Parse metadata and extract fields
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Send metadata to backend — it will parse, create Cognito IdP, and save config
+      const payload: any = {
+        provider_type: provider,
+        email_domains: emailDomains,
+        is_enabled: isEnabled,
+        attribute_mapping: attributeMapping,
+      };
+
+      if (idpMetadataUrl) {
+        payload.metadata_url = idpMetadataUrl;
+      } else if (idpMetadataXml) {
+        payload.metadata_xml = idpMetadataXml;
+      }
+
+      const response = await api.request(`/api/admin/sso/config${selectedTenantId ? `?tenant_id=${selectedTenantId}` : ''}`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
       
       toast({
         title: 'Success',
-        description: 'IdP metadata uploaded successfully'
+        description: 'IdP metadata uploaded and SSO configured successfully'
       });
       
       setMetadataDialogOpen(false);
+      // Clear metadata inputs after successful upload
+      setIdpMetadataUrl('');
+      setIdpMetadataXml('');
       loadSSOConfig();
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to upload metadata',
+        description: error.message || 'Failed to upload metadata. Ensure the URL is HTTPS and publicly accessible.',
         variant: 'destructive'
       });
     } finally {
@@ -487,18 +532,16 @@ export function SSOConfigSection() {
   };
 
   const handleDownloadSPMetadata = () => {
-    // Generate and download SP metadata XML
+    // Generate and download SP metadata XML using Cognito's SAML endpoint values
     const metadata = `<?xml version="1.0"?>
 <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="${config?.sp_entity_id}">
-  <SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+  <SPSSODescriptor AuthnRequestsSigned="false" WantAssertionsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</NameIDFormat>
     <AssertionConsumerService 
       Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" 
       Location="${config?.sp_acs_url}" 
       index="0" 
       isDefault="true"/>
-    <SingleLogoutService 
-      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" 
-      Location="${config?.sp_slo_url}"/>
   </SPSSODescriptor>
 </EntityDescriptor>`;
 
@@ -716,7 +759,7 @@ export function SSOConfigSection() {
               )}
 
               {/* SAML Configuration */}
-              {(provider === 'saml' || provider === 'azure_ad' || provider === 'okta') && (
+              {(provider === 'saml' || provider === 'azure_ad' || provider === 'cyberark' || provider === 'okta') && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <Label>IdP Metadata</Label>
@@ -938,12 +981,19 @@ export function SSOConfigSection() {
             <CardHeader>
               <CardTitle className="text-lg">Service Provider Information</CardTitle>
               <CardDescription>
-                Use these values when configuring Cohi as a service provider in your IdP
+                Provide these values to the client's IT team when they configure Cohi in their Identity Provider (Entra, CyberArk, etc.)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Alert>
+                <Shield className="h-4 w-4" />
+                <AlertDescription>
+                  These values point to your Cognito User Pool. They are the same for all tenants — each tenant is differentiated by their own IdP configuration within the pool.
+                </AlertDescription>
+              </Alert>
+
               <div className="space-y-2">
-                <Label>Entity ID (Issuer)</Label>
+                <Label>Entity ID / Audience URI (Identifier)</Label>
                 <div className="flex items-center gap-2">
                   <Input value={config?.sp_entity_id || ''} readOnly className="font-mono text-sm" />
                   <Button
@@ -954,10 +1004,11 @@ export function SSOConfigSection() {
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-xs text-slate-500">In Entra: "Identifier (Entity ID)". In CyberArk: "SP Entity ID / Audience".</p>
               </div>
 
               <div className="space-y-2">
-                <Label>ACS URL (Assertion Consumer Service)</Label>
+                <Label>Reply URL / ACS URL (Assertion Consumer Service)</Label>
                 <div className="flex items-center gap-2">
                   <Input value={config?.sp_acs_url || ''} readOnly className="font-mono text-sm" />
                   <Button
@@ -968,27 +1019,30 @@ export function SSOConfigSection() {
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-xs text-slate-500">In Entra: "Reply URL (Assertion Consumer Service URL)". In CyberArk: "SP ACS URL".</p>
               </div>
 
               <div className="space-y-2">
-                <Label>SLO URL (Single Logout)</Label>
+                <Label>Name ID Format</Label>
                 <div className="flex items-center gap-2">
-                  <Input value={config?.sp_slo_url || ''} readOnly className="font-mono text-sm" />
+                  <Input value="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" readOnly className="font-mono text-sm" />
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => copyToClipboard(config?.sp_slo_url || '', 'SLO URL')}
+                    onClick={() => copyToClipboard('urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', 'Name ID Format')}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
+                <p className="text-xs text-slate-500">The IdP should send the user's email address as the Name ID.</p>
               </div>
 
-              <div className="pt-4 border-t">
+              <div className="pt-4 border-t flex items-center gap-3">
                 <Button variant="outline" onClick={handleDownloadSPMetadata}>
                   <Download className="h-4 w-4 mr-2" />
-                  Download SP Metadata
+                  Download SP Metadata XML
                 </Button>
+                <p className="text-sm text-slate-500">Or provide the values above manually to the client's IT team.</p>
               </div>
             </CardContent>
           </Card>

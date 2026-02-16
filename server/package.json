@@ -17,8 +17,12 @@
     "migrate:repair": "tsx scripts/repair-tenant-schemas.ts",
     "seed:super-admin": "tsx scripts/seed-super-admin.ts",
     "seed:local": "tsx scripts/seed-local-dev.ts",
+    "init:local": "tsx scripts/init-local-database.ts",
     "create-admin": "node ../scripts/create-admin-user.js",
-    "check-user": "tsx scripts/check-user-and-create-super-admin.js"
+    "check-user": "tsx scripts/check-user-and-create-super-admin.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.980.0",
@@ -45,6 +49,7 @@
     "papaparse": "^5.5.3",
     "pdf-parse": "^2.4.5",
     "pg": "^8.13.3",
+    "pptxgenjs": "^4.0.1",
     "rss-parser": "^3.13.0",
     "stripe": "^17.7.0",
     "uuid": "^13.0.0",
@@ -64,7 +69,8 @@
     "@types/pg": "^8.15.2",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "fast-xml-parser": "5.3.4"

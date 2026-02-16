@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Navigation } from '@/components/layout/Navigation';
-import { FinancialModelingSandboxView } from '@/components/dashboard/views/FinancialModelingSandboxView';
+import { FinancialModelingSandboxView } from '@/components/views/FinancialModelingSandboxView';
 import { useTenantStore } from '@/stores/tenantStore';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 
 const FinancialModelingSandbox = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -40,7 +40,7 @@ const FinancialModelingSandbox = () => {
           {/* Main content */}
           <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-6">
             <div className="max-w-[1800px] mx-auto">
-              <FinancialModelingSandboxView />
+              <FinancialModelingSandboxView selectedTenantId={selectedTenantId ?? undefined} />
             </div>
           </main>
         </div>

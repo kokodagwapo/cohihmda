@@ -1,0 +1,304 @@
+{
+  "clientInfo": {
+    "instanceId": "3011216150",
+    "sourceFile": "3011216150_full_xml (1).xml",
+    "migratedAt": "2026-02-04T16:12:37.563Z"
+  },
+  "fieldSwaps": [
+    {
+      "coheusAlias": "Funding Date",
+      "defaultFieldId": "Fields.MS.FUN",
+      "newFieldId": "Fields.1997"
+    },
+    {
+      "coheusAlias": "Referral Name",
+      "defaultFieldId": "Fields.1822",
+      "newFieldId": "Fields.CX.OUTSIDE.REFERRAL"
+    },
+    {
+      "coheusAlias": "Submitted To Processing Date",
+      "defaultFieldId": "Fields.Log.MS.Date.Send To Processing",
+      "newFieldId": "Fields.Log.MS.Date.Origination"
+    },
+    {
+      "coheusAlias": "Submitted To Underwriting Date",
+      "defaultFieldId": "Fields.Log.MS.Date.Submittal",
+      "newFieldId": "Fields.Log.MS.Date.Processing"
+    },
+    {
+      "coheusAlias": "UW Final Approval Date",
+      "defaultFieldId": "Fields.2301",
+      "newFieldId": "Fields.Log.MS.Date.Clear to Close"
+    },
+    {
+      "coheusAlias": "UW Touches",
+      "defaultFieldId": "Fields.CX.Count.UWSub",
+      "newFieldId": "Fields.CX.UW.TOUCH.COUNT"
+    },
+    {
+      "coheusAlias": "Completion",
+      "defaultFieldId": "Fields.Log.MS.Date.Completion",
+      "newFieldId": "Fields.Log.MS.ExpectedDate.Completion"
+    }
+  ],
+  "additionalFields": [
+    {
+      "fieldId": "Fields.5",
+      "alias": "P&amp;I Payment"
+    },
+    {
+      "fieldId": "Fields.LoanTeamMember.Name.Loan Manager",
+      "alias": "Loan Team Member Name - Loan Manager"
+    },
+    {
+      "fieldId": "Fields.NEWHUD.X794",
+      "alias": "Fees Line 801 Seller Paid Total"
+    },
+    {
+      "fieldId": "Fields.NEWHUD2.X29",
+      "alias": "Line 800 Total Seller Paid Amount"
+    },
+    {
+      "fieldId": "Fields.NEWHUD2.X28",
+      "alias": "Line 800 Total Borrower Paid Amount"
+    },
+    {
+      "fieldId": "Fields.334",
+      "alias": "Fees Interest Borr"
+    },
+    {
+      "fieldId": "Fields.2836",
+      "alias": "Purchase Adv Expected Int Pymt from Investor"
+    },
+    {
+      "fieldId": "Fields.2596",
+      "alias": "Purchase Advice Expctd Payout 1 Amt"
+    },
+    {
+      "fieldId": "Fields.2597",
+      "alias": "Purchase Advice Expctd Payout 2 Amt"
+    },
+    {
+      "fieldId": "Fields.2598",
+      "alias": "Purchase Advice Expctd Payout 3 Amt"
+    },
+    {
+      "fieldId": "Fields.2208",
+      "alias": "Purchase Advice Sell Amount"
+    },
+    {
+      "fieldId": "Fields.CX.WHL.FEE",
+      "alias": "Warehouse Line Fee"
+    },
+    {
+      "fieldId": "Fields.CX.WHL.INT",
+      "alias": "Warehouse line interest"
+    },
+    {
+      "fieldId": "Fields.CX.SNAPDOCS.NBO1.PHONE",
+      "alias": "NBO #1 ALTERNATE PHONE"
+    },
+    {
+      "fieldId": "Fields.CX.CD.LC",
+      "alias": "CD Lender Credit"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Started",
+      "alias": "Milestone Date - Started"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Sent to Processing",
+      "alias": "Milestone Date - Sent to Processing"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Processing",
+      "alias": "Milestone Date - Processing"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Submitted to UW",
+      "alias": "Milestone Date - Submitted to UW"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.UW Decisioned",
+      "alias": "Milestone Date - UW Decisioned"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Cond. Approval",
+      "alias": "Milestone Date - Cond. Approval"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Clear to Close",
+      "alias": "Milestone Date - Clear to Close"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Funded",
+      "alias": "Milestone Date - Funded"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Origination",
+      "alias": "Milestone Date - Origination"
+    },
+    {
+      "fieldId": "Fields.CX.PREAPP.REQ.DT",
+      "alias": "PreApproval Req. Dt"
+    },
+    {
+      "fieldId": "Fields.HMDA.X12",
+      "alias": "Preapproval Flag"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Resubmittal",
+      "alias": "Milestone Date - Resubmittal"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Approved By Lender",
+      "alias": "Milestone Date - Approved By Lender"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.TBD Decisioned",
+      "alias": "Milestone Date - TBD Decisioned"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Submit to Lender",
+      "alias": "Milestone Date - Submit to Lender"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Ready for Docs",
+      "alias": "Milestone Date - Ready for Docs"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Docs Out",
+      "alias": "Milestone Date - Docs Out"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Lender Docs Out",
+      "alias": "Milestone Date - Lender Docs Out"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Docs Received",
+      "alias": "Milestone Date - Docs Received"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Final Reconcilation",
+      "alias": "Milestone Date - Final Reconcilation"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Lender Funded",
+      "alias": "Milestone Date - Lender Funded"
+    },
+    {
+      "fieldId": "Fields.Log.MS.ExpectedDate.Completion",
+      "alias": "Milestone Expected Completion Date - Completion"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Shipped",
+      "alias": "Milestone Date - Shipped"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Sent to Processing",
+      "alias": "Sent to Processing"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Submitted to UW",
+      "alias": "Submitted to UW"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.UW Decisioned",
+      "alias": "UW Decisioned"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.TBD Decisioned",
+      "alias": "TBD Decisioned"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Submit to Lender",
+      "alias": "Submit to Lender"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Approved By Lender",
+      "alias": "Approved By Lender"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Lender Docs Out",
+      "alias": "Lender Docs Out"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Docs Received",
+      "alias": "Docs Received"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Final Reconcilation",
+      "alias": "Final Reconcilation"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Clear to Close",
+      "alias": "Clear to Close"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Funded",
+      "alias": "Funded"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Lender Funded",
+      "alias": "Lender Funded"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Origination",
+      "alias": "Origination"
+    },
+    {
+      "fieldId": "Fields.Log.MS.Date.Shipped",
+      "alias": "Shipped"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.BY",
+      "alias": "File in Restructure By"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.DATE",
+      "alias": "date file in restructure"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.CBY",
+      "alias": "Restructure completed by"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.RSN",
+      "alias": "RESTRUCTURING REASON"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.COMPLETE",
+      "alias": "Restructuring is complete"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.CDATE",
+      "alias": "Restructure Complete Date"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE",
+      "alias": "File in Restructuring"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.NOTES",
+      "alias": "Restructure Notes"
+    },
+    {
+      "fieldId": "Fields.CX.RESTRUCTURE.HISTORY",
+      "alias": "Restructure History"
+    },
+    {
+      "fieldId": "Fields.641",
+      "alias": "Fees Appraisal Fee Borr"
+    },
+    {
+      "fieldId": "Fields.CD2.XSTLC",
+      "alias": "Lender Credits"
+    }
+  ],
+  "summary": {
+    "totalFieldsInLegacy": 329,
+    "matchingDefaults": 259,
+    "fieldSwaps": 7,
+    "additionalFields": 63
+  }
+}

@@ -1,13 +1,13 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Coheus ECS Fargate Backend Stack (Compute Only)
-  
+
   This stack deploys:
   - VPC with public/private subnets (or uses existing)
   - ECS Fargate cluster and service
   - Application Load Balancer
   - CloudWatch monitoring and alarms
-  
+
   Database: Deploy separately using coheus_aurora_cluster_stack.yaml
 
 Parameters:
@@ -36,27 +36,27 @@ Parameters:
 
   ExistingVPCId:
     Type: String
-    Default: ''
+    Default: ""
     Description: Existing VPC ID (required if NetworkMode=existing)
 
   ExistingPrivateSubnet1:
     Type: String
-    Default: ''
+    Default: ""
     Description: Existing private subnet 1 (required if NetworkMode=existing)
 
   ExistingPrivateSubnet2:
     Type: String
-    Default: ''
+    Default: ""
     Description: Existing private subnet 2 (required if NetworkMode=existing)
 
   ExistingPublicSubnet1:
     Type: String
-    Default: ''
+    Default: ""
     Description: Existing public subnet 1 (required if NetworkMode=existing)
 
   ExistingPublicSubnet2:
     Type: String
-    Default: ''
+    Default: ""
     Description: Existing public subnet 2 (required if NetworkMode=existing)
 
   # Container Configuration
@@ -72,18 +72,18 @@ Parameters:
 
   ContainerCpu:
     Type: Number
-    Default: 512
+    Default: 2048
     AllowedValues:
       - 256
       - 512
       - 1024
       - 2048
       - 4096
-    Description: CPU units (256 = 0.25 vCPU)
+    Description: CPU units (256 = 0.25 vCPU, 1024 = 1 vCPU)
 
   ContainerMemory:
     Type: Number
-    Default: 1024
+    Default: 4096
     AllowedValues:
       - 512
       - 1024
@@ -133,62 +133,63 @@ Parameters:
 
   FrontendUrl:
     Type: String
-    Default: ''
+    Default: ""
     Description: Frontend URL for CORS
 
   # SSL Configuration
   CertificateArn:
     Type: String
-    Default: ''
+    Default: ""
     Description: ACM certificate ARN for HTTPS (optional)
 
   # Alerts
   AlertEmail:
     Type: String
-    Default: ''
+    Default: ""
     Description: Email for alerts (optional)
 
   # Cognito SSO Configuration
   CognitoUserPoolId:
     Type: String
-    Default: ''
+    Default: ""
     Description: Cognito User Pool ID for SSO authentication
 
   CognitoClientId:
     Type: String
-    Default: ''
+    Default: ""
     Description: Cognito App Client ID
 
   CognitoClientSecret:
     Type: String
     NoEcho: true
-    Default: ''
+    Default: ""
     Description: Cognito App Client Secret
 
   CognitoDomain:
     Type: String
-    Default: ''
+    Default: ""
     Description: Cognito domain (e.g., your-app.auth.us-east-2.amazoncognito.com)
 
 Conditions:
-  CreateNewVPC: !Equals [!Ref NetworkMode, 'new']
-  HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
-  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
-  HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, '']]
+  CreateNewVPC: !Equals [!Ref NetworkMode, "new"]
+  IsDevEnvironment: !Equals [!Ref Environment, "dev"]
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, ""]]
 
 Rules:
   ExistingVPCRequiresSubnets:
-    RuleCondition: !Equals [!Ref NetworkMode, 'existing']
+    RuleCondition: !Equals [!Ref NetworkMode, "existing"]
     Assertions:
-      - Assert: !Not [!Equals [!Ref ExistingVPCId, '']]
+      - Assert: !Not [!Equals [!Ref ExistingVPCId, ""]]
         AssertDescription: ExistingVPCId is required when NetworkMode=existing
-      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnet1, '']]
+      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnet1, ""]]
         AssertDescription: ExistingPrivateSubnet1 is required when NetworkMode=existing
-      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnet2, '']]
+      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnet2, ""]]
         AssertDescription: ExistingPrivateSubnet2 is required when NetworkMode=existing
-      - Assert: !Not [!Equals [!Ref ExistingPublicSubnet1, '']]
+      - Assert: !Not [!Equals [!Ref ExistingPublicSubnet1, ""]]
         AssertDescription: ExistingPublicSubnet1 is required when NetworkMode=existing
-      - Assert: !Not [!Equals [!Ref ExistingPublicSubnet2, '']]
+      - Assert: !Not [!Equals [!Ref ExistingPublicSubnet2, ""]]
         AssertDescription: ExistingPublicSubnet2 is required when NetworkMode=existing
 
 Resources:
@@ -198,37 +199,42 @@ Resources:
   EncryptionKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: !Sub 'KMS key for ${ProjectName} ${Environment} encryption'
+      Description: !Sub "KMS key for ${ProjectName} ${Environment} encryption"
       EnableKeyRotation: true
       KeyPolicy:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Sid: Enable IAM User Permissions
             Effect: Allow
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-            Action: 'kms:*'
-            Resource: '*'
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
           - Sid: Allow CloudWatch Logs
             Effect: Allow
             Principal:
-              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
             Action:
-              - 'kms:Encrypt'
-              - 'kms:Decrypt'
-              - 'kms:GenerateDataKey*'
-            Resource: '*'
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey*"
+            Resource: "*"
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-key'
+          Value: !Sub "${ProjectName}-${Environment}-key"
 
   # ============================================================================
   # ECR Repository
   # ============================================================================
   ECRRepository:
     Type: AWS::ECR::Repository
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Properties:
-      RepositoryName: !Sub '${ProjectName}-backend'
+      RepositoryName: !If
+        - IsDevEnvironment
+        - !Sub "${ProjectName}-backend"
+        - !Sub "${ProjectName}-${Environment}-backend"
       ImageScanningConfiguration:
         ScanOnPush: true
       EncryptionConfiguration:
@@ -254,7 +260,10 @@ Resources:
           }
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-backend'
+          Value: !If
+            - IsDevEnvironment
+            - !Sub "${ProjectName}-backend"
+            - !Sub "${ProjectName}-${Environment}-backend"
 
   # ============================================================================
   # VPC and Networking (Conditional)
@@ -268,53 +277,53 @@ Resources:
       EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-vpc'
+          Value: !Sub "${ProjectName}-${Environment}-vpc"
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Condition: CreateNewVPC
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select [0, !GetAZs ""]
       CidrBlock: 10.0.10.0/24
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-public-1'
+          Value: !Sub "${ProjectName}-${Environment}-public-1"
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Condition: CreateNewVPC
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select [1, !GetAZs ""]
       CidrBlock: 10.0.11.0/24
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-public-2'
+          Value: !Sub "${ProjectName}-${Environment}-public-2"
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Condition: CreateNewVPC
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select [0, !GetAZs ""]
       CidrBlock: 10.0.1.0/24
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-private-1'
+          Value: !Sub "${ProjectName}-${Environment}-private-1"
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Condition: CreateNewVPC
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select [1, !GetAZs ""]
       CidrBlock: 10.0.2.0/24
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-private-2'
+          Value: !Sub "${ProjectName}-${Environment}-private-2"
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -322,7 +331,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-igw'
+          Value: !Sub "${ProjectName}-${Environment}-igw"
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -339,7 +348,7 @@ Resources:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-nat-eip'
+          Value: !Sub "${ProjectName}-${Environment}-nat-eip"
 
   NatGateway:
     Type: AWS::EC2::NatGateway
@@ -349,7 +358,7 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-nat'
+          Value: !Sub "${ProjectName}-${Environment}-nat"
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -358,7 +367,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-public-rt'
+          Value: !Sub "${ProjectName}-${Environment}-public-rt"
 
   DefaultPublicRoute:
     Type: AWS::EC2::Route
@@ -390,7 +399,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-private-rt'
+          Value: !Sub "${ProjectName}-${Environment}-private-rt"
 
   DefaultPrivateRoute:
     Type: AWS::EC2::Route
@@ -435,7 +444,7 @@ Resources:
           Description: Allow HTTP
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-alb-sg'
+          Value: !Sub "${ProjectName}-${Environment}-alb-sg"
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -454,7 +463,7 @@ Resources:
           Description: Allow all outbound
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-ecs-sg'
+          Value: !Sub "${ProjectName}-${Environment}-ecs-sg"
 
   # ============================================================================
   # Secrets Manager - JWT Secret
@@ -462,7 +471,7 @@ Resources:
   JWTSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub '${ProjectName}/${Environment}/jwt'
+      Name: !Sub "${ProjectName}/${Environment}/jwt"
       Description: JWT signing secret
       KmsKeyId: !Ref EncryptionKey
       SecretString: !Sub '{"secret":"${JwtSecret}"}'
@@ -473,7 +482,7 @@ Resources:
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub '${ProjectName}-${Environment}-alb'
+      Name: !Sub "${ProjectName}-${Environment}-alb"
       Type: application
       Scheme: internet-facing
       SecurityGroups:
@@ -483,15 +492,15 @@ Resources:
         - !If [CreateNewVPC, !Ref PublicSubnet2, !Ref ExistingPublicSubnet2]
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
-          Value: '3600'
+          Value: "3600"
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-alb'
+          Value: !Sub "${ProjectName}-${Environment}-alb"
 
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${ProjectName}-${Environment}-tg'
+      Name: !Sub "${ProjectName}-${Environment}-tg"
       Port: !Ref ContainerPort
       Protocol: HTTP
       VpcId: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
@@ -502,16 +511,16 @@ Resources:
       UnhealthyThresholdCount: 5
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
-          Value: '30'
+          Value: "30"
         - Key: stickiness.enabled
-          Value: 'true'
+          Value: "true"
         - Key: stickiness.type
           Value: lb_cookie
         - Key: stickiness.lb_cookie.duration_seconds
-          Value: '86400'
+          Value: "86400"
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-tg'
+          Value: !Sub "${ProjectName}-${Environment}-tg"
 
   ALBHTTPSListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -539,7 +548,7 @@ Resources:
           - Type: redirect
             RedirectConfig:
               Protocol: HTTPS
-              Port: '443'
+              Port: "443"
               StatusCode: HTTP_301
           - Type: forward
             TargetGroupArn: !Ref ALBTargetGroup
@@ -550,27 +559,27 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub '${ProjectName}-${Environment}-cluster'
+      ClusterName: !Sub "${ProjectName}-${Environment}-cluster"
       ClusterSettings:
         - Name: containerInsights
           Value: enabled
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-cluster'
+          Value: !Sub "${ProjectName}-${Environment}-cluster"
 
   ECSLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '/ecs/${ProjectName}-${Environment}'
+      LogGroupName: !Sub "/ecs/${ProjectName}-${Environment}"
       RetentionInDays: 30
       KmsKeyId: !GetAtt EncryptionKey.Arn
 
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${ProjectName}-${Environment}-ecs-exec-role'
+      RoleName: !Sub "${ProjectName}-${Environment}-ecs-exec-role"
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -581,7 +590,7 @@ Resources:
       Policies:
         - PolicyName: SecretsAccess
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
@@ -602,9 +611,9 @@ Resources:
   ECSTaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${ProjectName}-${Environment}-ecs-task-role'
+      RoleName: !Sub "${ProjectName}-${Environment}-ecs-task-role"
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -613,7 +622,7 @@ Resources:
       Policies:
         - PolicyName: TaskPolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
@@ -634,19 +643,19 @@ Resources:
                   - ssmmessages:CreateDataChannel
                   - ssmmessages:OpenControlChannel
                   - ssmmessages:OpenDataChannel
-                Resource: '*'
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - logs:CreateLogStream
                   - logs:DescribeLogGroups
                   - logs:DescribeLogStreams
                   - logs:PutLogEvents
-                Resource: '*'
+                Resource: "*"
 
   ECSTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub '${ProjectName}-${Environment}-backend'
+      Family: !Sub "${ProjectName}-${Environment}-backend"
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -655,13 +664,18 @@ Resources:
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
-        - Name: !Sub '${ProjectName}-backend'
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:${ContainerImageTag}'
+        - Name: !Sub "${ProjectName}-backend"
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}:${ContainerImageTag}"
           Essential: true
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+          Command:
+            - "npm"
+            - "start"
           Environment:
+            - Name: NODE_OPTIONS
+              Value: "--max-old-space-size=3584"
             - Name: NODE_ENV
               Value: production
             - Name: PORT
@@ -669,15 +683,15 @@ Resources:
             - Name: DEPLOYMENT_MODE
               Value: saas
             - Name: MULTI_TENANT_ENABLED
-              Value: 'true'
+              Value: "true"
             - Name: DB_HOST
               Value: !Ref AuroraEndpoint
             - Name: DB_PORT
-              Value: '5432'
+              Value: "5432"
             - Name: DB_NAME
               Value: coheus_management
             - Name: DB_SSL
-              Value: 'true'
+              Value: "true"
             - Name: FRONTEND_URL
               Value: !Ref FrontendUrl
             - Name: KMS_KEY_ID
@@ -688,20 +702,20 @@ Resources:
               Value: !Ref JwtSecret
             # Cognito SSO Configuration (optional)
             - Name: COGNITO_USER_POOL_ID
-              Value: !If [HasCognito, !Ref CognitoUserPoolId, '']
+              Value: !If [HasCognito, !Ref CognitoUserPoolId, ""]
             - Name: COGNITO_CLIENT_ID
-              Value: !If [HasCognito, !Ref CognitoClientId, '']
+              Value: !If [HasCognito, !Ref CognitoClientId, ""]
             - Name: COGNITO_CLIENT_SECRET
-              Value: !If [HasCognito, !Ref CognitoClientSecret, '']
+              Value: !If [HasCognito, !Ref CognitoClientSecret, ""]
             - Name: COGNITO_REGION
-              Value: !If [HasCognito, !Ref AWS::Region, '']
+              Value: !If [HasCognito, !Ref AWS::Region, ""]
             - Name: COGNITO_DOMAIN
-              Value: !If [HasCognito, !Ref CognitoDomain, '']
+              Value: !If [HasCognito, !Ref CognitoDomain, ""]
           Secrets:
             - Name: DB_USER
-              ValueFrom: !Sub '${AuroraSecretArn}:username::'
+              ValueFrom: !Sub "${AuroraSecretArn}:username::"
             - Name: DB_PASSWORD
-              ValueFrom: !Sub '${AuroraSecretArn}:password::'
+              ValueFrom: !Sub "${AuroraSecretArn}:password::"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -711,36 +725,44 @@ Resources:
           HealthCheck:
             Command:
               - CMD-SHELL
-              - !Sub 'wget --no-verbose --tries=1 --spider http://localhost:${ContainerPort}/health || exit 1'
+              - !Sub "wget --no-verbose --tries=1 --spider http://localhost:${ContainerPort}/health || exit 1"
             Interval: 30
             Timeout: 10
             Retries: 5
             StartPeriod: 120
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-task'
+          Value: !Sub "${ProjectName}-${Environment}-task"
 
   ECSService:
     Type: AWS::ECS::Service
     DependsOn:
       - ALBHTTPListener
     Properties:
-      ServiceName: !Sub '${ProjectName}-${Environment}-service'
+      ServiceName: !Sub "${ProjectName}-${Environment}-service"
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref ECSTaskDefinition
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
-      EnableExecuteCommand: true  # Enables ECS Exec for running migrations
+      EnableExecuteCommand: true # Enables ECS Exec for running migrations
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
-            - !If [CreateNewVPC, !Ref PrivateSubnet1, !Ref ExistingPrivateSubnet1]
-            - !If [CreateNewVPC, !Ref PrivateSubnet2, !Ref ExistingPrivateSubnet2]
+            - !If [
+                CreateNewVPC,
+                !Ref PrivateSubnet1,
+                !Ref ExistingPrivateSubnet1,
+              ]
+            - !If [
+                CreateNewVPC,
+                !Ref PrivateSubnet2,
+                !Ref ExistingPrivateSubnet2,
+              ]
           SecurityGroups:
             - !Ref ECSSecurityGroup
           AssignPublicIp: DISABLED
       LoadBalancers:
-        - ContainerName: !Sub '${ProjectName}-backend'
+        - ContainerName: !Sub "${ProjectName}-backend"
           ContainerPort: !Ref ContainerPort
           TargetGroupArn: !Ref ALBTargetGroup
       DeploymentConfiguration:
@@ -751,7 +773,7 @@ Resources:
           Rollback: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-service'
+          Value: !Sub "${ProjectName}-${Environment}-service"
 
   # ============================================================================
   # Auto Scaling
@@ -761,15 +783,15 @@ Resources:
     Properties:
       MaxCapacity: !Ref MaxCount
       MinCapacity: !Ref MinCount
-      ResourceId: !Sub 'service/${ECSCluster}/${ECSService.Name}'
-      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+      ResourceId: !Sub "service/${ECSCluster}/${ECSService.Name}"
+      RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
 
   ECSCPUScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
-      PolicyName: !Sub '${ProjectName}-${Environment}-cpu-scaling'
+      PolicyName: !Sub "${ProjectName}-${Environment}-cpu-scaling"
       PolicyType: TargetTrackingScaling
       ScalingTargetId: !Ref ECSAutoScalingTarget
       TargetTrackingScalingPolicyConfiguration:
@@ -782,7 +804,7 @@ Resources:
   ECSMemoryScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
-      PolicyName: !Sub '${ProjectName}-${Environment}-memory-scaling'
+      PolicyName: !Sub "${ProjectName}-${Environment}-memory-scaling"
       PolicyType: TargetTrackingScaling
       ScalingTargetId: !Ref ECSAutoScalingTarget
       TargetTrackingScalingPolicyConfiguration:
@@ -798,8 +820,8 @@ Resources:
   AlertsTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: !Sub '${ProjectName}-${Environment}-alerts'
-      DisplayName: !Sub '${ProjectName} ${Environment} Alerts'
+      TopicName: !Sub "${ProjectName}-${Environment}-alerts"
+      DisplayName: !Sub "${ProjectName} ${Environment} Alerts"
 
   AlertsEmailSubscription:
     Type: AWS::SNS::Subscription
@@ -812,7 +834,7 @@ Resources:
   ECSCPUAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-cpu-high'
+      AlarmName: !Sub "${ProjectName}-${Environment}-ecs-cpu-high"
       AlarmDescription: ECS CPU utilization is high
       MetricName: CPUUtilization
       Namespace: AWS/ECS
@@ -834,7 +856,7 @@ Resources:
   ECSMemoryAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-memory-high'
+      AlarmName: !Sub "${ProjectName}-${Environment}-ecs-memory-high"
       AlarmDescription: ECS memory utilization is high
       MetricName: MemoryUtilization
       Namespace: AWS/ECS
@@ -854,9 +876,9 @@ Resources:
 Outputs:
   ECRRepositoryUri:
     Description: ECR repository URI
-    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}'
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepository}"
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-ecr-uri'
+      Name: !Sub "${ProjectName}-${Environment}-ecr-uri"
 
   ECRRepositoryName:
     Description: ECR repository name
@@ -866,19 +888,19 @@ Outputs:
     Description: VPC ID
     Value: !If [CreateNewVPC, !Ref VPC, !Ref ExistingVPCId]
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-vpc-id'
+      Name: !Sub "${ProjectName}-${Environment}-vpc-id"
 
   PrivateSubnet1:
     Description: Private subnet 1 ID
     Value: !If [CreateNewVPC, !Ref PrivateSubnet1, !Ref ExistingPrivateSubnet1]
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-private-subnet-1'
+      Name: !Sub "${ProjectName}-${Environment}-private-subnet-1"
 
   PrivateSubnet2:
     Description: Private subnet 2 ID
     Value: !If [CreateNewVPC, !Ref PrivateSubnet2, !Ref ExistingPrivateSubnet2]
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-private-subnet-2'
+      Name: !Sub "${ProjectName}-${Environment}-private-subnet-2"
 
   ECSClusterName:
     Description: ECS cluster name
@@ -892,11 +914,23 @@ Outputs:
     Description: ECS security group ID (add to Aurora cluster allowed SGs)
     Value: !Ref ECSSecurityGroup
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-ecs-sg'
+      Name: !Sub "${ProjectName}-${Environment}-ecs-sg"
 
   ALBDNSName:
     Description: Application Load Balancer DNS name
     Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  ALBFullName:
+    Description: ALB full name for CloudWatch metrics
+    Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-alb-full-name"
+
+  TargetGroupFullName:
+    Description: Target group full name for CloudWatch metrics
+    Value: !GetAtt ALBTargetGroup.TargetGroupFullName
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-tg-full-name"
 
   ALBHostedZoneId:
     Description: ALB hosted zone ID (for Route 53)
@@ -906,7 +940,7 @@ Outputs:
     Description: KMS key ARN
     Value: !GetAtt EncryptionKey.Arn
     Export:
-      Name: !Sub '${ProjectName}-${Environment}-kms-key'
+      Name: !Sub "${ProjectName}-${Environment}-kms-key"
 
   AlertsTopicArn:
     Description: SNS alerts topic ARN
@@ -916,5 +950,5 @@ Outputs:
     Description: Backend API URL
     Value: !If
       - HasCertificate
-      - !Sub 'https://${ApplicationLoadBalancer.DNSName}'
-      - !Sub 'http://${ApplicationLoadBalancer.DNSName}'
+      - !Sub "https://${ApplicationLoadBalancer.DNSName}"
+      - !Sub "http://${ApplicationLoadBalancer.DNSName}"

@@ -4,8 +4,6 @@ import { cognitoAuth } from "./auth/index.js";
 import subscriptionsRoutes from "./subscriptions.js";
 import ragRoutes from "./rag.js";
 import metricsRoutes from "./metrics.js";
-import costsRoutes from "./costs.js";
-import deploymentsRoutes from "./deployments.js";
 import dashboardRoutes from "./dashboard.js";
 import adminRoutes from "./admin.js";
 import losRoutes from "./los.js";
@@ -14,17 +12,24 @@ import loansRoutes from "./loans.js";
 import scorecardRoutes from "./scorecard/index.js";
 import toptieringRoutes from "./toptiering/index.js";
 import predictionsRoutes from "./predictions/index.js";
-import fieldMappingsRoutes from "./fieldMappings.js";
-import demoRoutes from "./demo.js";
 import userPreferencesRoutes from "./userPreferences.js";
-import awsHostingRoutes from "./aws-hosting.js";
 import encompassRoutes from "./encompass.js";
 import tenantRoutes from "./tenants.js";
 import tenantConfigRoutes from "./tenantConfig.js";
-import dataChatRoutes from "./dataChat.js";
+import cohiChatRoutes from "./cohiChat.js";
+import cohiWorkbenchRoutes from "./cohiWorkbench.js";
 import ragKnowledgeBaseRouter from "./ragKnowledgeBase.js";
 import dataQualityRoutes from "./dataQuality.js";
 import newsRoutes from "./news.js";
+import globalKnowledgeRoutes from "./admin/globalKnowledge.js";
+import aiPromptsRoutes from "./admin/aiPrompts.js";
+import platformSettingsRoutes from "./admin/platformSettings.js";
+import tenantConfigExportRoutes from "./admin/tenantConfigExport.js";
+import insightFeedbackRoutes from "./admin/insightFeedback.js";
+import knowledgeCenterRoutes from "./knowledgeCenter.js";
+import shareLinksRoutes from "./shareLinks.js";
+import workbenchRoutes from "./workbench.js";
+import reportRoutes from "./reports.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -49,8 +54,6 @@ export function setupRoutes(app: Express) {
   app.use("/api/rag", ragRoutes);
   app.use("/api/rag/knowledge-base", ragKnowledgeBaseRouter);
   app.use("/api/metrics", metricsRoutes);
-  app.use("/api/costs", costsRoutes);
-  app.use("/api/deployments", deploymentsRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/los", losRoutes);
@@ -59,16 +62,23 @@ export function setupRoutes(app: Express) {
   app.use("/api/scorecard", scorecardRoutes);
   app.use("/api/toptiering", toptieringRoutes);
   app.use("/api/predictions", predictionsRoutes);
-  app.use("/api/field-mappings", fieldMappingsRoutes);
-  app.use("/api/demo", demoRoutes);
   app.use("/api/user", userPreferencesRoutes);
-  app.use("/api/aws-hosting", awsHostingRoutes);
   app.use("/api/encompass", encompassRoutes);
   app.use("/api/tenants", tenantRoutes);
   app.use("/api/tenant-config", tenantConfigRoutes);
-  app.use("/api/data-chat", dataChatRoutes);
+  app.use("/api/cohi-chat", cohiChatRoutes); // Cohi Chat service
+  app.use("/api/cohi-chat/workbench", cohiWorkbenchRoutes); // Workbench AI assistant
   app.use("/api/data-quality", dataQualityRoutes);
   app.use("/api/news", newsRoutes);
+  app.use("/api/admin/global-knowledge", globalKnowledgeRoutes);
+  app.use("/api/admin/ai-prompts", aiPromptsRoutes);
+  app.use("/api/admin/platform-settings", platformSettingsRoutes);
+  app.use("/api/admin/tenant-config-transfer", tenantConfigExportRoutes);
+  app.use("/api/admin/insight-feedback", insightFeedbackRoutes);
+  app.use("/api/knowledge-center", knowledgeCenterRoutes);
+  app.use("/api/share-links", shareLinksRoutes);
+  app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
+  app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {
@@ -109,7 +119,7 @@ export function setupRoutes(app: Express) {
         const dbCheck = Promise.race([
           pool.query("SELECT NOW(), current_database(), version()"),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Database query timeout")), 2000),
+            setTimeout(() => reject(new Error("Database query timeout")), 2000)
           ),
         ]);
 
@@ -145,7 +155,7 @@ export function setupRoutes(app: Express) {
         try {
           resetPool();
           console.log(
-            "🔄 Reset database pool - next query will attempt reconnection",
+            "🔄 Reset database pool - next query will attempt reconnection"
           );
         } catch (resetError) {
           console.warn("Could not reset pool:", resetError);

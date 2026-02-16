@@ -1,12 +1,17 @@
 /**
  * User Preferences API Routes
- * Handles user preference storage and retrieval
- * Migrated from Supabase database queries
+ * Handles user preference storage and retrieval, and password change.
  */
 
 import { Router } from 'express';
-import { pool, retryQuery, isDatabaseConnectionError, handleDatabaseError } from '../config/database.js';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { retryQuery, isDatabaseConnectionError, handleDatabaseError } from '../config/database.js';
+import { pool as managementPool } from '../config/managementDatabase.js';
+import { tenantDbManager } from '../config/tenantDatabaseManager.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { auditLog } from '../services/auditLogger.js';
+import { logError, logInfo } from '../services/logger.js';
 
 const router = Router();
 
@@ -22,14 +27,14 @@ router.get('/preferences', authenticateToken, async (req: AuthRequest, res) => {
     }
 
     const result = await retryQuery(
-      () => pool.query(
+      () => managementPool.query(
         `SELECT preference_key, preference_value 
-         FROM public.user_preferences 
+         FROM user_preferences 
          WHERE user_id = $1`,
         [userId]
       ),
-      3, // max retries
-      1000 // delay between retries
+      3,
+      1000
     );
 
     const preferences: Record<string, any> = {};
@@ -74,14 +79,14 @@ router.get('/preferences/:key', authenticateToken, async (req: AuthRequest, res)
     }
 
     const result = await retryQuery(
-      () => pool.query(
+      () => managementPool.query(
         `SELECT preference_value 
-         FROM public.user_preferences 
+         FROM user_preferences 
          WHERE user_id = $1 AND preference_key = $2`,
         [userId, key]
       ),
-      3, // max retries
-      1000 // delay between retries
+      3,
+      1000
     );
 
     if (result.rows.length === 0) {
@@ -139,15 +144,15 @@ router.put('/preferences/:key', authenticateToken, async (req: AuthRequest, res)
       : JSON.stringify(preference_value);
 
     await retryQuery(
-      () => pool.query(
-        `INSERT INTO public.user_preferences (user_id, preference_key, preference_value)
+      () => managementPool.query(
+        `INSERT INTO user_preferences (user_id, preference_key, preference_value)
          VALUES ($1, $2, $3::jsonb)
          ON CONFLICT (user_id, preference_key)
          DO UPDATE SET preference_value = $3::jsonb, updated_at = NOW()`,
         [userId, key, jsonValue]
       ),
-      3, // max retries
-      1000 // delay between retries
+      3,
+      1000
     );
 
     res.json({ success: true });
@@ -183,23 +188,44 @@ router.get('/profile', authenticateToken, async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const result = await retryQuery(
-      () => pool.query(
-        `SELECT p.*, u.email
-         FROM public.profiles p
-         JOIN public.users u ON p.user_id = u.id
-         WHERE p.user_id = $1`,
+    // Try tenant database first if user has tenant context, fall back to management DB
+    let profile = null;
+    if (req.tenantId) {
+      try {
+        const tenantPool = await tenantDbManager.getTenantPool(req.tenantId);
+        const result = await tenantPool.query(
+          `SELECT p.*, u.email
+           FROM profiles p
+           JOIN users u ON p.user_id = u.id
+           WHERE p.user_id = $1`,
+          [userId]
+        );
+        if (result.rows.length > 0) {
+          profile = result.rows[0];
+        }
+      } catch (e) {
+        // Fall through to management DB
+      }
+    }
+    
+    if (!profile) {
+      // Fall back to management DB (super admins or missing tenant context)
+      const result = await managementPool.query(
+        `SELECT id, email, full_name, role, created_at, updated_at
+         FROM coheus_users
+         WHERE id = $1`,
         [userId]
-      ),
-      3, // max retries
-      1000 // delay between retries
-    );
+      );
+      if (result.rows.length > 0) {
+        profile = result.rows[0];
+      }
+    }
 
-    if (result.rows.length === 0) {
+    if (!profile) {
       return res.status(404).json({ error: 'Profile not found' });
     }
 
-    res.json(result.rows[0]);
+    res.json(profile);
   } catch (error: any) {
     console.error('Error fetching user profile:', error);
     
@@ -225,30 +251,31 @@ router.put('/profile', authenticateToken, async (req: AuthRequest, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Update profile
-    await retryQuery(
-      () => pool.query(
-        `UPDATE public.profiles 
-         SET full_name = $1, updated_at = NOW()
-         WHERE user_id = $2`,
+    // Update in tenant DB if user has tenant context, else management DB
+    if (req.tenantId) {
+      const tenantPool = await tenantDbManager.getTenantPool(req.tenantId);
+      await tenantPool.query(
+        `UPDATE profiles SET full_name = $1, updated_at = NOW() WHERE user_id = $2`,
         [full_name, userId]
-      ),
-      3, // max retries
-      1000 // delay between retries
-    );
-
-    // Update user email if provided
-    if (email) {
-      await retryQuery(
-        () => pool.query(
-          `UPDATE public.users 
-           SET email = $1, updated_at = NOW()
-           WHERE id = $2`,
-          [email, userId]
-        ),
-        3, // max retries
-        1000 // delay between retries
       );
+      if (email) {
+        await tenantPool.query(
+          `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2`,
+          [email, userId]
+        );
+      }
+    } else {
+      // Super admin -- update in management DB
+      await managementPool.query(
+        `UPDATE coheus_users SET full_name = $1, updated_at = NOW() WHERE id = $2`,
+        [full_name, userId]
+      );
+      if (email) {
+        await managementPool.query(
+          `UPDATE coheus_users SET email = $1, updated_at = NOW() WHERE id = $2`,
+          [email, userId]
+        );
+      }
     }
 
     res.json({ success: true });
@@ -261,6 +288,146 @@ router.put('/profile', authenticateToken, async (req: AuthRequest, res) => {
     }
     
     res.status(500).json({ error: 'Failed to update user profile' });
+  }
+});
+
+// =============================================================================
+// PASSWORD CHANGE (authenticated users only)
+// =============================================================================
+
+const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+/**
+ * PUT /api/user/password
+ * Change the authenticated user's password.
+ * Only available for password-based auth (rejected for SSO-only users).
+ */
+router.put('/password', authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.userId;
+    const isSuperAdmin = req.isSuperAdmin;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Reject if authenticated via SSO (JWT has authMethod field set by cognitoAuth.ts)
+    const authHeader = req.headers['authorization'];
+    const token = authHeader?.split(' ')[1];
+    if (token) {
+      try {
+        const jwt = await import('jsonwebtoken');
+        const decoded = jwt.default.decode(token) as any;
+        if (decoded?.authMethod === 'cognito_sso') {
+          return res.status(403).json({
+            error: 'Password change is not available for SSO users. Your password is managed by your identity provider.',
+          });
+        }
+      } catch {
+        // Ignore decode errors -- proceed with password change
+      }
+    }
+
+    const { currentPassword, newPassword } = passwordChangeSchema.parse(req.body);
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'New password must be different from current password' });
+    }
+
+    let updated = false;
+
+    if (isSuperAdmin) {
+      // Super admin -- update in management database
+      const { pool: managementPool } = await import('../config/managementDatabase.js');
+      if (!managementPool) {
+        return res.status(500).json({ error: 'Management database not available' });
+      }
+
+      const userResult = await managementPool.query(
+        `SELECT encrypted_password FROM coheus_users WHERE id = $1 AND is_active = true`,
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, userResult.rows[0].encrypted_password);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      await managementPool.query(
+        `UPDATE coheus_users 
+         SET encrypted_password = $1, password_changed_at = NOW(), failed_login_attempts = 0, locked_until = NULL
+         WHERE id = $2`,
+        [hashedPassword, userId]
+      );
+      updated = true;
+    } else if (req.tenantId) {
+      // Tenant user -- update in tenant database
+      const tenantPool = await tenantDbManager.getTenantPool(req.tenantId);
+      const userResult = await tenantPool.query(
+        `SELECT encrypted_password FROM users WHERE id = $1 AND is_active = true`,
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, userResult.rows[0].encrypted_password);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      await tenantPool.query(
+        `UPDATE users 
+         SET encrypted_password = $1, failed_login_attempts = 0, locked_until = NULL
+         WHERE id = $2`,
+        [hashedPassword, userId]
+      );
+      updated = true;
+    } else {
+      return res.status(400).json({ error: 'Unable to determine user context for password change' });
+    }
+
+    if (updated) {
+      // Audit log
+      await auditLog({
+        userId,
+        userEmail: req.userEmail || null,
+        userRole: req.userRole || null,
+        tenantId: req.tenantId || null,
+        action: 'password_change',
+        resource: 'auth',
+        description: 'User changed their password',
+        status: 'success',
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      }).catch(() => {});
+
+      logInfo('[UserPrefs] Password changed', { userId, isSuperAdmin });
+      return res.json({ success: true, message: 'Password changed successfully' });
+    }
+
+    return res.status(500).json({ error: 'Failed to update password' });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    logError('[UserPrefs] Password change error', error, { userId: req.userId });
+    
+    if (handleDatabaseError(error, res, 'Failed to change password')) {
+      return;
+    }
+    
+    return res.status(500).json({ error: 'Failed to change password' });
   }
 });
 

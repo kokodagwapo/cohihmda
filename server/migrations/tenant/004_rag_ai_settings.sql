@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS rag_documents (
 
 CREATE INDEX IF NOT EXISTS idx_rag_documents_source ON rag_documents(source_id);
 CREATE INDEX IF NOT EXISTS idx_rag_documents_status ON rag_documents(status);
+-- Ensure file_hash exists (for tenants where rag_documents was created before this column was added)
+ALTER TABLE rag_documents ADD COLUMN IF NOT EXISTS file_hash TEXT;
 CREATE INDEX IF NOT EXISTS idx_rag_documents_hash ON rag_documents(file_hash) WHERE file_hash IS NOT NULL;
 
 -- =============================================================================

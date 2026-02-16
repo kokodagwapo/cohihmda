@@ -129,24 +129,18 @@ router.get(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    // Get user's role from database (requireRole middleware sets req.userRole, but we need to verify)
-      const userResult = await pool.query(
-        "SELECT role, tenant_id FROM public.users WHERE id = $1",
-        [req.userId],
-      );
-    
-      const userRole = userResult.rows[0]?.role || "user";
-    const userTenantId = userResult.rows[0]?.tenant_id;
-      const isSuperAdmin = userRole === "super_admin" || userRole === "admin";
+    // Use auth token values instead of querying legacy public.users
+    const userRole = req.userRole || "user";
+    const userTenantId = req.tenantId || null;
+    const isSuperAdmin = req.isSuperAdmin || userRole === "super_admin" || userRole === "platform_admin";
 
-    // Run essential queries in parallel
-    // Use management database for tenant count
+    // Run essential queries in parallel using management database
     const [tenantsResult, usersResult] = await Promise.all([
         managementPool.query(
           "SELECT COUNT(*) as count FROM coheus_tenants WHERE status = $1",
           ["active"],
         ),
-        pool.query("SELECT COUNT(*) as count FROM public.users"),
+        managementPool.query("SELECT COUNT(*) as count FROM coheus_users WHERE is_active = true"),
     ]);
 
     // Return minimal, fast response
@@ -198,7 +192,7 @@ router.get(
   requireRole("super_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id: tenantId } = req.params;
+    const tenantId = req.params.id as string;
 
     // Get tenant database pool
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
@@ -273,7 +267,7 @@ router.get(
   } catch (error: any) {
       logError("Error fetching tenant metrics", error, {
         userId: req.userId,
-        tenantId: req.params.id,
+        tenantId: req.params.id as string,
       });
       res
         .status(500)
@@ -362,14 +356,10 @@ router.get(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const userResult = await pool.query(
-        "SELECT role, tenant_id FROM public.users WHERE id = $1",
-        [req.userId],
-    );
-    
-      const userRole = userResult.rows[0]?.role || "user";
-    const userTenantId = userResult.rows[0]?.tenant_id;
-      const isSuperAdmin = userRole === "super_admin" || userRole === "admin";
+    // Use auth token values instead of querying legacy public.users
+    const userRole = req.userRole || "user";
+    const userTenantId = req.tenantId || null;
+    const isSuperAdmin = req.isSuperAdmin || userRole === "super_admin" || userRole === "platform_admin";
 
     let query = `
       SELECT 
@@ -379,24 +369,24 @@ router.get(
         u.role,
         u.created_at,
         u.updated_at,
-        p.tenant_id,
+        m.tenant_id,
         t.name as tenant_name
-      FROM public.users u
-      LEFT JOIN public.profiles p ON p.user_id = u.id
-      LEFT JOIN coheus_tenants t ON t.id = p.tenant_id
+      FROM coheus_users u
+      LEFT JOIN user_tenant_mappings m ON m.user_id = u.id
+      LEFT JOIN coheus_tenants t ON t.id = m.tenant_id
     `;
     
     const params: any[] = [];
     
     // If not super admin, only show users from same tenant
     if (!isSuperAdmin && userTenantId) {
-        query += " WHERE p.tenant_id = $1";
+        query += " WHERE m.tenant_id = $1";
       params.push(userTenantId);
     }
     
       query += " ORDER BY u.created_at DESC";
     
-    const result = await pool.query(query, params);
+    const result = await managementPool.query(query, params);
     
     res.json({ users: result.rows });
   } catch (error: any) {
@@ -421,8 +411,8 @@ router.post(
     const validated = createUserSchema.parse(req.body);
     const hashedPassword = await bcrypt.hash(validated.password, 10);
     
-    const result = await pool.query(
-      `INSERT INTO public.users (email, password_hash, full_name, role, created_at, updated_at)
+    const result = await managementPool.query(
+      `INSERT INTO coheus_users (email, encrypted_password, full_name, role, created_at, updated_at)
        VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING id, email, full_name, role, created_at`,
         [
@@ -435,20 +425,20 @@ router.post(
     
     const newUser = result.rows[0];
     
-    // If tenant_id provided, create profile mapping
+    // If tenant_id provided, create tenant mapping
     if (validated.tenant_id) {
-      await pool.query(
-        `INSERT INTO public.profiles (user_id, tenant_id, created_at, updated_at)
-         VALUES ($1, $2, NOW(), NOW())
-         ON CONFLICT (user_id) DO UPDATE SET tenant_id = $2, updated_at = NOW()`,
-          [newUser.id, validated.tenant_id],
+      await managementPool.query(
+        `INSERT INTO user_tenant_mappings (user_id, tenant_id, role, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         ON CONFLICT (user_id, tenant_id) DO UPDATE SET role = $3, updated_at = NOW()`,
+          [newUser.id, validated.tenant_id, validated.role || 'user'],
       );
     }
     
     auditLog({
       userId: req.userId!,
         action: "create_user",
-        resourceType: "user",
+        resource: "user",
       resourceId: newUser.id,
       metadata: { email: validated.email, role: validated.role },
     });
@@ -482,7 +472,7 @@ router.put(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const validated = updateUserSchema.parse(req.body);
     
     const updates: string[] = [];
@@ -513,8 +503,8 @@ router.put(
     updates.push(`updated_at = NOW()`);
     params.push(id);
     
-    const result = await pool.query(
-      `UPDATE public.users 
+    const result = await managementPool.query(
+      `UPDATE coheus_users 
        SET ${updates.join(", ")}
        WHERE id = $${paramIndex}
        RETURNING id, email, full_name, role, created_at, updated_at`,
@@ -529,16 +519,16 @@ router.put(
     if (validated.tenant_id !== undefined) {
       if (validated.tenant_id === null) {
         // Remove tenant mapping
-          await pool.query("DELETE FROM public.profiles WHERE user_id = $1", [
+          await managementPool.query("DELETE FROM user_tenant_mappings WHERE user_id = $1", [
             id,
           ]);
       } else {
         // Update or create tenant mapping
-        await pool.query(
-          `INSERT INTO public.profiles (user_id, tenant_id, created_at, updated_at)
-           VALUES ($1, $2, NOW(), NOW())
-           ON CONFLICT (user_id) DO UPDATE SET tenant_id = $2, updated_at = NOW()`,
-            [id, validated.tenant_id],
+        await managementPool.query(
+          `INSERT INTO user_tenant_mappings (user_id, tenant_id, role, created_at, updated_at)
+           VALUES ($1, $2, $3, NOW(), NOW())
+           ON CONFLICT (user_id, tenant_id) DO UPDATE SET updated_at = NOW()`,
+            [id, validated.tenant_id, validated.role || 'user'],
         );
       }
     }
@@ -546,7 +536,7 @@ router.put(
     auditLog({
       userId: req.userId!,
         action: "update_user",
-        resourceType: "user",
+        resource: "user",
       resourceId: id,
       metadata: validated,
     });
@@ -560,7 +550,7 @@ router.put(
     } else {
         logError("Error updating user", error, {
           userId: req.userId,
-          userToUpdate: req.params.id,
+          userToUpdate: req.params.id as string,
         });
         res
           .status(500)
@@ -580,7 +570,7 @@ router.delete(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     // Don't allow deleting yourself
     if (id === req.userId) {
@@ -589,8 +579,8 @@ router.delete(
           .json({ error: "Cannot delete your own account" });
     }
     
-    const result = await pool.query(
-        "DELETE FROM public.users WHERE id = $1 RETURNING id, email",
+    const result = await managementPool.query(
+        "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email",
         [id],
     );
     
@@ -601,7 +591,7 @@ router.delete(
     auditLog({
       userId: req.userId!,
         action: "delete_user",
-        resourceType: "user",
+        resource: "user",
       resourceId: id,
       metadata: { email: result.rows[0].email },
     });
@@ -610,7 +600,7 @@ router.delete(
   } catch (error: any) {
       logError("Error deleting user", error, {
         userId: req.userId,
-        userToDelete: req.params.id,
+        userToDelete: req.params.id as string,
       });
       res
         .status(500)
@@ -732,7 +722,7 @@ router.put(
   requireRole("super_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const schema = z.object({
       email: z.string().min(1).optional(),
       password: z.string().min(6).optional(),
@@ -812,7 +802,7 @@ router.delete(
   requireRole("super_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     
     if (id === req.userId) {
         return res
@@ -857,7 +847,7 @@ router.get(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = req.params.tenantId as string;
     
     // Tenant admins can only access their own tenant's users
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -870,6 +860,8 @@ router.get(
     // Get tenant pool
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     
+    // Filter out super_admin role -- that's a platform-level role that should
+    // never appear in a tenant's user list (may have been JIT-created via SSO)
     const result = await tenantPool.query(`
       SELECT 
         id,
@@ -885,6 +877,7 @@ router.get(
         loan_access_mode,
         loan_access_synced_at
       FROM users
+      WHERE role != 'super_admin'
       ORDER BY created_at DESC
     `);
     
@@ -901,7 +894,7 @@ router.get(
   } catch (error: any) {
       logError("Error fetching tenant users", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
@@ -923,7 +916,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = req.params.tenantId as string;
     
     // Tenant admins can only create users in their own tenant
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -933,6 +926,13 @@ router.post(
       });
     }
     
+    // Reject platform-level roles in tenant databases
+    if (req.body.role === "super_admin" || req.body.role === "platform_admin") {
+      return res.status(400).json({
+        error: "Cannot create platform-level users in a tenant. Use the platform admin management instead.",
+      });
+    }
+
     const schema = z.object({
       email: z.string().email(),
       password: z.string().min(6),
@@ -997,7 +997,7 @@ router.post(
     } else {
         logError("Error creating tenant user", error, {
           userId: req.userId,
-          tenantId: req.params.tenantId,
+          tenantId: req.params.tenantId as string,
         });
         res
           .status(500)
@@ -1020,7 +1020,8 @@ router.put(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId, userId } = req.params;
+    const tenantId = req.params.tenantId as string;
+    const userId = req.params.userId as string;
     
     // Tenant admins can only update users in their own tenant
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -1107,7 +1108,7 @@ router.put(
   } catch (error: any) {
       logError("Error updating tenant user", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
@@ -1129,7 +1130,8 @@ router.delete(
   requireRole("super_admin", "platform_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const { tenantId, userId } = req.params;
+    const tenantId = req.params.tenantId as string;
+    const userId = req.params.userId as string;
     
     // Tenant admins can only delete users in their own tenant
       if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
@@ -1160,7 +1162,7 @@ router.delete(
   } catch (error: any) {
       logError("Error deleting tenant user", error, {
         userId: req.userId,
-        tenantId: req.params.tenantId,
+        tenantId: req.params.tenantId as string,
       });
       res
         .status(500)
@@ -1168,6 +1170,74 @@ router.delete(
           error: "Failed to delete tenant user",
           details: error.message,
         });
+    }
+  },
+);
+
+/**
+ * GET /api/admin/tenants/:tenantId/usage
+ * Get usage statistics for a specific tenant
+ */
+router.get(
+  "/tenants/:tenantId/usage",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin", "tenant_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.params.tenantId as string;
+
+      // Tenant admins can only view their own tenant's usage
+      if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "You can only view usage for your own organization",
+        });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      // Run queries in parallel
+      const [userCount, loanCount, storageResult, lastSyncResult] =
+        await Promise.all([
+          tenantPool.query("SELECT COUNT(*) as count FROM users"),
+          tenantPool.query("SELECT COUNT(*) as count FROM loans"),
+          tenantPool.query(
+            "SELECT pg_database_size(current_database()) as size_bytes",
+          ),
+          tenantPool.query(
+            "SELECT last_synced_at FROM los_connections WHERE is_active = true ORDER BY last_synced_at DESC NULLS LAST LIMIT 1",
+          ),
+        ]);
+
+      const users = parseInt(userCount.rows[0]?.count || "0");
+      const loans = parseInt(loanCount.rows[0]?.count || "0");
+      const storageBytes = parseInt(
+        storageResult.rows[0]?.size_bytes || "0",
+      );
+      const storageGB = Math.round((storageBytes / 1073741824) * 100) / 100;
+      const lastSync = lastSyncResult.rows[0]?.last_synced_at || null;
+
+      res.json({
+        users: { current: users, limit: 0, percentage: 0 },
+        loans: { current: loans, limit: 0, percentage: 0 },
+        storage: {
+          current: storageGB,
+          limit: 0,
+          percentage: 0,
+          unit: "GB",
+        },
+        last_sync: lastSync,
+        sync_status: lastSync ? "healthy" : "warning",
+      });
+    } catch (error: any) {
+      logError("Error fetching tenant usage", error, {
+        userId: req.userId,
+        tenantId: req.params.tenantId as string,
+      });
+      res.status(500).json({
+        error: "Failed to fetch usage statistics",
+        details: error.message,
+      });
     }
   },
 );
@@ -1398,7 +1468,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { encompassUserId } = req.params;
+      const encompassUserId = req.params.encompassUserId as string;
       const { los_connection_id, role, invite_method, password, tenant_id } =
         req.body;
 
@@ -1559,7 +1629,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
       const { encompass_user_id, los_connection_id } = req.body;
 
       if (!encompass_user_id || !los_connection_id) {
@@ -1641,7 +1711,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
 
       const tenantSlug = req.tenantSlug;
       if (!tenantSlug) {
@@ -1749,7 +1819,7 @@ router.post(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
 
       // Resolve tenant context - platform admins can pass tenant_id, tenant admins use their own
       const tenantContext = await resolveTenantContext(
@@ -1807,7 +1877,7 @@ router.get(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
       const { limit } = req.query;
 
       const tenantSlug = req.tenantSlug;
@@ -1854,7 +1924,7 @@ router.get(
   requireRole("super_admin", "platform_admin", "tenant_admin", "admin"),
   async (req: AuthRequest, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.params.userId as string;
 
       const tenantSlug = req.tenantSlug;
       if (!tenantSlug) {
@@ -2064,6 +2134,407 @@ router.post(
         });
     }
   },
+);
+
+// ============================================================================
+// Sync Management Routes (Platform Admin)
+// Cross-tenant view of all LOS connections and their sync status
+// ============================================================================
+
+/**
+ * GET /api/admin/sync-management
+ * Get all LOS connections across all tenants with sync status
+ */
+router.get(
+  "/sync-management",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      // Get all active tenants
+      const tenantsResult = await managementPool.query(
+        `SELECT id, name, slug FROM coheus_tenants WHERE status = 'active' ORDER BY name`
+      );
+
+      const allConnections: any[] = [];
+
+      for (const tenant of tenantsResult.rows) {
+        try {
+          const tenantPool = await tenantDbManager.getTenantPool(tenant.id);
+
+          // Auto-fix stale 'in_progress' statuses left from server crashes/restarts.
+          // If a connection has been 'in_progress' for more than 30 minutes, it's stale.
+          const STALE_THRESHOLD_MINUTES = 30;
+          await tenantPool.query(
+            `UPDATE public.los_connections
+             SET last_sync_status = 'interrupted',
+                 last_sync_error = 'Sync was interrupted (server restart or crash)',
+                 updated_at = NOW()
+             WHERE last_sync_status = 'in_progress'
+               AND updated_at < NOW() - INTERVAL '${STALE_THRESHOLD_MINUTES} minutes'`
+          ).catch(() => {});
+
+          // Query connections from tenant database
+          const connectionsResult = await tenantPool.query(
+            `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
+                    last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
+                    is_active, created_at, updated_at
+             FROM public.los_connections
+             ORDER BY name`
+          );
+
+          // Get loan count for this tenant
+          let loanCount = 0;
+          try {
+            const loanResult = await tenantPool.query(
+              "SELECT COUNT(*) as count FROM public.loans"
+            );
+            loanCount = parseInt(loanResult.rows[0]?.count || "0", 10);
+          } catch {
+            // loans table may not exist
+          }
+
+          for (const conn of connectionsResult.rows) {
+            allConnections.push({
+              ...conn,
+              tenant_id: tenant.id,
+              tenant_name: tenant.name,
+              tenant_slug: tenant.slug,
+              loan_count: loanCount,
+            });
+          }
+        } catch (error: any) {
+          // Tenant DB might not have los_connections table yet — skip
+          if (error.code !== "42P01") {
+            logWarn("Error querying connections for tenant", {
+              tenantId: tenant.id,
+              tenantName: tenant.name,
+              error: error.message,
+            });
+          }
+        }
+      }
+
+      // Get scheduler info
+      const schedulerInfo = {
+        interval_minutes: 15,
+        next_run_estimate: new Date(
+          Date.now() + 15 * 60 * 1000
+        ).toISOString(),
+      };
+
+      return res.json({
+        connections: allConnections,
+        scheduler: schedulerInfo,
+        total_tenants: tenantsResult.rows.length,
+      });
+    } catch (error: any) {
+      logError("Error fetching sync management data", error, {
+        userId: req.userId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to fetch sync management data" });
+    }
+  }
+);
+
+/**
+ * PUT /api/admin/sync-management/:connectionId
+ * Update sync settings for a connection (enable/disable, change frequency)
+ */
+router.put(
+  "/sync-management/:connectionId",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const { tenant_id, sync_enabled, sync_frequency } = req.body;
+
+      if (!tenant_id) {
+        return res.status(400).json({ error: "tenant_id is required" });
+      }
+
+      // Validate sync_frequency if provided
+      const validFrequencies = ["realtime", "hourly", "daily", "weekly"];
+      if (sync_frequency && !validFrequencies.includes(sync_frequency)) {
+        return res.status(400).json({
+          error: `Invalid sync_frequency. Must be one of: ${validFrequencies.join(", ")}`,
+        });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenant_id);
+
+      // Build update query dynamically
+      const updates: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      if (typeof sync_enabled === "boolean") {
+        updates.push(`sync_enabled = $${paramIndex++}`);
+        values.push(sync_enabled);
+      }
+
+      if (sync_frequency) {
+        updates.push(`sync_frequency = $${paramIndex++}`);
+        values.push(sync_frequency);
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      updates.push("updated_at = NOW()");
+      values.push(connectionId);
+
+      const result = await tenantPool.query(
+        `UPDATE public.los_connections 
+         SET ${updates.join(", ")} 
+         WHERE id = $${paramIndex} 
+         RETURNING id, name, sync_enabled, sync_frequency, last_synced_at, last_sync_status`,
+        values
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      // Audit log
+      auditLog({
+        userId: req.userId as string,
+        action: "sync_settings_updated",
+        resource: "los_connection",
+        resourceId: connectionId,
+        metadata: {
+          tenant_id,
+          sync_enabled,
+          sync_frequency,
+        },
+      }).catch(() => {});
+
+      logInfo("Sync settings updated", {
+        userId: req.userId,
+        connectionId,
+        tenant_id,
+        sync_enabled,
+        sync_frequency,
+      });
+
+      return res.json({ connection: result.rows[0] });
+    } catch (error: any) {
+      logError("Error updating sync settings", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res
+        .status(500)
+        .json({ error: "Failed to update sync settings" });
+    }
+  }
+);
+
+/**
+ * POST /api/admin/sync-management/:connectionId/trigger
+ * Manually trigger a sync for a specific connection from the platform admin view
+ */
+router.post(
+  "/sync-management/:connectionId/trigger",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const { tenant_id } = req.body;
+
+      if (!tenant_id) {
+        return res.status(400).json({ error: "tenant_id is required" });
+      }
+
+      const tenantId = tenant_id as string;
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      // Get full connection details (need sync state for incremental sync)
+      const connResult = await tenantPool.query(
+        `SELECT id, los_type, connection_method, last_synced_at, last_loan_modified_at,
+                encompass_selected_folders
+         FROM public.los_connections WHERE id = $1`,
+        [connectionId]
+      );
+
+      if (connResult.rows.length === 0) {
+        return res.status(404).json({ error: "Connection not found" });
+      }
+
+      const conn = connResult.rows[0];
+
+      // Trigger sync based on type (same logic as los.ts sync route)
+      if (conn.connection_method === "api" && conn.los_type === "encompass") {
+        const { EncompassEtlService } = await import(
+          "../services/etl/encompassEtlService.js"
+        );
+        const etlService = new EncompassEtlService(tenantPool);
+
+        // Determine modifiedFrom for incremental sync (same logic as manual sync in los.ts)
+        let modifiedFrom: Date | undefined;
+        const lastLoanModifiedAt = conn.last_loan_modified_at;
+        const lastSyncedAt = conn.last_synced_at;
+
+        // Check if there are existing loans
+        let loansCount = 0;
+        try {
+          const countResult = await tenantPool.query(
+            "SELECT COUNT(*) as count FROM public.loans"
+          );
+          loansCount = parseInt(countResult.rows[0]?.count || "0", 10);
+        } catch {
+          // loans table may not exist
+        }
+
+        if (lastLoanModifiedAt && loansCount > 0) {
+          // Best case: use last_loan_modified_at from a previous successful sync
+          modifiedFrom = new Date(lastLoanModifiedAt);
+        } else if (loansCount > 0) {
+          // Fallback: query MAX(last_modified_date) directly from loans table.
+          // This handles the case where a previous sync was interrupted before
+          // last_loan_modified_at could be written, but loans were already loaded.
+          try {
+            const maxResult = await tenantPool.query(
+              `SELECT MAX(last_modified_date) as max_modified FROM public.loans WHERE last_modified_date IS NOT NULL`
+            );
+            if (maxResult.rows[0]?.max_modified) {
+              modifiedFrom = new Date(maxResult.rows[0].max_modified);
+            }
+          } catch {
+            // will do full sync
+          }
+        }
+        // If no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
+
+        // Set loanStartDate to 36 months ago (matching Qlik's vLoanStartDate)
+        const threeYearsAgo = new Date();
+        threeYearsAgo.setMonth(threeYearsAgo.getMonth() - 36);
+        threeYearsAgo.setDate(1);
+        threeYearsAgo.setHours(0, 0, 0, 0);
+
+        // Parse selected folders
+        let selectedFolders: string[] = [];
+        if (conn.encompass_selected_folders) {
+          try {
+            selectedFolders = typeof conn.encompass_selected_folders === "string"
+              ? JSON.parse(conn.encompass_selected_folders)
+              : conn.encompass_selected_folders;
+          } catch {
+            selectedFolders = [];
+          }
+        }
+
+        logInfo("Admin trigger sync", {
+          connectionId,
+          tenantId,
+          modifiedFrom: modifiedFrom?.toISOString() || "full sync",
+          loansCount,
+          folders: selectedFolders.length,
+        });
+
+        // Run sync asynchronously
+        etlService
+          .syncLoans(tenantId, connectionId, {
+            fullSync: false,
+            modifiedFrom,
+            loanStartDate: threeYearsAgo,
+            loanStartDateField: "Fields.Log.MS.Date.Started",
+            folderNames: selectedFolders.length > 0 ? selectedFolders : undefined,
+          })
+          .catch((error) => {
+            logError("Background sync error (admin trigger)", error, {
+              userId: req.userId,
+              connectionId,
+              tenant_id,
+            });
+          });
+
+        return res.json({
+          success: true,
+          message: modifiedFrom
+            ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
+            : "Full sync started (no previous sync data)",
+        });
+      } else if (conn.connection_method === "api") {
+        const { syncLoansFromAPI } = await import(
+          "../services/losApiService.js"
+        );
+        syncLoansFromAPI(connectionId).catch((error) => {
+          logError("Background API sync error (admin trigger)", error, {
+            userId: req.userId,
+            connectionId,
+          });
+        });
+
+        return res.json({
+          success: true,
+          message: "API sync started",
+        });
+      } else {
+        return res.status(400).json({
+          error: "Manual trigger not supported for this connection method",
+        });
+      }
+    } catch (error: any) {
+      logError("Error triggering sync", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res.status(500).json({ error: "Failed to trigger sync" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/sync-management/:connectionId/history
+ * Get sync history for a specific connection
+ */
+router.get(
+  "/sync-management/:connectionId/history",
+  authenticateToken,
+  requireRole("super_admin", "platform_admin"),
+  async (req: AuthRequest, res) => {
+    try {
+      const connectionId = req.params.connectionId as string;
+      const tenantId = req.query.tenant_id as string;
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+
+      if (!tenantId) {
+        return res.status(400).json({ error: "tenant_id query parameter is required" });
+      }
+
+      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+
+      const result = await tenantPool.query(
+        `SELECT id, los_connection_id, sync_type, status,
+                loans_added, loans_updated, loans_failed,
+                total_loans_after, modified_from, duration_ms,
+                error_message, started_at, completed_at
+         FROM public.los_sync_history
+         WHERE los_connection_id = $1
+         ORDER BY started_at DESC
+         LIMIT $2`,
+        [connectionId, limit]
+      );
+
+      return res.json({ history: result.rows });
+    } catch (error: any) {
+      // Table may not exist yet for older tenants
+      if (error.code === "42P01") {
+        return res.json({ history: [] });
+      }
+      logError("Error fetching sync history", error, {
+        userId: req.userId,
+        connectionId: req.params.connectionId,
+      });
+      return res.status(500).json({ error: "Failed to fetch sync history" });
+    }
+  }
 );
 
 // Mount SSO configuration routes

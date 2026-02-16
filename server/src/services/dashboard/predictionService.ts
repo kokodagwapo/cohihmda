@@ -72,6 +72,7 @@ export interface PredictionResponse {
     predictedWithdraw: number;
     predictedDeny: number;
     predictedOriginate: number;
+    likelyCloseLateCount?: number;
   };
   metadata: {
     model: string;
@@ -709,7 +710,7 @@ async function callAIModel(
  * compatibility during migration but should be empty.
  */
 export function prepareLoanData(loans: any[]): any[] {
-  return loans.map(loan => {
+  return loans.map((loan, idx) => {
     // Legacy raw_data support - will be empty after migration
     // Kept for backward compatibility during transition
     const rawData = loan.raw_data 
@@ -741,19 +742,59 @@ export function prepareLoanData(loans: any[]): any[] {
 
     const applicationDate = parseDate(loan.application_date || rawData.application_date);
     const lockDate = parseDate(loan.lock_date || rawData.lock_date);
+    const lockExpirationDate = parseDate(loan.lock_expiration_date || rawData.lock_expiration_date);
     const closingDate = parseDate(loan.closing_date || rawData.closing_date);
+    const estimatedClosingDate = parseDate(loan.estimated_closing_date || rawData.estimated_closing_date);
     const fundDate = parseDate(loan.fund_date || rawData.fund_date || rawData.funding_date || rawData['Funding Date']);
+    const uwDeniedDate = parseDate(loan.uw_denied_date || rawData.uw_denied_date);
+    const uwSuspendedDate = parseDate(loan.uw_suspended_date || rawData.uw_suspended_date);
+    const lastModifiedDate = parseDate(loan.last_modified_date || rawData.last_modified_date);
+    // Milestone dates for pipeline stage determination (close-late prediction)
+    const ctcDate = parseDate(loan.ctc_date || rawData.ctc_date);
+    const approvalDate = parseDate(loan.approval_date || loan.uw_final_approval_date || rawData.approval_date || rawData.uw_final_approval_date);
+    const condApprovalDate = parseDate(loan.conditional_approval_date || rawData.conditional_approval_date);
+    const submittedToProcessingDate = parseDate(loan.submitted_to_processing_date || rawData.submitted_to_processing_date);
+    const submittedToUwDate = parseDate(loan.submitted_to_underwriting_date || rawData.submitted_to_underwriting_date);
+
+    // Debug: log first raw row and prepared output for loan_purpose, channel, lock_date
+    const preparedLoanPurpose = String(loan.loan_purpose || rawData.loan_purpose || rawData['Fields.19'] || '');
+    const preparedChannel = String(
+      loan.channel ||
+      rawData.channel ||
+      rawData['Channel'] ||
+      rawData['Fields.2626'] ||
+      ''
+    );
+    if (idx === 0) {
+      const rawKeys = loan && typeof loan === 'object' ? Object.keys(loan).filter(k => /loan_purpose|channel|lock_date|loan_id/i.test(k)) : [];
+      logInfo('[PredictDebug] prepareLoanData first row', {
+        rawRowKeysSample: rawKeys,
+        'rawRow.loan_id': loan?.loan_id,
+        typeof_loan_id: typeof loan?.loan_id,
+        'rawRow.loan_purpose': loan?.loan_purpose,
+        'rawRow.channel': loan?.channel,
+        'rawRow.lock_date': loan?.lock_date,
+        preparedLockDate: lockDate != null ? (lockDate instanceof Date ? lockDate.toISOString() : String(lockDate)) : null,
+        prepared_loanPurpose: preparedLoanPurpose || '(empty)',
+        prepared_channel: preparedChannel || '(empty)',
+      });
+    }
 
     return {
       loanId: String(loan.loan_id || loan.id || rawData.GUID || rawData.guid || ''),
-      loanNumber: String(loan.loan_number || rawData.loan_number || loan.loan_id || ''),
+      loanNumber: String(loan.loan_number ?? rawData.loan_number ?? '').trim() || null,
       loanAmount: parseNumeric(loan.loan_amount || rawData.loan_amount) || 0,
       loanType: String(loan.loan_type || rawData.loan_type || 'Unknown'),
-      status: String(loan.status || rawData.status || 'Active'),
+      status: String(loan.status || loan.current_loan_status || rawData.status || rawData.current_loan_status || 'Active'),
       applicationDate,
       lockDate,
+      lockExpirationDate,
       closingDate,
+      estimatedClosingDate,
       fundDate,
+      uwDeniedDate,
+      uwSuspendedDate,
+      lastModifiedDate,
       interestRate: (() => {
         // Try all possible interest rate field name variations
         const interestRateValue = 
@@ -802,36 +843,24 @@ export function prepareLoanData(loans: any[]): any[] {
         rawData['Fields.353']                     // Encompass: LTV Ratio
       ),
       dti: (() => {
-        // Try all possible DTI field name variations including Encompass field IDs
-        const dtiValue = 
-          loan.dti || 
-          loan.be_dti_ratio ||                    // Tenant schema column
-          metadata.dti ||
-          metadata.dti_ratio ||
-          rawData.dti || 
-          rawData.dti_ratio || 
-          rawData['BE DTI Ratio'] || 
-          rawData['be dti ratio'] || // Case-insensitive
-          rawData['DTI Ratio'] ||
-          rawData['dti ratio'] || // Case-insensitive
-          rawData['Debt-to-Income Ratio'] ||
-          rawData['Fields.742'] ||                // Encompass: BE DTI Ratio
-          // Try case-insensitive search for any field containing "dti"
-          (() => {
-            if (rawData && typeof rawData === 'object') {
-              for (const key in rawData) {
-                if (key.toLowerCase().includes('dti') || key.toLowerCase().includes('debt')) {
-                  const val = rawData[key];
-                  if (val !== null && val !== undefined && val !== '') {
-                    return val;
-                  }
-                }
-              }
+        // Tenant DB uses structured column be_dti_ratio (see 002_loans_table.sql).
+        // raw_data may be removed (migration 009_remove_raw_data.sql).
+        if (loan.be_dti_ratio != null) return parseNumeric(loan.be_dti_ratio);
+        const fromDirect = loan.dti || metadata.dti || metadata.dti_ratio;
+        if (fromDirect) return parseNumeric(fromDirect);
+        if (rawData && typeof rawData === 'object') {
+          const fromRaw = rawData.dti ?? rawData.dti_ratio ?? rawData['BE DTI Ratio'] ?? rawData['be dti ratio'] ?? rawData['DTI Ratio'] ?? rawData['dti ratio'] ?? rawData['Debt-to-Income Ratio'] ?? rawData['Fields.742'];
+          if (fromRaw != null) return parseNumeric(fromRaw);
+          for (const key in rawData) {
+            if (key.toLowerCase().includes('dti') || key.toLowerCase().includes('debt')) {
+              const val = rawData[key];
+              if (val !== null && val !== undefined && val !== '') return parseNumeric(val);
             }
-            return null;
-          })();
-        return parseNumeric(dtiValue);
+          }
+        }
+        return null;
       })(),
+      be_dti_ratio: loan.be_dti_ratio != null ? loan.be_dti_ratio : undefined,
       // CLTV - check Encompass field IDs
       cltv: parseNumeric(
         loan.cltv ||
@@ -840,7 +869,8 @@ export function prepareLoanData(loans: any[]): any[] {
         rawData.combined_ltv ||
         rawData['Fields.976']                     // Encompass: CLTV (if available)
       ), // Combined Loan-to-Value
-      loanPurpose: String(loan.loan_purpose || rawData.loan_purpose || rawData['Fields.19'] || ''),
+      loanPurpose: preparedLoanPurpose,
+      loan_purpose: preparedLoanPurpose,
       branch: String(loan.branch || rawData.branch || ''),
       cycleTimeDays: parseNumeric(loan.cycle_time_days || rawData.cycle_time_days),
       // Person names for pullthrough calculations - check schema columns, aliases, and Encompass field IDs
@@ -888,13 +918,7 @@ export function prepareLoanData(loans: any[]): any[] {
         rawData['Fields.1811'] ||                     // Encompass: Occupancy Type (if available)
         ''
       ),
-      channel: String(
-        loan.channel ||
-        rawData.channel || 
-        rawData['Channel'] ||
-        rawData['Fields.2626'] ||                     // Encompass: Channel (if available)
-        ''
-      ),
+      channel: preparedChannel,
       // Commission fields (if available in data)
       commissionAssumption: parseNumeric(rawData.commission_assumption || rawData.commissionAssumption),
       commissionAtRisk: parseNumeric(rawData.commission_at_risk || rawData.commissionAtRisk),
@@ -935,7 +959,13 @@ export function prepareLoanData(loans: any[]): any[] {
       // Calculate days since application
       daysSinceApplication: applicationDate 
         ? Math.floor((new Date().getTime() - applicationDate.getTime()) / (1000 * 60 * 60 * 24))
-        : null
+        : null,
+      // Milestone dates for pipeline stage / close-late prediction
+      ctcDate,
+      approvalDate,
+      condApprovalDate,
+      submittedToProcessingDate,
+      submittedToUwDate
     };
   });
 }
@@ -948,8 +978,9 @@ export function prepareLoanData(loans: any[]): any[] {
 
 /**
  * Calculate market change delta for a loan
- * Based on MARKET_DELTA_CALCULATION.md
- * Now uses database lookup via marketRateService
+ * Lock rate = market rate at lock date (or application date if no lock date)
+ * Close rate = market rate at close/status date (or most recent for active loans)
+ * Delta = lockMarketRate - closeMarketRate (positive = rates fell = withdrawal risk)
  */
 async function calculateMarketDelta(loan: any): Promise<{
   marketChangeDelta: number | null;
@@ -962,18 +993,6 @@ async function calculateMarketDelta(loan: any): Promise<{
   // Determine lock date (priority: lock_date > application_date)
   const lockDate = loan.lockDate || loan.lock_date || loan.applicationDate || loan.application_date;
   if (!lockDate) {
-    // Special case: If interest rate exists but no dates, use rate directly
-    if (loan.interestRate || loan.interest_rate) {
-      const rate = loan.interestRate || loan.interest_rate;
-      return {
-        marketChangeDelta: rate,
-        marketChangeOverall: rate,
-        lockMarketRate: null,
-        closeMarketRate: null,
-        maxChangeRate: null,
-        maxChangeDate: null
-      };
-    }
     return {
       marketChangeDelta: null,
       marketChangeOverall: null,
@@ -1099,28 +1118,18 @@ async function calculateMarketDelta(loan: any): Promise<{
     const lockDateStr = lockDateObj.toISOString().split('T')[0];
     const closeDateStr = closeDateObj.toISOString().split('T')[0];
 
-    // Get lock rate: Use loan's interest rate if available, otherwise use market rate from application date
-    let lockMarketRate: number | null = null;
-    const loanInterestRate = loan.interestRate || loan.interest_rate;
-    
-    if (loanInterestRate !== null && loanInterestRate !== undefined && !isNaN(Number(loanInterestRate))) {
-      // Use the loan's actual interest rate as the lock rate
-      const parsedRate = typeof loanInterestRate === 'number' ? loanInterestRate : parseFloat(String(loanInterestRate));
-      if (!isNaN(parsedRate) && parsedRate > 0 && parsedRate < 50) { // Sanity check: rates should be between 0-50%
-        lockMarketRate = parsedRate;
-      }
-    }
-    
-    // If no interest rate found, use market rate from application date (or lock date if available)
+    // Get lock rate: Market rate at lock date (or application date if no lock date - lockDate already falls back to application_date)
+    let lockMarketRate: number | null = await getMarketRateForDate(lockDateStr);
     if (lockMarketRate === null) {
-      // Use application date for market rate lookup (since that's when the loan started)
-      const applicationDate = loan.applicationDate || loan.application_date;
-      const dateForMarketRate = applicationDate 
-        ? new Date(applicationDate).toISOString().split('T')[0]
-        : lockDateStr; // Fallback to lock date if no application date
-      lockMarketRate = await getMarketRateForDate(dateForMarketRate);
-      
-      // Use market rate as fallback (no logging to reduce terminal noise)
+      // If not found for exact date, try going back up to 7 days to find a rate
+      const targetDate = new Date(lockDateStr);
+      for (let daysBack = 1; daysBack <= 7; daysBack++) {
+        const checkDate = new Date(targetDate);
+        checkDate.setDate(targetDate.getDate() - daysBack);
+        const checkDateStr = checkDate.toISOString().split('T')[0];
+        lockMarketRate = await getMarketRateForDate(checkDateStr);
+        if (lockMarketRate !== null) break;
+      }
     }
 
     // Get close rate:
@@ -1923,7 +1932,7 @@ export async function bucketLoanData(
 ): Promise<any[]> {
   const logContext = options?.logContext || 'loans';
   // Step 1: Calculate pullthrough rates for all roles (needs all loans)
-  // Use exact column names from tenant schema (tenantDatabaseSchema.ts)
+  // Use exact column names from tenant schema (see migrations/tenant/)
   const loPullthrough = calculatePullthroughForRole(allLoans, ['loan_officer']);
   
   // Debug logging for pullthrough calculation
@@ -1941,7 +1950,8 @@ export async function bucketLoanData(
   // Smaller batches ensure connections are released between batches
   const BUCKETING_BATCH_SIZE = 200; // Process 200 loans at a time (reduced from 500 to prevent pool exhaustion)
   const bucketedLoans: any[] = [];
-  
+  let missingFieldsLogCount = 0;
+
   for (let i = 0; i < loans.length; i += BUCKETING_BATCH_SIZE) {
     const batch = loans.slice(i, i + BUCKETING_BATCH_SIZE);
     const batchResults = await Promise.all(batch.map(async (loan) => {
@@ -1995,22 +2005,18 @@ export async function bucketLoanData(
 
     const dti = loan.dti;
     
-    // Debug logging for DTI extraction
+    // Debug logging when DTI is missing. Tenant DB uses structured column be_dti_ratio; raw_data may be removed (migration 009).
     if (dti === null || dti === undefined) {
-      const rawData = typeof loan.raw_data === 'string' 
-        ? JSON.parse(loan.raw_data) 
+      const rawData = typeof loan.raw_data === 'string'
+        ? (() => { try { return JSON.parse(loan.raw_data); } catch { return {}; } })()
         : (loan.raw_data || {});
+      const rawKeys = rawData && typeof rawData === 'object' ? Object.keys(rawData) : [];
       logInfo('DTI is null/undefined for loan', {
         loanId: loan.loanId,
-        hasRawData: !!rawData,
-        rawDataKeys: rawData ? Object.keys(rawData) : [],
-        metadataDti: loan.metadata?.dti,
-        metadataDtiRatio: loan.metadata?.dti_ratio,
-        rawDataDti: rawData.dti,
-        rawDataDtiRatio: rawData.dti_ratio,
-        rawDataBeDtiRatio: rawData['BE DTI Ratio'],
-        // Check all possible DTI field name variations
-        allDtiFields: rawData ? Object.keys(rawData).filter(k => k.toLowerCase().includes('dti')) : []
+        be_dti_ratio: loan.be_dti_ratio,
+        note: 'Tenant schema uses loans.be_dti_ratio; raw_data may be removed (migration 009).',
+        rawDataKeys: rawKeys.length > 0 ? rawKeys.slice(0, 15) : [],
+        allDtiFields: rawKeys.length > 0 ? rawKeys.filter((k: string) => k.toLowerCase().includes('dti')) : []
       });
     }
     
@@ -2092,18 +2098,72 @@ export async function bucketLoanData(
 
     // LO Pullthrough: High pullthrough = less fallout prone (1), Low pullthrough = more fallout prone (6)
     const loNameLower = loName ? loName.toLowerCase().trim() : null;
-    const loPullthroughPct = loNameLower ? loPullthrough[loNameLower] : null;
+    // Try pullthrough map first (calculated from historical loans), fallback to loan's existing loPullthroughPercentage if available
+    // Also check snake_case variant (lo_pullthrough_percentage) for database compatibility
+    // IMPORTANT: Check multiple possible field names and formats to ensure we find the percentage
+    // Try multiple name variations to match the pullthrough map (which uses normalized names)
+    let loPullthroughPct = null;
+    if (loNameLower) {
+      loPullthroughPct = loPullthrough[loNameLower] ?? null;
+      // If not found, try raw loan_officer field (in case prepareLoanData extracted it differently)
+      if (!loPullthroughPct && loan.loan_officer) {
+        const rawLoNameLower = String(loan.loan_officer).toLowerCase().trim();
+        loPullthroughPct = loPullthrough[rawLoNameLower] ?? null;
+      }
+      // Also try loanOfficerName directly (in case it's set differently)
+      if (!loPullthroughPct && loan.loanOfficerName && loan.loanOfficerName !== loName) {
+        const altLoNameLower = String(loan.loanOfficerName).toLowerCase().trim();
+        loPullthroughPct = loPullthrough[altLoNameLower] ?? null;
+      }
+    }
+    // Normalize percentage value: handle both number and string types, ensure it's a valid number
+    // Check multiple possible field name variations (camelCase, snake_case, and any nested paths)
+    const loPullthroughPctRaw = loPullthroughPct ?? 
+                                loan.loPullthroughPercentage ?? 
+                                (loan as any).lo_pullthrough_percentage ??
+                                (loan as any).loPullthroughPct ??
+                                (loan as any).lo_pullthrough_pct ??
+                                null;
+    // Convert to number if it's a string, handle null/undefined
+    const loPullthroughPctFinal = loPullthroughPctRaw != null 
+      ? (typeof loPullthroughPctRaw === 'string' ? parseFloat(loPullthroughPctRaw) : Number(loPullthroughPctRaw))
+      : null;
+    // Ensure it's a valid number (not NaN)
+    const loPullthroughPctValid = (loPullthroughPctFinal != null && !isNaN(loPullthroughPctFinal)) ? loPullthroughPctFinal : null;
     
-    // Debug logging for LO Pullthrough (reduced verbosity - only log in debug mode)
-    // This is expected for loans where the LO doesn't have historical data, so we don't spam logs
+    // Debug logging: Log when we have a percentage but bucket is still null (for troubleshooting)
+    if (loPullthroughPctValid != null && loPullthroughPctValid > 0 && loPullthroughPctValid <= 100) {
+      const testBucket = bucketNumeric(loPullthroughPctValid, [
+        { min: 85, max: null, bucket: 1 },
+        { min: 78, max: 84.999, bucket: 2 },
+        { min: 70, max: 77.999, bucket: 3 },
+        { min: 60, max: 69.999, bucket: 4 },
+        { min: 50, max: 59.999, bucket: 5 },
+        { min: null, max: 49.999, bucket: 6 }
+      ]);
+      if (testBucket == null) {
+        logInfo('[PredictDebug] LO Pullthrough bucket calculation returned null despite valid percentage', {
+          loanId: loan.loanId,
+          loName: loName,
+          loPullthroughPctValid,
+          loPullthroughPctRaw,
+          loPullthroughPct,
+          loanHasLoPullthroughPercentage: !!loan.loPullthroughPercentage,
+          loanHasLoPullthroughPercentageSnake: !!(loan as any).lo_pullthrough_percentage
+        });
+      }
+    }
     
-    const loPullthroughBucket = bucketNumeric(loPullthroughPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+    // Calculate bucket from final percentage value (includes fallback)
+    // IMPORTANT: Always calculate bucket if percentage exists, even if it's from fallback
+    // Note: Ranges must cover all possible values without gaps. Using 84.999 to ensure 84.78 matches bucket 2, etc.
+    const loPullthroughBucket = bucketNumeric(loPullthroughPctValid, [
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     // Market Change Delta: Negative (favorable) = less fallout prone (1), Positive (unfavorable) = more fallout prone (6)
@@ -2111,11 +2171,11 @@ export async function bucketLoanData(
     // Positive delta = rates went DOWN since lock (better rates available, withdrawal risk)
     const marketDeltaBucket = bucketNumeric(marketDelta.marketChangeDelta, [
       { min: null, max: -0.3, bucket: 1 }, // Very favorable (rates up ≥0.3%, less fallout prone)
-      { min: -0.29, max: -0.1, bucket: 2 }, // Favorable (rates up 0.1-0.3%)
-      { min: -0.09, max: 0.05, bucket: 3 }, // Neutral (minimal change)
-      { min: 0.06, max: 0.2, bucket: 4 }, // Slightly unfavorable (rates down 0.06-0.2%)
-      { min: 0.21, max: 0.5, bucket: 5 }, // Unfavorable (rates down 0.21-0.5%)
-      { min: 0.51, max: null, bucket: 6 } // Very unfavorable (rates down >0.5%, more fallout prone)
+      { min: -0.299, max: -0.1, bucket: 2 }, // Favorable (rates up 0.1-0.3%) - Fixed: -0.299 to cover gap
+      { min: -0.099, max: 0.05, bucket: 3 }, // Neutral (minimal change) - Fixed: -0.099 to cover gap
+      { min: 0.051, max: 0.2, bucket: 4 }, // Slightly unfavorable (rates down 0.06-0.2%) - Fixed: 0.051 to cover gap
+      { min: 0.201, max: 0.5, bucket: 5 }, // Unfavorable (rates down 0.21-0.5%) - Fixed: 0.201 to cover gap
+      { min: 0.501, max: null, bucket: 6 } // Very unfavorable (rates down >0.5%, more fallout prone) - Fixed: 0.501 to cover gap
     ]);
 
     // Step 5: Calculate composite signals
@@ -2137,142 +2197,106 @@ export async function bucketLoanData(
     // High pullthrough = less fallout prone (1), Low pullthrough = more fallout prone (6)
     const uwPct = uwName ? uwPullthrough[uwName] : null;
     const uwPullthroughBucket = bucketNumeric(uwPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     const closerPct = closerName ? closerPullthrough[closerName] : null;
     const closerPullthroughBucket = bucketNumeric(closerPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
     const processorPct = processorName ? processorPullthrough[processorName] : null;
     const processorPullthroughBucket = bucketNumeric(processorPct, [
-      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone)
-      { min: 78, max: 84, bucket: 2 }, // Good pullthrough
-      { min: 70, max: 77, bucket: 3 }, // Average pullthrough
-      { min: 60, max: 69, bucket: 4 }, // Below average
-      { min: 50, max: 59, bucket: 5 }, // Poor pullthrough
-      { min: null, max: 49, bucket: 6 } // Very poor pullthrough (more fallout prone)
+      { min: 85, max: null, bucket: 1 }, // Excellent pullthrough (less fallout prone) - 85%+
+      { min: 78, max: 84.999, bucket: 2 }, // Good pullthrough - 78-84.999%
+      { min: 70, max: 77.999, bucket: 3 }, // Average pullthrough - 70-77.999%
+      { min: 60, max: 69.999, bucket: 4 }, // Below average - 60-69.999%
+      { min: 50, max: 59.999, bucket: 5 }, // Poor pullthrough - 50-59.999%
+      { min: null, max: 49.999, bucket: 6 } // Very poor pullthrough (more fallout prone) - <50%
     ]);
 
-    // Time in Motion Signal
-    // Calculate Active Days: For historical loans (Closed/Funded), use Closing/Funding Date - Application Date
-    // For active loans, use Today's Date - Application Date
-    const isActiveLoanForTim = !loan.closingDate && !loan.fundDate && loan.status !== 'Closed' && loan.status !== 'Originated' && loan.status !== 'Funded';
-    const endDateForTim = isActiveLoanForTim 
-      ? new Date() 
-      : (loan.closingDate || loan.fundDate || loan.closing_date || loan.fund_date || null);
+    // Time in Motion Signal - Active Days only (no milestones)
+    // Non-active: has closing date, funding date, or status closed/originated/funded/withdrawn/denied
+    //   -> Use first available of: funding_date, closing_date, uw_denied_date, uw_suspended_date, last_modified_date
+    // Active: use today's date
+    // Buckets: 1-10 days=1, 11-20=2, 21-30=3, 31-45=4, 46-60=5, >60=6
+    const statusStr = String(loan.status || '').toLowerCase().trim();
+    const isNonActive = !!(
+      loan.closingDate || loan.closing_date ||
+      loan.fundDate || loan.fund_date ||
+      ['closed', 'originated', 'funded', 'withdrawn', 'denied'].includes(statusStr)
+    );
+    const endDateForTim = isNonActive
+      ? (() => {
+          const dates = [
+            loan.fundDate || loan.fund_date,
+            loan.closingDate || loan.closing_date,
+            loan.uwDeniedDate || (loan as any).uw_denied_date,
+            loan.uwSuspendedDate || (loan as any).uw_suspended_date,
+            loan.lastModifiedDate || (loan as any).last_modified_date,
+          ].filter(Boolean);
+          const first = dates.find(d => d != null);
+          return first ? new Date(first) : null;
+        })()
+      : new Date();
     const activeDays = (loan.applicationDate && endDateForTim)
       ? Math.floor((new Date(endDateForTim).getTime() - new Date(loan.applicationDate).getTime()) / (1000 * 60 * 60 * 24))
       : null;
-
-    // Map milestone names to numbers (1-18) based on pipeline order
-    const milestoneMap: Record<string, number> = {
-      'Started': 1,
-      'PreApproval': 2,
-      'Pre-Approval': 2,
-      'Disclosure Prep': 3,
-      'DisclosurePrep': 3,
-      'Signed': 4,
-      'Scrubbed': 5,
-      'Processing': 6,
-      'Submittal': 7,
-      'Cond. Approval': 8,
-      'Cond Approval': 8,
-      'Conditional Approval': 8,
-      'Resubmittal': 9,
-      'Resubmit': 9,
-      'Approval': 10,
-      'Ready for Docs': 11,
-      'ReadyForDocs': 11,
-      'Doc Preparation': 12,
-      'DocPreparation': 12,
-      'Closer Assignment': 13,
-      'CloserAssignment': 13,
-      'Docs Out': 14,
-      'DocsOut': 14,
-      'Appt Set': 15,
-      'ApptSet': 15,
-      'Appt Reset': 16,
-      'ApptReset': 16,
-      'Docs Signing': 17,
-      'Doc Signing': 17,
-      'DocsSigning': 17,
-      'DocSigning': 17,
-      'Funding': 18
-    };
-
-    // Get milestone number from last completed milestone
-    const lastCompletedMilestone = loan.lastCompletedMilestone || '';
-    const milestoneNumber = milestoneMap[lastCompletedMilestone] || 
-                           milestoneMap[lastCompletedMilestone.trim()] ||
-                           (() => {
-                             // Try case-insensitive match
-                             const milestoneLower = lastCompletedMilestone.toLowerCase().trim();
-                             for (const [key, value] of Object.entries(milestoneMap)) {
-                               if (key.toLowerCase() === milestoneLower) {
-                                 return value;
-                               }
-                             }
-                             return null;
-                           })();
-
-    // Calculate Time in Motion bucket based on milestone and active days
-    // Bucket 1 = low risk, Bucket 6 = high risk
-    let timeInMotionBucket: number | null = null;
-    
-    if (milestoneNumber !== null && activeDays !== null) {
-      // Bucket 1: Milestones 14, 17, 18 (Docs Out, Docs Signing, Funding)
-      if ([14, 17, 18].includes(milestoneNumber)) {
-        timeInMotionBucket = 1;
-      }
-      // Bucket 2: Milestones 10, 11 AND ActiveDays <= 7
-      else if ([10, 11].includes(milestoneNumber) && activeDays <= 7) {
-        timeInMotionBucket = 2;
-      }
-      // Bucket 3: Milestones 8, 9 AND ActiveDays <= 10
-      else if ([8, 9].includes(milestoneNumber) && activeDays <= 10) {
-        timeInMotionBucket = 3;
-      }
-      // Bucket 4: Milestones 5, 6, 7 AND ActiveDays > 10
-      else if ([5, 6, 7].includes(milestoneNumber) && activeDays > 10) {
-        timeInMotionBucket = 4;
-      }
-      // Bucket 5: Milestones 1, 2, 3, 4 AND ActiveDays > 5
-      else if ([1, 2, 3, 4].includes(milestoneNumber) && activeDays > 5) {
-        timeInMotionBucket = 5;
-      }
-      // Bucket 6: Milestones 1, 2, 3, 4, 5, 6, 7, 8, 9 AND ActiveDays > 15
-      else if ([1, 2, 3, 4, 5, 6, 7, 8, 9].includes(milestoneNumber) && activeDays > 15) {
-        timeInMotionBucket = 6;
-      }
-      // Default: If milestone is known but doesn't match any bucket, assign based on active days
-      else {
-        if (activeDays <= 7) timeInMotionBucket = 2;
-        else if (activeDays <= 10) timeInMotionBucket = 3;
-        else if (activeDays <= 15) timeInMotionBucket = 4;
-        else timeInMotionBucket = 5;
-      }
-    } else if (activeDays !== null) {
-      // If we have active days but no milestone, use active days as fallback
-      if (activeDays <= 7) timeInMotionBucket = 2;
-      else if (activeDays <= 10) timeInMotionBucket = 3;
-      else if (activeDays <= 15) timeInMotionBucket = 4;
-      else if (activeDays <= 30) timeInMotionBucket = 5;
-      else timeInMotionBucket = 6;
-    }
-
+    const timeInMotionBucket = bucketNumeric(activeDays, [
+      { min: null, max: 10, bucket: 1 },  // 1-10 days
+      { min: 11, max: 20, bucket: 2 },   // 11-20 days
+      { min: 21, max: 30, bucket: 3 },   // 21-30 days
+      { min: 31, max: 45, bucket: 4 },   // 31-45 days
+      { min: 46, max: 74, bucket: 5 },   // 46-74 days
+      { min: 75, max: null, bucket: 6 }, // 75+ days
+    ]);
     const timeInMotionSignal = timeInMotionBucket;
+
+    // ----- COMMENTED OUT: Previous milestone-based Time in Motion implementation -----
+    // Uncomment to revert to milestone + active days logic
+    /*
+    const isActiveLoanForTim = !loan.closingDate && !loan.fundDate && loan.status !== 'Closed' && loan.status !== 'Originated' && loan.status !== 'Funded';
+    const endDateForTim = isActiveLoanForTim ? new Date() : (loan.closingDate || loan.fundDate || loan.closing_date || loan.fund_date || null);
+    const activeDays = (loan.applicationDate && endDateForTim)
+      ? Math.floor((new Date(endDateForTim).getTime() - new Date(loan.applicationDate).getTime()) / (1000 * 60 * 60 * 24))
+      : null;
+    const milestoneMap: Record<string, number> = {
+      'Started': 1, 'PreApproval': 2, 'Pre-Approval': 2, 'Disclosure Prep': 3, 'DisclosurePrep': 3,
+      'Signed': 4, 'Scrubbed': 5, 'Processing': 6, 'Submittal': 7, 'Cond. Approval': 8, 'Cond Approval': 8,
+      'Conditional Approval': 8, 'Resubmittal': 9, 'Resubmit': 9, 'Approval': 10, 'Ready for Docs': 11,
+      'ReadyForDocs': 11, 'Doc Preparation': 12, 'DocPreparation': 12, 'Closer Assignment': 13,
+      'CloserAssignment': 13, 'Docs Out': 14, 'DocsOut': 14, 'Appt Set': 15, 'ApptSet': 15,
+      'Appt Reset': 16, 'ApptReset': 16, 'Docs Signing': 17, 'Doc Signing': 17, 'DocsSigning': 17,
+      'DocSigning': 17, 'Funding': 18
+    };
+    const lastCompletedMilestone = loan.lastCompletedMilestone || '';
+    const milestoneNumber = milestoneMap[lastCompletedMilestone] || milestoneMap[lastCompletedMilestone.trim()] ||
+      (() => { const m = lastCompletedMilestone.toLowerCase().trim(); for (const [k, v] of Object.entries(milestoneMap)) { if (k.toLowerCase() === m) return v; } return null; })();
+    let timeInMotionBucket: number | null = null;
+    if (milestoneNumber !== null && activeDays !== null) {
+      if ([14, 17, 18].includes(milestoneNumber)) timeInMotionBucket = 1;
+      else if ([10, 11].includes(milestoneNumber) && activeDays <= 7) timeInMotionBucket = 2;
+      else if ([8, 9].includes(milestoneNumber) && activeDays <= 10) timeInMotionBucket = 3;
+      else if ([5, 6, 7].includes(milestoneNumber) && activeDays > 10) timeInMotionBucket = 4;
+      else if ([1, 2, 3, 4].includes(milestoneNumber) && activeDays > 5) timeInMotionBucket = 5;
+      else if ([1, 2, 3, 4, 5, 6, 7, 8, 9].includes(milestoneNumber) && activeDays > 15) timeInMotionBucket = 6;
+      else { if (activeDays <= 7) timeInMotionBucket = 2; else if (activeDays <= 10) timeInMotionBucket = 3; else if (activeDays <= 15) timeInMotionBucket = 4; else timeInMotionBucket = 5; }
+    } else if (activeDays !== null) {
+      if (activeDays <= 7) timeInMotionBucket = 2; else if (activeDays <= 10) timeInMotionBucket = 3;
+      else if (activeDays <= 15) timeInMotionBucket = 4; else if (activeDays <= 30) timeInMotionBucket = 5; else timeInMotionBucket = 6;
+    }
+    const timeInMotionSignal = timeInMotionBucket;
+    */
 
     // MLO AE Fallout Prone Signal (uses LO Pullthrough)
     // High pullthrough = less fallout prone (1), Low pullthrough = more fallout prone (6)
@@ -2303,8 +2327,7 @@ export async function bucketLoanData(
         if (channelBucket && channelBucket >= 3) reasons.push(`Channel: ${loan.channel || 'N/A'} (Bucket ${channelBucket})`);
       } else if (category === 'Time in Motion') {
         if (timeInMotionBucket && timeInMotionBucket >= 4) {
-          const milestoneText = lastCompletedMilestone || 'Unknown milestone';
-          reasons.push(`Milestone: ${milestoneText}, Active ${activeDays || 'N/A'} days (Bucket ${timeInMotionBucket})`);
+          reasons.push(`Active ${activeDays ?? 'N/A'} days (Bucket ${timeInMotionBucket})`);
         }
       } else if (category === 'MLO AE Fallout Prone') {
         if (loPullthroughBucket && loPullthroughBucket >= 4) {
@@ -2331,6 +2354,25 @@ export async function bucketLoanData(
       return reasons.length > 0 ? reasons : ['No significant risk factors'];
     };
 
+    // Debug: log when purpose, channel, or lock_date is missing (up to 5 occurrences)
+    const outPurpose = (loan.loanPurpose ?? (loan as any).loan_purpose ?? '').toString().trim() || null;
+    const outChannel = (loan.channel ?? (loan as any).channel ?? '').toString().trim() || null;
+    const outLockDate = loan.lockDate != null ? (loan.lockDate instanceof Date ? loan.lockDate.toISOString().split('T')[0] : String(loan.lockDate).split('T')[0]) : (loan as any).lock_date ?? null;
+    const anyMissing = !outPurpose || !outChannel || !outLockDate;
+    if (anyMissing && missingFieldsLogCount < 5) {
+      missingFieldsLogCount += 1;
+      logInfo('[PredictDebug] bucketLoanData output missing fields', {
+        occurrence: missingFieldsLogCount,
+        loanId: loan.loanId,
+        prepared_loanPurpose: loan.loanPurpose,
+        prepared_channel: loan.channel,
+        prepared_lockDate: loan.lockDate,
+        out_purpose: outPurpose,
+        out_channel: outChannel,
+        out_lock_date: outLockDate,
+      });
+    }
+
     // Final output structure - use snake_case to match database columns
     // NOTE: loan spread includes prepared data (camelCase from prepareLoanData)
     // We add snake_case aliases for frontend consistency with DB schema
@@ -2341,7 +2383,9 @@ export async function bucketLoanData(
       loan_number: loan.loanNumber,
       loan_amount: loanAmount,
       loan_type: loan.loanType,
-      
+      loan_purpose: (loan.loanPurpose ?? (loan as any).loan_purpose ?? '').toString().trim() || null,
+      channel: (loan.channel ?? (loan as any).channel ?? '').toString().trim() || null,
+
       // Credit metrics (snake_case matching DB)
       fico_score: loan.ficoScore,
       ltv_ratio: loan.ltv,
@@ -2355,15 +2399,21 @@ export async function bucketLoanData(
       market_rate: marketDelta.closeMarketRate,
       
       // Milestone (snake_case)
-      current_milestone: loan.lastCompletedMilestone || lastCompletedMilestone,
+      current_milestone: loan.lastCompletedMilestone || '',
       
       // Commission fields
       commission_at_risk: commissionAtRisk,
       commission_personalization_override: commissionPersonalizationOverride,
       
-      // Dates
+      // Dates (snake_case for API/frontend)
       estimated_closing_date: loan.closingDate || loan.estimatedClosingDate,
-      
+      lock_date: loan.lockDate != null
+        ? (loan.lockDate instanceof Date ? loan.lockDate.toISOString().split('T')[0] : String(loan.lockDate).split('T')[0])
+        : (loan as any).lock_date ?? null,
+      lock_expiration_date: loan.lockExpirationDate != null
+        ? (loan.lockExpirationDate instanceof Date ? loan.lockExpirationDate.toISOString().split('T')[0] : String(loan.lockExpirationDate).split('T')[0])
+        : (loan as any).lock_expiration_date ?? null,
+
       // Individual signal buckets
       ficoScoreSignal: ficoBucket,
       ltvSignal: ltvBucket,
@@ -2379,12 +2429,12 @@ export async function bucketLoanData(
       ]) : null,
       // Lender Credit Amount: Higher credit = less fallout prone (1), Lower/no credit = more fallout prone (6)
       lenderCreditAmountSignal: loan.lenderCreditAmount ? bucketNumeric(loan.lenderCreditAmount, [
-        { min: 5000, max: null, bucket: 1 }, // High lender credit (less fallout prone)
-        { min: 2000, max: 4999, bucket: 2 }, // Moderate lender credit
-        { min: 1000, max: 1999, bucket: 3 }, // Low lender credit
-        { min: 500, max: 999, bucket: 4 }, // Minimal lender credit
-        { min: 1, max: 499, bucket: 5 }, // Very minimal lender credit
-        { min: null, max: 0, bucket: 6 } // No lender credit (more fallout prone)
+        { min: 5000, max: null, bucket: 1 }, // High lender credit (less fallout prone) - $5000+
+        { min: 2000, max: 4999.999, bucket: 2 }, // Moderate lender credit - $2000-4999.999
+        { min: 1000, max: 1999.999, bucket: 3 }, // Low lender credit - $1000-1999.999
+        { min: 500, max: 999.999, bucket: 4 }, // Minimal lender credit - $500-999.999
+        { min: 0.001, max: 499.999, bucket: 5 }, // Very minimal lender credit - $0.001-499.999 (Fixed: 0.001 to cover gap)
+        { min: null, max: 0, bucket: 6 } // No lender credit (more fallout prone) - $0
       ]) : null,
       loanAmountSignal: loanAmountBucket,
       loanTypeSignal: loanTypeBucket,
@@ -2394,8 +2444,8 @@ export async function bucketLoanData(
       timeToApprovalSignal: timeToApprovalBucket,
       timeInMotionSignal: timeInMotionBucket,
       activeDays: activeDays,
-      lastCompletedMilestone: lastCompletedMilestone,
-      milestoneNumber: milestoneNumber,
+      lastCompletedMilestone: loan.lastCompletedMilestone || '',
+      milestoneNumber: null, // No longer used - Time in Motion is active-days only
       loPullthroughSignal: loPullthroughBucket,
       uwPullthroughSignal: uwPullthroughBucket,
       closerPullthroughSignal: closerPullthroughBucket,
@@ -2428,31 +2478,15 @@ export async function bucketLoanData(
       lockMarketRate: marketDelta.lockMarketRate,
       closeMarketRate: marketDelta.closeMarketRate,
       
-      // Pullthrough details
-      loPullthroughPercentage: loPullthroughPct,
+      // Pullthrough details (use final validated value that includes fallback from loan data)
+      loPullthroughPercentage: loPullthroughPctValid,
       uwPullthroughPercentage: uwPct,
       closerPullthroughPercentage: closerPct,
       processorPullthroughPercentage: processorPct,
       
-      // Overall bucket (high/medium/low) based on composite signal strengths
-      // Average of all non-null composite signals, then map to bucket:
-      // 1-2 = low risk, 3-4 = medium risk, 5-6 = high risk
-      bucket: (() => {
-        const compositeSignals = [
-          creditSignal, 
-          loanCharacteristicsSignal, 
-          timeInMotionSignal, 
-          mloAeFalloutProneSignal,
-          interestLockVsMarketSignal
-        ].filter(s => s !== null) as number[];
-        
-        if (compositeSignals.length === 0) return 'unknown';
-        
-        const avgSignal = compositeSignals.reduce((sum, s) => sum + s, 0) / compositeSignals.length;
-        if (avgSignal <= 2.5) return 'low';
-        if (avgSignal <= 4) return 'medium';
-        return 'high';
-      })(),
+      // Overall bucket (high/medium/low) - will be set after generateRuleBasedSummary is called
+      // Bucket calculation moved to generateRuleBasedSummary to avoid duplicate logic
+      bucket: 'medium', // Placeholder - will be overwritten after riskSummary is calculated
       
       // Signal strength for sorting (average of composite signals, higher = more risk)
       signal_strength: (() => {
@@ -2527,7 +2561,7 @@ function filterHistoricalLoans(allLoans: any[]): any[] {
     }
     if (!status && rawData && typeof rawData === 'object') status = rawData['Fields.1393'] ?? null;
     if (!status) {
-      status = loan.status ?? (rawData && typeof rawData === 'object' ? (rawData.status ?? rawData.Status ?? rawData['Current Status'] ?? rawData.current_status) : null) ?? null;
+      status = loan.status ?? loan.current_loan_status ?? (rawData && typeof rawData === 'object' ? (rawData.status ?? rawData.Status ?? rawData['Current Status'] ?? rawData.current_status) : null) ?? null;
     }
     const statusUpper = (status ?? '').toString().trim().toUpperCase();
     if (!statusUpper) return false;
@@ -2541,7 +2575,7 @@ function addActualOutcomeToHistorical(bucketedHistorical: any[]): any[] {
   return bucketedHistorical.map(loan => {
     const raw = loan.raw_data;
     const rd = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
-    const status = (rd && (rd['Current Loan Status'] ?? rd.current_loan_status ?? rd['Loan Status'] ?? rd.loan_status)) ?? loan.status ?? '';
+    const status = (rd && (rd['Current Loan Status'] ?? rd.current_loan_status ?? rd['Loan Status'] ?? rd.loan_status)) ?? loan.current_loan_status ?? loan.status ?? '';
     const statusUpper = (status ?? '').toString().trim().toUpperCase();
     let actualOutcome: 'withdraw' | 'deny' | 'originate';
     if (statusUpper === 'APPLICATION WITHDRAWN' || statusUpper === 'APPLICATION APPROVED BUT NOT ACCEPTED' ||
@@ -2554,6 +2588,528 @@ function addActualOutcomeToHistorical(bucketedHistorical: any[]): any[] {
     }
     return { ...loan, actualOutcome };
   });
+}
+
+// ========================================================================================
+// Close-Late Prediction: pipeline stage, historical on-time stats, close-on-time probability
+// ========================================================================================
+
+/**
+ * Determine pipeline readiness stage from milestone date fields.
+ * Higher score = further along = more likely to close on time.
+ */
+function determinePipelineStage(loan: any): { stage: string; readiness: number } {
+  // Check milestone dates (prefer parsed Date objects from prepareLoanData, fall back to raw fields)
+  const has = (field: any) => field != null && field !== '' && field !== 'null';
+
+  if (has(loan.ctcDate) || has(loan.ctc_date)) {
+    return { stage: 'CTC', readiness: 7 };
+  }
+  if (has(loan.approvalDate) || has(loan.approval_date) || has(loan.uw_final_approval_date)) {
+    return { stage: 'Approved', readiness: 6 };
+  }
+  if (has(loan.condApprovalDate) || has(loan.conditional_approval_date)) {
+    return { stage: 'Conditional Approval', readiness: 5 };
+  }
+  if (has(loan.lockDate) || has(loan.lock_date)) {
+    return { stage: 'Locked', readiness: 4 };
+  }
+  if (has(loan.submittedToUwDate) || has(loan.submitted_to_underwriting_date)) {
+    return { stage: 'Submitted to UW', readiness: 3 };
+  }
+  if (has(loan.submittedToProcessingDate) || has(loan.submitted_to_processing_date)) {
+    return { stage: 'In Processing', readiness: 2 };
+  }
+  return { stage: 'Not Yet In Processing', readiness: 1 };
+}
+
+/**
+ * Historical on-time closing statistics for a tenant.
+ * Computed once per predict flow from historical loans that have both estimated_closing_date and closing_date.
+ */
+export interface StageToClosePercentiles {
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  count: number;
+}
+
+export interface OnTimeStats {
+  /** Overall on-time rate (0-1). null if no data. */
+  overallOnTimeRate: number | null;
+  /** On-time rate by (readiness, daysRemainingBucket). Key = "readiness:bucket" */
+  rateByStageAndBucket: Record<string, { onTime: number; total: number; rate: number }>;
+  /** Cycle time percentiles (application_date → closing_date) */
+  cycleTimePercentiles: { p25: number; p50: number; p75: number; p90: number } | null;
+  /** Average days from each pipeline stage to closing. Key = readiness (1-7). */
+  stageToClosePercentiles: Record<string, StageToClosePercentiles>;
+  /** Number of historical loans with both dates */
+  sampleSize: number;
+}
+
+/**
+ * Compute historical on-time closing statistics from historical loans.
+ * Only uses loans that have both estimated_closing_date and closing_date.
+ */
+function computeHistoricalOnTimeStats(historicalLoans: any[]): OnTimeStats {
+  const withBothDates = historicalLoans.filter((loan) => {
+    const estClose = loan.estimatedClosingDate || loan.estimated_closing_date;
+    const actualClose = loan.closingDate || loan.closing_date;
+    return estClose != null && actualClose != null;
+  });
+
+  if (withBothDates.length === 0) {
+    return { overallOnTimeRate: null, rateByStageAndBucket: {}, cycleTimePercentiles: null, stageToClosePercentiles: {}, sampleSize: 0 };
+  }
+
+  // On-time rate overall
+  let onTimeCount = 0;
+  const rateMap: Record<string, { onTime: number; total: number }> = {};
+
+  for (const loan of withBothDates) {
+    const estClose = new Date(loan.estimatedClosingDate || loan.estimated_closing_date);
+    const actualClose = new Date(loan.closingDate || loan.closing_date);
+    if (isNaN(estClose.getTime()) || isNaN(actualClose.getTime())) continue;
+
+    const closedOnTime = actualClose.getTime() <= estClose.getTime();
+    if (closedOnTime) onTimeCount++;
+
+    // Determine what stage the loan reached (using the same milestone fields)
+    const { readiness } = determinePipelineStage(loan);
+
+    const key = String(readiness);
+    if (!rateMap[key]) rateMap[key] = { onTime: 0, total: 0 };
+    rateMap[key].total++;
+    if (closedOnTime) rateMap[key].onTime++;
+  }
+
+  const overallOnTimeRate = withBothDates.length > 0 ? onTimeCount / withBothDates.length : null;
+
+  // Convert to rates
+  const rateByStageAndBucket: Record<string, { onTime: number; total: number; rate: number }> = {};
+  for (const [key, val] of Object.entries(rateMap)) {
+    rateByStageAndBucket[key] = { ...val, rate: val.total > 0 ? val.onTime / val.total : 0 };
+  }
+
+  // ======== Stage-to-Close Time Percentiles ========
+  // For each pipeline stage, compute how many days it took from reaching that stage to closing.
+  // This tells us: "A loan at Locked stage historically takes a median of X days to fund."
+  //
+  // For each historical loan that has a closing_date, we look at every milestone date it has.
+  // Each milestone represents a stage the loan passed through. We compute:
+  //   days = closing_date - milestone_date
+  // and bucket by the readiness level of that milestone.
+  //
+  // This means a single loan contributes to MULTIPLE stage buckets (e.g., a loan that went
+  // through Processing → UW → Locked → Approved → CTC → Closed contributes to stages 2-7).
+  const stageToCloseDays: Record<string, number[]> = {};
+  const has = (v: any) => v != null && v !== '' && v !== 'null';
+
+  // Map of: readiness → list of field names that indicate the loan reached that stage
+  const stageFields: Array<{ readiness: number; fields: string[] }> = [
+    { readiness: 7, fields: ['ctcDate', 'ctc_date'] },
+    { readiness: 6, fields: ['approvalDate', 'approval_date', 'uw_final_approval_date'] },
+    { readiness: 5, fields: ['condApprovalDate', 'conditional_approval_date', 'cond_approval_date'] },
+    { readiness: 4, fields: ['lockDate', 'lock_date'] },
+    { readiness: 3, fields: ['submittedToUwDate', 'submitted_to_underwriting_date'] },
+    { readiness: 2, fields: ['submittedToProcessingDate', 'submitted_to_processing_date'] },
+  ];
+
+  for (const loan of historicalLoans) {
+    const closeDateRaw = loan.closingDate || loan.closing_date;
+    if (!closeDateRaw) continue;
+    const closeDate = new Date(closeDateRaw);
+    if (isNaN(closeDate.getTime())) continue;
+
+    for (const { readiness, fields } of stageFields) {
+      // Find the first non-null milestone date for this stage
+      let milestoneDate: Date | null = null;
+      for (const f of fields) {
+        if (has(loan[f])) {
+          const d = new Date(loan[f]);
+          if (!isNaN(d.getTime())) {
+            milestoneDate = d;
+            break;
+          }
+        }
+      }
+      if (!milestoneDate) continue;
+
+      const days = Math.floor((closeDate.getTime() - milestoneDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (days < 0 || days > 365) continue; // Sanity: ignore negative or > 1 year
+
+      const key = String(readiness);
+      if (!stageToCloseDays[key]) stageToCloseDays[key] = [];
+      stageToCloseDays[key].push(days);
+    }
+  }
+
+  // Also compute stage 1 (Not Yet In Processing) using application_date → closing_date
+  for (const loan of historicalLoans) {
+    const appDateRaw = loan.applicationDate || loan.application_date;
+    const closeDateRaw = loan.closingDate || loan.closing_date;
+    if (!appDateRaw || !closeDateRaw) continue;
+    const appDate = new Date(appDateRaw);
+    const closeDate = new Date(closeDateRaw);
+    if (isNaN(appDate.getTime()) || isNaN(closeDate.getTime())) continue;
+    const days = Math.floor((closeDate.getTime() - appDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (days < 0 || days > 365) continue;
+    if (!stageToCloseDays['1']) stageToCloseDays['1'] = [];
+    stageToCloseDays['1'].push(days);
+  }
+
+  // Build percentiles per stage
+  const stageToClosePercentiles: Record<string, StageToClosePercentiles> = {};
+  for (const [key, days] of Object.entries(stageToCloseDays)) {
+    if (days.length < 5) continue; // Need enough samples
+    days.sort((a, b) => a - b);
+    const pct = (p: number) => days[Math.min(Math.floor(p * days.length), days.length - 1)];
+    stageToClosePercentiles[key] = {
+      p25: pct(0.25),
+      p50: pct(0.5),
+      p75: pct(0.75),
+      p90: pct(0.9),
+      count: days.length,
+    };
+  }
+
+  // Cycle time percentiles (application → closing) — overall, not per stage
+  const cycleTimes = historicalLoans
+    .map((loan) => {
+      const appDate = loan.applicationDate || loan.application_date;
+      const closeDate = loan.closingDate || loan.closing_date;
+      if (!appDate || !closeDate) return null;
+      const app = new Date(appDate);
+      const close = new Date(closeDate);
+      if (isNaN(app.getTime()) || isNaN(close.getTime())) return null;
+      const days = Math.floor((close.getTime() - app.getTime()) / (1000 * 60 * 60 * 24));
+      return days > 0 ? days : null;
+    })
+    .filter((d): d is number => d != null)
+    .sort((a, b) => a - b);
+
+  let cycleTimePercentiles: OnTimeStats['cycleTimePercentiles'] = null;
+  if (cycleTimes.length >= 10) {
+    const pct = (p: number) => cycleTimes[Math.min(Math.floor(p * cycleTimes.length), cycleTimes.length - 1)];
+    cycleTimePercentiles = { p25: pct(0.25), p50: pct(0.5), p75: pct(0.75), p90: pct(0.9) };
+  }
+
+  return { overallOnTimeRate, rateByStageAndBucket, cycleTimePercentiles, stageToClosePercentiles, sampleSize: withBothDates.length };
+}
+
+/**
+ * Calculate the probability (0-100) that an active loan will close on time.
+ *
+ * Primary signal: compare "days remaining until estimated close" against
+ * the historical distribution of "days from this pipeline stage to closing."
+ *
+ * Example: If loans at the Locked stage historically take a median of 22 days
+ * to close, and this loan has 30 days remaining → comfortable (high probability).
+ * If it only has 8 days remaining → behind schedule (low probability).
+ *
+ * Falls back to on-time rates and loan age when data is insufficient.
+ */
+function calculateCloseOnTimeProbability(loan: any, stats: OnTimeStats): number {
+  const { readiness, stage } = determinePipelineStage(loan);
+  const now = new Date();
+
+  // Stage readiness factor: maps readiness 1-7 to a multiplier
+  const stageFactors: Record<number, number> = {
+    7: 1.3,  // CTC — very likely to close on time
+    6: 1.15, // Approved
+    5: 1.0,  // Conditional Approval
+    4: 0.85, // Locked
+    3: 0.65, // Submitted to UW
+    2: 0.5,  // In Processing
+    1: 0.3,  // Not Yet In Processing
+  };
+  const stageFactor = stageFactors[readiness] || 0.5;
+
+  // --- Path A: estimated_closing_date exists ---
+  const estCloseRaw = loan.estimatedClosingDate || loan.estimated_closing_date;
+  if (estCloseRaw != null) {
+    const estClose = new Date(estCloseRaw);
+    if (!isNaN(estClose.getTime())) {
+      const daysRemaining = Math.floor((estClose.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+      // Already past due
+      if (daysRemaining < -3) return 0;
+      if (daysRemaining < 0) return Math.min(100, Math.max(0, Math.round(10 * stageFactor)));
+
+      // ---- Primary: stage-to-close time comparison ----
+      // "How many days does it historically take from THIS stage to closing?"
+      // Compare that against how many days this loan has left.
+      const stagePercentiles = stats.stageToClosePercentiles[String(readiness)];
+      if (stagePercentiles && stagePercentiles.count >= 5) {
+        const { p25, p50, p75, p90 } = stagePercentiles;
+
+        // How much buffer does this loan have?
+        // ratio > 1.0 = more time than the median → good
+        // ratio < 1.0 = less time than the median → behind
+        // ratio = 0   = no time left
+        const ratio = p50 > 0 ? daysRemaining / p50 : (daysRemaining > 0 ? 2.0 : 0);
+
+        let baseProb: number;
+        if (daysRemaining >= p90) {
+          // Way more time than even the slowest loans need — very likely on time
+          baseProb = 95;
+        } else if (daysRemaining >= p75) {
+          // More time than 75% of loans needed — high confidence
+          baseProb = 85;
+        } else if (daysRemaining >= p50) {
+          // More time than the median — decent chance
+          baseProb = 70;
+        } else if (daysRemaining >= p25) {
+          // Less than median but more than the fast 25% — getting tight
+          baseProb = 50;
+        } else if (daysRemaining > 0) {
+          // Less time than even the fastest 25% needed — unlikely unless almost done
+          // Scale from 10 (barely any time) to 40 (close to p25)
+          baseProb = Math.round(10 + 30 * (daysRemaining / Math.max(p25, 1)));
+        } else {
+          // 0 days remaining
+          baseProb = 5;
+        }
+
+        // Apply stage factor: CTC with tight timeline is still more likely than In Processing
+        const prob = Math.round(baseProb * stageFactor);
+        return Math.min(100, Math.max(0, prob));
+      }
+
+      // ---- Fallback: on-time rate + time bonus (original logic) ----
+      // Used when we don't have enough stage-to-close samples for this readiness level
+      let baseRate = stats.overallOnTimeRate ?? 0.6;
+      const stageStats = stats.rateByStageAndBucket[String(readiness)];
+      if (stageStats && stageStats.total >= 5) {
+        baseRate = stageStats.rate;
+      }
+
+      let timeBonus = 0;
+      if (daysRemaining >= 30) timeBonus = 15;
+      else if (daysRemaining >= 14) timeBonus = 10;
+      else if (daysRemaining >= 7) timeBonus = 0;
+      else if (daysRemaining >= 3) timeBonus = -10;
+      else timeBonus = -25;
+
+      if (readiness <= 3 && daysRemaining < 7) {
+        timeBonus -= 20;
+      }
+
+      const prob = Math.round((baseRate * 100 + timeBonus) * stageFactor);
+      return Math.min(100, Math.max(0, prob));
+    }
+  }
+
+  // --- Path B: no estimated_closing_date — use stage-to-close percentiles + loan age ---
+  const appDateRaw = loan.applicationDate || loan.application_date;
+  if (appDateRaw == null) {
+    return Math.min(100, Math.max(0, Math.round(50 * stageFactor)));
+  }
+
+  const appDate = new Date(appDateRaw);
+  if (isNaN(appDate.getTime())) {
+    return Math.min(100, Math.max(0, Math.round(50 * stageFactor)));
+  }
+
+  const loanAgeDays = Math.floor((now.getTime() - appDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Try stage-to-close for stage 1 (application → close) to compare against loan age
+  const appToClosePercentiles = stats.stageToClosePercentiles['1'];
+  if (appToClosePercentiles && appToClosePercentiles.count >= 10) {
+    const { p50, p75, p90 } = appToClosePercentiles;
+    let baseProb: number;
+    if (loanAgeDays > p90) baseProb = 15;
+    else if (loanAgeDays > p75) baseProb = 35;
+    else if (loanAgeDays > p50) baseProb = 55;
+    else baseProb = 80;
+    return Math.min(100, Math.max(0, Math.round(baseProb * stageFactor)));
+  }
+
+  // Fallback: overall cycle time percentiles
+  if (stats.cycleTimePercentiles) {
+    const { p50, p75, p90 } = stats.cycleTimePercentiles;
+    let baseProb: number;
+    if (loanAgeDays > p90) baseProb = 20;
+    else if (loanAgeDays > p75) baseProb = 40;
+    else if (loanAgeDays > p50) baseProb = 60;
+    else baseProb = 80;
+    return Math.min(100, Math.max(0, Math.round(baseProb * stageFactor)));
+  }
+
+  // No historical data at all — crude fallback
+  let baseProb: number;
+  if (loanAgeDays > 60) baseProb = 25;
+  else if (loanAgeDays > 45) baseProb = 40;
+  else if (loanAgeDays > 30) baseProb = 60;
+  else baseProb = 80;
+  return Math.min(100, Math.max(0, Math.round(baseProb * stageFactor)));
+}
+
+// ========================================================================================
+
+/** Compute organization-wide historical fallout rate (withdraw + deny) / total. Returns 0 if no historical loans. */
+function calculateHistoricalFalloutRate(historicalWithOutcomes: any[]): number {
+  if (!historicalWithOutcomes?.length) return 0;
+  const fellOut = historicalWithOutcomes.filter(
+    (l) => l.actualOutcome === 'withdraw' || l.actualOutcome === 'deny'
+  ).length;
+  return fellOut / historicalWithOutcomes.length;
+}
+
+/**
+ * Compute a calibrated riskScore threshold (1-100 scale) so that predicted fallout rate
+ * matches the tenant's historical fallout rate.
+ *
+ * Scores historical loans with the same options used for active loans (pattern, trend, stage)
+ * so the threshold is from the same score distribution — otherwise active loans get higher
+ * scores and we over-predict fallout.
+ *
+ * Returns a riskScore value on the 1-100 scale: any active loan with riskScore >= threshold
+ * is predicted to fall out (withdraw or deny).
+ */
+function getCalibratedThreshold(
+  historicalWithOutcomes: any[],
+  historicalFalloutRate: number,
+  scoreOptions?: Omit<RuleBasedSummaryOptions, 'calibratedRiskScoreThreshold'>
+): number | null {
+  if (!historicalWithOutcomes?.length || historicalFalloutRate <= 0) return null;
+  const riskScores = historicalWithOutcomes
+    .map((loan) => {
+      const summary = generateRuleBasedSummary(loan, scoreOptions);
+      return summary.riskScore;
+    })
+    .filter((s) => typeof s === 'number' && !isNaN(s));
+  if (riskScores.length === 0) return null;
+  riskScores.sort((a, b) => a - b);
+  // Find the riskScore at the (1 - falloutRate) percentile:
+  // e.g. 47% fallout → threshold is at the 53rd percentile of historical scores
+  const index = Math.min(
+    Math.floor((1 - historicalFalloutRate) * riskScores.length),
+    riskScores.length - 1
+  );
+  const threshold = riskScores[Math.max(0, index)];
+  return threshold;
+}
+
+/**
+ * Compare an active loan to historical loans with actual outcomes; return similarity count and fallout rate
+ * among similar historical loans (same signal profile). Used to adjust prediction when current loan
+ * looks like historical fallouts.
+ */
+function compareToHistoricalFallouts(
+  activeLoan: any,
+  historicalWithOutcomes: any[]
+): { similarityScore: number; falloutRate: number } {
+  if (!historicalWithOutcomes?.length) return { similarityScore: 0, falloutRate: 0 };
+
+  const aFico = activeLoan.ficoScoreSignal ?? 0;
+  const aDti = activeLoan.dtiSignal ?? 0;
+  const aMlo = activeLoan.mloAeFalloutProneSignalStrength ?? 0;
+
+  const similarLoans = historicalWithOutcomes.filter((hist) => {
+    const hFico = hist.ficoScoreSignal ?? 0;
+    const hDti = hist.dtiSignal ?? 0;
+    const hMlo = hist.mloAeFalloutProneSignalStrength ?? 0;
+    const signalDiff =
+      Math.abs(hFico - aFico) + Math.abs(hDti - aDti) + Math.abs(hMlo - aMlo);
+    return signalDiff <= 3;
+  });
+
+  if (similarLoans.length === 0) return { similarityScore: 0, falloutRate: 0 };
+
+  const fellOut = similarLoans.filter(
+    (l) => l.actualOutcome === 'withdraw' || l.actualOutcome === 'deny'
+  ).length;
+  return {
+    similarityScore: similarLoans.length,
+    falloutRate: fellOut / similarLoans.length
+  };
+}
+
+/**
+ * Team composition risk: multiple personnel with low pull-through (bucket ≥4) increase risk.
+ */
+function calculateTeamRisk(loan: any): number {
+  const personnelBuckets = [
+    loan.mloAeFalloutProneSignalStrength,
+    loan.uwPullthroughSignalStrength,
+    loan.closerPullthroughSignalStrength,
+    loan.processorPullthroughSignalStrength
+  ].filter((b) => b !== null && b !== undefined);
+
+  if (personnelBuckets.length === 0) return 0;
+
+  const highRiskCount = personnelBuckets.filter((b) => b >= 4).length;
+
+  if (highRiskCount >= 3) return 3;
+  if (highRiskCount >= 2) return 2;
+  if (highRiskCount >= 1) return 1;
+  return 0;
+}
+
+/** Role key used for pull-through map (must match bucketLoanData role columns). */
+type PersonnelRoleKey = 'loan_officer' | 'underwriter' | 'closer' | 'processor';
+
+/**
+ * Recent vs overall pull-through for one person; trend risk if recent is significantly worse.
+ */
+function calculateRecentTrend(
+  personnelName: string,
+  role: PersonnelRoleKey,
+  allLoans: any[],
+  days: number = 90
+): { recentPullthrough: number; overallPullthrough: number; trendRisk: number } {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+
+  const recentLoans = allLoans.filter((loan) => {
+    const appDate = loan.applicationDate
+      ? new Date(loan.applicationDate)
+      : null;
+    return appDate && appDate >= cutoffDate;
+  });
+
+  const recentMap = calculatePullthroughForRole(recentLoans, [role]);
+  const overallMap = calculatePullthroughForRole(allLoans, [role]);
+  const recentPullthrough = recentMap[personnelName] ?? 0;
+  const overallPullthrough = overallMap[personnelName] ?? 0;
+
+  const trendRisk = overallPullthrough > 0 && recentPullthrough < overallPullthrough - 10 ? 1 : 0;
+
+  return { recentPullthrough, overallPullthrough, trendRisk };
+}
+
+/**
+ * Days from application to a given date (or to closing for closed loans, or to now for active).
+ */
+function getDaysInPipeline(loan: any, asOf: Date = new Date()): number | null {
+  const app = loan.applicationDate ? new Date(loan.applicationDate) : null;
+  if (!app) return null;
+  const end =
+    loan.closingDate && (loan.status === 'Closed' || loan.status === 'Originated' || loan.status === 'Funded')
+      ? new Date(loan.closingDate)
+      : asOf;
+  return Math.floor((end.getTime() - app.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Stage progression risk: loan in pipeline longer than historical average (application → close).
+ */
+function calculateStageProgressionRisk(loan: any, historicalLoans: any[]): number {
+  const daysActive = getDaysInPipeline(loan);
+  if (daysActive == null) return 0;
+
+  const historicalDays = historicalLoans
+    .map((h) => getDaysInPipeline(h))
+    .filter((d): d is number => d != null);
+  if (historicalDays.length === 0) return 0;
+
+  const avgDays =
+    historicalDays.reduce((s, d) => s + d, 0) / historicalDays.length;
+  if (daysActive > avgDays * 1.5) return 2;
+  if (daysActive > avgDays * 1.2) return 1;
+  return 0;
 }
 
 /**
@@ -2599,6 +3155,17 @@ async function getCachedHistoricalBucketLoanIds(tenantId: string | null, dbPool:
   } catch (err: any) {
     logError('Failed to load historical bucket cache loan ids', err, { tenantId });
     return new Set();
+  }
+}
+
+/** Clear all rows from historical_loan_bucket_cache so the next predict run will re-bucket from scratch. */
+export async function clearHistoricalBucketCache(dbPool: pg.Pool): Promise<void> {
+  try {
+    await dbPool.query('TRUNCATE TABLE public.historical_loan_bucket_cache');
+    logInfo('Cleared historical loan bucket cache');
+  } catch (err: any) {
+    logError('Failed to clear historical bucket cache', err, {});
+    throw err;
   }
 }
 
@@ -2736,6 +3303,37 @@ async function runPredictFlow(
 
   let allBucketedHistorical: any[] = [];
 
+  // ——— Step 0: Clear bucket cache when requested or when cached data is stale (missing key signals). ———
+  if (process.env.CLEAR_BUCKET_CACHE === '1' || process.env.CLEAR_BUCKET_CACHE === 'true') {
+    await clearHistoricalBucketCache(dbPool);
+  } else {
+    // Auto-detect stale cache: check if a sample cached row has a non-null ficoScoreSignal.
+    // If ficoScoreSignal is absent or null, the cache was likely built from an old query
+    // that lacked FICO/DTI/LTV columns — clear and rebuild with full data.
+    try {
+      const sampleResult = await dbPool.query(
+        `SELECT bucket_snapshot FROM public.historical_loan_bucket_cache LIMIT 1`
+      );
+      if (sampleResult.rows.length > 0) {
+        // Check multiple samples: if none have any credit signal, cache is stale
+        const multiSample = await dbPool.query(
+          `SELECT bucket_snapshot FROM public.historical_loan_bucket_cache LIMIT 10`
+        );
+        const creditSignalKeys = ['ficoScoreSignal', 'ltvSignal', 'dtiSignal'];
+        const hasAnyCreditSignal = multiSample.rows.some((row: any) => {
+          const d = typeof row.bucket_snapshot === 'string' ? JSON.parse(row.bucket_snapshot) : row.bucket_snapshot;
+          return d && creditSignalKeys.some(k => d[k] != null);
+        });
+        if (!hasAnyCreditSignal) {
+          logInfo('Stale historical bucket cache detected (no credit signals in 10-row sample) — clearing and rebuilding');
+          await clearHistoricalBucketCache(dbPool);
+        }
+      }
+    } catch {
+      // Table may not exist yet — ignore
+    }
+  }
+
   // ——— Step 1: If historical bucket cache is empty, bucket and save all historical loans. ———
   const cachedIds = await getCachedHistoricalBucketLoanIds(tenantId, dbPool);
   if (cachedIds.size === 0 && historicalLoans.length > 0) {
@@ -2744,8 +3342,10 @@ async function runPredictFlow(
     await saveHistoricalBuckets(tenantId, bucketed, dbPool);
     allBucketedHistorical = bucketed;
     logInfo('Step 1/3: Done — saved all historical buckets', { count: bucketed.length });
-  } else {
+  } else if (cachedIds.size > 0) {
     logInfo('Step 1/3: Historical bucket cache not empty — skipping', { cachedCount: cachedIds.size });
+  } else {
+    logInfo('Step 1/3: No historical loans to bucket — skipping');
   }
 
   // ——— Step 2: If cache isn't empty, for each historical loan not in cache: bucket and save. ———
@@ -2774,16 +3374,86 @@ async function runPredictFlow(
 
   const historicalWithOutcomes = addActualOutcomeToHistorical(allBucketedHistorical);
 
+  // Compute historical on-time closing stats for close-late prediction
+  const onTimeStats = computeHistoricalOnTimeStats(historicalLoans);
+  const stageNames: Record<string, string> = { '1': 'App→Close', '2': 'Processing→Close', '3': 'UW→Close', '4': 'Lock→Close', '5': 'CondAppr→Close', '6': 'Approved→Close', '7': 'CTC→Close' };
+  logInfo('Close-late stats', {
+    sampleSize: onTimeStats.sampleSize,
+    overallOnTimeRate: onTimeStats.overallOnTimeRate != null ? Math.round(onTimeStats.overallOnTimeRate * 100) + '%' : 'none',
+    cycleTimePercentiles: onTimeStats.cycleTimePercentiles,
+    stageRates: Object.entries(onTimeStats.rateByStageAndBucket).map(([k, v]) => `readiness=${k}: ${Math.round(v.rate * 100)}% (n=${v.total})`),
+    stageToCloseDays: Object.entries(onTimeStats.stageToClosePercentiles).map(([k, v]) =>
+      `${stageNames[k] || `stage${k}`}: p25=${v.p25}d p50=${v.p50}d p75=${v.p75}d p90=${v.p90}d (n=${v.count})`
+    ),
+  });
+
+  // Precompute pull-through by role (used for both calibration and active loan summaries)
+  const ROLES: PersonnelRoleKey[] = ['loan_officer', 'underwriter', 'closer', 'processor'];
+  let recentPullthroughByRole: Record<PersonnelRoleKey, Record<string, number>> | undefined;
+  let overallPullthroughByRole: Record<PersonnelRoleKey, Record<string, number>> | undefined;
+  if (allLoansForPullthrough.length > 0) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 90);
+    const recentLoans = allLoansForPullthrough.filter((loan) => {
+      const appDate = loan.applicationDate ? new Date(loan.applicationDate) : null;
+      return appDate && appDate >= cutoffDate;
+    });
+    recentPullthroughByRole = {} as Record<PersonnelRoleKey, Record<string, number>>;
+    overallPullthroughByRole = {} as Record<PersonnelRoleKey, Record<string, number>>;
+    for (const role of ROLES) {
+      recentPullthroughByRole[role] = calculatePullthroughForRole(recentLoans, [role]);
+      overallPullthroughByRole[role] = calculatePullthroughForRole(allLoansForPullthrough, [role]);
+    }
+  }
+
+  const calibrationScoreOptions: Omit<RuleBasedSummaryOptions, 'calibratedRiskScoreThreshold'> = {
+    historicalWithOutcomes: historicalWithOutcomes.length > 0 ? historicalWithOutcomes : undefined,
+    allLoans: allLoansForPullthrough.length > 0 ? allLoansForPullthrough : undefined,
+    recentPullthroughByRole,
+    overallPullthroughByRole
+  };
+
+  // Calibrate riskScore threshold so predicted fallout rate matches historical
+  // The threshold is on the same 1-100 riskScore scale shown in the UI
+  const historicalFalloutRate = calculateHistoricalFalloutRate(historicalWithOutcomes);
+  const calibratedRiskScoreThreshold = getCalibratedThreshold(historicalWithOutcomes, historicalFalloutRate, calibrationScoreOptions);
+  logInfo('Calibration', {
+    historicalFalloutRate: Math.round(historicalFalloutRate * 100) / 100,
+    calibratedRiskScoreThreshold: calibratedRiskScoreThreshold ?? 'none (using fixed threshold of 65)',
+    historicalCount: historicalWithOutcomes.length
+  });
+
   // ——— Step 3: Bucket all active loans with signal strengths ———
   logInfo('Step 3/3: Bucketing all active loans', { count: preparedLoans.length });
   try {
     bucketedLoans = await bucketLoanData(preparedLoans, allLoansForPullthrough, { logContext: 'active' });
-    
-    // Add rule-based risk summaries to each loan
-    bucketedLoans = bucketedLoans.map(loan => ({
-      ...loan,
-      riskSummary: generateRuleBasedSummary(loan)
-    }));
+
+    const summaryOptions: RuleBasedSummaryOptions = {
+      ...(calibratedRiskScoreThreshold != null && { calibratedRiskScoreThreshold }),
+      historicalWithOutcomes: historicalWithOutcomes.length > 0 ? historicalWithOutcomes : undefined,
+      allLoans: allLoansForPullthrough.length > 0 ? allLoansForPullthrough : undefined,
+      recentPullthroughByRole,
+      overallPullthroughByRole
+    };
+
+    // Add rule-based risk summaries and close-on-time probability to each loan
+    bucketedLoans = bucketedLoans.map((loan) => {
+      const riskSummary = generateRuleBasedSummary(loan, summaryOptions);
+      const closeOnTimeProbability = calculateCloseOnTimeProbability(loan, onTimeStats);
+      const closeLateRisk = closeOnTimeProbability < 50;
+      const { stage: pipelineStage, readiness: pipelineReadiness } = determinePipelineStage(loan);
+
+      return {
+        ...loan,
+        riskSummary,
+        bucket: riskSummary.bucket,
+        riskScore: riskSummary.riskScore,
+        closeOnTimeProbability,
+        closeLateRisk,
+        pipelineStage,
+        pipelineReadiness
+      };
+    });
     
     logInfo('Step 3/3: Active loan bucketing done', {
       activeCount: bucketedLoans.length,
@@ -2807,6 +3477,7 @@ async function runPredictFlow(
   // Count loans by predicted outcome from riskSummary
   const outcomeCounts = { withdraw: 0, deny: 0, originate: 0, at_risk: 0 };
   const bucketCounts = { high: 0, medium: 0, low: 0, unknown: 0 };
+  let likelyCloseLateCount = 0;
   bucketedLoans.forEach(loan => {
     // Count by bucket
     const bucket = loan.bucket || 'unknown';
@@ -2817,15 +3488,30 @@ async function runPredictFlow(
     if (outcome && outcome in outcomeCounts) {
       outcomeCounts[outcome as keyof typeof outcomeCounts]++;
     }
+
+    // Count close-late risk
+    if (loan.closeLateRisk) likelyCloseLateCount++;
   });
   
   const processingTimeMs = Date.now() - startTime;
+
+  // Validation: compare predicted fallout rate to historical
+  const predictedFalloutCount = (outcomeCounts.withdraw ?? 0) + (outcomeCounts.deny ?? 0);
+  const predictedFalloutRate =
+    bucketedLoans.length > 0 ? predictedFalloutCount / bucketedLoans.length : 0;
   logInfo('Prediction complete (simplified - instant)', {
     bucketedLoansCount: bucketedLoans.length,
     historicalCount: historicalWithOutcomes.length,
     processingTimeMs,
     bucketCounts,
-    outcomeCounts
+    outcomeCounts,
+    likelyCloseLateCount,
+    calibrationValidation: {
+      historicalFalloutRate: Math.round(historicalFalloutRate * 100) / 100,
+      predictedFalloutRate: Math.round(predictedFalloutRate * 100) / 100,
+      predictedFalloutCount,
+      calibratedRiskScoreThreshold: calibratedRiskScoreThreshold ?? 'fixed:65'
+    }
   });
 
   return {
@@ -2836,7 +3522,8 @@ async function runPredictFlow(
       // Use actual predicted outcomes from riskSummary
       predictedWithdraw: outcomeCounts.withdraw,
       predictedDeny: outcomeCounts.deny,
-      predictedOriginate: outcomeCounts.originate + outcomeCounts.at_risk // at_risk likely to originate with intervention
+      predictedOriginate: outcomeCounts.originate + outcomeCounts.at_risk, // at_risk likely to originate with intervention
+      likelyCloseLateCount
     },
     metadata: {
       model: 'rule-based',
@@ -2882,12 +3569,29 @@ async function runPredictFlow(
  * - DENY: Credit-related issues (bad FICO, high LTV, high DTI) - lender will reject
  * - WITHDRAW: Market/process issues (unfavorable rates, long pipeline, low LO pullthrough) - borrower will cancel
  */
-export function generateRuleBasedSummary(loan: any): {
+export interface RuleBasedSummaryOptions {
+  /** Calibrated riskScore threshold on the 1-100 scale. Loans with riskScore >= this are predicted fallout. */
+  calibratedRiskScoreThreshold?: number;
+  /** Historical loans with actualOutcome for pattern comparison and stage progression. */
+  historicalWithOutcomes?: any[];
+  /** All loans (active + historical) for recent trend pull-through. */
+  allLoans?: any[];
+  /** Precomputed pull-through % by person (recent window). When set, recent-trend uses these instead of calling calculatePullthroughForRole per loan. */
+  recentPullthroughByRole?: Record<PersonnelRoleKey, Record<string, number>>;
+  /** Precomputed pull-through % by person (all time). When set, recent-trend uses these instead of calling calculatePullthroughForRole per loan. */
+  overallPullthroughByRole?: Record<PersonnelRoleKey, Record<string, number>>;
+}
+
+export function generateRuleBasedSummary(loan: any, options?: RuleBasedSummaryOptions): {
   risks: string[];
   positives: string[];
   overallRisk: string;
-  predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk';
+  predictedOutcome: 'originate' | 'withdraw' | 'deny';
   confidence: number;
+  bucket: 'high' | 'medium' | 'low';
+  riskScore: number;
+  creditRiskScore: number;
+  processRiskScore: number;
 } {
   const risks: string[] = [];
   const positives: string[] = [];
@@ -2896,32 +3600,37 @@ export function generateRuleBasedSummary(loan: any): {
   let creditRiskScore = 0;  // Issues that lead to DENY (lender rejection)
   let processRiskScore = 0; // Issues that lead to WITHDRAW (borrower cancellation)
   
-  // Credit-related risks (lead to DENIAL by lender)
-  if (loan.creditMetricsSignalStrength >= 5) {
+  // Credit Risk Score (denial risk): FICO, DTI, LTV ≥ 5: +2-3 each; Loan characteristics ≥ 3: +2
+  // COMMENTED OUT: UW pullthrough ≥ 4: +1
+  if (loan.ficoScoreSignal === 6) {
     risks.push('Credit metrics indicate elevated risk (low FICO, high DTI, or high LTV)');
+    creditRiskScore += 4;
+  } else if (loan.ficoScoreSignal >= 5) {
     creditRiskScore += 3;
-  } else if (loan.creditMetricsSignalStrength >= 4) {
-    risks.push('Credit metrics are borderline (moderate FICO, DTI, or LTV concerns)');
-    creditRiskScore += 1;
   }
-  
-  if (loan.loanCharacteristicsSignalStrength >= 5) {
+  if (loan.dtiSignal === 6) {
+    creditRiskScore += 3;
+  } else if (loan.dtiSignal >= 5) {
+    creditRiskScore += 2;
+  }
+  if (loan.ltvSignal === 6) {
+    creditRiskScore += 3;
+  } else if (loan.ltvSignal >= 5) {
+    creditRiskScore += 2;
+  }
+  if (loan.loanCharacteristicsSignalStrength >= 3) {
     risks.push('Loan characteristics indicate higher risk (jumbo, investment, cash-out refi)');
     creditRiskScore += 2;
   }
-  
-  // Check individual credit signals for additional denial indicators
-  if (loan.ficoScoreSignal >= 5) {
-    creditRiskScore += 2; // Poor credit score is strong denial indicator
+  // UW pull-through (credit/underwriting risk): below-average underwriter = higher denial/fallout risk
+  if (loan.uwPullthroughSignalStrength >= 5) {
+    risks.push('Underwriter has below-average historical pullthrough rate');
+    creditRiskScore += 2;
+  } else if (loan.uwPullthroughSignalStrength >= 4) {
+    creditRiskScore += 1;
   }
-  if (loan.dtiSignal >= 5) {
-    creditRiskScore += 1; // High DTI increases denial risk
-  }
-  if (loan.ltvSignal >= 5) {
-    creditRiskScore += 1; // High LTV increases denial risk
-  }
-  
-  // Process/market-related risks (lead to WITHDRAWAL by borrower)
+
+  // Process Risk Score (withdrawal risk): Time in Motion ≥ 5: +2, ≥ 4: +1; MLO/Closer/Processor pullthrough; Interest Lock vs Market; FICO ≤ 2 (shop/withdraw risk)
   if (loan.timeInMotionSignalStrength >= 5) {
     risks.push('Loan has been in pipeline longer than typical');
     processRiskScore += 2;
@@ -2929,31 +3638,83 @@ export function generateRuleBasedSummary(loan: any): {
     risks.push('Loan is taking longer than average to process');
     processRiskScore += 1;
   }
-  
   if (loan.mloAeFalloutProneSignalStrength >= 5) {
     risks.push('Loan officer has below-average historical pullthrough rate');
     processRiskScore += 2;
   }
-  
+  if (loan.closerPullthroughSignalStrength >= 5) {
+    risks.push('Closer has below-average historical pullthrough rate');
+    processRiskScore += 2;
+  } else if (loan.closerPullthroughSignalStrength >= 4) {
+    processRiskScore += 1;
+  }
+  if (loan.processorPullthroughSignalStrength >= 5) {
+    risks.push('Processor has below-average historical pullthrough rate');
+    processRiskScore += 2;
+  } else if (loan.processorPullthroughSignalStrength >= 4) {
+    processRiskScore += 1;
+  }
   if (loan.interestLockVsMarketSignalStrength >= 5) {
     risks.push('Interest rate lock is unfavorable compared to current market');
-    processRiskScore += 3; // Strong withdrawal indicator - borrower may shop elsewhere
+    processRiskScore += 3;
   } else if (loan.interestLockVsMarketSignalStrength >= 4) {
     risks.push('Interest rate lock is slightly above current market rates');
     processRiskScore += 1;
   }
-  
-  // Check market delta signal for additional withdrawal indicators
-  if (loan.marketChangeDeltaSignal >= 5) {
-    processRiskScore += 2; // Rates have improved significantly since lock - borrower may want to relock
+  if (loan.ficoScoreSignal <= 2) {
+    processRiskScore += 2; // Strong borrower - shop/withdraw risk
   }
-  
-  // Medium risk signals (bucket 3-4)
-  if (loan.uwPullthroughSignalStrength >= 4) {
-    risks.push('Underwriter has moderate historical fallout rate');
-    creditRiskScore += 1; // UW fallout often indicates documentation/qualification issues
+
+  // Team composition risk (multiple personnel with low pull-through)
+  const teamRisk = calculateTeamRisk(loan);
+  processRiskScore += teamRisk;
+
+  // Historical pattern comparison: similar loans that often fell out
+  if (options?.historicalWithOutcomes?.length) {
+    const comp = compareToHistoricalFallouts(loan, options.historicalWithOutcomes);
+    if (comp.falloutRate > 0.5 && comp.similarityScore > 0) {
+      risks.push('Similar historical loans had high fallout rate');
+      processRiskScore += 2;
+    }
   }
-  
+
+  // Recent trend: personnel with declining pull-through (use precomputed maps when provided to avoid 600+ duplicate pull-through logs)
+  const roles: { name: string; role: PersonnelRoleKey }[] = [
+    { name: (loan.loanOfficerName ?? loan.loan_officer ?? '').toString().toLowerCase().trim(), role: 'loan_officer' },
+    { name: (loan.underwriterName ?? loan.underwriter ?? '').toString().toLowerCase().trim(), role: 'underwriter' },
+    { name: (loan.closerName ?? loan.closer ?? '').toString().toLowerCase().trim(), role: 'closer' },
+    { name: (loan.processorName ?? loan.processor ?? '').toString().toLowerCase().trim(), role: 'processor' }
+  ];
+  let trendRiskTotal = 0;
+  if (options?.recentPullthroughByRole && options?.overallPullthroughByRole) {
+    for (const { name, role } of roles) {
+      if (!name) continue;
+      const recentPullthrough = options.recentPullthroughByRole[role]?.[name] ?? 0;
+      const overallPullthrough = options.overallPullthroughByRole[role]?.[name] ?? 0;
+      const trendRisk = overallPullthrough > 0 && recentPullthrough < overallPullthrough - 10 ? 1 : 0;
+      trendRiskTotal += trendRisk;
+    }
+  } else if (options?.allLoans?.length) {
+    for (const { name, role } of roles) {
+      if (!name) continue;
+      const trend = calculateRecentTrend(name, role, options.allLoans!, 90);
+      trendRiskTotal += trend.trendRisk;
+    }
+  }
+  if (trendRiskTotal > 0) {
+    risks.push('One or more personnel have declining recent pull-through');
+    processRiskScore += Math.min(trendRiskTotal, 2);
+  }
+
+  // Stage progression: in pipeline longer than historical average
+  if (options?.historicalWithOutcomes?.length) {
+    const stageRisk = calculateStageProgressionRisk(loan, options.historicalWithOutcomes);
+    if (stageRisk > 0) {
+      risks.push('Loan has been in pipeline longer than typical');
+      processRiskScore += stageRisk;
+    }
+  }
+
   // Low risk signals (bucket 1-2) - indicates likely to close
   if (loan.creditMetricsSignalStrength <= 2) {
     positives.push('Strong credit profile (high FICO, low DTI)');
@@ -2967,42 +3728,116 @@ export function generateRuleBasedSummary(loan: any): {
   if (loan.mloAeFalloutProneSignalStrength <= 2) {
     positives.push('Loan officer has excellent historical pullthrough rate');
   }
+  if (loan.uwPullthroughSignalStrength != null && loan.uwPullthroughSignalStrength <= 2) {
+    positives.push('Underwriter has excellent historical pullthrough rate');
+  }
+  if (loan.closerPullthroughSignalStrength != null && loan.closerPullthroughSignalStrength <= 2) {
+    positives.push('Closer has excellent historical pullthrough rate');
+  }
+  if (loan.processorPullthroughSignalStrength != null && loan.processorPullthroughSignalStrength <= 2) {
+    positives.push('Processor has excellent historical pullthrough rate');
+  }
   if (loan.interestLockVsMarketSignalStrength <= 2) {
     positives.push('Rate lock is favorable compared to market');
   }
   
-  // Determine overall prediction based on risk bucket AND risk category
-  const overallRisk = loan.bucket || 'unknown';
-  let predictedOutcome: 'originate' | 'withdraw' | 'deny' | 'at_risk' = 'originate';
-  let confidence = 70;
+  // ——— Compute riskScore (1-100) from signal bucket averages ———
+  // This is the SINGLE source of truth for risk level, bucket, and predicted outcome.
+  //
+  // Process Risk: Time in Motion, MLO/Closer/Processor Pullthrough, Interest Lock vs Market, Inverse FICO
+  // Credit Risk: FICO, DTI, LTV, Loan Characteristics, UW Pullthrough
+  // Final Risk Score = max(process risk, credit risk) scaled to 1-100
   
-  if (overallRisk === 'high') {
-    // Determine whether likely to be denied (credit issues) or withdrawn (process/market issues)
-    if (creditRiskScore > processRiskScore) {
-      predictedOutcome = 'deny';
-      confidence = 55 + Math.min(creditRiskScore * 5, 30);
-    } else if (processRiskScore > creditRiskScore) {
-      predictedOutcome = 'withdraw';
-      confidence = 55 + Math.min(processRiskScore * 5, 30);
-    } else {
-      // Equal risk scores - default to withdraw as it's more common
-      predictedOutcome = 'withdraw';
-      confidence = 55 + Math.min(risks.length * 4, 25);
-    }
-  } else if (overallRisk === 'medium') {
-    predictedOutcome = 'at_risk';
-    confidence = 50 + Math.min(positives.length * 5, 20);
-  } else if (overallRisk === 'low') {
-    predictedOutcome = 'originate';
-    confidence = 70 + Math.min(positives.length * 5, 25);
+  // Process risk buckets (inverse FICO: higher FICO = stronger borrower = more shop/withdraw risk)
+  const processRiskBuckets = [
+    loan.timeInMotionSignalStrength,
+    loan.mloAeFalloutProneSignalStrength,
+    loan.closerPullthroughSignalStrength,
+    loan.processorPullthroughSignalStrength,
+    loan.interestLockVsMarketSignalStrength,
+    loan.ficoScoreSignal !== null && loan.ficoScoreSignal !== undefined
+      ? 7 - loan.ficoScoreSignal // Invert: FICO bucket 1 (excellent) → 6 (high process risk)
+      : null
+  ].filter(b => b !== null && b !== undefined && typeof b === 'number') as number[];
+
+  // Credit risk buckets
+  const creditRiskBuckets = [
+    loan.ficoScoreSignal,
+    loan.dtiSignal,
+    loan.ltvSignal,
+    loan.loanCharacteristicsSignalStrength,
+    loan.uwPullthroughSignalStrength
+  ].filter(b => b !== null && b !== undefined && typeof b === 'number') as number[];
+
+  const processRiskAvg = processRiskBuckets.length > 0
+    ? processRiskBuckets.reduce((sum, b) => sum + b, 0) / processRiskBuckets.length
+    : 0;
+  const creditRiskAvg = creditRiskBuckets.length > 0
+    ? creditRiskBuckets.reduce((sum, b) => sum + b, 0) / creditRiskBuckets.length
+    : 0;
+  
+  // Scale each dimension from 1-6 average to 1-100
+  const scaleToHundred = (avg: number) => avg > 0 ? Math.min(100, Math.max(1, Math.round(((avg - 1) / 5) * 99 + 1))) : 0;
+  const processRiskScore100 = scaleToHundred(processRiskAvg);
+  const creditRiskScore100 = scaleToHundred(creditRiskAvg);
+
+  let riskScore: number;
+  if (processRiskBuckets.length === 0 && creditRiskBuckets.length === 0) {
+    riskScore = 50; // Fallback if no signal buckets available
+  } else {
+    riskScore = Math.max(processRiskScore100, creditRiskScore100);
   }
+  
+  // Calculate bucket based on riskScore ranges
+  let bucket: 'high' | 'medium' | 'low';
+  if (riskScore >= 75) {
+    bucket = 'high';
+  } else if (riskScore >= 50) {
+    bucket = 'medium';
+  } else {
+    bucket = 'low';
+  }
+
+  // ——— Determine predicted outcome from riskScore vs calibrated threshold ———
+  // When calibrated: loans with riskScore >= threshold are predicted fallout.
+  // When uncalibrated: use a fixed threshold of 65 (conservative default).
+  // The dominant dimension (process vs credit) determines withdraw vs deny.
+  const useCalibrated = options?.calibratedRiskScoreThreshold != null && options.calibratedRiskScoreThreshold > 0;
+  const threshold = useCalibrated ? options!.calibratedRiskScoreThreshold! : 65;
+
+  let predictedOutcome: 'originate' | 'withdraw' | 'deny' = 'originate';
+  let confidence = 70;
+
+  if (riskScore >= threshold) {
+    // Loan is above the fallout threshold — determine withdraw vs deny from dominant risk dimension
+    if (creditRiskAvg >= processRiskAvg) {
+      predictedOutcome = 'deny';
+    } else {
+      predictedOutcome = 'withdraw';
+    }
+    // Confidence scales with how far above the threshold the score is
+    const overshoot = riskScore - threshold;
+    confidence = Math.min(95, 55 + Math.round(overshoot * 0.8));
+  } else {
+    predictedOutcome = 'originate';
+    // Confidence scales with how far below the threshold the score is
+    const undershoot = threshold - riskScore;
+    confidence = Math.min(95, 60 + Math.round(undershoot * 0.5));
+  }
+  
+  // Derive overallRisk from predictedOutcome for API response
+  const overallRisk = (predictedOutcome === 'deny' || predictedOutcome === 'withdraw') ? 'high' : 'low';
   
   return {
     risks,
     positives,
     overallRisk,
     predictedOutcome,
-    confidence
+    confidence,
+    bucket,
+    riskScore,
+    creditRiskScore: creditRiskScore100,   // 1-100 scale (same as riskScore)
+    processRiskScore: processRiskScore100  // 1-100 scale (same as riskScore)
   };
 }
 
@@ -3061,13 +3896,22 @@ export async function savePredictionsToDatabase(
       
       // Prepare loan_data JSONB - store all the computed fields for display
       // This includes signal strengths, credit metrics, pullthrough rates, etc.
+      // Include loan_number, lock_date, loan_purpose, channel for critical loan cards on refresh
       const loanData = {
         // Basic loan info
         loan_id: loanId,
+        loan_number: loan.loan_number ?? loan.loanNumber ?? null,
         loan_officer: loan.loan_officer,
         loan_amount: loan.loan_amount,
         loan_type: loan.loan_type,
+        loan_purpose: loan.loan_purpose ?? loan.loanPurpose ?? null,
+        channel: loan.channel ?? null,
         current_milestone: loan.current_milestone || loan.lastCompletedMilestone,
+        
+        // Lock dates (for Rate & Market section on loan cards)
+        lock_date: loan.lock_date ?? loan.lockDate ?? null,
+        lock_expiration_date: loan.lock_expiration_date ?? loan.lockExpirationDate ?? null,
+        estimated_closing_date: loan.estimated_closing_date ?? loan.estimatedClosingDate ?? loan.closing_date ?? loan.closingDate ?? null,
         
         // Credit metrics
         fico_score: loan.fico_score,
@@ -3077,6 +3921,8 @@ export async function savePredictionsToDatabase(
         // Rate info
         interest_rate: loan.interest_rate,
         market_rate: loan.market_rate,
+        lockMarketRate: loan.lockMarketRate,
+        closeMarketRate: loan.closeMarketRate,
         marketChangeDelta: loan.marketChangeDelta,
         
         // Time in motion
@@ -3108,6 +3954,11 @@ export async function savePredictionsToDatabase(
         // Risk summary
         riskSummary: loan.riskSummary,
         bucket: bucket,
+        // Close-late prediction fields
+        closeOnTimeProbability: loan.closeOnTimeProbability ?? null,
+        closeLateRisk: loan.closeLateRisk ?? null,
+        pipelineStage: loan.pipelineStage ?? null,
+        pipelineReadiness: loan.pipelineReadiness ?? null,
       };
       
       // Upsert: Delete any existing prediction for this loan, then insert new one

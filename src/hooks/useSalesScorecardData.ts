@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
-import { api } from '@/lib/api';
+import { useState, useEffect } from "react";
+import { api } from "@/lib/api";
 
 export interface DateRange {
   start: string;
   end: string;
 }
 
-export type ActorType = 'branch' | 'loan_officer';
-export type TTSTier = 'top' | 'second' | 'bottom';
+export type ActorType = "branch" | "loan_officer";
+export type TTSTier = "top" | "second" | "bottom";
 
 /**
  * TTS (Top Tier Score) Actor data
@@ -39,10 +39,10 @@ export interface TTSActor {
  * Company-wide average metrics used as baseline for ratings
  */
 export interface CompanyAverages {
-  avgUnitsPerActor: number;  // For Unit Rating calculation
+  avgUnitsPerActor: number; // For Unit Rating calculation
   avgLoanAmount: number;
   avgRevenue: number;
-  avgConcession: number;     // For Concession Rating calculation
+  avgConcession: number; // For Concession Rating calculation
   avgPullThrough: number;
   avgTurnTime: number;
 }
@@ -52,12 +52,12 @@ export interface CompanyAverages {
  * 6 components totaling 100%
  */
 export interface WeightConfig {
-  unit: number;        // Default: 20 - Unit Rating weight
-  volume: number;      // Default: 20 - Volume Rating weight
-  margin: number;      // Default: 20 - Margin Rating weight
-  concession: number;  // Default: 20 - Concession Rating weight
+  unit: number; // Default: 20 - Unit Rating weight
+  volume: number; // Default: 20 - Volume Rating weight
+  margin: number; // Default: 20 - Margin Rating weight
+  concession: number; // Default: 20 - Concession Rating weight
   pullThrough: number; // Default: 15 - Pull-Through Rating weight
-  turnTime: number;    // Default: 5  - Turn Time Rating weight
+  turnTime: number; // Default: 5  - Turn Time Rating weight
 }
 
 /**
@@ -149,26 +149,26 @@ export interface SalesScorecardData {
 
 /**
  * Hook for fetching TTS Sales Scorecard data
- * 
+ *
  * TTS (Top Tier Score) is a weighted composite score that measures performance
- * relative to company averages using 6 components:
- * - Unit Rating (20%), Volume Rating (20%), Margin Rating (20%)
- * - Concession Rating (20%), Pull-Through Rating (15%), Turn Time Rating (5%)
- * 
- * Tier assignment is based on TTS SCORE THRESHOLDS (from Qlik):
- * - Top Tier: TTS > 120 (20%+ above average)
- * - Second Tier: TTS 100-120 (above average)
- * - Bottom Tier: TTS < 100 (below average)
- * 
+ * relative to company averages using 6 components (weights from tenant config):
+ * - Unit Rating, Volume Rating, Margin Rating
+ * - Concession Rating, Pull-Through Rating, Turn Time Rating
+ *
+ * Tier assignment is based on PERCENTILE DISTRIBUTION (Pareto 20/30/50):
+ * - Top Tier: 80th+ percentile (top 20% of actors by TTS score rank)
+ * - Second Tier: 50th-80th percentile (middle 30%)
+ * - Bottom Tier: Below 50th percentile (bottom 50%)
+ *
  * Default time frame: Rolling 13 months (per Qlik eCCA_TVI_Score_13_Months)
- * 
+ *
  * @param actorType - 'branch' or 'loan_officer'
  * @param dateRange - Optional date range filter (defaults to rolling 13 months)
  * @param selectedTenantId - Optional tenant ID for multi-tenant support
  * @param selectedChannel - Optional channel filter
  */
 export const useSalesScorecardData = (
-  actorType: ActorType = 'loan_officer',
+  actorType: ActorType = "loan_officer",
   dateRange?: DateRange,
   selectedTenantId?: string | null,
   selectedChannel?: string | null
@@ -180,63 +180,86 @@ export const useSalesScorecardData = (
   useEffect(() => {
     const fetchSalesScorecardData = async () => {
       // Check if user has a valid token before making API call
-      const token = localStorage.getItem('auth_token');
+      const token = localStorage.getItem("auth_token");
       if (!token) {
         setData(null);
         setLoading(false);
         return;
       }
-      
+
       setLoading(true);
       setError(null);
-      
+
       try {
         // Build query parameters
         const params = new URLSearchParams();
-        params.append('actor', actorType);
-        if (dateRange?.start) params.append('startDate', dateRange.start);
-        if (dateRange?.end) params.append('endDate', dateRange.end);
-        if (selectedTenantId) params.append('tenant_id', selectedTenantId);
-        if (selectedChannel) params.append('channel_group', selectedChannel);
-        
+        params.append("actor", actorType);
+        if (dateRange?.start) params.append("startDate", dateRange.start);
+        if (dateRange?.end) params.append("endDate", dateRange.end);
+        if (selectedTenantId) params.append("tenant_id", selectedTenantId);
+        if (selectedChannel && selectedChannel !== "All")
+          params.append("channel_group", selectedChannel);
+
         const queryString = params.toString();
         // NOTE: Using original endpoint until /api/scorecard/sales is fully tested
-        const url = `/api/loans/sales-scorecard${queryString ? `?${queryString}` : ''}`;
-        
-        console.log('[SalesScorecard] Fetching data from', url);
+        // Using new consolidated endpoint with channel-aware actor support
+        const url = `/api/scorecard/sales${
+          queryString ? `?${queryString}` : ""
+        }`;
+
+        console.log("[SalesScorecard] Fetching data from", url);
         const responseData = await api.request<SalesScorecardData>(url);
-        console.log('[SalesScorecard] API response:', JSON.stringify({
-          actorCount: responseData.actors?.length,
-          totals: responseData.totals,
-          tierSummary: {
-            top: responseData.tierSummary?.top?.count,
-            second: responseData.tierSummary?.second?.count,
-            bottom: responseData.tierSummary?.bottom?.count,
-          }
-        }, null, 2));
-        
+        console.log(
+          "[SalesScorecard] API response:",
+          JSON.stringify(
+            {
+              actorCount: responseData.actors?.length,
+              totals: responseData.totals,
+              tierSummary: {
+                top: responseData.tierSummary?.top?.count,
+                second: responseData.tierSummary?.second?.count,
+                bottom: responseData.tierSummary?.bottom?.count,
+              },
+            },
+            null,
+            2
+          )
+        );
+
         if (responseData && responseData.actors) {
           setData(responseData);
         } else {
-          console.warn('[SalesScorecard] API returned data but it appears empty or invalid:', responseData);
+          console.warn(
+            "[SalesScorecard] API returned data but it appears empty or invalid:",
+            responseData
+          );
           setData(null);
         }
       } catch (err: any) {
         // Handle unauthorized errors silently (user not logged in)
-        if (err.message?.includes('Unauthorized') || err.message?.includes('401')) {
+        if (
+          err.message?.includes("Unauthorized") ||
+          err.message?.includes("401")
+        ) {
           setData(null);
         } else {
-          console.error('[SalesScorecard] Failed to fetch data:', err);
-          setError(err.message || 'Failed to fetch sales scorecard data');
+          console.error("[SalesScorecard] Failed to fetch data:", err);
+          setError(err.message || "Failed to fetch sales scorecard data");
           setData(null);
         }
       } finally {
         setLoading(false);
       }
     };
-    
+
     fetchSalesScorecardData();
-  }, [actorType, dateRange?.start, dateRange?.end, selectedTenantId, selectedChannel]);
+  }, [
+    actorType,
+    dateRange?.start,
+    dateRange?.end,
+    selectedTenantId,
+    selectedChannel,
+  ]);
 
   return { data, loading, error };
 };
@@ -244,11 +267,20 @@ export const useSalesScorecardData = (
 /**
  * Helper function to get tier badge color classes
  */
-export const getTierColorClass = (tier: TTSTier, isDarkMode: boolean = false): string => {
+export const getTierColorClass = (
+  tier: TTSTier,
+  isDarkMode: boolean = false
+): string => {
   const colors = {
-    top: isDarkMode ? 'bg-emerald-900/30 text-emerald-300' : 'bg-emerald-100 text-emerald-700',
-    second: isDarkMode ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-100 text-blue-700',
-    bottom: isDarkMode ? 'bg-rose-900/30 text-rose-300' : 'bg-rose-100 text-rose-700',
+    top: isDarkMode
+      ? "bg-tier-top-dark text-blue-300"
+      : "bg-tier-top-light text-tier-top",
+    second: isDarkMode
+      ? "bg-tier-second-dark text-green-300"
+      : "bg-tier-second-light text-tier-second",
+    bottom: isDarkMode
+      ? "bg-tier-bottom-dark text-slate-300"
+      : "bg-tier-bottom-light text-slate-600",
   };
   return colors[tier];
 };
@@ -258,9 +290,9 @@ export const getTierColorClass = (tier: TTSTier, isDarkMode: boolean = false): s
  */
 export const getTierDisplayName = (tier: TTSTier): string => {
   const names: Record<TTSTier, string> = {
-    top: 'Top Tier',
-    second: 'Second Tier',
-    bottom: 'Bottom Tier',
+    top: "Top Tier",
+    second: "Second Tier",
+    bottom: "Bottom Tier",
   };
   return names[tier];
 };
@@ -284,86 +316,94 @@ export const getDateRangeForPeriod = (period: string): DateRange => {
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
   const currentQuarter = Math.floor(currentMonth / 3);
-  
+
   switch (period) {
-    case 'MTD': {
+    case "MTD": {
       const startOfMonth = new Date(currentYear, currentMonth, 1);
       return {
-        start: startOfMonth.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: startOfMonth.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
-    case 'QTD': {
+    case "QTD": {
       const startOfQuarter = new Date(currentYear, currentQuarter * 3, 1);
       return {
-        start: startOfQuarter.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: startOfQuarter.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
-    case 'YTD': {
+    case "YTD": {
       const startOfYear = new Date(currentYear, 0, 1);
       return {
-        start: startOfYear.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: startOfYear.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
-    case 'Last Month': {
+    case "Last Month": {
       const startOfLastMonth = new Date(currentYear, currentMonth - 1, 1);
       const endOfLastMonth = new Date(currentYear, currentMonth, 0);
       return {
-        start: startOfLastMonth.toISOString().split('T')[0],
-        end: endOfLastMonth.toISOString().split('T')[0],
+        start: startOfLastMonth.toISOString().split("T")[0],
+        end: endOfLastMonth.toISOString().split("T")[0],
       };
     }
-    case 'Last Quarter': {
+    case "Last Quarter": {
       const lastQuarter = currentQuarter - 1;
       const lastQuarterYear = lastQuarter < 0 ? currentYear - 1 : currentYear;
       const adjustedLastQuarter = lastQuarter < 0 ? 3 : lastQuarter;
-      const startOfLastQuarter = new Date(lastQuarterYear, adjustedLastQuarter * 3, 1);
-      const endOfLastQuarter = new Date(lastQuarterYear, (adjustedLastQuarter + 1) * 3, 0);
+      const startOfLastQuarter = new Date(
+        lastQuarterYear,
+        adjustedLastQuarter * 3,
+        1
+      );
+      const endOfLastQuarter = new Date(
+        lastQuarterYear,
+        (adjustedLastQuarter + 1) * 3,
+        0
+      );
       return {
-        start: startOfLastQuarter.toISOString().split('T')[0],
-        end: endOfLastQuarter.toISOString().split('T')[0],
+        start: startOfLastQuarter.toISOString().split("T")[0],
+        end: endOfLastQuarter.toISOString().split("T")[0],
       };
     }
-    case '3-months':
-    case '3 Months': {
+    case "3-months":
+    case "3 Months": {
       const threeMonthsAgo = new Date(now);
       threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
       return {
-        start: threeMonthsAgo.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: threeMonthsAgo.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
-    case '6-months':
-    case '6 Months': {
+    case "6-months":
+    case "6 Months": {
       const sixMonthsAgo = new Date(now);
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
       return {
-        start: sixMonthsAgo.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: sixMonthsAgo.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
-    case '12-months':
-    case '12 Months':
-    case 'Rolling 12M': {
+    case "12-months":
+    case "12 Months":
+    case "Rolling 12M": {
       const twelveMonthsAgo = new Date(now);
       twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
       return {
-        start: twelveMonthsAgo.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: twelveMonthsAgo.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
-    case '13-months':
-    case '13 Months':
-    case 'Rolling 13M':
+    case "13-months":
+    case "13 Months":
+    case "Rolling 13M":
     default: {
       // Default: Rolling 13 months (Qlik standard for TTS scorecards)
       const thirteenMonthsAgo = new Date(now);
       thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13);
       return {
-        start: thirteenMonthsAgo.toISOString().split('T')[0],
-        end: now.toISOString().split('T')[0],
+        start: thirteenMonthsAgo.toISOString().split("T")[0],
+        end: now.toISOString().split("T")[0],
       };
     }
   }
@@ -372,7 +412,10 @@ export const getDateRangeForPeriod = (period: string): DateRange => {
 /**
  * Helper function to format currency values
  */
-export const formatCurrency = (value: number, abbreviated: boolean = true): string => {
+export const formatCurrency = (
+  value: number,
+  abbreviated: boolean = true
+): string => {
   if (abbreviated) {
     if (value >= 1000000000) {
       return `$${(value / 1000000000).toFixed(1)}B`;
@@ -384,16 +427,19 @@ export const formatCurrency = (value: number, abbreviated: boolean = true): stri
       return `$${(value / 1000).toFixed(0)}K`;
     }
   }
-  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
 };
 
 /**
  * Helper function to format numbers with commas
  */
 export const formatNumber = (num: number, decimals: number = 0): string => {
-  return num.toLocaleString('en-US', { 
-    minimumFractionDigits: decimals, 
-    maximumFractionDigits: decimals 
+  return num.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
 };
 

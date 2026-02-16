@@ -12,12 +12,14 @@
 # Options:
 # -DryRun           Preview migrations without applying
 # -Interactive      Open interactive shell in container (for manual commands)
+# -FixChecksums     Fix checksum mismatches for already-applied migrations
 # ============================================================================
 
 param(
     [switch]$DryRun,
     [switch]$Interactive,
-    [switch]$EnableExec
+    [switch]$EnableExec,
+    [switch]$FixChecksums
 )
 
 # Load configuration
@@ -121,7 +123,7 @@ if ($Interactive) {
     Write-Status "Opening interactive shell in container..."
     Write-Host ""
     Write-Host "You're now inside the container. Run migrations with:" -ForegroundColor Cyan
-    Write-Host "  cd /app/server && npx tsx src/migrations/cli.ts up --verbose" -ForegroundColor Gray
+    Write-Host "  cd /app/server && node dist/migrations/cli.js all --verbose" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Type 'exit' to leave the container." -ForegroundColor Yellow
     Write-Host ""
@@ -135,13 +137,21 @@ if ($Interactive) {
         --profile $env:AWS_PROFILE `
         --region $env:AWS_REGION
 } else {
-    # Build migration command
-    $migrationCmd = "cd /app/server && npx tsx src/migrations/cli.ts up --verbose"
+    # Build migration command (use compiled JS in production container)
+    # Use 'all' command to run both management AND tenant migrations
+    $migrationFlags = "--verbose"
     
     if ($DryRun) {
-        $migrationCmd = "cd /app/server && npx tsx src/migrations/cli.ts up --dry-run --verbose"
+        $migrationFlags += " --dry-run"
         Write-Status "DRY RUN MODE - No changes will be made" "Yellow"
     }
+    
+    if ($FixChecksums) {
+        $migrationFlags += " --fix-checksums"
+        Write-Status "FIX CHECKSUMS MODE - Will update checksums for modified migrations" "Yellow"
+    }
+    
+    $migrationCmd = "cd /app/server && node dist/migrations/cli.js all $migrationFlags"
     
     Write-Status "Running migrations inside ECS task..."
     Write-Host "  Command: $migrationCmd" -ForegroundColor Gray

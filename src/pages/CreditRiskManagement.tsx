@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Filter, X, Calendar, ShieldCheck, TrendingUp, TrendingDown, BarChart3, PieChart, AlertCircle, CheckCircle2, User, Building2, Maximize2, Minimize2, Plus, CheckSquare, Square } from 'lucide-react';
+import { KPICard } from '@/components/widgets/components/KPICard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { Navigation } from '@/components/layout/Navigation';
-import { TopTieringSidebar } from '@/components/toptiering/TopTieringSidebar';
-import { TopTieringTopBar } from '@/components/toptiering/TopTieringTopBar';
+import { TopTieringSidebar } from '@/components/layout/TopTieringSidebar';
+import { TopTieringTopBar } from '@/components/layout/TopTieringTopBar';
 import {
   Dialog,
   DialogContent,
@@ -160,85 +161,7 @@ export default function CreditRiskManagement() {
         }),
       });
       
-      if (response?.loans) {
-        setDrilldownLoans(response.loans);
-      } else {
-        // Generate detailed mock loans for demo
-        const rangeParts = range.split('-');
-        const minValue = type === 'fico' 
-          ? parseInt(rangeParts[0].replace(/[^0-9]/g, '')) || 600
-          : type === 'ltv'
-          ? parseFloat(rangeParts[0].replace(/[^0-9.]/g, '')) || 60
-          : parseFloat(rangeParts[0].replace(/[^0-9.]/g, '')) || 30;
-        const maxValue = type === 'fico'
-          ? (rangeParts[1] ? parseInt(rangeParts[1].replace(/[^0-9]/g, '')) : minValue + 50) || minValue + 50
-          : type === 'ltv'
-          ? (rangeParts[1] ? parseFloat(rangeParts[1].replace(/[^0-9.]/g, '')) : minValue + 20) || minValue + 20
-          : (rangeParts[1] ? parseFloat(rangeParts[1].replace(/[^0-9.]/g, '')) : minValue + 10) || minValue + 10;
-
-        const loanCount = Math.min(25, parseInt(rangeParts[0].replace(/[^0-9]/g, '')) || 15);
-        const firstNames = ['John', 'Sarah', 'Michael', 'Emily', 'David', 'Jessica', 'Robert', 'Amanda', 'James', 'Lisa'];
-        const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
-        const officers = ['Sarah Johnson', 'Michael Chen', 'Emily Rodriguez', 'David Kim', 'Jessica Martinez'];
-        const loanTypes = ['FHA', 'Conventional', 'VA', 'USDA', 'Jumbo'];
-        const statuses = ['Active', 'Pending', 'Under Review', 'Approved', 'Conditional'];
-        const riskReasons = [
-          'High DTI ratio',
-          'Low credit score',
-          'High LTV',
-          'Employment verification pending',
-          'Income documentation required',
-          'Property appraisal needed',
-          'Standard risk assessment'
-        ];
-
-        const mockLoans: Loan[] = Array.from({ length: loanCount }, (_, i) => {
-          const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-          const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-          const fico = type === 'fico' 
-            ? Math.floor(Math.random() * (maxValue - minValue + 1)) + minValue
-            : Math.floor(Math.random() * 150) + 600;
-          const ltv = type === 'ltv'
-            ? Math.random() * (maxValue - minValue) + minValue
-            : Math.random() * 40 + 60;
-          const dti = type === 'dti'
-            ? Math.random() * (maxValue - minValue) + minValue
-            : Math.random() * 20 + 30;
-          
-          let riskLevel: 'Low' | 'Medium' | 'Very High' = 'Low';
-          if (fico < 620 || ltv > 95 || dti > 43) {
-            riskLevel = 'Very High';
-          } else if (fico < 700 || ltv > 80 || dti > 36) {
-            riskLevel = 'Medium';
-          }
-
-          const riskScore = riskLevel === 'Very High' 
-            ? Math.floor(Math.random() * 30) + 10
-            : riskLevel === 'Medium'
-            ? Math.floor(Math.random() * 30) + 40
-            : Math.floor(Math.random() * 30) + 70;
-
-          const amountValue = Math.random() * 500000 + 100000;
-
-          return {
-            id: `LOAN-${type.toUpperCase()}-${String(i + 1).padStart(4, '0')}`,
-            borrower: `${firstName} ${lastName}`,
-            officer: officers[Math.floor(Math.random() * officers.length)],
-            amount: `$${Math.round(amountValue).toLocaleString()}`,
-            amountValue,
-            riskLevel,
-            riskScore,
-            reason: riskReasons[Math.floor(Math.random() * riskReasons.length)],
-            loanType: loanTypes[Math.floor(Math.random() * loanTypes.length)],
-            status: statuses[Math.floor(Math.random() * statuses.length)],
-            ficoScore: fico,
-            ltvRatio: parseFloat(ltv.toFixed(1)),
-            dtiRatio: parseFloat(dti.toFixed(1)),
-            range,
-          };
-        });
-        setDrilldownLoans(mockLoans);
-      }
+      setDrilldownLoans(response?.loans || []);
     } catch (err) {
       console.error('Failed to fetch loans:', err);
       setDrilldownLoans([]);
@@ -266,74 +189,7 @@ export default function CreditRiskManagement() {
         }),
       });
       
-      if (response?.loans) {
-        setDrilldownLoans(response.loans);
-      } else {
-        // Generate detailed mock loans
-        const currentRow = currentLoanMix.find(r => r.category === category);
-        const loanCount = Math.min(25, currentRow?.units || 15);
-        const firstNames = ['John', 'Sarah', 'Michael', 'Emily', 'David', 'Jessica', 'Robert', 'Amanda', 'James', 'Lisa'];
-        const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
-        const officers = ['Sarah Johnson', 'Michael Chen', 'Emily Rodriguez', 'David Kim', 'Jessica Martinez'];
-        const statuses = ['Active', 'Pending', 'Under Review', 'Approved', 'Conditional'];
-        const riskReasons = [
-          'High DTI ratio',
-          'Low credit score',
-          'High LTV',
-          'Employment verification pending',
-          'Income documentation required',
-          'Property appraisal needed',
-          'Standard risk assessment'
-        ];
-
-        const baseFico = currentRow ? currentRow.waFico : 700;
-        const baseLtv = currentRow ? currentRow.waLtv : 75;
-        const baseDti = currentRow ? currentRow.waDti : 38;
-
-        const mockLoans: Loan[] = Array.from({ length: loanCount }, (_, i) => {
-          const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-          const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-          
-          const fico = Math.max(500, Math.min(850, Math.round(baseFico + (Math.random() - 0.5) * 100)));
-          const ltv = Math.max(0, Math.min(100, baseLtv + (Math.random() - 0.5) * 20));
-          const dti = Math.max(0, Math.min(60, baseDti + (Math.random() - 0.5) * 15));
-
-          let riskLevel: 'Low' | 'Medium' | 'Very High' = 'Low';
-          if (fico < 620 || ltv > 95 || dti > 43) {
-            riskLevel = 'Very High';
-          } else if (fico < 700 || ltv > 80 || dti > 36) {
-            riskLevel = 'Medium';
-          }
-
-          const riskScore = riskLevel === 'Very High' 
-            ? Math.floor(Math.random() * 30) + 10
-            : riskLevel === 'Medium'
-            ? Math.floor(Math.random() * 30) + 40
-            : Math.floor(Math.random() * 30) + 70;
-
-          const amountValue = currentRow 
-            ? (currentRow.volume / currentRow.units) + (Math.random() - 0.5) * 100000
-            : Math.random() * 500000 + 100000;
-
-          return {
-            id: `LOAN-${category.replace(/\s+/g, '-').toUpperCase()}-${String(i + 1).padStart(4, '0')}`,
-            borrower: `${firstName} ${lastName}`,
-            officer: officers[Math.floor(Math.random() * officers.length)],
-            amount: `$${Math.round(amountValue).toLocaleString()}`,
-            amountValue,
-            riskLevel,
-            riskScore,
-            reason: riskReasons[Math.floor(Math.random() * riskReasons.length)],
-            loanType: category,
-            status: statuses[Math.floor(Math.random() * statuses.length)],
-            ficoScore: fico,
-            ltvRatio: parseFloat(ltv.toFixed(1)),
-            dtiRatio: parseFloat(dti.toFixed(1)),
-            category,
-          };
-        });
-        setDrilldownLoans(mockLoans);
-      }
+      setDrilldownLoans(response?.loans || []);
     } catch (err) {
       console.error('Failed to fetch loans:', err);
       setDrilldownLoans([]);
@@ -549,30 +405,20 @@ export default function CreditRiskManagement() {
         <div className="space-y-4">
         {/* Header Section */}
         <div className="flex flex-col gap-6">
-          {/* Title and Action Buttons */}
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div className="space-y-1">
-              <h1 className="text-3xl font-light text-slate-900 dark:text-white tracking-tight">
-                Credit Risk Management
-              </h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {canvasMode ? `Canvas Mode: ${canvasEntityName}` : 'Monitor and analyze credit risk across your loan portfolio'}
-              </p>
-            </div>
+          {/* Canvas Mode Exit Button */}
+          {canvasMode && (
             <div className="flex items-center gap-2">
-              {canvasMode && (
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-9 w-9 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  onClick={exitCanvas}
-                  title="Exit Canvas Mode"
-                >
-                  <Minimize2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                </Button>
-              )}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                onClick={exitCanvas}
+                title="Exit Canvas Mode"
+              >
+                <Minimize2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              </Button>
             </div>
-          </div>
+          )}
 
           {/* Filters - DatePeriodPicker and Application Type */}
           <div className="bg-white dark:bg-slate-800/50 rounded-xl p-5 border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
@@ -719,31 +565,30 @@ export default function CreditRiskManagement() {
               </div>
             </div>
 
-            {/* KPI Cards - Enhanced Spacing and Design */}
+            {/* KPI Cards – shared widget components */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-              {kpiCards.map((card, idx) => {
-                const Icon = card.icon;
-                return (
-                  <div 
-                    key={idx} 
-                    className={cn(
-                      "relative bg-gradient-to-br", card.color,
-                      "rounded-xl p-5 text-white shadow-lg overflow-hidden group hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
-                    )}
-                  >
-                    <div className="absolute top-0 right-0 w-28 h-28 bg-white/10 rounded-full blur-2xl" />
-                    <div className="absolute bottom-0 left-0 w-20 h-20 bg-white/5 rounded-full blur-xl" />
-                    
-                    <div className="relative z-10">
-                      <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center mb-3 shadow-md group-hover:bg-white/30 transition-colors">
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div className="text-2xl sm:text-3xl font-bold mb-1 tracking-tight">{card.value}</div>
-                      <div className="text-white/90 text-xs font-medium uppercase tracking-wider">{card.label}</div>
-                    </div>
-                  </div>
-                );
-              })}
+              {(() => {
+                const kpis = data?.kpis || { units: 0, volume: 0, wac: 0, waFico: 0, waLtv: 0, waDti: 0 };
+                const kpiItems: Array<{ value: number; label: string; format: 'number' | 'currency' | 'ratio' | 'percent'; color: string }> = [
+                  { value: kpis.units, label: 'Units', format: 'number', color: 'blue' },
+                  { value: kpis.volume, label: 'Volume', format: 'currency', color: 'emerald' },
+                  { value: kpis.wac, label: 'WAC', format: 'ratio', color: 'violet' },
+                  { value: kpis.waFico, label: 'WA FICO', format: 'number', color: 'amber' },
+                  { value: kpis.waLtv, label: 'WA LTV', format: 'percent', color: 'sky' },
+                  { value: kpis.waDti, label: 'WA DTI', format: 'percent', color: 'rose' },
+                ];
+                return kpiItems.map((item, idx) => (
+                  <KPICard
+                    key={idx}
+                    data={{ value: item.value, label: item.label, format: item.format }}
+                    loading={false}
+                    error={null}
+                    width={180}
+                    height={120}
+                    config={{ color: item.color }}
+                  />
+                ));
+              })()}
             </div>
 
             {/* Charts and Table Section */}

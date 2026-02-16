@@ -3,5 +3,35 @@
  * Exports all AI-related services
  */
 
-export * from './dataChatService.js';
-export * from './queryBuilderService.js';
+// Export types from cohiChatService (new hybrid architecture)
+export type {
+  ChatContext,
+  UserPermissions,
+  RowFilter,
+  CohiChatMessage,
+  CohiChatResponse,
+  VisualizationConfig,
+} from "./cohiChatService.js";
+
+// Export functions from cohiChatService
+export {
+  processCohiQuestion,
+  refineCohiQuery,
+} from "./cohiChatService.js";
+
+// Export types from queryBuilderService (excluding duplicates already exported)
+export type {
+  QueryContext,
+  FilterOperator,
+  DynamicSource,
+  SecureQueryResult,
+} from "./queryBuilderService.js";
+
+// Export functions from queryBuilderService
+export {
+  getUserPermissions,
+  buildSecureQuery,
+  checkSectionAccess,
+  checkFieldAccess,
+  getAccessibleFields,
+} from "./queryBuilderService.js";
