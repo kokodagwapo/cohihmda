@@ -129,24 +129,18 @@ router.get(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    // Get user's role from database (requireRole middleware sets req.userRole, but we need to verify)
-      const userResult = await pool.query(
-        "SELECT role, tenant_id FROM public.users WHERE id = $1",
-        [req.userId],
-      );
-    
-      const userRole = userResult.rows[0]?.role || "user";
-    const userTenantId = userResult.rows[0]?.tenant_id;
-      const isSuperAdmin = userRole === "super_admin" || userRole === "admin";
+    // Use auth token values instead of querying legacy public.users
+    const userRole = req.userRole || "user";
+    const userTenantId = req.tenantId || null;
+    const isSuperAdmin = req.isSuperAdmin || userRole === "super_admin" || userRole === "platform_admin";
 
-    // Run essential queries in parallel
-    // Use management database for tenant count
+    // Run essential queries in parallel using management database
     const [tenantsResult, usersResult] = await Promise.all([
         managementPool.query(
           "SELECT COUNT(*) as count FROM coheus_tenants WHERE status = $1",
           ["active"],
         ),
-        pool.query("SELECT COUNT(*) as count FROM public.users"),
+        managementPool.query("SELECT COUNT(*) as count FROM coheus_users WHERE is_active = true"),
     ]);
 
     // Return minimal, fast response
@@ -362,14 +356,10 @@ router.get(
   requireRole("super_admin", "tenant_admin"),
   async (req: AuthRequest, res) => {
   try {
-    const userResult = await pool.query(
-        "SELECT role, tenant_id FROM public.users WHERE id = $1",
-        [req.userId],
-    );
-    
-      const userRole = userResult.rows[0]?.role || "user";
-    const userTenantId = userResult.rows[0]?.tenant_id;
-      const isSuperAdmin = userRole === "super_admin" || userRole === "admin";
+    // Use auth token values instead of querying legacy public.users
+    const userRole = req.userRole || "user";
+    const userTenantId = req.tenantId || null;
+    const isSuperAdmin = req.isSuperAdmin || userRole === "super_admin" || userRole === "platform_admin";
 
     let query = `
       SELECT 
@@ -379,24 +369,24 @@ router.get(
         u.role,
         u.created_at,
         u.updated_at,
-        p.tenant_id,
+        m.tenant_id,
         t.name as tenant_name
-      FROM public.users u
-      LEFT JOIN public.profiles p ON p.user_id = u.id
-      LEFT JOIN coheus_tenants t ON t.id = p.tenant_id
+      FROM coheus_users u
+      LEFT JOIN user_tenant_mappings m ON m.user_id = u.id
+      LEFT JOIN coheus_tenants t ON t.id = m.tenant_id
     `;
     
     const params: any[] = [];
     
     // If not super admin, only show users from same tenant
     if (!isSuperAdmin && userTenantId) {
-        query += " WHERE p.tenant_id = $1";
+        query += " WHERE m.tenant_id = $1";
       params.push(userTenantId);
     }
     
       query += " ORDER BY u.created_at DESC";
     
-    const result = await pool.query(query, params);
+    const result = await managementPool.query(query, params);
     
     res.json({ users: result.rows });
   } catch (error: any) {
@@ -421,8 +411,8 @@ router.post(
     const validated = createUserSchema.parse(req.body);
     const hashedPassword = await bcrypt.hash(validated.password, 10);
     
-    const result = await pool.query(
-      `INSERT INTO public.users (email, password_hash, full_name, role, created_at, updated_at)
+    const result = await managementPool.query(
+      `INSERT INTO coheus_users (email, encrypted_password, full_name, role, created_at, updated_at)
        VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING id, email, full_name, role, created_at`,
         [
@@ -435,13 +425,13 @@ router.post(
     
     const newUser = result.rows[0];
     
-    // If tenant_id provided, create profile mapping
+    // If tenant_id provided, create tenant mapping
     if (validated.tenant_id) {
-      await pool.query(
-        `INSERT INTO public.profiles (user_id, tenant_id, created_at, updated_at)
-         VALUES ($1, $2, NOW(), NOW())
-         ON CONFLICT (user_id) DO UPDATE SET tenant_id = $2, updated_at = NOW()`,
-          [newUser.id, validated.tenant_id],
+      await managementPool.query(
+        `INSERT INTO user_tenant_mappings (user_id, tenant_id, role, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         ON CONFLICT (user_id, tenant_id) DO UPDATE SET role = $3, updated_at = NOW()`,
+          [newUser.id, validated.tenant_id, validated.role || 'user'],
       );
     }
     
@@ -513,8 +503,8 @@ router.put(
     updates.push(`updated_at = NOW()`);
     params.push(id);
     
-    const result = await pool.query(
-      `UPDATE public.users 
+    const result = await managementPool.query(
+      `UPDATE coheus_users 
        SET ${updates.join(", ")}
        WHERE id = $${paramIndex}
        RETURNING id, email, full_name, role, created_at, updated_at`,
@@ -529,16 +519,16 @@ router.put(
     if (validated.tenant_id !== undefined) {
       if (validated.tenant_id === null) {
         // Remove tenant mapping
-          await pool.query("DELETE FROM public.profiles WHERE user_id = $1", [
+          await managementPool.query("DELETE FROM user_tenant_mappings WHERE user_id = $1", [
             id,
           ]);
       } else {
         // Update or create tenant mapping
-        await pool.query(
-          `INSERT INTO public.profiles (user_id, tenant_id, created_at, updated_at)
-           VALUES ($1, $2, NOW(), NOW())
-           ON CONFLICT (user_id) DO UPDATE SET tenant_id = $2, updated_at = NOW()`,
-            [id, validated.tenant_id],
+        await managementPool.query(
+          `INSERT INTO user_tenant_mappings (user_id, tenant_id, role, created_at, updated_at)
+           VALUES ($1, $2, $3, NOW(), NOW())
+           ON CONFLICT (user_id, tenant_id) DO UPDATE SET updated_at = NOW()`,
+            [id, validated.tenant_id, validated.role || 'user'],
         );
       }
     }
@@ -589,8 +579,8 @@ router.delete(
           .json({ error: "Cannot delete your own account" });
     }
     
-    const result = await pool.query(
-        "DELETE FROM public.users WHERE id = $1 RETURNING id, email",
+    const result = await managementPool.query(
+        "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email",
         [id],
     );
     

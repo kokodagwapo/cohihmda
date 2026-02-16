@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import express from 'express';
-import { pool } from '../config/database.js';
+import { pool } from '../config/managementDatabase.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
 import Stripe from 'stripe';
@@ -135,17 +135,10 @@ router.put('/plans/:id', authenticateToken, async (req: AuthRequest, res) => {
  */
 router.get('/current', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    // Get tenant_id from user profile
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
-
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
-
-    const tenantId = profileResult.rows[0].tenant_id;
 
     // Get subscription with plan details
     const subscriptionResult = await pool.query(
@@ -203,7 +196,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
         t.name as tenant_name
        FROM public.tenant_subscriptions ts
        JOIN public.subscription_plans sp ON ts.plan_id = sp.id
-       LEFT JOIN public.tenants t ON ts.tenant_id = t.id
+       LEFT JOIN public.coheus_tenants t ON ts.tenant_id::text = t.id::text
        ORDER BY ts.created_at DESC`
     );
 
@@ -226,17 +219,10 @@ router.post('/checkout', authenticateToken, async (req: AuthRequest, res) => {
 
     const { planId, deploymentType, billingPeriod, successUrl, cancelUrl, lenderName, lenderEmail } = checkoutSchema.parse(req.body);
 
-    // Get tenant_id from user profile
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
-
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
-
-    const tenantId = profileResult.rows[0].tenant_id;
 
     // Get plan details
     const planResult = await pool.query(
@@ -600,17 +586,10 @@ router.post('/cancel', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const { reason } = cancelSubscriptionSchema.parse(req.body);
 
-    // Get tenant_id
-    const profileResult = await pool.query(
-      'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-      [req.userId]
-    );
-
-    if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
-
-    const tenantId = profileResult.rows[0].tenant_id;
 
     // Get subscription
     const subscriptionResult = await pool.query(
@@ -681,20 +660,14 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   // Create tenant if doesn't exist (for public checkout flow)
   if (!tenantId) {
-    // Create tenant with lender name
+    // Create tenant in management database
     const tenantResult = await pool.query(
-      `INSERT INTO public.tenants (name, created_at, updated_at)
-       VALUES ($1, NOW(), NOW())
+      `INSERT INTO public.coheus_tenants (name, status, created_at, updated_at)
+       VALUES ($1, 'active', NOW(), NOW())
        RETURNING id`,
       [lenderName]
     );
     tenantId = tenantResult.rows[0].id;
-
-    // Create default RAG settings for this tenant
-    await pool.query(
-      'INSERT INTO public.rag_settings (tenant_id, created_at) VALUES ($1, NOW())',
-      [tenantId]
-    );
 
     console.log(`✅ Created new tenant ${tenantId} for ${lenderEmail}`);
   }

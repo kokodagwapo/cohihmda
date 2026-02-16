@@ -14,10 +14,8 @@ export type AdminSection =
   | "security-compliance" // Combined security and SOC 2
   | "connections" // Combined LOS + Synapse integrations
   | "dev-tools" // Developer tools including demo data
-  | "deployment"
   | "stripe"
   | "rag-voice"
-  | "aws-hosting"
   | "metrics-catalog"
   | "knowledge-library" // Global knowledge library (platform admin)
   | "knowledge-center" // Tenant knowledge center

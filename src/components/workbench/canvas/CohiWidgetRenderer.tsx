@@ -1024,10 +1024,22 @@ export function CohiWidgetRenderer({
   const removeWidgetFromStore = useCanvasDataStore((s) => s.removeWidget);
 
   // ─── Chart type state ───
-  const [chartType, setChartTypeLocal] = useState<VisualizationConfig['type']>(vizConfig.type);
+  // Normalize invalid types the LLM may generate (e.g. "chart" → "bar")
+  const normalizeVizType = (t: string): VisualizationConfig['type'] => {
+    const valid = new Set(['bar','line','pie','area','table','kpi','donut','horizontal_bar','stacked_bar','grouped_bar','treemap','pivot']);
+    if (valid.has(t)) return t as VisualizationConfig['type'];
+    // Map common LLM mistakes
+    if (t === 'chart') return 'bar';
+    if (t === 'number' || t === 'metric' || t === 'metric-card') return 'kpi';
+    if (t === 'hbar' || t === 'h_bar') return 'horizontal_bar';
+    console.warn(`[CohiWidget] Normalized invalid viz type "${t}" → "bar"`);
+    return 'bar';
+  };
+
+  const [chartType, setChartTypeLocal] = useState<VisualizationConfig['type']>(normalizeVizType(vizConfig.type));
   const setChartType = useCallback((type: VisualizationConfig['type']) => {
-    setChartTypeLocal(type);
-    onVizTypeChange?.(type);
+    setChartTypeLocal(normalizeVizType(type));
+    onVizTypeChange?.(normalizeVizType(type));
   }, [onVizTypeChange]);
 
   // ─── Timeframe state ───
