@@ -22,6 +22,7 @@ export interface LoanCardContentLoan {
   channel?: string | null;
   currentMilestone?: string | null;
   activeDays?: number | null;
+  applicationDate?: string | null;
   estimatedClosingDate?: string | null;
   interestRate?: number | null;
   marketRate?: number | null;
@@ -515,6 +516,7 @@ export const LoanCardContent = memo(
             loanPurpose={loan.loanPurpose}
             channel={loan.channel}
             activeDays={loan.activeDays}
+            applicationDate={loan.applicationDate}
             currentMilestone={loan.currentMilestone}
             estimatedClosingDate={loan.estimatedClosingDate}
             loPullthroughPct={loan.loPullthroughPct}

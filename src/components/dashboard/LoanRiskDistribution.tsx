@@ -12,6 +12,7 @@ interface LoanRiskDistributionProps {
   loanPurpose?: string | null;
   channel?: string | null;
   activeDays?: number | null;
+  applicationDate?: string | null;
   currentMilestone?: string | null;
   estimatedClosingDate?: string | null;
   loPullthroughPct?: number | null;
@@ -74,6 +75,7 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   loanPurpose,
   channel,
   activeDays,
+  applicationDate,
   currentMilestone,
   estimatedClosingDate,
   loPullthroughPct,
@@ -155,6 +157,16 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
 
   const milestoneDisplay = currentMilestone != null && String(currentMilestone).trim() !== '' ? String(currentMilestone) : '—';
   const timeInMotionDisplay = activeDays != null ? `${activeDays} days` : '—';
+  const applicationDateDisplay = (() => {
+    if (applicationDate == null || String(applicationDate).trim() === '') return '—';
+    try {
+      const d = new Date(applicationDate);
+      if (Number.isNaN(d.getTime())) return String(applicationDate);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return String(applicationDate);
+    }
+  })();
   const estimatedClosingDisplay = (() => {
     if (estimatedClosingDate == null || String(estimatedClosingDate).trim() === '') return '—';
     try {
@@ -179,7 +191,7 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
 
   return (
     <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-white/10' : 'border-slate-100'}`}>
-      <div className="grid grid-cols-5 grid-rows-2 gap-x-3 gap-y-0.5 sm:gap-x-4 py-1 items-start">
+      <div className="grid grid-cols-5 gap-x-3 gap-y-0.5 sm:gap-x-4 py-1 items-start">
         {/* Row 1: FICO, LTV, DTI, LO Pullthrough, Time in Motion */}
         <MetricItem
           label="FICO"
@@ -211,12 +223,14 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
           valueClassName={activeDays != null ? getTimeInMotionColor(activeDays) : undefined}
           isDarkMode={isDarkMode}
         />
-        {/* Row 2: Loan Type, Loan Purpose, Channel, Milestone */}
+        {/* Row 2: Loan Type, Loan Purpose, Channel, Milestone, Application Date */}
         <MetricItem label="Loan Type" value={loanType != null && String(loanType).trim() !== '' ? String(loanType) : '—'} isDarkMode={isDarkMode} />
         <MetricItem label="Loan Purpose" value={loanPurpose != null && String(loanPurpose).trim() !== '' ? String(loanPurpose) : '—'} isDarkMode={isDarkMode} />
         <MetricItem label="Channel" value={channel != null && String(channel).trim() !== '' ? String(channel) : '—'} isDarkMode={isDarkMode} />
         <MetricItem label="Milestone" value={milestoneDisplay} isDarkMode={isDarkMode} />
-        <MetricItem label="Estimated closing date" value={estimatedClosingDisplay} isDarkMode={isDarkMode} />
+        <MetricItem label="Application Date" value={applicationDateDisplay} isDarkMode={isDarkMode} />
+        {/* Row 3: Estimated Closing */}
+        <MetricItem label="Est. Closing" value={estimatedClosingDisplay} isDarkMode={isDarkMode} />
       </div>
     </div>
   );
