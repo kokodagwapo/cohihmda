@@ -1066,7 +1066,15 @@ router.get(
           current_loan_status:
             mergedLoanData.current_loan_status ??
             mergedLoanData.currentLoanStatus,
-          activeDays: mergedLoanData.activeDays ?? null,
+          activeDays: (() => {
+            // Always recompute from application_date so it stays current (stored value is stale)
+            const appDate = mergedLoanData.application_date;
+            if (appDate != null) {
+              const days = Math.floor((Date.now() - new Date(appDate).getTime()) / (1000 * 60 * 60 * 24));
+              if (!isNaN(days) && days >= 0) return days;
+            }
+            return mergedLoanData.activeDays ?? null;
+          })(),
           loPullthroughPercentage: loPullthroughPercentage ?? null,
           uwPullthroughPercentage:
             mergedLoanData.uwPullthroughPercentage ?? null,
@@ -1080,9 +1088,9 @@ router.get(
             mergedLoanData.loanCharacteristicsSignalStrength ??
             loanCharacteristicsSignal,
           timeInMotionSignalStrength:
-            mergedLoanData.timeInMotionSignalStrength ?? timeInMotionSignal,
+            calculateTimeInMotionSignal({ ...mergedLoanData, activeDays: undefined }) ?? timeInMotionSignal,
           timeInMotionSignal:
-            mergedLoanData.timeInMotionSignal ?? timeInMotionSignal,
+            calculateTimeInMotionSignal({ ...mergedLoanData, activeDays: undefined }) ?? timeInMotionSignal,
           mloAeFalloutProneSignalStrength:
             mergedLoanData.mloAeFalloutProneSignalStrength ?? mloAeFalloutSignal,
           interestLockVsMarketSignalStrength:

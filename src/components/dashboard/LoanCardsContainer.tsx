@@ -35,6 +35,7 @@ interface LoanCard {
   // Milestone and time in motion
   currentMilestone?: string | null;
   activeDays?: number | null;
+  applicationDate?: string | null;
   estimatedClosingDate?: string | null;
   // Rates and market
   interestRate?: number | null;
