@@ -1,7 +1,7 @@
 /**
  * Revenue Formula Tab
  * Build custom revenue calculation formulas from available loan fields
- * Allows tenants to define their own revenue formula matching their Qlik/legacy systems
+ * Allows tenants to define their own revenue formula
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -50,11 +50,12 @@ import {
   Info,
   TestTube,
   RefreshCw,
-  FileUp,
   ArrowRight,
   Search,
   Parentheses,
   X,
+  Copy,
+  ClipboardPaste,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -67,201 +68,6 @@ interface RevenueFormulaTabProps {
 
 // NOTE: Fields are now dynamically loaded from the tenant's database schema
 // via the loadTenantFields() function. No hardcoded field list needed.
-
-// Mapping from Qlik field names to Encompass LOS field IDs
-// This allows us to look up existing columns by their LOS field ID or generate new ones
-const QLIK_TO_LOS_FIELD_ID: Record<string, string> = {
-  // Purchase Advice fields
-  "purchase advice sell amount": "2208",
-  "pa sell amt": "2208",
-  "purchase advice srp amount": "2206",
-  "pa srp amt": "2206",
-  "purchase adv expected int pymt from investor": "2836",
-  "purchase advice expected interest payment from investor": "2836",
-  "expected interest payment from investor": "2836",
-  "purchase advice expctd payout 1 amt": "2596",
-  "purchase advice expected payout 1 amount": "2596",
-  "purchase advice payout 1": "2596",
-  "pa payout 1": "2596",
-  "purchase advice expctd payout 2 amt": "2597",
-  "purchase advice expected payout 2 amount": "2597",
-  "purchase advice payout 2": "2597",
-  "pa payout 2": "2597",
-  "purchase advice expctd pymt 2 amt": "2597",
-  "purchase advice expctd payout 3 amt": "2598",
-  "purchase advice expected payout 3 amount": "2598",
-  "purchase advice payout 3": "2598",
-  "pa payout 3": "2598",
-  "purchase advice expctd pymt 3 amt": "2598",
-  "purchase advice expctd payout 4 amt": "2599",
-  "purchase advice expected payout 4 amount": "2599",
-  "purchase advice payout 4": "2599",
-  "pa payout 4": "2599",
-  "purchase advice expctd payout 5 amt": "2600",
-  "purchase advice expected payout 5 amount": "2600",
-  "purchase advice payout 5": "2600",
-  "pa payout 5": "2600",
-
-  // Line 800 fields
-  "line 800 total borrower paid amount": "NEWHUD2.X28",
-  "line 800 total borrower paid": "NEWHUD2.X28",
-  "line 800 borr": "NEWHUD2.X28",
-  "line 800 total seller paid amount": "NEWHUD2.X29",
-  "line 800 total seller paid": "NEWHUD2.X29",
-  "line 800 seller": "NEWHUD2.X29",
-
-  // Fee fields
-  "fees appraisal fee borr": "NEWHUD.X1109",
-  "appraisal fee borrower": "NEWHUD.X1109",
-  "fees appraisal fee borrower": "NEWHUD.X1109",
-  "fees interest borr": "334",
-  "fees interest borrower": "334",
-  "interest fees borrower": "334",
-  "origination fee borrower paid": "NEWHUD.X1164",
-  "orig fee borr pd": "NEWHUD.X1164",
-  "origination fees seller paid": "NEWHUD.X1180",
-  "origination fees seller": "NEWHUD.X1180",
-  "orig fees seller": "NEWHUD.X1180",
-  "origination points": "NEWHUD.X627",
-
-  // Credits
-  "lender credits": "NEWHUD.X1136",
-  "lender credit": "NEWHUD.X1136",
-  "cd lender credits": "CD3.X61",
-  "cd applied cure": "NEWHUD.X1210",
-
-  // Warehouse (custom fields - may vary by client)
-  "warehouse line fee": "CX.WHL.FEE",
-  "warehouse fee": "CX.WHL.FEE",
-  "warehouse line interest": "CX.WHL.INT",
-  "warehouse interest": "CX.WHL.INT",
-
-  // Base buy / pricing
-  "base buy": "3236",
-  "rate lock buy side base price rate": "3236",
-  "base buy ($)": "3236",
-
-  // Loan fields
-  "loan amount": "2",
-};
-
-// Helper to generate a column name from a display name/description
-function generateColumnName(displayName: string): string {
-  return displayName
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "") // Remove special chars
-    .replace(/\s+/g, "_") // Replace spaces with underscores
-    .replace(/_+/g, "_") // Remove duplicate underscores
-    .replace(/^_|_$/g, "") // Remove leading/trailing underscores
-    .substring(0, 63); // PostgreSQL column name limit
-}
-
-/**
- * Parse a Qlik-style formula and extract fields with their operators
- * Example: [Field A] + [Field B] - [Field C]
- * Searches existing tenant columns by LOS field ID and fuzzy name matching
- */
-function parseQlikFormula(
-  qlikFormula: string,
-  tenantFields: TenantField[]
-): {
-  components: Array<{
-    qlikName: string;
-    dbField: string | null;
-    operator: "+" | "-";
-    label: string;
-    losFieldId?: string;
-  }>;
-  unmappedFields: string[];
-} {
-  const components: Array<{
-    qlikName: string;
-    dbField: string | null;
-    operator: "+" | "-";
-    label: string;
-    losFieldId?: string;
-  }> = [];
-  const unmappedFields: string[] = [];
-
-  // Remove parentheses - we flatten the formula for simplicity
-  const formulaText = qlikFormula.replace(/[()]/g, " ");
-
-  // Find all [Field Name] patterns with their preceding operator
-  const fieldPattern = /([+-]?)\s*\[([^\]]+)\]/g;
-  let match;
-  let isFirst = true;
-
-  while ((match = fieldPattern.exec(formulaText)) !== null) {
-    const operatorChar = match[1]?.trim() || "+";
-    const qlikFieldName = match[2].trim();
-
-    // Normalize the Qlik field name for lookup
-    const normalizedName = qlikFieldName.toLowerCase().trim();
-
-    // Look up the Encompass field ID from our mapping
-    const losFieldId = QLIK_TO_LOS_FIELD_ID[normalizedName];
-
-    // Determine operator (first field is always +)
-    const operator: "+" | "-" = isFirst
-      ? "+"
-      : operatorChar === "-"
-      ? "-"
-      : "+";
-    isFirst = false;
-
-    // Try to find existing column:
-    // 1. First by LOS field ID match
-    // 2. Then by fuzzy name match
-    let matchedField: TenantField | undefined;
-
-    if (losFieldId && tenantFields.length > 0) {
-      // Search by LOS field ID
-      matchedField = tenantFields.find((f) => f.losFieldId === losFieldId);
-    }
-
-    if (!matchedField && tenantFields.length > 0) {
-      // Fuzzy name match - convert Qlik name to potential column name and search
-      const potentialColumnName = generateColumnName(qlikFieldName);
-
-      // Try exact match first
-      matchedField = tenantFields.find((f) => f.value === potentialColumnName);
-
-      // Try partial match - column contains key words from the Qlik field
-      if (!matchedField) {
-        const keyWords = normalizedName
-          .split(/\s+/)
-          .filter((w) => w.length > 2);
-        matchedField = tenantFields.find((f) => {
-          const colLower = f.value.toLowerCase();
-          return keyWords.every((kw) =>
-            colLower.includes(kw.replace(/[^a-z0-9]/g, ""))
-          );
-        });
-      }
-    }
-
-    if (matchedField) {
-      components.push({
-        qlikName: qlikFieldName,
-        dbField: matchedField.value,
-        operator,
-        label: matchedField.label || qlikFieldName,
-        losFieldId,
-      });
-    } else {
-      unmappedFields.push(qlikFieldName);
-      components.push({
-        qlikName: qlikFieldName,
-        dbField: null,
-        operator,
-        label: qlikFieldName,
-        losFieldId,
-      });
-    }
-  }
-
-  return { components, unmappedFields };
-}
 
 // Field categories for grouping in the UI
 const FIELD_CATEGORIES = [
@@ -308,7 +114,7 @@ interface TenantField {
 
 export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
   const { toast } = useToast();
-  const { selectedTenantId, isTenantAdmin } = useAdminTenant();
+  const { selectedTenantId, isTenantAdmin, isPlatformAdmin } = useAdminTenant();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -339,49 +145,17 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
   const [tenantFields, setTenantFields] = useState<TenantField[]>([]);
   const [loadingFields, setLoadingFields] = useState(false);
 
-  // LOS connection for adding fields
-  const [losConnectionId, setLosConnectionId] = useState<string | null>(null);
-  const [addingMissingFields, setAddingMissingFields] = useState(false);
+  // Export/Import formula between tenants
+  const [showFormulaImport, setShowFormulaImport] = useState(false);
+  const [importJsonText, setImportJsonText] = useState("");
+  const [importParseError, setImportParseError] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<RevenueFormula | null>(null);
 
-  // Qlik import state
-  const [showQlikImport, setShowQlikImport] = useState(false);
-  const [qlikFormulaText, setQlikFormulaText] = useState("");
-  const [qlikParseResult, setQlikParseResult] = useState<{
-    components: Array<{
-      qlikName: string;
-      dbField: string | null;
-      operator: "+" | "-";
-      label: string;
-      losFieldId?: string;
-    }>;
-    unmappedFields: string[];
-  } | null>(null);
-
-  // Load existing formula, available fields, and LOS connection on mount
+  // Load existing formula and available fields on mount
   useEffect(() => {
     loadFormula();
     loadTenantFields();
-    loadLosConnection();
   }, [selectedTenantId]);
-
-  // Load LOS connection ID for creating additional fields
-  const loadLosConnection = async () => {
-    try {
-      const tenantParam = selectedTenantId
-        ? `?tenant_id=${selectedTenantId}`
-        : "";
-      const response = await api.request<{
-        connections: { id: string; los_type: string }[];
-      }>(`/api/tenant-config/los-connections${tenantParam}`);
-      // Get the first Encompass connection (typically there's only one)
-      const encompassConnection = response.connections?.find(
-        (c) => c.los_type === "encompass"
-      );
-      setLosConnectionId(encompassConnection?.id || null);
-    } catch (error: any) {
-      console.error("Error loading LOS connection:", error);
-    }
-  };
 
   // Track if tenant fields have been loaded (even if empty)
   const [fieldsLoaded, setFieldsLoaded] = useState(false);
@@ -432,163 +206,6 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
       .map((c) => c.field!)
       .filter((field) => !isFieldAvailable(field));
   }, [formula.formula_components, fieldsLoaded, isFieldAvailable]);
-
-  // Get missing field column names with their LOS field IDs from the Qlik mapping
-  const getMissingFieldsWithLosId = useCallback((): Array<{
-    columnName: string;
-    losFieldId: string;
-    qlikLabel: string;
-  }> => {
-    const missingFieldNames = getMissingFields();
-    const results: Array<{
-      columnName: string;
-      losFieldId: string;
-      qlikLabel: string;
-    }> = [];
-
-    for (const columnName of missingFieldNames) {
-      // Find the formula component to get its label
-      const component = formula.formula_components.find(
-        (c) => c.field === columnName
-      );
-      const label = component?.label || columnName;
-
-      // Look up the LOS field ID from our Qlik mapping
-      // We need to reverse-lookup: find what Qlik name maps to this column name
-      const normalizedLabel = label.toLowerCase().trim();
-      const losFieldId = QLIK_TO_LOS_FIELD_ID[normalizedLabel];
-
-      if (losFieldId) {
-        results.push({ columnName, losFieldId, qlikLabel: label });
-      } else {
-        console.log(
-          `[RevenueFormula] Missing field "${columnName}" (${label}) has no LOS field ID mapping`
-        );
-      }
-    }
-
-    console.log(
-      `[RevenueFormula] Missing fields: ${
-        missingFieldNames.length
-      }, with LOS field IDs: ${results.length}, LOS connection: ${
-        losConnectionId || "none"
-      }`
-    );
-    return results;
-  }, [getMissingFields, formula.formula_components, losConnectionId]);
-
-  // Add missing fields to the database - fetches descriptions from Encompass RDB
-  const addMissingFieldsToDatabase = async () => {
-    if (!losConnectionId) {
-      toast({
-        title: "Error",
-        description:
-          "No LOS connection found. Please configure an Encompass connection first.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const missingFields = getMissingFieldsWithLosId();
-    if (missingFields.length === 0) {
-      toast({
-        title: "No Fields to Add",
-        description:
-          "All fields either exist or don't have Encompass field ID mappings.",
-      });
-      return;
-    }
-
-    setAddingMissingFields(true);
-    try {
-      const tenantParam = selectedTenantId
-        ? `?tenant_id=${selectedTenantId}`
-        : "";
-
-      // Call backend endpoint that fetches Encompass descriptions and creates columns
-      const response = await api.request<{
-        success: boolean;
-        message: string;
-        results: Array<{
-          losFieldId: string;
-          columnName: string;
-          displayName: string;
-          success: boolean;
-          error?: string;
-        }>;
-        requiresSync: boolean;
-      }>(
-        `/api/tenant-config/additional-fields/batch-create-from-encompass${tenantParam}`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            losConnectionId,
-            fields: missingFields.map((f) => ({
-              losFieldId: f.losFieldId,
-              fallbackDisplayName: f.qlikLabel, // Used if Encompass lookup fails
-            })),
-          }),
-        }
-      );
-
-      const successCount = response.results.filter((r) => r.success).length;
-      const alreadyExisted = response.results.filter(
-        (r) => r.error === "Field already exists"
-      ).length;
-
-      if (response.success || successCount > 0) {
-        // Update formula components with the new column names from Encompass
-        const columnNameMap = new Map(
-          response.results
-            .filter((r) => r.success)
-            .map((r) => [r.losFieldId, r.columnName])
-        );
-
-        // Update formula to use the new column names
-        setFormula((prev) => ({
-          ...prev,
-          formula_components: prev.formula_components.map((comp) => {
-            // Find the LOS field ID for this component
-            const normalizedLabel = comp.label.toLowerCase().trim();
-            const losFieldId = QLIK_TO_LOS_FIELD_ID[normalizedLabel];
-            const newColumnName = losFieldId
-              ? columnNameMap.get(losFieldId)
-              : undefined;
-
-            if (newColumnName && !isFieldAvailable(comp.field)) {
-              return { ...comp, field: newColumnName };
-            }
-            return comp;
-          }),
-          is_validated: false,
-        }));
-
-        toast({
-          title: "Fields Added Successfully",
-          description: `${successCount} field(s) added to database${
-            alreadyExisted > 0 ? ` (${alreadyExisted} already existed)` : ""
-          }. Column names generated from Encompass descriptions. Run a data sync to populate values.`,
-          duration: 8000,
-        });
-        // Reload tenant fields to update the UI
-        await loadTenantFields();
-      } else {
-        toast({
-          title: "Failed to Add Fields",
-          description: response.message,
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "Error Adding Fields",
-        description: error.message || "Failed to add fields to database",
-        variant: "destructive",
-      });
-    } finally {
-      setAddingMissingFields(false);
-    }
-  };
 
   const loadFormula = async () => {
     setLoading(true);
@@ -794,116 +411,172 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
     }));
   };
 
-  // Handle parsing Qlik formula text
-  const handleParseQlikFormula = () => {
-    if (!qlikFormulaText.trim()) {
+  // Export formula to clipboard as JSON
+  const handleExportFormula = async () => {
+    if (formula.formula_components.length === 0) {
       toast({
-        title: "Error",
-        description: "Please paste a Qlik formula first",
+        title: "Nothing to Export",
+        description: "Add fields to the formula before exporting.",
         variant: "destructive",
       });
       return;
     }
 
-    const result = parseQlikFormula(qlikFormulaText, tenantFields);
-    setQlikParseResult(result);
+    const exportData = {
+      _type: "cohi_revenue_formula",
+      _version: 1,
+      _exportedAt: new Date().toISOString(),
+      name: formula.name,
+      description: formula.description,
+      calculation_type: formula.calculation_type,
+      formula_components: formula.formula_components,
+      is_active: formula.is_active,
+    };
 
-    const mappedCount = result.components.filter((c) => c.dbField).length;
-    const unmappedCount = result.unmappedFields.length;
-
-    if (unmappedCount > 0 && mappedCount > 0) {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(exportData, null, 2));
       toast({
-        title: "Partially Mapped",
-        description: `Mapped ${mappedCount} fields to existing columns. ${unmappedCount} field(s) need to be added.`,
+        title: "Formula Copied",
+        description: `Copied "${formula.name}" with ${formula.formula_components.filter((c) => c.type === "field").length} field(s) to clipboard. Paste it into another tenant's Revenue Formula tab.`,
+        duration: 5000,
       });
-    } else if (unmappedCount > 0) {
+    } catch {
+      // Fallback for clipboard API not available
+      const textArea = document.createElement("textarea");
+      textArea.value = JSON.stringify(exportData, null, 2);
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
       toast({
-        title: "Fields Not Found",
-        description: `${unmappedCount} field(s) not found in database. They will need to be added.`,
-        variant: "destructive",
-      });
-    } else if (mappedCount > 0) {
-      toast({
-        title: "All Fields Mapped",
-        description: `Successfully mapped all ${mappedCount} fields to existing database columns.`,
+        title: "Formula Copied",
+        description: `Copied "${formula.name}" to clipboard.`,
       });
     }
   };
 
-  // Import the parsed Qlik formula into the formula builder
-  const handleImportQlikFormula = () => {
-    if (!qlikParseResult || qlikParseResult.components.length === 0) {
-      toast({
-        title: "Error",
-        description:
-          "No valid fields to import. Please parse the formula first.",
-        variant: "destructive",
-      });
+  // Parse pasted formula JSON for import preview
+  const handleParseImportJson = () => {
+    setImportParseError(null);
+    setImportPreview(null);
+
+    if (!importJsonText.trim()) {
+      setImportParseError("Please paste exported formula JSON first.");
       return;
     }
 
-    // Convert ALL components to FormulaComponent format
-    // For unmapped fields, generate a column name from the Qlik name
-    const allComponents: FormulaComponent[] = qlikParseResult.components.map(
-      (c, index) => {
-        // For mapped fields, use the existing column
-        // For unmapped fields, generate a column name from the Qlik field name
-        const columnName = c.dbField || generateColumnName(c.qlikName);
+    try {
+      const parsed = JSON.parse(importJsonText.trim());
 
-        // Check if this is a "Base Buy" type field (pricing percentage)
-        const isBaseBuy =
-          c.qlikName.toLowerCase().includes("base buy") ||
-          c.qlikName.toLowerCase().includes("base price rate") ||
-          c.losFieldId === "3236";
+      // Validate structure
+      if (parsed._type !== "cohi_revenue_formula") {
+        setImportParseError(
+          "Invalid format. This doesn't look like an exported revenue formula. Make sure you copied from the Export button on another tenant's Revenue Formula tab."
+        );
+        return;
+      }
 
-        return {
-          id: Date.now().toString() + index,
-          type: "field" as const,
-          field: columnName,
-          operator: c.operator,
-          label: c.label,
-          isBaseBuy,
-        };
+      if (
+        !Array.isArray(parsed.formula_components) ||
+        parsed.formula_components.length === 0
+      ) {
+        setImportParseError(
+          "The exported formula has no components. Nothing to import."
+        );
+        return;
+      }
+
+      // Validate each component has the required fields
+      for (const comp of parsed.formula_components) {
+        if (!comp.id || !comp.type || !comp.operator) {
+          setImportParseError(
+            "One or more formula components are malformed. Please re-export from the source tenant."
+          );
+          return;
+        }
+      }
+
+      const preview: RevenueFormula = {
+        calculation_type: parsed.calculation_type || "revenue",
+        name: parsed.name || "Imported Revenue Formula",
+        description: parsed.description || "",
+        formula_components: parsed.formula_components,
+        is_active: parsed.is_active ?? true,
+        is_validated: false,
+      };
+
+      setImportPreview(preview);
+    } catch (e: any) {
+      setImportParseError(
+        `Invalid JSON: ${e.message}. Make sure you pasted the complete exported text.`
+      );
+    }
+  };
+
+  // Apply the imported formula
+  const handleApplyImportedFormula = () => {
+    if (!importPreview) return;
+
+    // Regenerate component IDs to avoid collisions
+    const now = Date.now();
+    const remappedComponents = importPreview.formula_components.map(
+      (comp, idx) => {
+        const newId = `${now}_${idx}`;
+        // For group_start/group_end, remap groupId consistently
+        if (comp.type === "group_start" || comp.type === "group_end") {
+          return { ...comp, id: newId };
+        }
+        return { ...comp, id: newId };
       }
     );
 
-    if (allComponents.length === 0) {
-      toast({
-        title: "Error",
-        description: "No fields could be parsed from the formula.",
-        variant: "destructive",
-      });
-      return;
-    }
+    // Remap groupIds so paired group_start/group_end still match
+    const groupIdMap = new Map<string, string>();
+    const finalComponents = remappedComponents.map((comp) => {
+      if (comp.groupId) {
+        if (!groupIdMap.has(comp.groupId)) {
+          groupIdMap.set(comp.groupId, `grp_${now}_${groupIdMap.size}`);
+        }
+        return { ...comp, groupId: groupIdMap.get(comp.groupId) };
+      }
+      return comp;
+    });
 
-    // Replace the current formula with the imported one
     setFormula((prev) => ({
       ...prev,
-      formula_components: allComponents,
+      name: importPreview.name,
+      description: importPreview.description,
+      formula_components: finalComponents,
+      is_active: importPreview.is_active,
       is_validated: false,
+      validation_result: undefined,
     }));
 
-    // Close the import dialog
-    setShowQlikImport(false);
-    setQlikFormulaText("");
-    setQlikParseResult(null);
+    // Close dialog and reset
+    setShowFormulaImport(false);
+    setImportJsonText("");
+    setImportParseError(null);
+    setImportPreview(null);
 
-    // Count how many fields need to be created
-    const missingCount = allComponents.filter(
-      (c) => !isFieldAvailable(c.field)
+    // Check for missing fields
+    const fieldComponents = finalComponents.filter(
+      (c) => c.type === "field" && c.field
+    );
+    const missingCount = fieldComponents.filter(
+      (c) => !isFieldAvailable(c.field!)
     ).length;
-    const existingCount = allComponents.length - missingCount;
 
     if (missingCount > 0) {
       toast({
-        title: "Formula Imported - Fields Need to be Added",
-        description: `Imported ${allComponents.length} fields. ${existingCount} exist in DB, ${missingCount} need to be added. Use "Add Missing Fields to DB" button.`,
+        title: "Formula Imported - Some Fields Missing",
+        description: `Imported ${fieldComponents.length} field(s). ${missingCount} field(s) don't exist in this tenant's database yet. Check the warning above to add them.`,
+        variant: "destructive",
         duration: 8000,
       });
     } else {
       toast({
         title: "Formula Imported Successfully",
-        description: `All ${allComponents.length} field(s) exist in your database. You can test and save the formula.`,
+        description: `Imported "${importPreview.name}" with ${fieldComponents.length} field(s). Test and save when ready.`,
       });
     }
   };
@@ -966,15 +639,11 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
     // Check for missing fields first
     const missingFields = getMissingFields();
     if (missingFields.length > 0) {
-      const autoAddableCount = getMissingFieldsWithLosId().length;
       toast({
         title: "Missing Fields - Cannot Test",
-        description:
-          autoAddableCount > 0
-            ? `${missingFields.length} field(s) missing. Click "Add Fields from Encompass" to auto-create them, then test again.`
-            : `${missingFields.length} field(s) missing: ${missingFields.join(
-                ", "
-              )}. Add them via Additional Fields or remove from formula.`,
+        description: `${missingFields.length} field(s) missing: ${missingFields.join(
+          ", "
+        )}. Add them via Additional Fields or remove from formula.`,
         variant: "destructive",
       });
       return;
@@ -1053,15 +722,11 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
     // Check for missing fields before saving
     const missingFields = getMissingFields();
     if (missingFields.length > 0) {
-      const autoAddableCount = getMissingFieldsWithLosId().length;
       toast({
         title: "Missing Fields - Cannot Save",
-        description:
-          autoAddableCount > 0
-            ? `${missingFields.length} field(s) missing. Click "Add Fields from Encompass" to auto-create them, then save again.`
-            : `${missingFields.length} field(s) missing: ${missingFields.join(
-                ", "
-              )}. Add them via Additional Fields or remove from formula.`,
+        description: `${missingFields.length} field(s) missing: ${missingFields.join(
+          ", "
+        )}. Add them via Additional Fields or remove from formula.`,
         variant: "destructive",
       });
       return;
@@ -1201,15 +866,31 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowQlikImport(true)}
-              className="font-light bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300"
-            >
-              <FileUp className="h-4 w-4 mr-2" />
-              Import from Qlik
-            </Button>
+            {isPlatformAdmin && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportFormula}
+                  disabled={formula.formula_components.length === 0}
+                  className="font-light bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+                  title="Copy formula to clipboard for pasting into another tenant"
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowFormulaImport(true)}
+                  className="font-light bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-950/50 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"
+                  title="Import formula copied from another tenant"
+                >
+                  <ClipboardPaste className="h-4 w-4 mr-2" />
+                  Import
+                </Button>
+              </>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1274,12 +955,12 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
           </Alert>
         )}
 
-        {/* Missing Fields Warning with Auto-Add */}
+        {/* Missing Fields Warning */}
         {fieldsLoaded && getMissingFields().length > 0 && (
           <Alert className="bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800">
             <AlertCircle className="h-4 w-4 text-amber-600" />
             <AlertDescription className="text-amber-800 dark:text-amber-200 text-sm">
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <div>
                   <span className="font-medium">Missing Fields:</span> The
                   following fields in your formula don't exist in this tenant's
@@ -1288,46 +969,10 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
                     {getMissingFields().join(", ")}
                   </span>
                 </div>
-
-                {getMissingFieldsWithLosId().length > 0 ? (
-                  <div className="flex items-center justify-between gap-4 p-2 bg-amber-100 dark:bg-amber-900/40 rounded">
-                    <p className="text-xs">
-                      <strong>{getMissingFieldsWithLosId().length}</strong>{" "}
-                      field(s) can be auto-added from Encompass. Column names
-                      will be generated from Encompass field descriptions. After
-                      adding, run a data sync.
-                    </p>
-                    {losConnectionId ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={addMissingFieldsToDatabase}
-                        disabled={addingMissingFields}
-                        className="shrink-0 bg-amber-200 hover:bg-amber-300 dark:bg-amber-800 dark:hover:bg-amber-700 border-amber-500 text-amber-900 dark:text-amber-100 font-medium"
-                      >
-                        {addingMissingFields ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Plus className="h-4 w-4 mr-2" />
-                        )}
-                        Add {getMissingFieldsWithLosId().length} Field
-                        {getMissingFieldsWithLosId().length > 1 ? "s" : ""} from
-                        Encompass
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-red-600 dark:text-red-400">
-                        No LOS connection found - configure one in Integrations
-                        tab first
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs text-amber-700 dark:text-amber-300">
-                    These fields don't have Encompass field ID mappings. Add
-                    them manually via the Additional Fields tab or remove them
-                    from the formula.
-                  </p>
-                )}
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  Add them via the Additional Fields tab or remove them from the
+                  formula.
+                </p>
               </div>
             </AlertDescription>
           </Alert>
@@ -1639,7 +1284,7 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
                     The tenant's database doesn't have numeric columns mapped
                     yet.
                     <br />
-                    Use the Qlik Import feature above or add Additional Fields.
+                    Add fields via the Additional Fields tab.
                   </p>
                 </div>
               )}
@@ -1794,56 +1439,75 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
         </div>
       </CardContent>
 
-      {/* Qlik Import Dialog */}
-      <Dialog open={showQlikImport} onOpenChange={setShowQlikImport}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+      {/* Import Formula from Another Tenant Dialog */}
+      <Dialog
+        open={showFormulaImport}
+        onOpenChange={(open) => {
+          setShowFormulaImport(open);
+          if (!open) {
+            setImportJsonText("");
+            setImportParseError(null);
+            setImportPreview(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-thin flex items-center gap-2">
-              <FileUp className="h-5 w-5" />
-              Import Revenue Formula from Qlik
+              <ClipboardPaste className="h-5 w-5" />
+              Import Revenue Formula
             </DialogTitle>
             <DialogDescription className="font-light">
-              Paste your Qlik revenue formula below. Fields in square brackets
-              (e.g., [Field Name]) will be automatically mapped to database
-              columns.
+              Paste a revenue formula exported from another tenant. Use the
+              Export button on the source tenant to copy the formula first.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Instructions */}
             <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
               <Info className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-blue-700 dark:text-blue-300 text-sm">
-                <strong>Supported format:</strong> Qlik-style formulas with
-                field names in square brackets.
-                <br />
-                <span className="font-mono text-xs">
-                  Example: [Field A] + [Field B] - [Field C]
-                </span>
+                <strong>How to use:</strong>
+                <ol className="mt-1 ml-4 list-decimal text-xs space-y-1">
+                  <li>
+                    Go to the source tenant's Revenue Formula tab and click{" "}
+                    <strong>Export</strong>
+                  </li>
+                  <li>Come back here and paste the copied text below</li>
+                  <li>
+                    Click <strong>Parse</strong> to preview, then{" "}
+                    <strong>Apply</strong> to import
+                  </li>
+                </ol>
+                <p className="mt-2 text-xs">
+                  <strong>Note:</strong> This will replace your current formula.
+                  Fields that don't exist in this tenant's database will be
+                  flagged so you can add them.
+                </p>
               </AlertDescription>
             </Alert>
 
-            {/* Formula Input */}
             <div className="space-y-2">
-              <Label htmlFor="qlik-formula">Qlik Formula</Label>
+              <Label htmlFor="import-formula-json">
+                Exported Formula (JSON)
+              </Label>
               <Textarea
-                id="qlik-formula"
-                value={qlikFormulaText}
+                id="import-formula-json"
+                value={importJsonText}
                 onChange={(e) => {
-                  setQlikFormulaText(e.target.value);
-                  setQlikParseResult(null); // Clear previous parse result
+                  setImportJsonText(e.target.value);
+                  setImportParseError(null);
+                  setImportPreview(null);
                 }}
-                placeholder="Paste your Qlik formula here, e.g.:
-[Purchase Advice Sell Amount] + [Line 800 Total Borrower Paid Amount] - [Fees Appraisal Fee Borr] + [Line 800 Total Seller Paid Amount] - [Lender Credits]"
-                rows={4}
-                className="font-mono text-sm"
+                placeholder='Paste the exported formula JSON here...'
+                rows={6}
+                className="font-mono text-xs"
               />
             </div>
 
-            {/* Parse Button */}
             <Button
-              onClick={handleParseQlikFormula}
-              disabled={!qlikFormulaText.trim()}
+              onClick={handleParseImportJson}
+              disabled={!importJsonText.trim()}
               variant="outline"
               className="w-full"
             >
@@ -1851,78 +1515,131 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
               Parse Formula
             </Button>
 
-            {/* Parse Results */}
-            {qlikParseResult && (
+            {importParseError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-sm">
+                  {importParseError}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {importPreview && (
               <div className="space-y-4">
                 <Separator />
 
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label className="flex items-center gap-2">
-                    Parsed Fields
-                    <Badge variant="secondary">
-                      {qlikParseResult.components.length} found
-                    </Badge>
-                    {qlikParseResult.unmappedFields.length > 0 && (
-                      <Badge variant="destructive">
-                        {qlikParseResult.unmappedFields.length} unmapped
-                      </Badge>
-                    )}
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    Formula Preview
                   </Label>
 
-                  <div className="max-h-[200px] overflow-y-auto space-y-2 p-3 bg-slate-50 dark:bg-slate-800/30 rounded-lg">
-                    {qlikParseResult.components.map((comp, index) => (
-                      <div
-                        key={index}
-                        className={cn(
-                          "flex items-center gap-3 p-2 rounded border",
-                          comp.dbField
-                            ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
-                            : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
-                        )}
-                      >
-                        <Badge variant="outline" className="w-8 justify-center">
-                          {comp.operator}
-                        </Badge>
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">
-                            {comp.qlikName}
-                          </div>
-                          {comp.dbField ? (
-                            <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                              <CheckCircle2 className="h-3 w-3" />→{" "}
-                              {comp.dbField}
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/30 rounded-lg border space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">
+                        {importPreview.name}
+                      </span>
+                      <Badge variant="secondary">
+                        {
+                          importPreview.formula_components.filter(
+                            (c) => c.type === "field"
+                          ).length
+                        }{" "}
+                        fields
+                      </Badge>
+                    </div>
+                    {importPreview.description && (
+                      <p className="text-xs text-slate-500">
+                        {importPreview.description}
+                      </p>
+                    )}
+
+                    {/* Formula expression preview */}
+                    <div className="font-mono text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-2 rounded border">
+                      {importPreview.formula_components
+                        .map((comp, index) => {
+                          if (comp.type === "group_start") {
+                            const prefix =
+                              index === 0 ? "" : ` ${comp.operator} `;
+                            return `${prefix}(`;
+                          }
+                          if (comp.type === "group_end") return ")";
+                          const prefix =
+                            index === 0 ? "" : ` ${comp.operator} `;
+                          return `${prefix}${comp.label}`;
+                        })
+                        .join("")}
+                    </div>
+
+                    {/* Field list */}
+                    <div className="max-h-[180px] overflow-y-auto space-y-1">
+                      {importPreview.formula_components
+                        .filter((c) => c.type === "field")
+                        .map((comp, idx) => {
+                          const exists = comp.field
+                            ? isFieldAvailable(comp.field)
+                            : false;
+                          return (
+                            <div
+                              key={idx}
+                              className={cn(
+                                "flex items-center gap-2 p-2 rounded border text-xs",
+                                exists
+                                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
+                                  : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
+                              )}
+                            >
+                              <Badge
+                                variant="outline"
+                                className="w-6 justify-center text-xs"
+                              >
+                                {comp.operator}
+                              </Badge>
+                              <div className="flex-1">
+                                <span className="font-medium">
+                                  {comp.label}
+                                </span>
+                                <span className="ml-2 font-mono text-slate-500">
+                                  {comp.field}
+                                </span>
+                              </div>
+                              {exists ? (
+                                <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                              ) : (
+                                <span className="text-red-600 dark:text-red-400 shrink-0 flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3" />
+                                  Missing
+                                </span>
+                              )}
                             </div>
-                          ) : (
-                            <div className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-                              <AlertCircle className="h-3 w-3" />
-                              Not mapped - will be skipped
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                          );
+                        })}
+                    </div>
+
+                    {/* Summary of field availability */}
+                    {(() => {
+                      const fieldComps =
+                        importPreview.formula_components.filter(
+                          (c) => c.type === "field" && c.field
+                        );
+                      const existCount = fieldComps.filter((c) =>
+                        isFieldAvailable(c.field!)
+                      ).length;
+                      const missCount = fieldComps.length - existCount;
+                      return missCount > 0 ? (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                          {missCount} field(s) missing in this tenant. After
+                          importing, use "Add Fields from Encompass" to create
+                          them.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2">
+                          All fields exist in this tenant's database.
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
-
-                {/* Unmapped Fields Warning */}
-                {qlikParseResult.unmappedFields.length > 0 && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      <strong>Unmapped fields:</strong> The following fields
-                      could not be automatically mapped and will be skipped:
-                      <ul className="mt-1 text-xs">
-                        {qlikParseResult.unmappedFields.map((field, i) => (
-                          <li key={i}>• {field}</li>
-                        ))}
-                      </ul>
-                      <span className="text-xs mt-2 block">
-                        You can manually add these fields after import if they
-                        exist in your database.
-                      </span>
-                    </AlertDescription>
-                  </Alert>
-                )}
               </div>
             )}
           </div>
@@ -1931,29 +1648,22 @@ export function RevenueFormulaTab({ onRefresh }: RevenueFormulaTabProps) {
             <Button
               variant="outline"
               onClick={() => {
-                setShowQlikImport(false);
-                setQlikFormulaText("");
-                setQlikParseResult(null);
+                setShowFormulaImport(false);
+                setImportJsonText("");
+                setImportParseError(null);
+                setImportPreview(null);
               }}
               className="font-light"
             >
               Cancel
             </Button>
             <Button
-              onClick={handleImportQlikFormula}
-              disabled={
-                !qlikParseResult ||
-                qlikParseResult.components.filter((c) => c.dbField).length === 0
-              }
+              onClick={handleApplyImportedFormula}
+              disabled={!importPreview}
               className="font-light"
             >
-              <FileUp className="h-4 w-4 mr-2" />
-              Import{" "}
-              {qlikParseResult
-                ? `(${
-                    qlikParseResult.components.filter((c) => c.dbField).length
-                  } fields)`
-                : ""}
+              <ClipboardPaste className="h-4 w-4 mr-2" />
+              Apply Formula
             </Button>
           </DialogFooter>
         </DialogContent>

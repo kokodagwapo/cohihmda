@@ -7629,4 +7629,169 @@ Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
   }
 }
 
+// =============================================================================
+// OFFICER DETAILS - GET /api/loans/officer-details
+// =============================================================================
+
+/**
+ * GET /api/loans/officer-details?name=Officer+Name
+ * Returns officer-level stats, risk breakdown, and loan details for the LO modal
+ */
+router.get(
+  "/officer-details",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const tenantPool = tenantContext.tenantPool;
+      const officerName = (req.query.name as string || "").trim();
+
+      if (!officerName) {
+        return res.status(400).json({ error: "name query parameter is required" });
+      }
+
+      // Fetch all loans for this officer
+      const loansResult = await tenantPool.query(
+        `SELECT l.loan_id, l.loan_number, l.loan_amount, l.loan_type, l.loan_purpose,
+                l.current_loan_status, l.current_milestone, l.fico_score, l.ltv_ratio, l.be_dti_ratio,
+                l.interest_rate, l.application_date, l.lock_date, l.lock_expiration_date,
+                l.estimated_closing_date, l.channel,
+                l.loan_officer, l.funding_date, l.closing_date
+         FROM public.loans l
+         WHERE TRIM(l.loan_officer) = $1
+           AND l.application_date >= NOW() - INTERVAL '18 months'
+         ORDER BY l.application_date DESC`,
+        [officerName]
+      );
+
+      const allLoans = loansResult.rows;
+
+      // Classify loans
+      const activeLoanStatuses = ['ACTIVE LOAN', 'ACTIVE', 'INQUIRY'];
+      const withdrawnStatuses = [
+        'APPLICATION WITHDRAWN', 'WITHDRAWN', 'APPLICATION APPROVED BUT NOT ACCEPTED',
+        'FILE CLOSED FOR INCOMPLETENESS', 'PREAPPROVAL REQUEST APPROVED BUT NOT ACCEPTED'
+      ];
+      const deniedStatuses = [
+        'APPLICATION DENIED', 'DENIED', 'DECLINED',
+        'PREAPPROVAL REQUEST DENIED BY FINANCIAL INSTITUTION'
+      ];
+
+      const activeLoans = allLoans.filter((l: any) =>
+        activeLoanStatuses.includes((l.current_loan_status || '').trim().toUpperCase()));
+      const closedLoans = allLoans.filter((l: any) => {
+        const status = (l.current_loan_status || '').trim().toUpperCase();
+        return !activeLoanStatuses.includes(status) &&
+               !withdrawnStatuses.includes(status) &&
+               !deniedStatuses.includes(status);
+      });
+      const falloutLoans = allLoans.filter((l: any) => {
+        const status = (l.current_loan_status || '').trim().toUpperCase();
+        return withdrawnStatuses.includes(status) || deniedStatuses.includes(status);
+      });
+
+      const finalized = closedLoans.length + falloutLoans.length;
+      const pullThroughPct = finalized > 0 ? Math.round((closedLoans.length / finalized) * 100) : 0;
+
+      const sumVolume = (loans: any[]) =>
+        loans.reduce((sum: number, l: any) => sum + (Number(l.loan_amount) || 0), 0);
+      const formatVolume = (v: number) =>
+        v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : `$${(v / 1_000).toFixed(0)}K`;
+
+      // Get predictions for active loans
+      const activeLoanIds = activeLoans.map((l: any) => l.loan_id);
+      let predByLoanId = new Map<string, any>();
+      if (activeLoanIds.length > 0) {
+        try {
+          const predResult = await tenantPool.query(
+            `SELECT DISTINCT ON (loan_id) loan_id, predicted_outcome, confidence, reason_codes
+             FROM public.loan_predictions
+             WHERE loan_id = ANY($1)
+             ORDER BY loan_id, created_at DESC`,
+            [activeLoanIds]
+          );
+          predByLoanId = new Map(predResult.rows.map((r: any) => [r.loan_id, r]));
+        } catch {
+          // loan_predictions may not exist yet
+        }
+      }
+
+      // Build risk breakdown and loan details
+      let veryHigh = 0;
+      let medium = 0;
+      let low = 0;
+      let atRiskVolume = 0;
+
+      const loanDetails = activeLoans.map((l: any) => {
+        const pred = predByLoanId.get(l.loan_id);
+        const outcome = pred?.predicted_outcome ?? "originate";
+        const confidence = pred?.confidence ?? 50;
+        let riskLevel = "Low";
+        let riskScore = confidence;
+
+        if (outcome === "withdraw" || outcome === "deny") {
+          riskLevel = "Very High";
+          riskScore = Math.max(riskScore, 85);
+          veryHigh++;
+          atRiskVolume += Number(l.loan_amount) || 0;
+        } else if (confidence >= 60 && confidence < 80) {
+          riskLevel = "Medium";
+          medium++;
+        } else {
+          low++;
+        }
+
+        const borrower = l.loan_number || l.loan_id;
+        const amount = Number(l.loan_amount) || 0;
+
+        return {
+          id: l.loan_number || l.loan_id,
+          guid: l.loan_id,
+          borrower,
+          amount: amount >= 1000 ? `$${(amount / 1000).toFixed(0)}K` : `$${amount}`,
+          amountValue: amount,
+          riskLevel,
+          riskScore,
+          predictedOutcome: outcome,
+          reason: outcome === "withdraw"
+            ? "AI predicts loan may be withdrawn"
+            : outcome === "deny"
+              ? "AI predicts loan may be denied"
+              : "Loan appears on track",
+          status: l.current_loan_status || "Active",
+          loanType: l.loan_type || "N/A",
+          lender: l.channel || "N/A",
+          ficoScore: l.fico_score != null ? Number(l.fico_score) : null,
+          ltvRatio: l.ltv_ratio != null ? Number(l.ltv_ratio) : null,
+          dtiRatio: l.be_dti_ratio != null ? Number(l.be_dti_ratio) : null,
+        };
+      });
+
+      res.json({
+        officer: {
+          name: officerName,
+          email: null,
+          phone: null,
+          totalLoans: allLoans.length,
+          activeLoans: activeLoans.length,
+          closedLoans: closedLoans.length,
+          pullThrough: `${pullThroughPct}%`,
+          totalVolume: formatVolume(sumVolume(allLoans)),
+          activeVolume: formatVolume(sumVolume(activeLoans)),
+          closedVolume: formatVolume(sumVolume(closedLoans)),
+          atRiskVolume: formatVolume(atRiskVolume),
+        },
+        riskBreakdown: { veryHigh, medium, low },
+        loans: loanDetails,
+      });
+    } catch (error: any) {
+      logError("Error fetching officer details", error, { userId: req.userId });
+      if (handleDatabaseError(error, res, "Failed to fetch officer details")) return;
+      res.status(500).json({ error: error.message || "Failed to fetch officer details" });
+    }
+  }
+);
+
 export default router;
