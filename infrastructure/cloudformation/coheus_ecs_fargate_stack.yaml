@@ -172,6 +172,7 @@ Parameters:
 
 Conditions:
   CreateNewVPC: !Equals [!Ref NetworkMode, "new"]
+  IsDevEnvironment: !Equals [!Ref Environment, "dev"]
   HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
   HasCognito: !Not [!Equals [!Ref CognitoUserPoolId, ""]]
@@ -227,8 +228,13 @@ Resources:
   # ============================================================================
   ECRRepository:
     Type: AWS::ECR::Repository
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Properties:
-      RepositoryName: !Sub "${ProjectName}-${Environment}-backend"
+      RepositoryName: !If
+        - IsDevEnvironment
+        - !Sub "${ProjectName}-backend"
+        - !Sub "${ProjectName}-${Environment}-backend"
       ImageScanningConfiguration:
         ScanOnPush: true
       EncryptionConfiguration:
@@ -254,7 +260,10 @@ Resources:
           }
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-${Environment}-backend"
+          Value: !If
+            - IsDevEnvironment
+            - !Sub "${ProjectName}-backend"
+            - !Sub "${ProjectName}-${Environment}-backend"
 
   # ============================================================================
   # VPC and Networking (Conditional)
