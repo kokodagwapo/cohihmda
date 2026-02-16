@@ -320,10 +320,10 @@ export const InsightDetailModal = ({
       cols = DEFAULT_COLUMNS[insightSource] || [];
     }
 
-    // Enforce: if this is loan-level data, loanId is always first
-    if (rows.length > 0 && rows[0].loanId !== undefined) {
-      const without = cols.filter(c => c !== 'loanId');
-      cols = ['loanId', ...without];
+    // Enforce: if this is loan-level data, loanNumber is always first
+    if (rows.length > 0 && rows[0].loanNumber !== undefined) {
+      const without = cols.filter(c => c !== 'loanNumber');
+      cols = ['loanNumber', ...without];
     }
 
     return cols;
@@ -511,7 +511,7 @@ export const InsightDetailModal = ({
                       <tbody>
                         {rows.map((row, idx) => (
                           <tr
-                            key={row.loanId || row.name || row.month || idx}
+                            key={row.loanNumber || row.name || row.month || idx}
                             className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
                           >
                             {columns.map(colKey => {

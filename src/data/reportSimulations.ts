@@ -161,7 +161,7 @@ export const falloutRiskData: ReportData = {
   tables: [
     {
       title: 'Critical Rate Lock Expirations',
-      headers: ['Loan ID', 'Borrower', 'Expires In', 'Loan Amount', 'Risk Level'],
+      headers: ['Loan #', 'Borrower', 'Expires In', 'Loan Amount', 'Risk Level'],
       rows: [
         ['#12345', 'Smith, John', '2 days', '$450K', 'CRITICAL'],
         ['#12346', 'Johnson, Mary', '3 days', '$320K', 'HIGH'],

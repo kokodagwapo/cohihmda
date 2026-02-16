@@ -17,11 +17,23 @@ import { tenantDbManager } from "../../config/tenantDatabaseManager.js";
 import { pool as managementPool } from "../../config/managementDatabase.js";
 import { decryptAPIKeys } from "../encryption.js";
 import { InsightMetricsPayload, PeriodSnapshot } from "./insightMetricsCollector.js";
+import { hydrateInsightDetails } from "./insightDetailHydrator.js";
 import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/** Pre-hydrated detail snapshot stored at generation time. */
+export interface InsightDetailSnapshot {
+  title: string;
+  summary: Record<string, number>;
+  rows: Array<Record<string, any>>;
+  displayConfig: {
+    columns: string[];
+    summaryMetrics: string[];
+  };
+}
 
 /** A single categorized insight (the enriched object stored in the DB). */
 export interface CategorizedInsight {
@@ -48,6 +60,8 @@ export interface CategorizedInsight {
   summary_metrics?: string[];
   /** Exact filter params for replaying the detail query at drill-down time. */
   detail_query?: Record<string, any> | null;
+  /** Pre-hydrated detail snapshot — rendered directly by the frontend. */
+  detail_data?: InsightDetailSnapshot | null;
 }
 
 /** Full response from a generation run. */
@@ -564,10 +578,10 @@ function buildDetailFilters(
       ) || [];
       const knownPerfNames = [...new Set([...tieringActors, ...periodActors])];
 
-      // Match names from headline + understory
-      const perfText = `${insight.headline} ${insight.understory}`;
+      // Match names from headline ONLY — understory may mention comparison
+      // actors whose numbers should NOT be summed in the detail summary
       const mentionedPerfNames = knownPerfNames.filter(name =>
-        perfText.toLowerCase().includes(name.toLowerCase())
+        insight.headline.toLowerCase().includes(name.toLowerCase())
       );
 
       // Store per-officer snapshot values from tiering data for consistency
@@ -652,10 +666,11 @@ function buildDetailFilters(
         (t.periodChanges || []).map(c => c.name)
       );
       const allKnownNames = [...new Set([...allTieringActors, ...periodActors])];
-      // Match names that appear in headline or understory (case-insensitive)
-      const text = `${insight.headline} ${insight.understory}`;
+      // Match names that appear in the HEADLINE only (case-insensitive).
+      // Understory may mention comparison actors whose numbers should NOT be
+      // summed in the detail summary (e.g. "compared to Matt Brown").
       const mentionedNames = allKnownNames.filter(name =>
-        text.toLowerCase().includes(name.toLowerCase())
+        insight.headline.toLowerCase().includes(name.toLowerCase())
       );
 
       // Store per-officer snapshot values at generation time so the detail modal
@@ -936,76 +951,67 @@ async function persistInsights(
     [dateFilter, channelGroup || null]
   );
 
-  // Check if experiment_id column exists (graceful for pre-migration tenants)
+  // Check which optional columns exist (graceful for pre-migration tenants)
   let hasExperimentCol = false;
+  let hasDetailDataCol = false;
   try {
     const colCheck = await tenantPool.query(`
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'generated_insights' AND column_name = 'experiment_id'
+      WHERE table_name = 'generated_insights' AND column_name IN ('experiment_id', 'detail_data')
     `);
-    hasExperimentCol = colCheck.rows.length > 0;
+    for (const row of colCheck.rows) {
+      if (row.column_name === "experiment_id") hasExperimentCol = true;
+      if (row.column_name === "detail_data") hasDetailDataCol = true;
+    }
   } catch { /* ignore */ }
 
-  // Batch insert
+  // Batch insert — build column list and values dynamically
   const values: any[] = [];
   const placeholders: string[] = [];
   let paramIdx = 1;
 
   for (const ins of insights) {
     const expId = experimentIdMap?.[ins.bucket] || null;
+
+    // Base 15 columns always present
+    const baseCount = 15;
+    const extraCount = (hasExperimentCol ? 1 : 0) + (hasDetailDataCol ? 1 : 0);
+    const totalParams = baseCount + extraCount;
+    const ph = Array.from({ length: totalParams }, () => `$${paramIdx++}`);
+    placeholders.push(`(${ph.join(", ")})`);
+
+    values.push(
+      ins.bucket,
+      ins.priority,
+      ins.headline,
+      ins.understory,
+      ins.insight_type,
+      ins.source,
+      ins.severity_score,
+      JSON.stringify(ins.impact),
+      JSON.stringify(ins.evidence),
+      ins.for_podcast,
+      dateFilter,
+      channelGroup || null,
+      generationBatch,
+      new Date().toISOString(),
+      ins.detail_query ? JSON.stringify(ins.detail_query) : null,
+    );
+    if (hasDetailDataCol) {
+      values.push(ins.detail_data ? JSON.stringify(ins.detail_data) : null);
+    }
     if (hasExperimentCol) {
-      placeholders.push(
-        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
-      );
-      values.push(
-        ins.bucket,
-        ins.priority,
-        ins.headline,
-        ins.understory,
-        ins.insight_type,
-        ins.source,
-        ins.severity_score,
-        JSON.stringify(ins.impact),
-        JSON.stringify(ins.evidence),
-        ins.for_podcast,
-        dateFilter,
-        channelGroup || null,
-        generationBatch,
-        new Date().toISOString(),
-        ins.detail_query ? JSON.stringify(ins.detail_query) : null,
-        expId
-      );
-    } else {
-      placeholders.push(
-        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
-      );
-      values.push(
-        ins.bucket,
-        ins.priority,
-        ins.headline,
-        ins.understory,
-        ins.insight_type,
-        ins.source,
-        ins.severity_score,
-        JSON.stringify(ins.impact),
-        JSON.stringify(ins.evidence),
-        ins.for_podcast,
-        dateFilter,
-        channelGroup || null,
-        generationBatch,
-        new Date().toISOString(),
-        ins.detail_query ? JSON.stringify(ins.detail_query) : null
-      );
+      values.push(expId);
     }
   }
 
-  const columns = hasExperimentCol
-    ? `(bucket, priority, headline, understory, insight_type, source,
+  // Build column list matching the values order
+  let columnList = `bucket, priority, headline, understory, insight_type, source,
        severity_score, impact, evidence, for_podcast,
-       date_filter, channel_group, generation_batch, generated_at, detail_query, experiment_id)`
-    : `(bucket, priority, headline, understory, insight_type, source,
-       severity_score, impact, evidence, for_podcast,
-       date_filter, channel_group, generation_batch, generated_at, detail_query)`;
+       date_filter, channel_group, generation_batch, generated_at, detail_query`;
+  if (hasDetailDataCol) columnList += `, detail_data`;
+  if (hasExperimentCol) columnList += `, experiment_id`;
+  const columns = `(${columnList})`;
 
   await tenantPool.query(
     `INSERT INTO generated_insights ${columns}
@@ -1212,6 +1218,16 @@ export async function generateCategorizedInsights(
     if (expSel?.experimentId) {
       experimentIdMap[BUCKETS[i].id] = expSel.experimentId;
     }
+  }
+
+  // Hydrate detail snapshots before persisting (non-fatal on failure)
+  try {
+    await hydrateInsightDetails(allInsights, metricsPayload, tenantPool, channelGroup);
+  } catch (hydrateError: any) {
+    console.warn(
+      "[LLMInsights] Detail hydration failed (persisting without snapshots):",
+      hydrateError.message,
+    );
   }
 
   // Persist to tenant DB

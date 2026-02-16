@@ -741,6 +741,9 @@ async function fetchPersonnelTiering(
     for (const cfg of actorConfigs) {
       try {
         // Query 1: Funded loans — revenue, volume, units, BPS, cycle time per actor
+        // Scoped by funding_date to match TopTieringComparison page exactly.
+        // "Funded YTD" = loans funded during this year, regardless of application date.
+        // No status filter needed — funding_date IS NOT NULL is sufficient.
         const fundedQuery = `
           SELECT
             ${cfg.actorColumn} AS actor_name,
@@ -753,23 +756,28 @@ async function fetchPersonnelTiering(
             END AS revenue_bps,
             AVG(${closeDateExpr} - application_date) AS avg_cycle_days
           FROM public.loans
-          WHERE (funding_date IS NOT NULL OR closing_date IS NOT NULL)
-            AND ${closeDateExpr} >= $1
-            AND ${closeDateExpr} <= $2
+          WHERE funding_date IS NOT NULL
+            AND funding_date >= $1
+            AND funding_date <= $2
             ${channelClause}
           GROUP BY ${cfg.actorColumn}
           HAVING SUM(${revenueExpr}) > 0
           ORDER BY revenue DESC
         `;
 
-        // Query 2: All applications — started, completed (non-active), lost, denied per actor (YTD by application_date)
-        // completed excludes active-in-pipeline loans, matching the org-level PT denominator
+        // Query 2: Application cohort — started, completed, funded-from-cohort, lost, denied per actor
+        // Scoped by application_date for pull-through calculation (PT = funded_from_cohort / completed).
+        // funded_from_cohort counts loans APPLIED in period that reached funded status,
+        // which is different from funded query above (scoped by funding_date).
         const appQuery = `
           SELECT
             ${cfg.actorColumn} AS actor_name,
             COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS started,
             COUNT(DISTINCT CASE WHEN current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
               THEN COALESCE(loan_number, loan_id::text) END) AS completed,
+            COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+              AND current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+              THEN COALESCE(loan_number, loan_id::text) END) AS funded_from_cohort,
             COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
               OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
               OR current_loan_status ILIKE '%incomplete%' THEN COALESCE(loan_number, loan_id::text) END) AS lost,
@@ -787,13 +795,14 @@ async function fetchPersonnelTiering(
           tenantPool.query(appQuery, [startOfYear, today]),
         ]);
 
-        // Build lookup from application query
-        const appMap = new Map<string, { started: number; completed: number; lost: number; denied: number }>();
+        // Build lookup from application cohort query
+        const appMap = new Map<string, { started: number; completed: number; fundedFromCohort: number; lost: number; denied: number }>();
         for (const r of appRes.rows) {
           if (!isActorMissing(r.actor_name)) {
             appMap.set(r.actor_name, {
               started: parseInt(r.started) || 0,
               completed: parseInt(r.completed) || 0,
+              fundedFromCohort: parseInt(r.funded_from_cohort) || 0,
               lost: parseInt(r.lost) || 0,
               denied: parseInt(r.denied) || 0,
             });
@@ -805,17 +814,18 @@ async function fetchPersonnelTiering(
           .map((r: any) => {
             const name = r.actor_name || "Unknown";
             const units = parseInt(r.units) || 0;
-            const appData = appMap.get(r.actor_name) || { started: 0, completed: 0, lost: 0, denied: 0 };
-            // Use completed (non-active) as denominator — matches org-level PT calc
-            // so per-actor PT + per-actor fallout = 100%
-            const completedForActor = Math.max(appData.completed, units); // completed should be >= funded
+            const appData = appMap.get(r.actor_name) || { started: 0, completed: 0, fundedFromCohort: 0, lost: 0, denied: 0 };
+            // PT computed from app cohort: funded-from-cohort / completed
+            // This is decoupled from the funding_date-scoped units above
+            const ptDenom = appData.completed;
+            const ptNumer = appData.fundedFromCohort;
             return {
               name,
               revenue: parseFloat(r.revenue) || 0,
               units,
               volume: parseFloat(r.volume) || 0,
               revenueBps: Math.round(parseFloat(r.revenue_bps) || 0),
-              pullThrough: completedForActor > 0 ? Math.round((units / completedForActor) * 1000) / 10 : 0,
+              pullThrough: ptDenom > 0 ? Math.round((ptNumer / ptDenom) * 1000) / 10 : 0,
               avgCycleTime: Math.round(parseFloat(r.avg_cycle_days) || 0),
               lostOpportunityUnits: appData.lost,
               deniedUnits: appData.denied,
@@ -832,28 +842,51 @@ async function fetchPersonnelTiering(
         // Multi-window period-over-period: 30D, 60D, 90D each vs their prior equivalent period
         let periodChanges: InsightMetricsPayload["tiering"]["byActorType"][0]["periodChanges"] = [];
         try {
+          // Period comparison query — funded/revenue/volume/cycle use funding_date
+          // scoping (matching TopTieringComparison), while PT uses app cohort.
           const periodQuery = `
             SELECT
               ${cfg.actorColumn} AS actor_name,
-              COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN COALESCE(loan_number, loan_id::text) END) AS funded_cur,
+              -- Funded units: scoped by funding_date (matches TopTiering)
+              COUNT(DISTINCT CASE WHEN funding_date >= $1 AND funding_date <= $2
+                THEN COALESCE(loan_number, loan_id::text) END) AS funded_cur,
+              -- PT numerator: funded from app cohort (app_date in window + has funding/closing + non-active)
+              COUNT(DISTINCT CASE WHEN application_date >= $1 AND application_date <= $2
+                AND (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+                AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+                THEN COALESCE(loan_number, loan_id::text) END) AS funded_cohort_cur,
+              -- PT denominator: completed from app cohort
               COUNT(DISTINCT CASE WHEN application_date >= $1 AND application_date <= $2
                 AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
                 THEN COALESCE(loan_number, loan_id::text) END) AS completed_cur,
-              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN (${revenueExpr}) ELSE 0 END) AS revenue_cur,
-              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2 THEN loan_amount ELSE 0 END) AS volume_cur,
-              AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2
-                  THEN (${closeDateExpr} - application_date) END) AS cycle_cur,
-              COUNT(DISTINCT CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN COALESCE(loan_number, loan_id::text) END) AS funded_prior,
+              -- Revenue/volume/cycle: scoped by funding_date
+              SUM(CASE WHEN funding_date >= $1 AND funding_date <= $2
+                THEN (${revenueExpr}) ELSE 0 END) AS revenue_cur,
+              SUM(CASE WHEN funding_date >= $1 AND funding_date <= $2
+                THEN loan_amount ELSE 0 END) AS volume_cur,
+              AVG(CASE WHEN funding_date >= $1 AND funding_date <= $2
+                THEN (${closeDateExpr} - application_date) END) AS cycle_cur,
+              -- Prior period: same dual-scoping approach
+              COUNT(DISTINCT CASE WHEN funding_date >= $3 AND funding_date <= $4
+                THEN COALESCE(loan_number, loan_id::text) END) AS funded_prior,
+              COUNT(DISTINCT CASE WHEN application_date >= $3 AND application_date <= $4
+                AND (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+                AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+                THEN COALESCE(loan_number, loan_id::text) END) AS funded_cohort_prior,
               COUNT(DISTINCT CASE WHEN application_date >= $3 AND application_date <= $4
                 AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
                 THEN COALESCE(loan_number, loan_id::text) END) AS completed_prior,
-              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN (${revenueExpr}) ELSE 0 END) AS revenue_prior,
-              SUM(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4 THEN loan_amount ELSE 0 END) AS volume_prior,
-              AVG(CASE WHEN (funding_date IS NOT NULL OR closing_date IS NOT NULL) AND ${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4
-                  THEN (${closeDateExpr} - application_date) END) AS cycle_prior
+              SUM(CASE WHEN funding_date >= $3 AND funding_date <= $4
+                THEN (${revenueExpr}) ELSE 0 END) AS revenue_prior,
+              SUM(CASE WHEN funding_date >= $3 AND funding_date <= $4
+                THEN loan_amount ELSE 0 END) AS volume_prior,
+              AVG(CASE WHEN funding_date >= $3 AND funding_date <= $4
+                THEN (${closeDateExpr} - application_date) END) AS cycle_prior
             FROM public.loans
-            WHERE (application_date >= $1 AND application_date <= $2) OR (application_date >= $3 AND application_date <= $4)
-              OR ((${closeDateExpr} >= $1 AND ${closeDateExpr} <= $2) OR (${closeDateExpr} >= $3 AND ${closeDateExpr} <= $4))
+            WHERE (funding_date >= $1 AND funding_date <= $2)
+               OR (funding_date >= $3 AND funding_date <= $4)
+               OR (application_date >= $1 AND application_date <= $2)
+               OR (application_date >= $3 AND application_date <= $4)
               ${channelClause}
             GROUP BY ${cfg.actorColumn}
           `;
@@ -868,21 +901,22 @@ async function fetchPersonnelTiering(
             for (const r of periodRes.rows) {
               if (isActorMissing(r.actor_name)) continue;
               const fundedCur = parseInt(r.funded_cur) || 0;
+              const fundedCohortCur = parseInt(r.funded_cohort_cur) || 0;
               const completedCur = parseInt(r.completed_cur) || 0;
               const fundedPrior = parseInt(r.funded_prior) || 0;
+              const fundedCohortPrior = parseInt(r.funded_cohort_prior) || 0;
               const completedPrior = parseInt(r.completed_prior) || 0;
               const revenueCur = parseFloat(r.revenue_cur) || 0;
               const volumeCur = parseFloat(r.volume_cur) || 0;
               const revenuePrior = parseFloat(r.revenue_prior) || 0;
               const volumePrior = parseFloat(r.volume_prior) || 0;
 
-              // Debug: log revenue vs volume for top actors to catch any mismatch
               if (fundedCur >= 5 || fundedPrior >= 5) {
                 console.log(`[InsightMetrics] Period ${pw.window} actor="${r.actor_name}": rev_cur=$${Math.round(revenueCur)} vol_cur=$${Math.round(volumeCur)} rev_prior=$${Math.round(revenuePrior)} vol_prior=$${Math.round(volumePrior)} units_cur=${fundedCur} units_prior=${fundedPrior}`);
               }
-              // Use completed (non-active) as denominator — matches org-level PT
-              const pullCur = completedCur > 0 ? (fundedCur / completedCur) * 100 : 0;
-              const pullPrior = completedPrior > 0 ? (fundedPrior / completedPrior) * 100 : 0;
+              // PT from app cohort (funded_cohort / completed), not from funding_date-scoped units
+              const pullCur = completedCur > 0 ? (fundedCohortCur / completedCur) * 100 : 0;
+              const pullPrior = completedPrior > 0 ? (fundedCohortPrior / completedPrior) * 100 : 0;
               const bpsCur = volumeCur > 0 ? (revenueCur / volumeCur) * 10000 : 0;
               const bpsPrior = volumePrior > 0 ? (revenuePrior / volumePrior) * 10000 : 0;
               const unitsCur = fundedCur;

@@ -28,19 +28,38 @@ const router = Router();
 async function loadDetailFilters(
   tenantPool: any,
   insightId: number
-): Promise<{ filters: Record<string, any> | null; generatedAt: string | null }> {
+): Promise<{
+  filters: Record<string, any> | null;
+  generatedAt: string | null;
+  detailData: Record<string, any> | null;
+}> {
   try {
+    // Gracefully handle pre-migration schemas that lack the detail_data column
+    let hasDetailDataCol = false;
+    try {
+      const colCheck = await tenantPool.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'generated_insights' AND column_name = 'detail_data'
+      `);
+      hasDetailDataCol = colCheck.rows.length > 0;
+    } catch { /* ignore */ }
+
+    const selectCols = hasDetailDataCol
+      ? 'detail_query, generated_at, detail_data'
+      : 'detail_query, generated_at';
+
     const result = await tenantPool.query(
-      `SELECT detail_query, generated_at FROM generated_insights WHERE id = $1`,
+      `SELECT ${selectCols} FROM generated_insights WHERE id = $1`,
       [insightId]
     );
-    if (result.rows.length === 0) return { filters: null, generatedAt: null };
+    if (result.rows.length === 0) return { filters: null, generatedAt: null, detailData: null };
     return {
       filters: result.rows[0].detail_query || null,
       generatedAt: result.rows[0].generated_at || null,
+      detailData: result.rows[0].detail_data || null,
     };
   } catch {
-    return { filters: null, generatedAt: null };
+    return { filters: null, generatedAt: null, detailData: null };
   }
 }
 
@@ -84,17 +103,50 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
     const { dateFilter = 'ytd', insightId, headline = '' } = req.query;
     const startDate = calculateStartDate(String(dateFilter));
 
-    // 1. Try to load stored detail_query from the DB (gold standard)
+    // 1. Try to load stored detail_query (and pre-hydrated detail_data) from the DB
     let filters: Record<string, any> | null = null;
     let insightGeneratedAt: string | null = null;
+    let detailData: Record<string, any> | null = null;
     if (insightId) {
       const loaded = await loadDetailFilters(tenantPool, Number(insightId));
       filters = loaded.filters;
       insightGeneratedAt = loaded.generatedAt;
+      detailData = loaded.detailData;
     }
+
+    // Fast path: if we have pre-hydrated detail_data, return it directly.
+    // This guarantees the detail modal shows exactly the same numbers as the
+    // headline — no re-query, no drift.
+    if (detailData && detailData.title && detailData.rows) {
+      const endDate = new Date();
+      const filterLabel: Record<string, string> = {
+        today: 'Today',
+        mtd: 'Month to Date',
+        ytd: 'Year to Date',
+      };
+
+      console.log(`[InsightDetails] source=${source}, insightId=${insightId} — returning pre-hydrated detail_data (${(detailData.rows as any[]).length} rows)`);
+
+      return res.json({
+        source,
+        dateFilter,
+        title: detailData.title,
+        summary: detailData.summary || {},
+        rows: detailData.rows || [],
+        displayConfig: detailData.displayConfig || { columns: [], summaryMetrics: [] },
+        dateRange: {
+          label: filterLabel[String(dateFilter)] || 'Year to Date',
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+        },
+        ...(insightGeneratedAt ? { dataAsOf: insightGeneratedAt } : {}),
+      });
+    }
+
+    // Fallback: no pre-hydrated data — use the legacy re-query handlers below
     const insightHeadline = String(headline || '').toLowerCase();
 
-    console.log(`[InsightDetails] source=${source}, insightId=${insightId || 'none'}, filters=${filters ? 'stored' : 'fallback'}`);
+    console.log(`[InsightDetails] source=${source}, insightId=${insightId || 'none'}, filters=${filters ? 'stored' : 'fallback'} (legacy re-query path)`);
 
     // Resolve column names against the tenant's actual schema
     const loans = await createSchemaResolver(tenantPool, 'loans');
@@ -217,7 +269,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               : 0
           },
           loans: predictions.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             predictedOutcome: row.predicted_outcome,
             confidence: Math.round(row.confidence),
             reasoning: row.reasoning,
@@ -251,6 +303,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           creditRiskQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -293,6 +346,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           creditRiskQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -336,7 +390,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             totalVolume: creditRisk.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0), 0)
           },
           loans: creditRisk.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -367,6 +421,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           lostOpportunityQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -398,6 +453,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           lostOpportunityQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -434,7 +490,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             estimatedLostRevenue: lostOpp.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0), 0) * 0.01
           },
           loans: lostOpp.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -476,6 +532,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         const pipelineQuery = `
           SELECT 
             l.loan_id,
+            l.loan_number,
             l.loan_amount,
             l.loan_type,
             l.current_loan_status as status,
@@ -529,7 +586,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               : 0
           },
           loans: pipeline.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -788,6 +845,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           closingQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -808,6 +866,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           closingQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -844,7 +903,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               : 0,
           },
           loans: closingRisk.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -873,6 +932,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           lockQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -895,6 +955,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           lockQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -934,7 +995,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               : 0,
           },
           loans: lockExp.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -965,6 +1026,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           tridQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -986,6 +1048,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           tridQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -1023,7 +1086,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               : 0,
           },
           loans: tridLoans.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -1072,6 +1135,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           condQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -1090,6 +1154,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           condQuery = `
             SELECT 
               l.loan_id,
+              l.loan_number,
               l.loan_amount,
               l.loan_type,
               l.current_loan_status as status,
@@ -1122,7 +1187,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             totalVolume: condLoans.rows.reduce((sum: number, r: any) => sum + (parseFloat(r.loan_amount) || 0), 0),
           },
           loans: condLoans.rows.map((row: any) => ({
-            loanId: row.loan_id,
+            loanNumber: row.loan_number || row.loan_id,
             loanAmount: parseFloat(row.loan_amount) || 0,
             loanType: row.loan_type,
             status: row.status,
@@ -1153,6 +1218,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         const revenueExpr = await getTenantRevenueExpression(tenantPool);
 
         // Funded query: revenue, volume, units, BPS, cycle time, revenue per loan
+        // Scoped by application_date and requires non-active status to match canonical metrics.
         const tierQuery = `
           SELECT
             ${actorColumn} AS actor_name,
@@ -1170,18 +1236,21 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
             AVG(${closeDateExpr} - application_date) AS avg_cycle_days
           FROM public.loans
           WHERE (funding_date IS NOT NULL OR closing_date IS NOT NULL)
-            AND ${closeDateExpr} >= $1
-            AND ${closeDateExpr} <= $2
+            AND current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+            AND application_date >= $1
+            AND application_date <= $2
           GROUP BY ${actorColumn}
           HAVING SUM(${revenueExpr}) > 0
           ORDER BY revenue DESC
         `;
 
-        // Application query: started, lost, denied per actor
+        // Application query: started, completed (canonical denominator), lost, denied per actor
         const appQuery = `
           SELECT
             ${actorColumn} AS actor_name,
             COUNT(DISTINCT COALESCE(loan_number, loan_id::text)) AS started,
+            COUNT(DISTINCT CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+              THEN COALESCE(loan_number, loan_id::text) END) AS completed,
             COUNT(DISTINCT CASE WHEN current_loan_status ILIKE '%withdraw%' OR current_loan_status ILIKE '%cancelled%'
               OR current_loan_status ILIKE '%canceled%' OR current_loan_status ILIKE '%not accepted%'
               OR current_loan_status ILIKE '%incomplete%' THEN COALESCE(loan_number, loan_id::text) END) AS lost,
@@ -1198,10 +1267,10 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
         ]);
 
         // Build app data lookup
-        const appMap = new Map<string, { started: number; lost: number; denied: number }>();
+        const appMap = new Map<string, { started: number; completed: number; lost: number; denied: number }>();
         for (const r of appResult.rows) {
           if (!isActorMissing(r.actor_name)) {
-            appMap.set(r.actor_name, { started: parseInt(r.started) || 0, lost: parseInt(r.lost) || 0, denied: parseInt(r.denied) || 0 });
+            appMap.set(r.actor_name, { started: parseInt(r.started) || 0, completed: parseInt(r.completed) || 0, lost: parseInt(r.lost) || 0, denied: parseInt(r.denied) || 0 });
           }
         }
 
@@ -1211,8 +1280,8 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
           .map((r: any) => {
             const name = r.actor_name || 'Unknown';
             const units = parseInt(r.units) || 0;
-            const appData = appMap.get(r.actor_name) || { started: 0, lost: 0, denied: 0 };
-            const started = Math.max(appData.started, units);
+            const appData = appMap.get(r.actor_name) || { started: 0, completed: 0, lost: 0, denied: 0 };
+            const completedForActor = Math.max(appData.completed, units);
             return {
               name,
               revenue: parseFloat(r.revenue) || 0,
@@ -1220,7 +1289,7 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
               volume: parseFloat(r.volume) || 0,
               revenueBps: Math.round(parseFloat(r.revenue_bps) || 0),
               revenuePerLoan: Math.round(parseFloat(r.revenue_per_loan) || 0),
-              pullThrough: started > 0 ? Math.round((units / started) * 1000) / 10 : 0,
+              pullThrough: completedForActor > 0 ? Math.round((units / completedForActor) * 1000) / 10 : 0,
               avgCycleTime: Math.round(parseFloat(r.avg_cycle_days) || 0),
               lostOpportunityUnits: appData.lost,
               deniedUnits: appData.denied,

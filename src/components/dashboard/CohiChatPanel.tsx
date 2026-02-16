@@ -1522,6 +1522,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         item?.loan_officer ??
         item?.loan_officer_name ??
         item?.branch ??
+        item?.loan_number ??
         item?.loan_id ??
         item?.id ??
         "Details";
@@ -1542,7 +1543,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
         setDrilldownData({
           type: "loan",
           item: displayItem,
-          title: `Loan: ${item?.loan_id ?? item?.id ?? "Details"}`,
+          title: `Loan: ${item?.loan_number ?? item?.loan_id ?? item?.id ?? "Details"}`,
         });
         setDrilldownOpen(true);
       }

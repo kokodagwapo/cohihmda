@@ -95,7 +95,7 @@ export const LoanDetailsTable = ({ tenantId }: LoanDetailsTableProps) => {
   const filteredLoans = searchQuery
     ? loans.filter(
         (loan) =>
-          loan.loan_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (loan.loan_number || loan.loan_id)?.toLowerCase().includes(searchQuery.toLowerCase()) ||
           loan.borrower_name
             ?.toLowerCase()
             .includes(searchQuery.toLowerCase()) ||
@@ -179,7 +179,7 @@ export const LoanDetailsTable = ({ tenantId }: LoanDetailsTableProps) => {
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700">
                     <th className="text-left p-2 font-light text-slate-600 dark:text-slate-400">
-                      Loan ID
+                      Loan #
                     </th>
                     <th className="text-left p-2 font-light text-slate-600 dark:text-slate-400">
                       Borrower
@@ -220,7 +220,7 @@ export const LoanDetailsTable = ({ tenantId }: LoanDetailsTableProps) => {
                       className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
                     >
                       <td className="p-2 font-mono text-xs text-slate-900 dark:text-white">
-                        {loan.loan_id || "-"}
+                        {loan.loan_number || loan.loan_id || "-"}
                       </td>
                       <td className="p-2 text-slate-700 dark:text-slate-300">
                         {loan.borrower_name || "-"}

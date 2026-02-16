@@ -283,7 +283,7 @@ function pipelineWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "At-Risk Loans (Closing Soon, No CTC)",
       sql: `SELECT
-        l.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         l.estimated_closing_date,
@@ -301,7 +301,7 @@ function pipelineWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "At-Risk Loans (Closing ≤10 Days, No CTC)",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "estimated_closing_date", label: "Est. Close", format: "date" },
@@ -434,7 +434,7 @@ function creditRiskWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "High-Risk Loans Detail",
       sql: `SELECT
-        l.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         l.fico_score,
@@ -454,7 +454,7 @@ function creditRiskWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "High-Risk Active Loans",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "fico_score", label: "FICO", format: "number" },
@@ -495,7 +495,7 @@ function predictionsWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "High-Risk Predictions (≥70% Confidence)",
       sql: `SELECT
-        p.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         p.predicted_outcome,
@@ -513,7 +513,7 @@ function predictionsWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "High-Confidence Risk Predictions",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "predicted_outcome", label: "Prediction" },
@@ -538,7 +538,7 @@ function lockExpirationWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "Expiring Locks Detail",
       sql: `SELECT
-        l.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         l.lock_expiration_date,
@@ -557,7 +557,7 @@ function lockExpirationWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "Locks Expiring Within 7 Days (No CTC)",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "lock_expiration_date", label: "Lock Expires", format: "date" },
