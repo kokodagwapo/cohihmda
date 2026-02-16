@@ -12,9 +12,9 @@ ENV NODE_ENV=$BUILD_ENV
 
 WORKDIR /app/server
 
-# Copy package files
+# Copy package files and install ALL deps (including dev deps needed for tsc)
 COPY server/package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 # Copy server source
 COPY server/ ./
@@ -27,10 +27,12 @@ FROM node:20-alpine
 
 WORKDIR /app/server
 
-# Copy only production dependencies and built files
-COPY --from=builder /app/server/node_modules ./node_modules
+# Copy package files and install production-only dependencies
+COPY server/package*.json ./
+RUN npm ci --omit=dev
+
+# Copy built files from builder
 COPY --from=builder /app/server/dist ./dist
-COPY --from=builder /app/server/package*.json ./
 
 # Copy migration SQL files (needed for database migrations)
 COPY --from=builder /app/server/migrations ./migrations

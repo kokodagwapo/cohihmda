@@ -69,6 +69,7 @@ import {
   ToggleLeft,
   DollarSign,
   Percent,
+  Check,
   ChevronDown,
   ChevronRight,
   Layers,

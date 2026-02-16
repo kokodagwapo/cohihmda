@@ -157,7 +157,7 @@ if (-not $SkipBuild) {
     # Build the image
     Write-Status "Building Docker image..."
     Push-Location "$REPO_ROOT"
-    docker build -t "${PROJECT_NAME}-backend" -f Dockerfile.backend .
+    docker build -t "${PROJECT_NAME}-backend" -f Dockerfile.backend.prod .
     
     if ($LASTEXITCODE -ne 0) {
         Write-Status "ERROR: Docker build failed" "Red"

@@ -171,12 +171,13 @@ export const Login = () => {
       const result = await lookupSso(email.trim());
       setSsoInfo(result);
 
-      if (result.available) {
-        // SSO detected: redirect immediately
+      if (result.available && !result.allowPassword) {
+        // SSO-only: redirect immediately (no password fallback)
         setStep('sso-redirect');
         handleSsoRedirect(result);
       } else {
-        // No SSO: show password field
+        // No SSO, or hybrid mode (SSO + password allowed): show password field
+        // User can still click "Sign in with SSO" button if SSO is available
         setStep('password');
         setTimeout(() => passwordRef.current?.focus(), 100);
       }
