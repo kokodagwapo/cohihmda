@@ -207,11 +207,31 @@ function inferDataType(
   // Currency/amount fields
   if (
     lowerAlias.includes("amount") ||
+    lowerAlias.includes(" amt") ||
+    lowerAlias.endsWith(" amt") ||
+    lowerAlias.endsWith("_amt") ||
     lowerAlias.includes("revenue") ||
     lowerAlias.includes("fee") ||
     lowerAlias.includes("price") ||
     lowerAlias.includes("payment") ||
-    lowerAlias.includes("concession")
+    lowerAlias.includes(" pmt") ||
+    lowerAlias.endsWith(" pmt") ||
+    lowerAlias.endsWith("_pmt") ||
+    lowerAlias.includes("payout") ||
+    lowerAlias.includes("concession") ||
+    lowerAlias.includes("credit") ||
+    lowerAlias.includes("sell amount") ||
+    lowerAlias.includes("sell amt") ||
+    lowerAlias.includes("srp") ||
+    lowerAlias.includes("loan amount") ||
+    lowerAlias.includes("loan_amount") ||
+    lowerAlias.includes("balance") ||
+    lowerAlias.includes("cost") ||
+    lowerAlias.includes("charge") ||
+    lowerAlias.includes("income") ||
+    lowerAlias.includes("salary") ||
+    lowerAlias.includes("origination") ||
+    lowerAlias.includes("warehouse")
   ) {
     return "currency";
   }
@@ -223,6 +243,12 @@ function inferDataType(
     lowerAlias.includes("ratio") ||
     lowerAlias.includes("rate") ||
     lowerAlias.includes("number") ||
+    lowerAlias.includes("points") ||
+    lowerAlias.includes("term") ||
+    lowerAlias.includes("ltv") ||
+    lowerAlias.includes("dti") ||
+    lowerAlias.includes("fico") ||
+    lowerAlias.includes("months") ||
     lowerAlias.includes("%")
   ) {
     return "number";
