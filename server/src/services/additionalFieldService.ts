@@ -444,6 +444,72 @@ export class AdditionalFieldService {
   }
 
   /**
+   * Change the data type of an additional field (ALTERs the column in the loans table)
+   */
+  async changeFieldDataType(id: string, newDataType: DataType, userId?: string): Promise<AdditionalFieldDefinition | null> {
+    const existing = await this.getFieldDefinitionById(id);
+    if (!existing) {
+      return null;
+    }
+
+    if (existing.dataType === newDataType) {
+      return existing;
+    }
+
+    const newDbColumnType = DATA_TYPE_TO_DB_TYPE[newDataType];
+    const columnName = existing.columnName;
+
+    console.log(`[AdditionalFieldService] Changing data type for ${existing.displayName} (${columnName}): ${existing.dataType} -> ${newDataType} (${existing.dbColumnType} -> ${newDbColumnType})`);
+
+    const client = await this.tenantPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // ALTER the column type in the loans table
+      // Use USING clause to attempt automatic casting
+      let usingClause = '';
+      if (newDataType === 'string') {
+        usingClause = `USING ${columnName}::TEXT`;
+      } else if (newDataType === 'number' || newDataType === 'currency' || newDataType === 'percentage') {
+        // Cast text to numeric - NULLify values that can't be cast
+        usingClause = `USING CASE WHEN ${columnName} IS NULL OR TRIM(${columnName}::TEXT) = '' THEN NULL ELSE NULLIF(REGEXP_REPLACE(TRIM(${columnName}::TEXT), '[^0-9.\\-]', '', 'g'), '')::${newDbColumnType} END`;
+      } else if (newDataType === 'date') {
+        usingClause = `USING CASE WHEN ${columnName} IS NULL OR TRIM(${columnName}::TEXT) = '' THEN NULL ELSE ${columnName}::DATE END`;
+      } else if (newDataType === 'boolean') {
+        usingClause = `USING CASE WHEN ${columnName} IS NULL OR TRIM(${columnName}::TEXT) = '' THEN NULL ELSE ${columnName}::BOOLEAN END`;
+      }
+
+      await client.query(`
+        ALTER TABLE public.loans 
+        ALTER COLUMN ${columnName} TYPE ${newDbColumnType} ${usingClause}
+      `);
+
+      // Update the field definition
+      const result = await client.query(`
+        UPDATE additional_field_definitions 
+        SET data_type = $1, db_column_type = $2, updated_at = NOW()
+        WHERE id = $3
+        RETURNING *
+      `, [newDataType, newDbColumnType, id]);
+
+      // Audit log
+      await client.query(`
+        INSERT INTO additional_field_audit_log (field_definition_id, action, previous_values, new_values, performed_by, notes)
+        VALUES ($1, 'update', $2, $3, $4, $5)
+      `, [id, JSON.stringify({ dataType: existing.dataType, dbColumnType: existing.dbColumnType }), JSON.stringify({ dataType: newDataType, dbColumnType: newDbColumnType }), userId || null, `Data type changed from ${existing.dataType} to ${newDataType}`]);
+
+      await client.query('COMMIT');
+
+      return this.rowToDefinition(result.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Delete an additional field definition and drop the column
    */
   async deleteField(id: string, userId?: string): Promise<boolean> {

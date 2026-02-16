@@ -684,6 +684,48 @@ router.put(
 );
 
 /**
+ * PUT /api/tenant-config/additional-fields/:id/data-type
+ * Change the data type of an additional field (ALTERs the column in the loans table)
+ */
+router.put(
+  "/additional-fields/:id/data-type",
+  authenticateToken,
+  attachTenantContext,
+  requireRole("tenant_admin", "super_admin"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+      const id = req.params.id as string;
+
+      const schema = z.object({
+        dataType: z.enum(["string", "number", "date", "boolean", "currency", "percentage"]),
+      });
+
+      const data = schema.parse(req.body);
+
+      const service = new AdditionalFieldService(tenantPool);
+      const field = await service.changeFieldDataType(id, data.dataType, req.userId);
+
+      if (!field) {
+        return res.status(404).json({ error: "Additional field not found" });
+      }
+
+      logInfo("Additional field data type changed", { userId: req.userId, fieldId: id, newDataType: data.dataType });
+      res.json({ field });
+    } catch (error: any) {
+      logError("Error changing additional field data type", error, {
+        userId: req.userId,
+        fieldId: req.params.id,
+      });
+      const message = error.message?.includes("cannot be cast")
+        ? "Cannot convert existing data to the new type. Some values may not be compatible."
+        : error.message || "Failed to change field data type";
+      res.status(500).json({ error: message });
+    }
+  }
+);
+
+/**
  * DELETE /api/tenant-config/additional-fields/:id
  * Delete an additional field (drops column from loans table)
  */
