@@ -7,7 +7,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Rnd } from "react-rnd";
 import {
   MessageSquare,
   Send,
@@ -55,16 +54,6 @@ import {
   Percent,
   BadgeCheck,
   LayoutGrid,
-  LayoutDashboard,
-  Trophy,
-  Zap,
-  Newspaper,
-  Filter,
-  ArrowLeftRight,
-  Shield,
-  ClipboardList,
-  LineChart,
-  Calculator,
   Code,
   ExternalLink,
 } from "lucide-react";
@@ -79,6 +68,7 @@ import {
   ChatMessage,
   VisualizationConfig,
 } from "@/hooks/useCohiChat";
+import { ChatHistorySidebar } from "@/components/dashboard/ChatHistorySidebar";
 import { DynamicVisualization } from "@/components/visualizations/DynamicVisualization";
 import {
   EnhancedVisualization,
@@ -87,8 +77,6 @@ import {
 } from "@/components/visualizations/EnhancedVisualization";
 import { useToast } from "@/components/ui/use-toast";
 import { convertChatToCanvasItems } from "@/utils/chatToCanvas";
-import { CanvasWidgetCard } from "@/components/workbench/canvas/CanvasWidgetCard";
-import { WidgetRenderer } from "@/components/workbench/canvas/WidgetRenderer";
 import {
   createLayoutItem,
   type CanvasLayoutItem,
@@ -497,145 +485,6 @@ const renderMarkdownText = (text: string): React.ReactNode => {
   );
 };
 
-const CHAT_CANVAS_DEFAULT_SIZE = { w: 360, h: 240 };
-const CHAT_CANVAS_GAP = 16;
-
-type ChatDashboardItem = {
-  id: string;
-  title: string;
-  icon: React.ComponentType<{ className?: string }>;
-  iconClass?: string;
-};
-
-const CHAT_DASHBOARD_GROUPS: { label: string; items: ChatDashboardItem[] }[] = [
-  {
-    label: "Insights",
-    items: [
-      {
-        id: "aletheiaInsights",
-        title: "Cohi Daily Briefings",
-        icon: Zap,
-        iconClass: "text-emerald-500",
-      },
-      {
-        id: "industryNews",
-        title: "Mortgage News",
-        icon: Newspaper,
-        iconClass: "text-blue-500",
-      },
-    ],
-  },
-  {
-    label: "Dashboards",
-    items: [
-      {
-        id: "leaderboard",
-        title: "Leaderboard",
-        icon: Trophy,
-        iconClass: "text-amber-500",
-      },
-      {
-        id: "executiveDashboard",
-        title: "Business Overview",
-        icon: Target,
-        iconClass: "text-blue-500",
-      },
-      {
-        id: "closingFalloutForecast",
-        title: "Closing & Fallout Forecast",
-        icon: BarChart3,
-        iconClass: "text-emerald-500",
-      },
-    ],
-  },
-  {
-    label: "Top Tiering",
-    items: [
-      {
-        id: "loanFunnel",
-        title: "Loan Funnel",
-        icon: Filter,
-        iconClass: "text-blue-500",
-      },
-      {
-        id: "topTieringComparison",
-        title: "TopTiering Comparison",
-        icon: ArrowLeftRight,
-        iconClass: "text-sky-500",
-      },
-      {
-        id: "creditRiskManagement",
-        title: "Credit Risk Management",
-        icon: Shield,
-        iconClass: "text-emerald-500",
-      },
-      {
-        id: "companyScorecard",
-        title: "Company Scorecard",
-        icon: ClipboardList,
-        iconClass: "text-indigo-500",
-      },
-    ],
-  },
-  {
-    label: "Sales",
-    items: [
-      {
-        id: "salesScorecard",
-        title: "Scorecard",
-        icon: Target,
-        iconClass: "text-violet-500",
-      },
-      {
-        id: "salesTrends",
-        title: "Trends",
-        icon: TrendingUp,
-        iconClass: "text-emerald-500",
-      },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      {
-        id: "operationsScorecard",
-        title: "Scorecard",
-        icon: Target,
-        iconClass: "text-indigo-500",
-      },
-      {
-        id: "operationsTrends",
-        title: "Trends",
-        icon: LineChart,
-        iconClass: "text-blue-500",
-      },
-    ],
-  },
-  {
-    label: "Financial Modeling",
-    items: [
-      {
-        id: "financialModeling",
-        title: "Financial Modeling Sandbox",
-        icon: Calculator,
-        iconClass: "text-amber-500",
-      },
-    ],
-  },
-];
-
-const CHAT_HIDEABLE_SECTIONS: Record<string, { id: string; label: string }[]> =
-  {
-    topTiering: [
-      { id: "dailyStory", label: "Executive summary / Daily Story" },
-      { id: "chart", label: "Funnel / Detail chart" },
-    ],
-    loanFunnel: [
-      { id: "dailyStory", label: "Executive summary / Daily Story" },
-      { id: "chart", label: "Funnel / Detail chart" },
-    ],
-  };
-
 // ============================================================================
 // Animated KPI Card
 // ============================================================================
@@ -807,14 +656,7 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const [vizTypeOverrides, setVizTypeOverrides] = useState<
     Record<string, VisualizationConfig["type"]>
   >({});
-  const [chatCanvasItems, setChatCanvasItems] = useState<CanvasLayoutItem[]>(
-    []
-  );
-  const [selectedCanvasId, setSelectedCanvasId] = useState<string | null>(null);
-  const [chatCanvasWidth, setChatCanvasWidth] = useState(360);
-  const [lastDashboardLabel, setLastDashboardLabel] = useState("Add dashboard");
   const isMobile = useIsMobile();
-  const chatCanvasRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -824,20 +666,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
-    const el = chatCanvasRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry?.contentRect.width) {
-        setChatCanvasWidth(entry.contentRect.width);
-      }
-    });
-    ro.observe(el);
-    setChatCanvasWidth(el.getBoundingClientRect().width || 360);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
     if (!isOpen) return;
     if (isMobile) {
       setIsFullscreen(true);
@@ -845,93 +673,25 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
     }
   }, [isMobile, isOpen]);
 
-  const getNextCanvasPosition = useCallback(() => {
-    if (chatCanvasItems.length === 0) return { x: 0, y: 0 };
-    let maxY = 0;
-    chatCanvasItems.forEach((item) => {
-      const bottom = item.y + item.h;
-      if (bottom > maxY) maxY = bottom;
-    });
-    return { x: 0, y: maxY + CHAT_CANVAS_GAP };
-  }, [chatCanvasItems]);
-
-  const updateCanvasItemRect = useCallback(
-    (
-      id: string,
-      next: Partial<Pick<CanvasLayoutItem, "x" | "y" | "w" | "h">>
-    ) => {
-      setChatCanvasItems((prev) =>
-        prev.map((i) => (i.i === id ? { ...i, ...next } : i))
-      );
-    },
-    []
-  );
-
-  const updateCanvasWidgetPayload = useCallback(
-    (id: string, payload: CanvasLayoutItem["payload"]) => {
-      setChatCanvasItems((prev) =>
-        prev.map((i) => (i.i === id ? { ...i, payload } : i))
-      );
-    },
-    []
-  );
-
-  const addDashboardToCanvas = useCallback(
-    (sectionId: string, title: string) => {
-      const id = `cohi-canvas-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      const { x, y } = getNextCanvasPosition();
-      const baseWidth = Math.max(
-        220,
-        Math.min(chatCanvasWidth - 16, isMobile ? 320 : 420)
-      );
-      const baseHeight = Math.max(200, Math.round(baseWidth * 0.6));
-      const newItem = createLayoutItem(
-        id,
-        "dashboard_section",
-        { type: "dashboard_section", sectionId, title },
-        { x, y, w: baseWidth, h: baseHeight }
-      );
-      setChatCanvasItems((prev) => [...prev, newItem]);
-      setSelectedCanvasId(id);
-      setLastDashboardLabel(title);
-    },
-    [chatCanvasWidth, getNextCanvasPosition]
-  );
-
-  const duplicateCanvasItem = useCallback(
-    (id: string) => {
-      const item = chatCanvasItems.find((i) => i.i === id);
-      if (!item) return;
-      const newId = `cohi-canvas-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      const { x, y } = getNextCanvasPosition();
-      const copy = { ...item, i: newId, x, y };
-      setChatCanvasItems((prev) => [...prev, copy]);
-      setSelectedCanvasId(newId);
-    },
-    [chatCanvasItems, getNextCanvasPosition]
-  );
-
-  const removeCanvasItem = useCallback(
-    (id: string) => {
-      setChatCanvasItems((prev) => prev.filter((i) => i.i !== id));
-      if (selectedCanvasId === id) setSelectedCanvasId(null);
-    },
-    [selectedCanvasId]
-  );
-
   const {
     messages,
     isLoading,
+    sessionId: currentSessionId,
     suggestedQuestions,
     sendMessage,
     addConversationTurn,
     clearMessages,
     newSession,
+    chatSessions,
+    isLoadingSessions,
+    isLoadingSession,
+    fetchSessions,
+    loadSession,
+    deleteSession,
+    renameSession,
   } = useCohiChat({ tenantId });
+
+  const [showHistory, setShowHistory] = useState(false);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -2080,52 +1840,6 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
             </Badge>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Dashboard selector – adds to chat canvas */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-white/80 hover:text-white hover:bg-white/20 text-xs gap-1 max-w-[160px] truncate"
-                  title="Add dashboard to chat canvas"
-                >
-                  <LayoutDashboard className="w-3.5 h-3.5" />
-                  <span className="truncate">{lastDashboardLabel}</span>
-                  <ChevronDown className="w-3 h-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-[10001] w-72">
-                {CHAT_DASHBOARD_GROUPS.map((group, index) => (
-                  <div key={group.label}>
-                    <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-2 py-1.5">
-                      {group.label}
-                    </DropdownMenuLabel>
-                    {group.items.map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <DropdownMenuItem
-                          key={item.id}
-                          onClick={() =>
-                            addDashboardToCanvas(item.id, item.title)
-                          }
-                          className="gap-2 py-2"
-                        >
-                          <Icon
-                            className={`w-4 h-4 ${
-                              item.iconClass ?? "text-slate-500"
-                            } shrink-0`}
-                          />
-                          <span className="truncate">{item.title}</span>
-                        </DropdownMenuItem>
-                      );
-                    })}
-                    {index < CHAT_DASHBOARD_GROUPS.length - 1 && (
-                      <DropdownMenuSeparator />
-                    )}
-                  </div>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
             {/* Voice Toggle */}
             <Button
               variant="ghost"
@@ -2139,6 +1853,15 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
               ) : (
                 <VolumeX className="w-4 h-4" />
               )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-white/80 hover:text-white hover:bg-white/20"
+              onClick={() => setShowHistory(true)}
+              title="Chat history"
+            >
+              <Clock className="w-4 h-4" />
             </Button>
             <Button
               variant="ghost"
@@ -2214,182 +1937,24 @@ export const CohiChatPanel: React.FC<CohiChatPanelProps> = ({
           </div>
         </div>
 
+        {/* Chat History Sidebar */}
+        <ChatHistorySidebar
+          isOpen={showHistory}
+          onClose={() => setShowHistory(false)}
+          sessions={chatSessions}
+          activeSessionId={currentSessionId}
+          isLoading={isLoadingSessions}
+          isLoadingSession={isLoadingSession}
+          onFetchSessions={fetchSessions}
+          onLoadSession={loadSession}
+          onDeleteSession={deleteSession}
+          onRenameSession={renameSession}
+          onNewSession={newSession}
+        />
+
         {/* Messages */}
         <ScrollArea className="flex-1 p-4 sm:p-5">
           <div className="space-y-5">
-            {/* Chat Canvas */}
-            {chatCanvasItems.length > 0 && (
-              <div className="rounded-2xl border border-slate-200/70 dark:border-slate-700/70 bg-white/90 dark:bg-slate-900/70 shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between px-3.5 py-2 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/70 dark:bg-slate-800/60">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    <LayoutGrid className="w-4 h-4 text-slate-500" />
-                    Chat Canvas
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-                    onClick={() => setChatCanvasItems([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-                <div
-                  ref={chatCanvasRef}
-                  className="relative p-2 min-h-[200px] sm:min-h-[260px] bg-white/70 dark:bg-slate-900/40 resize-y overflow-auto max-h-[70vh]"
-                  style={{
-                    minHeight: Math.max(
-                      isMobile ? 200 : 260,
-                      Math.max(...chatCanvasItems.map((i) => i.y + i.h)) + 80
-                    ),
-                  }}
-                >
-                  <style>{`
-                    .cohi-chat-canvas .react-resizable-handle {
-                      opacity: 0;
-                      z-index: 20;
-                      width: 12px;
-                      height: 12px;
-                      transition: opacity 0.2s ease;
-                    }
-                    .cohi-chat-canvas .canvas-item:hover .react-resizable-handle {
-                      opacity: 1;
-                    }
-                    .cohi-chat-canvas .react-resizable-handle-se::after,
-                    .cohi-chat-canvas .react-resizable-handle-sw::after,
-                    .cohi-chat-canvas .react-resizable-handle-ne::after,
-                    .cohi-chat-canvas .react-resizable-handle-nw::after {
-                      right: 2px;
-                      bottom: 2px;
-                      width: 6px;
-                      height: 6px;
-                      border-right-width: 2px;
-                      border-bottom-width: 2px;
-                      border-color: rgba(100, 116, 139, 0.6);
-                    }
-                  `}</style>
-                  <div
-                    className="relative cohi-chat-canvas w-full"
-                    style={{ minWidth: 260 }}
-                  >
-                    {chatCanvasItems.map((item, index) => {
-                      const isDashboardSection =
-                        item.type === "dashboard_section" &&
-                        item.payload.type === "dashboard_section";
-                      const payload = item.payload;
-                      const hideableSections = isDashboardSection
-                        ? CHAT_HIDEABLE_SECTIONS[
-                            (payload as { sectionId: string }).sectionId
-                          ] ?? []
-                        : [];
-                      const hiddenSections = isDashboardSection
-                        ? (payload as { hiddenSections?: string[] })
-                            .hiddenSections ?? []
-                        : [];
-                      const displayMode = isDashboardSection
-                        ? (
-                            payload as {
-                              displayMode?: "full" | "compact" | "hidden";
-                            }
-                          ).displayMode ?? "full"
-                        : undefined;
-                      const onToggleSection = isDashboardSection
-                        ? (sectionId: string, hidden: boolean) => {
-                            const prev =
-                              (payload as { hiddenSections?: string[] })
-                                .hiddenSections ?? [];
-                            const next = hidden
-                              ? [...prev, sectionId]
-                              : prev.filter((s) => s !== sectionId);
-                            updateCanvasWidgetPayload(item.i, {
-                              ...payload,
-                              hiddenSections: next,
-                            });
-                          }
-                        : undefined;
-
-                      return (
-                        <Rnd
-                          key={item.i}
-                          size={{ width: item.w, height: item.h }}
-                          position={{ x: item.x, y: item.y }}
-                          bounds="parent"
-                          onDragStart={() => setSelectedCanvasId(item.i)}
-                          onResizeStart={() => setSelectedCanvasId(item.i)}
-                          onDrag={(_, data) =>
-                            updateCanvasItemRect(item.i, {
-                              x: data.x,
-                              y: data.y,
-                            })
-                          }
-                          onResize={(_, __, ref, ___, position) =>
-                            updateCanvasItemRect(item.i, {
-                              x: position.x,
-                              y: position.y,
-                              w: ref.offsetWidth,
-                              h: ref.offsetHeight,
-                            })
-                          }
-                          onDragStop={(_, data) =>
-                            updateCanvasItemRect(item.i, {
-                              x: data.x,
-                              y: data.y,
-                            })
-                          }
-                          onResizeStop={(_, __, ref, ___, position) =>
-                            updateCanvasItemRect(item.i, {
-                              x: position.x,
-                              y: position.y,
-                              w: ref.offsetWidth,
-                              h: ref.offsetHeight,
-                            })
-                          }
-                          enableResizing
-                          cancel="button, a, input, textarea, select, option, [contenteditable], .canvas-interactive"
-                          className="canvas-item"
-                          style={{ zIndex: index + 1 }}
-                        >
-                          <CanvasWidgetCard
-                            widgetId={item.i}
-                            selected={selectedCanvasId === item.i}
-                            onSelect={() => setSelectedCanvasId(item.i)}
-                            onDuplicate={() => duplicateCanvasItem(item.i)}
-                            onDelete={() => removeCanvasItem(item.i)}
-                            className="overflow-hidden"
-                            hideableSections={hideableSections}
-                            hiddenSections={hiddenSections}
-                            onToggleSection={onToggleSection}
-                            displayMode={displayMode}
-                            onChangeDisplayMode={
-                              isDashboardSection
-                                ? (mode) =>
-                                    updateCanvasWidgetPayload(item.i, {
-                                      ...payload,
-                                      displayMode: mode,
-                                    })
-                                : undefined
-                            }
-                          >
-                            <WidgetRenderer
-                              item={item}
-                              height={item.h}
-                              width={item.w}
-                              onUpdatePayload={
-                                item.type === "text_block" ||
-                                item.type === "rich_text"
-                                  ? (p) => updateCanvasWidgetPayload(item.i, p)
-                                  : undefined
-                              }
-                            />
-                          </CanvasWidgetCard>
-                        </Rnd>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
             <AnimatePresence>
               {messages.length === 0 && (
                 <motion.div
