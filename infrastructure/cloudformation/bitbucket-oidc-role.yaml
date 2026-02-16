@@ -81,7 +81,7 @@ Resources:
               - ecr:GetAuthorizationToken
             Resource: "*"
 
-          # ECR repository access
+          # ECR repository access (includes management actions for CloudFormation)
           - Sid: ECRRepository
             Effect: Allow
             Action:
@@ -95,6 +95,14 @@ Resources:
               - ecr:DescribeRepositories
               - ecr:ListImages
               - ecr:DescribeImages
+              - ecr:CreateRepository
+              - ecr:DeleteRepository
+              - ecr:TagResource
+              - ecr:UntagResource
+              - ecr:PutLifecyclePolicy
+              - ecr:PutImageScanningConfiguration
+              - ecr:SetRepositoryPolicy
+              - ecr:DeleteLifecyclePolicy
             Resource: !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/coheus-*
 
           # ECS deployment
