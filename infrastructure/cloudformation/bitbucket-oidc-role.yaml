@@ -42,7 +42,7 @@ Resources:
         - Key: Application
           Value: Coheus
 
-  # Deployment policy
+  # Comprehensive deployment policy covering all CloudFormation-managed resources
   DeploymentPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -52,117 +52,141 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # S3 frontend deployment
-          - Sid: S3Access
+          # CloudFormation full access
+          - Sid: CloudFormation
+            Effect: Allow
+            Action: cloudformation:*
+            Resource: "*"
+
+          # ECS full access (cluster, service, task definitions)
+          - Sid: ECS
+            Effect: Allow
+            Action: ecs:*
+            Resource: "*"
+
+          # ECR full access (scoped to coheus repos)
+          - Sid: ECR
+            Effect: Allow
+            Action: ecr:*
+            Resource: !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/coheus-*
+
+          # ECR auth (account-level, no resource scope)
+          - Sid: ECRAuth
+            Effect: Allow
+            Action: ecr:GetAuthorizationToken
+            Resource: "*"
+
+          # EC2 (VPC, subnets, security groups, NAT, EIP, routes)
+          - Sid: EC2
+            Effect: Allow
+            Action: ec2:*
+            Resource: "*"
+
+          # ELB (ALB, target groups, listeners)
+          - Sid: ELB
+            Effect: Allow
+            Action: elasticloadbalancing:*
+            Resource: "*"
+
+          # IAM (roles created/managed by CloudFormation stacks)
+          - Sid: IAM
             Effect: Allow
             Action:
-              - s3:PutObject
-              - s3:GetObject
-              - s3:DeleteObject
-              - s3:ListBucket
-              - s3:GetBucketLocation
+              - iam:GetRole
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:UpdateRole
+              - iam:PutRolePolicy
+              - iam:GetRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:PassRole
+              - iam:CreatePolicy
+              - iam:DeletePolicy
+              - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:CreateServiceLinkedRole
+            Resource: "*"
+
+          # S3 (frontend buckets)
+          - Sid: S3
+            Effect: Allow
+            Action: s3:*
             Resource:
               - arn:aws:s3:::coheus-*
               - arn:aws:s3:::coheus-*/*
 
-          # CloudFront cache invalidation
-          - Sid: CloudFrontAccess
+          # CloudFront (distributions, cache policies, OAC, response headers)
+          - Sid: CloudFront
             Effect: Allow
-            Action:
-              - cloudfront:CreateInvalidation
-              - cloudfront:GetInvalidation
-              - cloudfront:ListInvalidations
+            Action: cloudfront:*
             Resource: "*"
 
-          # ECR authentication
-          - Sid: ECRAuth
+          # WAFv2 (web ACLs)
+          - Sid: WAFv2
             Effect: Allow
-            Action:
-              - ecr:GetAuthorizationToken
+            Action: wafv2:*
             Resource: "*"
 
-          # ECR repository access (includes management actions for CloudFormation)
-          - Sid: ECRRepository
+          # Lambda (edge functions for CloudFront)
+          - Sid: Lambda
             Effect: Allow
-            Action:
-              - ecr:BatchCheckLayerAvailability
-              - ecr:GetDownloadUrlForLayer
-              - ecr:BatchGetImage
-              - ecr:PutImage
-              - ecr:InitiateLayerUpload
-              - ecr:UploadLayerPart
-              - ecr:CompleteLayerUpload
-              - ecr:DescribeRepositories
-              - ecr:ListImages
-              - ecr:DescribeImages
-              - ecr:CreateRepository
-              - ecr:DeleteRepository
-              - ecr:TagResource
-              - ecr:UntagResource
-              - ecr:PutLifecyclePolicy
-              - ecr:PutImageScanningConfiguration
-              - ecr:SetRepositoryPolicy
-              - ecr:DeleteLifecyclePolicy
-            Resource: !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/coheus-*
+            Action: lambda:*
+            Resource: !Sub arn:aws:lambda:*:${AWS::AccountId}:function:coheus-*
 
-          # ECS deployment
-          - Sid: ECSAccess
+          # CloudWatch (alarms)
+          - Sid: CloudWatch
             Effect: Allow
-            Action:
-              - ecs:UpdateService
-              - ecs:DescribeServices
-              - ecs:DescribeClusters
-              - ecs:ListServices
-              - ecs:DescribeTaskDefinition
-              - ecs:ListTaskDefinitions
-              - ecs:ListClusters
-              - ecs:ListTasks
-              - ecs:DescribeTasks
-              - ecs:ExecuteCommand
+            Action: cloudwatch:*
             Resource: "*"
 
-          # SSM for ECS Exec (required for running migrations)
-          - Sid: SSMForECSExec
+          # CloudWatch Logs (log groups)
+          - Sid: Logs
             Effect: Allow
-            Action:
-              - ssmmessages:CreateControlChannel
-              - ssmmessages:CreateDataChannel
-              - ssmmessages:OpenControlChannel
-              - ssmmessages:OpenDataChannel
+            Action: logs:*
             Resource: "*"
 
-          # ECS task role pass
-          - Sid: IAMPassRole
+          # KMS (encryption keys)
+          - Sid: KMS
             Effect: Allow
-            Action:
-              - iam:PassRole
-            Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/*
-            Condition:
-              StringEquals:
-                iam:PassedToService: ecs-tasks.amazonaws.com
-
-          # CloudFormation stack management (for infrastructure deployments)
-          - Sid: CloudFormationAccess
-            Effect: Allow
-            Action:
-              - cloudformation:ValidateTemplate
-              - cloudformation:DescribeStacks
-              - cloudformation:DescribeStackEvents
-              - cloudformation:DescribeStackResources
-              - cloudformation:GetTemplate
-              - cloudformation:GetTemplateSummary
-              - cloudformation:CreateChangeSet
-              - cloudformation:DescribeChangeSet
-              - cloudformation:ExecuteChangeSet
-              - cloudformation:DeleteChangeSet
-              - cloudformation:ListChangeSets
+            Action: kms:*
             Resource: "*"
 
-          # STS for identity verification
-          - Sid: STSAccess
+          # Secrets Manager (DB credentials, API keys)
+          - Sid: SecretsManager
+            Effect: Allow
+            Action: secretsmanager:*
+            Resource: "*"
+
+          # SNS (alert topics)
+          - Sid: SNS
+            Effect: Allow
+            Action: sns:*
+            Resource: "*"
+
+          # Application Auto Scaling (ECS auto-scaling)
+          - Sid: AutoScaling
+            Effect: Allow
+            Action: application-autoscaling:*
+            Resource: "*"
+
+          # SSM (ECS Exec, parameter store)
+          - Sid: SSM
             Effect: Allow
             Action:
-              - sts:GetCallerIdentity
+              - ssmmessages:*
+              - ssm:*
+            Resource: "*"
+
+          # STS identity verification
+          - Sid: STS
+            Effect: Allow
+            Action: sts:GetCallerIdentity
             Resource: "*"
 
 Outputs:

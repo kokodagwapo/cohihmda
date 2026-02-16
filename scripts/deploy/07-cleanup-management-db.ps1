@@ -5,6 +5,9 @@
 # These tables were incorrectly created by the legacy runMigrations() and
 # are no longer referenced by any management-level code.
 #
+# Uses Node.js + pg inside the container (psql is not installed in the image).
+# The cleanup JS is base64-encoded to avoid PowerShell/shell quoting issues.
+#
 # Prerequisites:
 # - Backend deployed with ECS Exec enabled
 # - Code changes from database schema cleanup already deployed
@@ -73,76 +76,128 @@ $TASK_ID = $TASK_ARN.Split('/')[-1]
 Write-Status "Task: $TASK_ID" "Green"
 
 # ============================================================================
-# Build SQL
+# Build the cleanup JS script (runs inside container with node + pg)
 # ============================================================================
 $CONTAINER_NAME = "coheus-backend"
 
-# The SQL to execute (mirrors scripts/cleanup-management-db.sql)
-$SQL = @"
--- Tenant tables that were misplaced in management DB
-DROP TABLE IF EXISTS public.call_sessions CASCADE;
-DROP TABLE IF EXISTS public.contacts CASCADE;
-DROP TABLE IF EXISTS public.documents CASCADE;
-DROP TABLE IF EXISTS public.loans CASCADE;
-DROP TABLE IF EXISTS public.los_connections CASCADE;
-DROP TABLE IF EXISTS public.los_sync_logs CASCADE;
-DROP TABLE IF EXISTS public.vendor_connections CASCADE;
-DROP TABLE IF EXISTS public.vendor_sync_logs CASCADE;
-DROP TABLE IF EXISTS public.tenant_field_mappings CASCADE;
-DROP TABLE IF EXISTS public.encompass_field_swaps CASCADE;
-DROP TABLE IF EXISTS public.encompass_token_cache CASCADE;
-DROP TABLE IF EXISTS public.encompass_concurrency_metrics CASCADE;
-DROP TABLE IF EXISTS public.rag_settings CASCADE;
-DROP TABLE IF EXISTS public.rag_document_sources CASCADE;
-DROP TABLE IF EXISTS public.rag_documents CASCADE;
-DROP TABLE IF EXISTS public.user_sessions CASCADE;
-DROP TABLE IF EXISTS public.failed_login_attempts CASCADE;
-DROP TABLE IF EXISTS public.data_access_logs CASCADE;
-DROP TABLE IF EXISTS public.audit_logs CASCADE;
-DROP TABLE IF EXISTS public.profiles CASCADE;
-DROP TABLE IF EXISTS public.users CASCADE;
-DROP TABLE IF EXISTS public.tenants CASCADE;
-DROP TABLE IF EXISTS public.deployment_instances CASCADE;
-DROP TABLE IF EXISTS public.aws_deployments CASCADE;
-DROP TABLE IF EXISTS public.aws_billing_history CASCADE;
-DROP SCHEMA IF EXISTS auth CASCADE;
-SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;
-"@
-
-if ($DryRun) {
-    # In dry-run mode, just list the tables that WOULD be dropped
-    Write-Status "DRY RUN - Checking which tables exist (no changes will be made)" "Yellow"
-    $SQL = @"
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public'
-AND table_name IN (
-  'call_sessions','contacts','documents','loans','los_connections','los_sync_logs',
-  'vendor_connections','vendor_sync_logs','tenant_field_mappings','encompass_field_swaps',
-  'encompass_token_cache','encompass_concurrency_metrics','rag_settings','rag_document_sources',
-  'rag_documents','user_sessions','failed_login_attempts','data_access_logs','audit_logs',
-  'profiles','users','tenants','deployment_instances','aws_deployments','aws_billing_history'
+$orphanTables = @(
+    'call_sessions','contacts','documents','loans',
+    'los_connections','los_sync_logs',
+    'vendor_connections','vendor_sync_logs',
+    'tenant_field_mappings','encompass_field_swaps',
+    'encompass_token_cache','encompass_concurrency_metrics',
+    'rag_settings','rag_document_sources','rag_documents',
+    'user_sessions','failed_login_attempts',
+    'data_access_logs','audit_logs',
+    'profiles','users','tenants',
+    'deployment_instances','aws_deployments','aws_billing_history'
 )
-ORDER BY table_name;
-SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'auth';
-"@
-}
 
-# ============================================================================
-# Execute via psql inside ECS container
-# ============================================================================
-# Escape single quotes in SQL for shell passthrough
-$escapedSQL = $SQL -replace "'", "'\''"
-
-$psqlCmd = "psql -h `$DB_HOST -U `$DB_USER -d coheus_management -c '$escapedSQL'"
-$shellCmd = "/bin/sh -c `"PGPASSWORD=`$DB_PASSWORD $psqlCmd`""
+$tablesJson = ($orphanTables | ForEach-Object { "`"$_`"" }) -join ','
 
 if ($DryRun) {
-    Write-Status "Tables that would be dropped:" "Cyan"
+    Write-Status "DRY RUN - checking which orphan tables exist..." "Yellow"
+
+    $jsScript = @"
+const { Pool } = require('pg');
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: 'coheus_management',
+  ssl: { rejectUnauthorized: false }
+});
+const orphans = [$tablesJson];
+(async () => {
+  try {
+    const res = await pool.query(
+      "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
+    );
+    const existing = res.rows.map(r => r.table_name);
+    const toDelete = orphans.filter(t => existing.includes(t));
+    const schemaRes = await pool.query(
+      "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'auth'"
+    );
+    console.log('\n=== DRY RUN - Tables that WOULD be dropped ===');
+    if (toDelete.length === 0) {
+      console.log('  (none found - already clean!)');
+    } else {
+      toDelete.forEach(t => console.log('  DROP TABLE public.' + t + ' CASCADE'));
+    }
+    if (schemaRes.rows.length > 0) {
+      console.log('  DROP SCHEMA auth CASCADE');
+    }
+    console.log('\n=== All current public tables ===');
+    existing.forEach(t => {
+      const marker = orphans.includes(t) ? ' <-- WILL BE DROPPED' : '';
+      console.log('  ' + t + marker);
+    });
+    console.log('\nTotal: ' + existing.length + ' tables, ' + toDelete.length + ' to drop');
+  } catch (e) {
+    console.error('Error:', e.message);
+    process.exit(1);
+  } finally {
+    await pool.end();
+  }
+})();
+"@
 } else {
     Write-Status "Dropping orphan tables from coheus_management..." "Yellow"
+
+    $jsScript = @"
+const { Pool } = require('pg');
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: 'coheus_management',
+  ssl: { rejectUnauthorized: false }
+});
+const orphans = [$tablesJson];
+(async () => {
+  try {
+    let dropped = 0;
+    for (const t of orphans) {
+      try {
+        await pool.query('DROP TABLE IF EXISTS public.' + t + ' CASCADE');
+        console.log('  Dropped: ' + t);
+        dropped++;
+      } catch (e) {
+        console.error('  Error dropping ' + t + ': ' + e.message);
+      }
+    }
+    try {
+      await pool.query('DROP SCHEMA IF EXISTS auth CASCADE');
+      console.log('  Dropped schema: auth');
+    } catch (e) {
+      console.error('  Error dropping auth schema: ' + e.message);
+    }
+    console.log('\n=== Remaining tables in public schema ===');
+    const res = await pool.query(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
+    );
+    res.rows.forEach(r => console.log('  ' + r.table_name));
+    console.log('\nDone! Dropped ' + dropped + ' tables. ' + res.rows.length + ' remain.');
+  } catch (e) {
+    console.error('Error:', e.message);
+    process.exit(1);
+  } finally {
+    await pool.end();
+  }
+})();
+"@
 }
 
+# Base64-encode to avoid all PowerShell/shell quoting issues
+$jsBytes  = [System.Text.Encoding]::UTF8.GetBytes($jsScript)
+$jsBase64 = [System.Convert]::ToBase64String($jsBytes)
+
+Write-Status "Executing cleanup script inside ECS container..."
 Write-Host ""
+
+# Command: decode base64 JS to a temp file, then run with node
+# No embedded quotes = no PowerShell/Win32 command-line parsing issues
+$shellCmd = "/bin/sh -c 'echo $jsBase64 | base64 -d > /app/server/cleanup.cjs && node /app/server/cleanup.cjs && rm /app/server/cleanup.cjs'"
 
 aws ecs execute-command `
     --cluster $ECS_CLUSTER `
@@ -160,7 +215,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 if ($DryRun) {
-    Write-Status "Dry run complete. Run without -DryRun to apply changes." "Cyan"
+    Write-Status "Dry run complete. No changes were made." "Cyan"
+    Write-Status "Run without -DryRun to apply changes." "Gray"
 } else {
-    Write-Status "Cleanup complete! Remaining tables listed above." "Green"
+    Write-Status "Cleanup complete!" "Green"
 }

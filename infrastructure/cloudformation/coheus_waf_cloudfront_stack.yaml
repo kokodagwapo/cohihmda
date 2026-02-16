@@ -8,6 +8,11 @@ Description: |
   - CloudFront distribution with WAF association
   - S3 origin (OAC) for frontend; custom origin for API (ALB)
 
+  SPA routing:
+  - CloudFront Function rewrites non-file URIs to /index.html (viewer-request
+    on default S3 behavior). This replaces global CustomErrorResponses which
+    intercepted 403/404 from ALL origins, breaking backend API error responses.
+
   Caching (SPA best practice):
   - Static assets (default): long TTL, gzip/brotli in cache key
   - index.html: managed CachingDisabled (no cache; custom TTL=0 cannot use EnableAcceptEncoding*)
@@ -106,6 +111,7 @@ Resources:
               Name: AWSManagedRulesCommonRuleSet
               ExcludedRules:
                 - Name: SizeRestrictions_BODY # Allow larger request bodies for file uploads
+                - Name: CrossSiteScripting_BODY # API accepts XML/HTML content (legacy config import, knowledge docs, AI prompts)
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedRulesCommonRuleSetMetric
@@ -126,6 +132,9 @@ Resources:
             SampledRequestsEnabled: true
 
         # Rule 3: AWS Managed SQL Injection Rule Set
+        # Body inspection excluded: API legitimately handles SQL-like content in
+        # AI chat queries, query builder service, and XML config imports.
+        # SQL injection is mitigated at the application layer via parameterized queries.
         - Name: AWSManagedRulesSQLiRuleSet
           Priority: 3
           OverrideAction:
@@ -134,6 +143,8 @@ Resources:
             ManagedRuleGroupStatement:
               VendorName: AWS
               Name: AWSManagedRulesSQLiRuleSet
+              ExcludedRules:
+                - Name: SQLi_BODY # API handles SQL-like content (AI chat, query builder, XML imports)
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedRulesSQLiRuleSetMetric
@@ -263,6 +274,34 @@ Resources:
   # Managed ID: 216adef6-5c7f-47e4-b989-5492eafa07d3 = AllViewer
 
   # ============================================================================
+  # CloudFront Function for SPA routing (replaces global CustomErrorResponses)
+  # ============================================================================
+  # Global CustomErrorResponses intercept 403/404 from ALL origins (including
+  # the backend API), replacing JSON error responses with index.html. This
+  # CloudFront Function runs only on the S3 (frontend) origin response and
+  # rewrites S3 403/404 errors to index.html for client-side SPA routing,
+  # while leaving backend API error responses untouched.
+  SPARoutingFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-spa-routing"
+      FunctionConfig:
+        Comment: Rewrite S3 404/403 to /index.html for SPA client-side routing
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        async function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          // If the URI has a file extension (e.g. .js, .css, .png), let it through as-is.
+          // Otherwise rewrite to /index.html for SPA client-side routing.
+          if (!uri.includes('.')) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+      AutoPublish: true
+
+  # ============================================================================
   # CloudFront Distribution
   # ============================================================================
   CloudFrontDistribution:
@@ -318,12 +357,17 @@ Resources:
             - !Ref AWS::NoValue
 
         # Default cache behavior (S3 static assets)
+        # The SPA routing function rewrites non-file requests (e.g. /admin/settings)
+        # to /index.html so S3 returns the SPA shell instead of 403/404.
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
           Compress: true
           CachePolicyId: !Ref StaticAssetsCachePolicy
           ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SPARoutingFunction.FunctionARN
           AllowedMethods:
             - GET
             - HEAD
@@ -332,7 +376,7 @@ Resources:
             - GET
             - HEAD
 
-        # Cache behaviors
+        # Cache behaviors (evaluated before DefaultCacheBehavior, most specific first)
         CacheBehaviors:
           # API requests to backend
           - !If
@@ -369,6 +413,19 @@ Resources:
               Compress: true
             - !Ref AWS::NoValue
 
+          # Static assets with file extensions (JS, CSS, images, fonts)
+          # These bypass the SPA function since the default behavior's function
+          # only rewrites URIs without extensions. Explicit behavior for cache control.
+          - PathPattern: "/assets/*"
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: !Ref StaticAssetsCachePolicy
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+            Compress: true
+            AllowedMethods:
+              - GET
+              - HEAD
+
           # index.html - no cache for SPA (managed CachingDisabled)
           - PathPattern: "/index.html"
             TargetOriginId: S3Origin
@@ -379,17 +436,6 @@ Resources:
             AllowedMethods:
               - GET
               - HEAD
-
-        # Custom error responses for SPA routing
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 0
-          - ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-            ErrorCachingMinTTL: 0
 
         # Logging (optional - uncomment to enable)
         # Logging:
