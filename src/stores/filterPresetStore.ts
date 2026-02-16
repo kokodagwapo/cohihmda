@@ -1,11 +1,9 @@
 /**
- * filterPresetStore – Zustand store for named filter presets (bookmarks).
+ * filterPresetStore – Zustand store for saved filter presets (bookmarks).
  *
- * Filter presets let users save a combination of date range, date field,
- * and dimension filters under a name, then apply them to any Cohi widget
- * or widget group with one click.
- *
- * MVP: persisted in localStorage keyed by tenant ID.
+ * Presets are stored in localStorage keyed by tenant ID so they persist
+ * across sessions without requiring a DB migration. Each preset stores
+ * a WidgetFilterState that can be applied to any Cohi widget.
  */
 
 import { create } from 'zustand';
@@ -22,105 +20,109 @@ export interface FilterPreset {
   createdAt: string;
 }
 
-interface FilterPresetState {
-  /** All presets keyed by tenant ID → presets array */
+interface FilterPresetStore {
+  /** Presets keyed by tenant ID (lazily loaded from localStorage on first access) */
   presetsByTenant: Record<string, FilterPreset[]>;
 
-  /** Get presets for a specific tenant */
-  getPresets: (tenantId: string) => FilterPreset[];
+  /** Ensure presets are loaded for a tenant — call in components on mount */
+  ensureLoaded: (tenantId: string) => void;
 
-  /** Add a new preset */
-  addPreset: (tenantId: string, name: string, filters: WidgetFilterState) => void;
+  /** Save a new preset for the given tenant */
+  addPreset: (tenantId: string, name: string, filters: WidgetFilterState) => FilterPreset;
 
-  /** Remove a preset by ID */
-  removePreset: (tenantId: string, presetId: string) => void;
+  /** Remove a preset by id */
+  removePreset: (tenantId: string, id: string) => void;
 
   /** Rename a preset */
-  renamePreset: (tenantId: string, presetId: string, newName: string) => void;
-
-  /** Load presets from localStorage */
-  loadFromStorage: () => void;
+  renamePreset: (tenantId: string, id: string, newName: string) => void;
 }
 
 // ---------------------------------------------------------------------------
-// localStorage helpers
+// Helpers
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = 'cohi_filter_presets';
+const MAX_PRESETS = 15;
 
-function readStorage(): Record<string, FilterPreset[]> {
+function storageKey(tenantId: string): string {
+  return `cohi-filter-presets-${tenantId}`;
+}
+
+function readFromStorage(tenantId: string): FilterPreset[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw);
+    const raw = localStorage.getItem(storageKey(tenantId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return {};
+    return [];
   }
 }
 
-function writeStorage(data: Record<string, FilterPreset[]>) {
+function writeToStorage(tenantId: string, presets: FilterPreset[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(storageKey(tenantId), JSON.stringify(presets));
   } catch {
-    // storage full or unavailable — fail silently
+    // localStorage full or unavailable — silently ignore
   }
+}
+
+/** Lazily load presets for a tenant into the store, returning the array */
+function ensureLoaded(
+  state: FilterPresetStore,
+  tenantId: string,
+): FilterPreset[] {
+  if (state.presetsByTenant[tenantId]) return state.presetsByTenant[tenantId];
+  return readFromStorage(tenantId);
 }
 
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
-/** Stable empty array to avoid Zustand selector infinite re-render loops */
-const EMPTY_PRESETS: FilterPreset[] = [];
+export const useFilterPresetStore = create<FilterPresetStore>((set, get) => ({
+  presetsByTenant: {},
 
-export const useFilterPresetStore = create<FilterPresetState>((set, get) => ({
-  presetsByTenant: readStorage(),
-
-  getPresets: (tenantId: string) => {
-    return get().presetsByTenant[tenantId] ?? EMPTY_PRESETS;
+  ensureLoaded: (tenantId: string) => {
+    if (get().presetsByTenant[tenantId] !== undefined) return;
+    const loaded = readFromStorage(tenantId);
+    set((s) => ({
+      presetsByTenant: { ...s.presetsByTenant, [tenantId]: loaded },
+    }));
   },
 
   addPreset: (tenantId: string, name: string, filters: WidgetFilterState) => {
-    const id = `preset-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const existing = ensureLoaded(get(), tenantId);
     const preset: FilterPreset = {
-      id,
-      name,
+      id: `preset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim() || 'Untitled preset',
       filters,
       createdAt: new Date().toISOString(),
     };
-    set((state) => {
-      const existing = state.presetsByTenant[tenantId] || [];
-      // Cap at 20 presets per tenant
-      const updated = [...existing, preset].slice(-20);
-      const next = { ...state.presetsByTenant, [tenantId]: updated };
-      writeStorage(next);
-      return { presetsByTenant: next };
-    });
+    const next = [...existing, preset].slice(-MAX_PRESETS);
+    set((s) => ({
+      presetsByTenant: { ...s.presetsByTenant, [tenantId]: next },
+    }));
+    writeToStorage(tenantId, next);
+    return preset;
   },
 
-  removePreset: (tenantId: string, presetId: string) => {
-    set((state) => {
-      const existing = state.presetsByTenant[tenantId] || [];
-      const updated = existing.filter((p) => p.id !== presetId);
-      const next = { ...state.presetsByTenant, [tenantId]: updated };
-      writeStorage(next);
-      return { presetsByTenant: next };
-    });
+  removePreset: (tenantId: string, id: string) => {
+    const existing = ensureLoaded(get(), tenantId);
+    const next = existing.filter((p) => p.id !== id);
+    set((s) => ({
+      presetsByTenant: { ...s.presetsByTenant, [tenantId]: next },
+    }));
+    writeToStorage(tenantId, next);
   },
 
-  renamePreset: (tenantId: string, presetId: string, newName: string) => {
-    set((state) => {
-      const existing = state.presetsByTenant[tenantId] || [];
-      const updated = existing.map((p) =>
-        p.id === presetId ? { ...p, name: newName } : p,
-      );
-      const next = { ...state.presetsByTenant, [tenantId]: updated };
-      writeStorage(next);
-      return { presetsByTenant: next };
-    });
-  },
-
-  loadFromStorage: () => {
-    set({ presetsByTenant: readStorage() });
+  renamePreset: (tenantId: string, id: string, newName: string) => {
+    const existing = ensureLoaded(get(), tenantId);
+    const next = existing.map((p) =>
+      p.id === id ? { ...p, name: newName.trim() || p.name } : p,
+    );
+    set((s) => ({
+      presetsByTenant: { ...s.presetsByTenant, [tenantId]: next },
+    }));
+    writeToStorage(tenantId, next);
   },
 }));

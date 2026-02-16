@@ -1781,6 +1781,7 @@ function GroupFilterBookmarkButton({
 }) {
   const { selectedTenantId } = useTenantStore();
   const tenantId = selectedTenantId || 'default';
+  const ensureLoaded = useFilterPresetStore((s) => s.ensureLoaded);
   const presets = useFilterPresetStore((s) => s.presetsByTenant[tenantId]) ?? EMPTY_FILTER_PRESETS;
   const addPreset = useFilterPresetStore((s) => s.addPreset);
   const removePreset = useFilterPresetStore((s) => s.removePreset);
@@ -1788,6 +1789,9 @@ function GroupFilterBookmarkButton({
   const [saving, setSaving] = useState(false);
   const [presetName, setPresetName] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Lazily load presets from localStorage on first render
+  useEffect(() => { ensureLoaded(tenantId); }, [tenantId, ensureLoaded]);
 
   // Close on outside click
   useEffect(() => {

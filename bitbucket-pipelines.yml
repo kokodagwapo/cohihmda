@@ -68,10 +68,7 @@ definitions:
           - server-npm
         script:
           - cd server && npm ci && npm run build
-        artifacts:
-          - server/dist/**
-          - server/node_modules/**
-          - server/package.json
+          - echo "Build validation passed (Docker build in deploy step compiles from source)"
 
     # Deploy steps with automatic change detection
     - step: &deploy-dev
