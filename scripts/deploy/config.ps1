@@ -8,7 +8,7 @@ $env:AWS_REGION = "us-east-2"
 
 # Project Configuration
 $PROJECT_NAME = "coheus"
-$ENVIRONMENT = "prod"  # Change to 'staging' or 'prod' as needed
+$ENVIRONMENT = "dev"  # Change to 'staging' or 'prod' as needed
 
 # ============================================================================
 # EXISTING VPC CONFIGURATION
@@ -69,11 +69,11 @@ $COGNITO_CLIENT_ID_DEV = "3b3ntlo09hcc46gec2esd6iii5"
 $COGNITO_CLIENT_SECRET_DEV = "rgf0qcvtbuhuvdsrd28tanenke7u70duq4r6l7j35gc0bk8amrb"
 $COGNITO_DOMAIN_DEV = "us-east-2larr8isfk.auth.us-east-2.amazoncognito.com"
 
-# Prod Cognito Configuration (update these when you create prod pool)
-$COGNITO_USER_POOL_ID_PROD = ""  # TODO: Create prod Cognito pool
-$COGNITO_CLIENT_ID_PROD = ""
-$COGNITO_CLIENT_SECRET_PROD = ""
-$COGNITO_DOMAIN_PROD = ""
+# Prod Cognito Configuration
+$COGNITO_USER_POOL_ID_PROD = "us-east-2_hhOr4kNDX"
+$COGNITO_CLIENT_ID_PROD = "1snnpc5vrr0epd68qacu3apmub"
+$COGNITO_CLIENT_SECRET_PROD = "cg180ks433ffdb8gcue8b71p1kdc5v3m9v01pg5sked0s7hj5ee"
+$COGNITO_DOMAIN_PROD = "coheus-prod.auth.us-east-2.amazoncognito.com"
 
 # Select Cognito config based on environment
 if ($ENVIRONMENT -eq "prod") {

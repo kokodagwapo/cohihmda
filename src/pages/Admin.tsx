@@ -9,7 +9,6 @@ import { TenantsSection } from "@/components/admin/TenantsSection";
 import { SystemSection } from "@/components/admin/SystemSection";
 import { SecuritySection } from "@/components/admin/SecuritySection";
 import { ConnectionsSection } from "@/components/admin/ConnectionsSection";
-import { DeploymentSection } from "@/components/admin/DeploymentSection";
 import { RAGVoiceSection } from "@/components/admin/RAGVoiceSection";
 import { UserManagementSection } from "@/components/admin/UserManagementSection";
 import { PlatformTeamSection } from "@/components/admin/PlatformTeamSection";
@@ -20,7 +19,6 @@ import { DataQualitySection } from "@/components/admin/DataQualitySection";
 import { TenantConfigSection } from "@/components/admin/tenant-config";
 import { SOC2ComplianceSection } from "@/components/admin/SOC2ComplianceSection";
 import { StripeSection } from "@/components/admin/StripeSection";
-import { AWSHostingSection } from "@/components/admin/AWSHostingSection";
 import { DemoDataSection } from "@/components/admin/DemoDataSection";
 import { MetricsCatalogSection } from "@/components/admin/MetricsCatalogSection";
 import { TenantSelectorCard } from "@/components/admin/TenantSelectorCard";
@@ -44,7 +42,6 @@ import { useTenants } from "@/hooks/admin/useTenants";
 import { useSecurityInfo } from "@/hooks/admin/useSecurityInfo";
 import { useLOSConnections } from "@/hooks/admin/useLOSConnections";
 import { useSynapseConnections } from "@/hooks/admin/useSynapseConnections";
-import { useDeployments } from "@/hooks/admin/useDeployments";
 import { useRAGSettings } from "@/hooks/admin/useRAGSettings";
 import { useStripeData } from "@/hooks/admin/useStripeData";
 import { useState } from "react";
@@ -134,18 +131,6 @@ export const Admin = () => {
     createConnection: createSynapseConnection,
   } = useSynapseConnections();
   const {
-    deployments,
-    syncEvents,
-    deploymentsLoading,
-    syncEventsLoading,
-    loadDeployments,
-    loadSyncEvents,
-    provision,
-    register,
-    startSync,
-    failover,
-  } = useDeployments();
-  const {
     ragVoiceSettings,
     ragVoiceCosts,
     loading: ragVoiceLoading,
@@ -227,10 +212,6 @@ export const Admin = () => {
             }
             await loadSynapseData();
             break;
-          case "deployment":
-            await loadDeployments();
-            await loadSyncEvents();
-            break;
           case "rag-voice":
             await loadRagVoiceData(false);
             break;
@@ -258,8 +239,6 @@ export const Admin = () => {
     loadSecurityInfo,
     loadLosData,
     loadSynapseData,
-    loadDeployments,
-    loadSyncEvents,
     loadRagVoiceData,
     isPlatform,
     user?.tenant_id,
@@ -282,9 +261,7 @@ export const Admin = () => {
       { id: "knowledge-center", label: "Knowledge Center" },
       { id: "infrastructure", label: "Infrastructure" },
       { id: "security-compliance", label: "Security & Compliance" },
-      { id: "deployment", label: "Deployment" },
       { id: "stripe", label: "Stripe Payments" },
-      { id: "aws-hosting", label: "AWS Hosting" },
       { id: "metrics-catalog", label: "Metrics Catalog" },
       { id: "dev-tools", label: "Developer Tools" },
       { id: "ai-prompts", label: "AI Prompts" },
@@ -577,20 +554,6 @@ export const Admin = () => {
                 </motion.div>
               )}
 
-              {/* Deployment Section */}
-              {activeSection === "deployment" && (
-                <DeploymentSection
-                  deployments={deployments}
-                  syncEvents={syncEvents}
-                  deploymentsLoading={deploymentsLoading}
-                  syncEventsLoading={syncEventsLoading}
-                  onProvision={provision}
-                  onRegister={register}
-                  onSync={startSync}
-                  onFailover={failover}
-                />
-              )}
-
               {/* Stripe Payments Section */}
               {activeSection === "stripe" && (
                 <StripeSection
@@ -599,17 +562,6 @@ export const Admin = () => {
                   loading={stripeLoading}
                   onRefresh={loadStripeData}
                 />
-              )}
-
-              {/* AWS Hosting Section */}
-              {activeSection === "aws-hosting" && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <AWSHostingSection />
-                </motion.div>
               )}
 
               {/* RAG & Voice Section */}

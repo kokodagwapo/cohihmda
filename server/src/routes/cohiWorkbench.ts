@@ -344,7 +344,8 @@ Each action in the "actions" array must be one of:
    {"type": "suggest_dashboard", "sectionKey": "<key like companyScorecard, salesScorecard, etc.>", "explanation": "Why this dashboard is useful"}
 
 3. **create_widget**: Generate a new visualization from SQL
-   {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi", "title": "...", "data": [], "xKey": "...", "yKey": "..."}, "explanation": "What this shows"}
+   {"type": "create_widget", "sql": "SELECT ...", "title": "Chart Title", "config": {"type": "bar|line|pie|area|table|kpi|donut|horizontal_bar|stacked_bar|grouped_bar|treemap|pivot", "title": "...", "data": [], "xKey": "...", "yKey": "...", "yKeys": ["...", "..."], "pivotConfig": {"rowKey":"...","columnKey":"...","valueKey":"...","aggregation":"sum"}}, "explanation": "What this shows"}
+   IMPORTANT: The config.type MUST be one of: bar, line, pie, area, table, kpi, donut, horizontal_bar, stacked_bar, grouped_bar, treemap, pivot. NEVER use "chart" as a type.
 
 4. **modify_widget**: Change an existing canvas widget
    {"type": "modify_widget", "instanceId": "<canvas item id>", "changes": {...}, "explanation": "What changed"}
@@ -461,7 +462,7 @@ Each action in the "actions" array must be one of:
 
     Element config details (ALWAYS include actual data, never placeholders):
     - text: {"type":"text","content":"The organization delivered stable funded volume...","fontSize":12,"color":"#1e293b","align":"left"}
-    - chart: {"type":"chart","chartType":"bar","title":"Volume by Month","data":[{"month":"Jan","volume":1200},{"month":"Feb","volume":1350}],"xKey":"month","yKey":"volume","yKeys":["volume"],"colors":["#3b82f6"],"showLegend":true}
+    - chart: {"type":"bar","title":"Volume by Month","data":[{"month":"Jan","volume":1200},{"month":"Feb","volume":1350}],"xKey":"month","yKey":"volume","yKeys":["volume"],"colors":["#3b82f6"],"showLegend":true}
     - table: {"type":"table","columns":[{"key":"name","label":"Name"},{"key":"volume","label":"Volume","format":"currency"}],"data":[{"name":"John Smith","volume":5200000},{"name":"Jane Doe","volume":4800000}]}
     - kpi: {"type":"kpi","label":"Active Loans","value":342,"format":"number","change":5.2,"trend":"up"}
     - metric-card: {"type":"metric-card","metrics":[{"label":"Total Volume","value":842000000,"format":"currency"},{"label":"Units","value":156,"format":"number"}],"columns":3}
@@ -756,6 +757,22 @@ router.post(
           typeof a.type === "string" &&
           VALID_ACTION_TYPES.includes(a.type)
       );
+
+      // Normalize create_widget config.type — the LLM sometimes uses "chart" etc.
+      const VALID_VIZ_TYPES = new Set(['bar','line','pie','area','table','kpi','donut','horizontal_bar','stacked_bar','grouped_bar','treemap','pivot']);
+      for (const action of validActions) {
+        if (action.type === 'create_widget' && action.config && typeof action.config.type === 'string') {
+          const t = action.config.type.toLowerCase().trim();
+          if (!VALID_VIZ_TYPES.has(t)) {
+            const mapped = t === 'chart' ? (action.config.chartType || 'bar')
+              : t === 'number' || t === 'metric' || t === 'metric-card' ? 'kpi'
+              : t === 'hbar' || t === 'h_bar' ? 'horizontal_bar'
+              : 'bar';
+            console.log(`[CohiWorkbench] Normalized invalid viz type "${action.config.type}" → "${mapped}" for widget "${action.title}"`);
+            action.config.type = mapped;
+          }
+        }
+      }
 
       // ------------------------------------------------------------------
       // Two-pass flow: if the LLM emitted query_data actions, execute

@@ -11,26 +11,26 @@ import { Plus, X, Sparkles, LayoutDashboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/* ─── localStorage keys for tab persistence ─── */
-const LS_TABS_KEY = 'cohi-workbench-tabs';
-const LS_ACTIVE_KEY = 'cohi-workbench-active';
+/* ─── localStorage keys for tab persistence (tenant-scoped) ─── */
+function lsTabsKey(tenantId?: string) { return `cohi-workbench-tabs${tenantId ? `-${tenantId}` : ''}`; }
+function lsActiveKey(tenantId?: string) { return `cohi-workbench-active${tenantId ? `-${tenantId}` : ''}`; }
 
-function loadPersistedTabs(): { tabs: string[]; active: string | null } {
+function loadPersistedTabs(tenantId?: string): { tabs: string[]; active: string | null } {
   try {
-    const tabs = JSON.parse(localStorage.getItem(LS_TABS_KEY) || '[]');
-    const active = localStorage.getItem(LS_ACTIVE_KEY) || null;
+    const tabs = JSON.parse(localStorage.getItem(lsTabsKey(tenantId)) || '[]');
+    const active = localStorage.getItem(lsActiveKey(tenantId)) || null;
     return { tabs: Array.isArray(tabs) ? tabs : [], active };
   } catch {
     return { tabs: [], active: null };
   }
 }
 
-function persistTabs(tabs: string[], active: string | null) {
+function persistTabs(tabs: string[], active: string | null, tenantId?: string) {
   try {
     // Only persist saved canvas IDs (not temp "new-*" tabs)
     const saved = tabs.filter((t) => !t.startsWith('new-'));
-    localStorage.setItem(LS_TABS_KEY, JSON.stringify(saved));
-    localStorage.setItem(LS_ACTIVE_KEY, active && !active.startsWith('new-') ? active : saved[saved.length - 1] ?? '');
+    localStorage.setItem(lsTabsKey(tenantId), JSON.stringify(saved));
+    localStorage.setItem(lsActiveKey(tenantId), active && !active.startsWith('new-') ? active : saved[saved.length - 1] ?? '');
   } catch { /* quota / private browsing */ }
 }
 
@@ -49,8 +49,8 @@ export default function MyDashboard() {
   const [canvasKey, setCanvasKey] = useState(0);
   const [canvasSearch, setCanvasSearch] = useState('');
 
-  // Track which canvases the user has "open" as tabs
-  const persisted = useRef(loadPersistedTabs());
+  // Track which canvases the user has "open" as tabs (tenant-scoped)
+  const persisted = useRef(loadPersistedTabs(effectiveTenantId));
   const [openTabs, setOpenTabs] = useState<string[]>(persisted.current.tabs);
   const [activeTabId, setActiveTabId] = useState<string | null>(persisted.current.active);
   // Map temp tab IDs → readable titles for unsaved canvases
@@ -95,8 +95,36 @@ export default function MyDashboard() {
 
   /* ─── Persist tabs to localStorage when they change ─── */
   useEffect(() => {
-    persistTabs(openTabs, activeTabId);
-  }, [openTabs, activeTabId]);
+    persistTabs(openTabs, activeTabId, effectiveTenantId);
+  }, [openTabs, activeTabId, effectiveTenantId]);
+
+  /* ─── Reload tabs when tenant changes (platform admin switching tenants) ─── */
+  const prevTenantRef = useRef(effectiveTenantId);
+  useEffect(() => {
+    if (prevTenantRef.current === effectiveTenantId) return;
+    prevTenantRef.current = effectiveTenantId;
+    const { tabs, active } = loadPersistedTabs(effectiveTenantId);
+    if (tabs.length > 0) {
+      setOpenTabs(tabs);
+      setActiveTabId(active);
+      if (active && !active.startsWith('new-')) {
+        setLoadCanvasId(active);
+        navigate(`/my-dashboard/${active}`, { replace: true });
+      } else {
+        setLoadCanvasId(null);
+        setCanvasKey((k) => k + 1);
+        navigate('/my-dashboard', { replace: true });
+      }
+    } else {
+      const newTabId = `new-${Date.now()}`;
+      setOpenTabs([newTabId]);
+      setActiveTabId(newTabId);
+      setLoadCanvasId(null);
+      setCanvasKey((k) => k + 1);
+      navigate('/my-dashboard', { replace: true });
+    }
+    setDirtyTabs(new Set());
+  }, [effectiveTenantId, navigate]);
 
   /* ─── Unsaved changes warning (beforeunload) ─── */
   useEffect(() => {

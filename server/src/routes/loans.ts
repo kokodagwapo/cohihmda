@@ -1613,39 +1613,11 @@ router.get(
 router.get(
   "/company-overview",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      // Get tenant_id from query or user profile (supports super admins)
-      let tenantId = req.query.tenant_id as string;
-
-      if (!tenantId) {
-        const profileResult = await pool.query(
-          "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-          [req.userId],
-        );
-        tenantId = profileResult.rows[0]?.tenant_id;
-      }
-
-      // If still no tenant, check if user is super admin and use Default Tenant
-      if (!tenantId) {
-        const userResult = await pool.query(
-          "SELECT role FROM public.users WHERE id = $1",
-          [req.userId],
-        );
-        if (userResult.rows[0]?.role === "super_admin") {
-          const defaultTenantResult = await pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`,
-          );
-          if (defaultTenantResult.rows.length > 0) {
-            tenantId = defaultTenantResult.rows[0].id;
-          }
-        }
-      }
-
-      if (!tenantId) {
-        return res.status(404).json({ error: "Tenant not found" });
-      }
+      const { tenantId, tenantPool } = getTenantContext(req);
 
       // Parse date range and channel filters from query params
       const startDate = req.query.startDate as string | undefined;
@@ -1661,7 +1633,7 @@ router.get(
 
       // Use shared utility for channel filtering
       const channelClause = buildChannelWhereClause(channelGroup);
-      const whereClause = `tenant_id = $1 ${channelClause}`;
+      const whereClause = `1=1 ${channelClause}`;
 
       logInfo("[CompanyOverview] Query params", {
         tenantId,
@@ -1677,20 +1649,20 @@ router.get(
 
       const allLoansResult = await retryQuery(
         () =>
-          pool.query(
+          tenantPool.query(
             `SELECT 
           loan_id, borrower_name, loan_amount, loan_type, status, channel,
           application_date, closing_date, lock_date, funding_date, interest_rate
-         FROM public.loans 
+         FROM loans 
          WHERE ${whereClause}
            AND (
-             application_date >= $2 OR 
-             funding_date >= $2 OR 
-             closing_date >= $2 OR
+             application_date >= $1 OR 
+             funding_date >= $1 OR 
+             closing_date >= $1 OR
              (funding_date IS NULL AND closing_date IS NULL)  -- Include active loans
            )
          ORDER BY application_date DESC`,
-            [tenantId, startDateStr],
+            [startDateStr],
           ),
         2,
         500,
@@ -1895,39 +1867,11 @@ router.get(
 router.get(
   "/operations-overview",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
-      // Get tenant_id from query or user profile (supports super admins)
-      let tenantId = req.query.tenant_id as string;
-
-      if (!tenantId) {
-        const profileResult = await pool.query(
-          "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-          [req.userId],
-        );
-        tenantId = profileResult.rows[0]?.tenant_id;
-      }
-
-      // If still no tenant, check if user is super admin and use Default Tenant
-      if (!tenantId) {
-        const userResult = await pool.query(
-          "SELECT role FROM public.users WHERE id = $1",
-          [req.userId],
-        );
-        if (userResult.rows[0]?.role === "super_admin") {
-          const defaultTenantResult = await pool.query(
-            `SELECT id FROM public.tenants WHERE name = 'Default Tenant' LIMIT 1`,
-          );
-          if (defaultTenantResult.rows.length > 0) {
-            tenantId = defaultTenantResult.rows[0].id;
-          }
-        }
-      }
-
-      if (!tenantId) {
-        return res.status(404).json({ error: "Tenant not found" });
-      }
+      const { tenantId, tenantPool } = getTenantContext(req);
 
       // Parse date range and channel filters from query params
       const startDate = req.query.startDate as string | undefined;
@@ -1941,9 +1885,9 @@ router.get(
         : new Date(now.getFullYear(), 0, 1);
       const effectiveEndDate = endDate ? new Date(endDate) : now;
 
-      // Build WHERE clause for channel filtering
-      const conditions: string[] = ["tenant_id = $1"];
-      const params: any[] = [tenantId];
+      // Build WHERE clause for channel filtering (no tenant_id -- tenant DB is already scoped)
+      const conditions: string[] = ["1=1"];
+      const params: any[] = [];
 
       // Channel Group filter - consolidated channel (Retail, TPO, etc.)
       // Fixed grouping: Retail = only retail, TPO = brokers, wholesale, correspondent
@@ -1975,11 +1919,11 @@ router.get(
       // Get all loans with channel filter applied
       const loansResult = await retryQuery(
         () =>
-          pool.query(
+          tenantPool.query(
             `SELECT 
           loan_id, borrower_name, loan_amount, loan_type, status, channel,
           application_date, closing_date, lock_date, funding_date, ctc_date, interest_rate
-         FROM public.loans 
+         FROM loans 
          WHERE ${whereClause}
          ORDER BY application_date DESC`,
             params,
@@ -2162,166 +2106,6 @@ router.get(
       res.status(500).json({
         error: error.message || "Failed to fetch operations overview",
       });
-    }
-  },
-);
-
-/**
- * GET /api/loans/diagnostic
- * Diagnostic endpoint to check database state (for debugging)
- */
-router.get(
-  "/diagnostic",
-  authenticateToken,
-  apiLimiter,
-  async (req: AuthRequest, res) => {
-    try {
-      // Get tenant_id
-      const profileResult = await pool.query(
-        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-        [req.userId],
-      );
-
-      const tenantId = profileResult.rows[0]?.tenant_id;
-
-      // Get all loans count
-      const allLoansResult = await pool.query(
-        "SELECT COUNT(*) as total FROM public.loans",
-      );
-      const totalLoans = allLoansResult.rows[0]?.total || 0;
-
-      // Get loans by tenant
-      const loansByTenantResult = await pool.query(
-        "SELECT tenant_id, COUNT(*) as count FROM public.loans GROUP BY tenant_id LIMIT 10",
-      );
-
-      // Get user's tenant loans
-      let userLoansCount = 0;
-      let userLoansSample: any[] = [];
-      if (tenantId) {
-        const userLoansResult = await pool.query(
-          "SELECT loan_id, borrower_name, status, lock_date, closing_date FROM public.loans WHERE tenant_id = $1 LIMIT 5",
-          [tenantId],
-        );
-        userLoansCount = userLoansResult.rows.length;
-        userLoansSample = userLoansResult.rows;
-      }
-
-      res.json({
-        userId: req.userId,
-        tenantId: tenantId || "NOT FOUND",
-        totalLoansInDatabase: parseInt(totalLoans),
-        loansByTenant: loansByTenantResult.rows.map((r) => ({
-          tenant_id: r.tenant_id,
-          count: parseInt(r.count),
-        })),
-        userTenantLoansCount: userLoansCount,
-        userTenantLoansSample: userLoansSample,
-      });
-    } catch (error: any) {
-      logError("Diagnostic endpoint error", error, { userId: req.userId });
-      res.status(500).json({ error: error.message });
-    }
-  },
-);
-
-/**
- * PUT /api/loans/:loanId
- * Update a loan (admin/tenant owner only)
- */
-router.put(
-  "/:loanId",
-  authenticateToken,
-  apiLimiter,
-  async (req: AuthRequest, res) => {
-    try {
-      const { loanId } = req.params;
-      const profileResult = await pool.query(
-        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-        [req.userId],
-      );
-
-      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-        return res.status(404).json({ error: "Tenant not found" });
-      }
-
-      const tenantId = profileResult.rows[0].tenant_id;
-
-      // Verify loan belongs to tenant
-      const loanCheck = await pool.query(
-        "SELECT loan_id FROM public.loans WHERE loan_id = $1 AND tenant_id = $2",
-        [loanId, tenantId],
-      );
-
-      if (loanCheck.rows.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "Loan not found or access denied" });
-      }
-
-      // Build update query dynamically based on provided fields
-      const allowedFields = [
-        "borrower_name",
-        "loan_amount",
-        "loan_type",
-        "status",
-        "application_date",
-        "closing_date",
-        "lock_date",
-        "interest_rate",
-        "loan_officer_name",
-        "branch",
-        "fico_score",
-        "ltv",
-        "loan_purpose",
-        "credit_pull_date",
-        "property_address",
-        "property_city",
-        "property_state",
-        "property_zip",
-        "nmls_id",
-        "loan_officer_role",
-      ];
-
-      const updates: string[] = [];
-      const values: any[] = [];
-      let paramIndex = 1;
-
-      Object.keys(req.body).forEach((key) => {
-        if (allowedFields.includes(key) && req.body[key] !== undefined) {
-          updates.push(`${key} = $${paramIndex}`);
-          values.push(req.body[key] === "" ? null : req.body[key]);
-          paramIndex++;
-        }
-      });
-
-      if (updates.length === 0) {
-        return res.status(400).json({ error: "No valid fields to update" });
-      }
-
-      values.push(loanId, tenantId);
-      const query = `
-      UPDATE public.loans 
-      SET ${updates.join(", ")}, updated_at = NOW()
-      WHERE loan_id = $${paramIndex} AND tenant_id = $${paramIndex + 1}
-      RETURNING *
-    `;
-
-      const result = await pool.query(query, values);
-
-      if (result.rows.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "Loan not found or update failed" });
-      }
-
-      res.json({ loan: result.rows[0], message: "Loan updated successfully" });
-    } catch (error: any) {
-      logError("Error updating loan", error, {
-        userId: req.userId,
-        loanId: req.params.id,
-      });
-      res.status(500).json({ error: error.message || "Failed to update loan" });
     }
   },
 );
@@ -7844,53 +7628,5 @@ Example: ["Recommendation 1", "Recommendation 2", "Recommendation 3"]`;
     return [];
   }
 }
-
-/**
- * DELETE /api/loans/:loanId
- * Delete a loan (admin/tenant owner only)
- */
-router.delete(
-  "/:loanId",
-  authenticateToken,
-  apiLimiter,
-  async (req: AuthRequest, res) => {
-    try {
-      const { loanId } = req.params;
-      const profileResult = await pool.query(
-        "SELECT tenant_id FROM public.profiles WHERE user_id = $1",
-        [req.userId],
-      );
-
-      if (profileResult.rows.length === 0 || !profileResult.rows[0].tenant_id) {
-        return res.status(404).json({ error: "Tenant not found" });
-      }
-
-      const tenantId = profileResult.rows[0].tenant_id;
-
-      // Verify loan belongs to tenant and delete
-      const result = await pool.query(
-        "DELETE FROM public.loans WHERE loan_id = $1 AND tenant_id = $2 RETURNING loan_id",
-        [loanId, tenantId],
-      );
-
-      if (result.rows.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "Loan not found or access denied" });
-      }
-
-      res.json({
-        message: "Loan deleted successfully",
-        loanId: result.rows[0].loan_id,
-      });
-    } catch (error: any) {
-      logError("Error deleting loan", error, {
-        userId: req.userId,
-        loanId: req.params.id,
-      });
-      res.status(500).json({ error: error.message || "Failed to delete loan" });
-    }
-  },
-);
 
 export default router;

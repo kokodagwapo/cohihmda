@@ -1056,8 +1056,16 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           setSaveStatus('saved');
         });
         onLoaded?.();
-      } catch {
-        if (!cancelled) toast({ title: 'Failed to load canvas', variant: 'destructive' });
+      } catch (err: any) {
+        if (!cancelled) {
+          const msg = err?.message ?? '';
+          const is404 = msg.includes('not found') || msg.includes('404');
+          toast({
+            title: is404 ? 'Canvas not found' : 'Failed to load canvas',
+            description: is404 ? 'This canvas may have been deleted or belongs to a different workspace.' : undefined,
+            variant: 'destructive',
+          });
+        }
       }
     })();
     return () => { cancelled = true; };

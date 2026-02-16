@@ -269,17 +269,18 @@ export async function initDatabase(): Promise<void> {
       // Continue - management DB might not exist yet
     }
 
-    // Run migrations (don't block server startup on migration warnings)
-    // Note: These migrations are for backward compatibility with existing shared database
-    // New tenants will use tenant-specific databases created via provisioning
-    try {
-      await runMigrations();
-    } catch (migrationError) {
-      console.warn(
-        "⚠️ Migration warnings (server will continue):",
-        migrationError,
-      );
-      // Don't throw - allow server to start even with migration warnings
+    // Legacy shared-database migrations: only run for local dev (single-DB mode).
+    // In multi-tenant mode (ECS), management and tenant DBs use the proper migration system
+    // (server/migrations/management/ and server/migrations/tenant/).
+    if (process.env.MULTI_TENANT_ENABLED !== "true") {
+      try {
+        await runMigrations();
+      } catch (migrationError) {
+        console.warn(
+          "⚠️ Migration warnings (server will continue):",
+          migrationError,
+        );
+      }
     }
 
     // Force-sync default AI prompt configs on every startup.
@@ -308,21 +309,6 @@ export async function initDatabase(): Promise<void> {
 
 async function runMigrations() {
   try {
-    // Create auth schema if it doesn't exist
-    await pool.query("CREATE SCHEMA IF NOT EXISTS auth");
-
-    // Create users table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS auth.users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email TEXT UNIQUE NOT NULL,
-        encrypted_password TEXT NOT NULL,
-        email_confirmed_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-
     // Create tenants table FIRST (no dependencies)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.tenants (
@@ -1524,34 +1510,6 @@ async function runMigrations() {
     `,
       )
       .catch(() => {});
-
-    // Create default admin user if it doesn't exist
-    try {
-      const adminResult = await pool.query(`
-        INSERT INTO public.users (email, encrypted_password, full_name, role, is_active)
-        VALUES (
-          'admin@Cohi.com',
-          '$2a$10$vbbt8TWzAGU1Nf5QPom4bu9rxKx.8QqK/COn1HScKq3TysCmYJFlK',
-          'Admin User',
-          'admin',
-          true
-        )
-        ON CONFLICT (email) DO UPDATE SET
-          encrypted_password = EXCLUDED.encrypted_password,
-          role = COALESCE(EXCLUDED.role, public.users.role, 'admin'),
-          is_active = COALESCE(EXCLUDED.is_active, public.users.is_active, true),
-          full_name = COALESCE(EXCLUDED.full_name, public.users.full_name, 'Admin User')
-        RETURNING id, email
-      `);
-      if (adminResult.rows.length > 0) {
-        console.log(
-          "✅ Admin user created/updated:",
-          adminResult.rows[0].email,
-        );
-      }
-    } catch (err: any) {
-      console.warn("⚠️  Error creating admin user:", err.message);
-    }
 
     // Create user_preferences table
     // Note: No FK to users table since users are now in coheus_users
