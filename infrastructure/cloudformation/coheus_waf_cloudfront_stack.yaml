@@ -111,6 +111,7 @@ Resources:
               Name: AWSManagedRulesCommonRuleSet
               ExcludedRules:
                 - Name: SizeRestrictions_BODY # Allow larger request bodies for file uploads
+                - Name: CrossSiteScripting_BODY # API accepts XML/HTML content (legacy config import, knowledge docs, AI prompts)
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedRulesCommonRuleSetMetric
@@ -131,6 +132,9 @@ Resources:
             SampledRequestsEnabled: true
 
         # Rule 3: AWS Managed SQL Injection Rule Set
+        # Body inspection excluded: API legitimately handles SQL-like content in
+        # AI chat queries, query builder service, and XML config imports.
+        # SQL injection is mitigated at the application layer via parameterized queries.
         - Name: AWSManagedRulesSQLiRuleSet
           Priority: 3
           OverrideAction:
@@ -139,6 +143,8 @@ Resources:
             ManagedRuleGroupStatement:
               VendorName: AWS
               Name: AWSManagedRulesSQLiRuleSet
+              ExcludedRules:
+                - Name: SQLi_BODY # API handles SQL-like content (AI chat, query builder, XML imports)
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedRulesSQLiRuleSetMetric
