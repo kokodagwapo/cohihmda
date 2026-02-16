@@ -1,7 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 import {
-  ArrowUp,
-  ArrowDown,
   ChevronUp,
   Medal,
   Rocket,
@@ -739,20 +737,7 @@ export const LeaderBoardSection = ({
                       units
                     </p>
                   </div>
-                  <div
-                    className={`flex items-center gap-0.5 text-[11px] sm:text-xs font-medium ${
-                      leader.delta >= 0
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-500 dark:text-rose-400"
-                    }`}
-                  >
-                    {leader.delta >= 0 ? (
-                      <ArrowUp className="w-3 h-3" />
-                    ) : (
-                      <ArrowDown className="w-3 h-3" />
-                    )}
-                    {Math.abs(leader.delta)}%
-                  </div>
+                  {/* Percent change hidden – values are unreliable, will fix later */}
                 </div>
 
                 {/* Stats row */}
@@ -1200,16 +1185,7 @@ export const LeaderBoardSection = ({
                       <span className="text-xs text-slate-500 dark:text-slate-400">
                         units
                       </span>
-                      <span
-                        className={`ml-auto text-xs font-light px-2 py-0.5 rounded-full ${
-                          leader.delta >= 0
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                            : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"
-                        }`}
-                      >
-                        {leader.delta >= 0 ? "↑" : "↓"} {Math.abs(leader.delta)}
-                        %
-                      </span>
+                      {/* Percent change hidden – values are unreliable, will fix later */}
                     </div>
                   </div>
 
