@@ -1,18 +1,18 @@
 /**
  * Market Rate Service
  * Fetches and stores daily mortgage market rates from FRED API
- * 
+ *
  * Data Source: FRED API - OBMMIC30YF (30-Year Fixed Rate Conforming Mortgage Index)
  * API Documentation: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
  */
 
 // Use management database pool - market_rates is a global table in the management database
-import { pool } from '../../config/managementDatabase.js';
-import { logInfo, logError } from '../logger.js';
+import { pool } from "../../config/managementDatabase.js";
+import { logInfo, logError } from "../logger.js";
 
 const getFredApiKey = () => process.env.FRED_API_KEY;
-const FRED_API_BASE_URL = 'https://api.stlouisfed.org/fred/series/observations';
-const FRED_SERIES_ID = 'OBMMIC30YF'; // 30-Year Fixed Rate Conforming Mortgage Index
+const FRED_API_BASE_URL = "https://api.stlouisfed.org/fred/series/observations";
+const FRED_SERIES_ID = "OBMMIC30YF"; // 30-Year Fixed Rate Conforming Mortgage Index
 
 export interface MarketRate {
   date: string; // YYYY-MM-DD
@@ -40,11 +40,13 @@ export interface FREDResponse {
  */
 export async function fetchMarketRatesFromFRED(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
 ): Promise<MarketRate[]> {
   const apiKey = getFredApiKey();
   if (!apiKey) {
-    throw new Error('FRED_API_KEY is not configured. Please set it in environment variables.');
+    throw new Error(
+      "FRED_API_KEY is not configured. Please set it in environment variables.",
+    );
   }
 
   // Calculate default dates if not provided
@@ -52,80 +54,106 @@ export async function fetchMarketRatesFromFRED(
   const threeYearsAgo = new Date();
   threeYearsAgo.setFullYear(today.getFullYear() - 3);
 
-  const observationStart = startDate || threeYearsAgo.toISOString().split('T')[0];
-  const observationEnd = endDate || today.toISOString().split('T')[0];
+  const observationStart =
+    startDate || threeYearsAgo.toISOString().split("T")[0];
+  const observationEnd = endDate || today.toISOString().split("T")[0];
 
   const url = new URL(FRED_API_BASE_URL);
-  url.searchParams.append('series_id', FRED_SERIES_ID);
-  url.searchParams.append('api_key', apiKey);
-  url.searchParams.append('file_type', 'json');
-  url.searchParams.append('observation_start', observationStart);
-  url.searchParams.append('observation_end', observationEnd);
+  url.searchParams.append("series_id", FRED_SERIES_ID);
+  url.searchParams.append("api_key", apiKey);
+  url.searchParams.append("file_type", "json");
+  url.searchParams.append("observation_start", observationStart);
+  url.searchParams.append("observation_end", observationEnd);
 
   try {
-    console.log('[FRED API] ========================================');
-    console.log('[FRED API] Starting FRED API call...');
-    console.log('[FRED API] Series ID:', FRED_SERIES_ID);
-    console.log('[FRED API] Date Range:', observationStart, 'to', observationEnd);
-    console.log('[FRED API] API Key configured:', !!apiKey);
-    console.log('[FRED API] Full URL:', url.toString().replace(apiKey || '', '***REDACTED***'));
-    logInfo(`Fetching market rates from FRED API (${observationStart} to ${observationEnd})`);
+    console.log("[FRED API] ========================================");
+    console.log("[FRED API] Starting FRED API call...");
+    console.log("[FRED API] Series ID:", FRED_SERIES_ID);
+    console.log(
+      "[FRED API] Date Range:",
+      observationStart,
+      "to",
+      observationEnd,
+    );
+    console.log("[FRED API] API Key configured:", !!apiKey);
+    console.log(
+      "[FRED API] Full URL:",
+      url.toString().replace(apiKey || "", "***REDACTED***"),
+    );
+    logInfo(
+      `Fetching market rates from FRED API (${observationStart} to ${observationEnd})`,
+    );
 
     const response = await fetch(url.toString());
-    
-    console.log('[FRED API] Response status:', response.status, response.statusText);
-    console.log('[FRED API] Response headers:', Object.fromEntries(response.headers.entries()));
-    
+
+    console.log(
+      "[FRED API] Response status:",
+      response.status,
+      response.statusText,
+    );
+    console.log(
+      "[FRED API] Response headers:",
+      Object.fromEntries(response.headers.entries()),
+    );
+
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[FRED API] ❌ Error response:', errorText);
-      throw new Error(`FRED API error: ${response.status} ${response.statusText} - ${errorText}`);
+      console.error("[FRED API] ❌ Error response:", errorText);
+      throw new Error(
+        `FRED API error: ${response.status} ${response.statusText} - ${errorText}`,
+      );
     }
 
-    const data = await response.json() as FREDResponse;
-    console.log('[FRED API] Response received successfully');
-    console.log('[FRED API] Response structure:', {
+    const data = (await response.json()) as FREDResponse;
+    console.log("[FRED API] Response received successfully");
+    console.log("[FRED API] Response structure:", {
       hasObservations: !!data.observations,
       observationsCount: data.observations?.length || 0,
       count: data.count,
       units: data.units,
-      fileType: data.file_type
+      fileType: data.file_type,
     });
 
     if (!data.observations || !Array.isArray(data.observations)) {
-      console.error('[FRED API] ❌ Invalid response structure:', data);
-      throw new Error('Invalid FRED API response: missing observations array');
+      console.error("[FRED API] ❌ Invalid response structure:", data);
+      throw new Error("Invalid FRED API response: missing observations array");
     }
 
     // Filter out missing data (FRED uses "." for missing values)
     const allObservations = data.observations.length;
     const rates: MarketRate[] = data.observations
-      .filter(obs => obs.value && obs.value !== '.' && !isNaN(parseFloat(obs.value)))
-      .map(obs => ({
+      .filter(
+        (obs) =>
+          obs.value && obs.value !== "." && !isNaN(parseFloat(obs.value)),
+      )
+      .map((obs) => ({
         date: obs.date,
-        rate: parseFloat(obs.value)
+        rate: parseFloat(obs.value),
       }));
 
     const filteredOut = allObservations - rates.length;
-    console.log('[FRED API] ✅ Successfully parsed rates:');
-    console.log('[FRED API]   - Total observations:', allObservations);
-    console.log('[FRED API]   - Valid rates:', rates.length);
-    console.log('[FRED API]   - Filtered out (missing data):', filteredOut);
+    console.log("[FRED API] ✅ Successfully parsed rates:");
+    console.log("[FRED API]   - Total observations:", allObservations);
+    console.log("[FRED API]   - Valid rates:", rates.length);
+    console.log("[FRED API]   - Filtered out (missing data):", filteredOut);
     if (rates.length > 0) {
-      console.log('[FRED API]   - First rate:', rates[0]);
-      console.log('[FRED API]   - Last rate:', rates[rates.length - 1]);
+      console.log("[FRED API]   - First rate:", rates[0]);
+      console.log("[FRED API]   - Last rate:", rates[rates.length - 1]);
     }
-    console.log('[FRED API] ========================================');
-    
+    console.log("[FRED API] ========================================");
+
     logInfo(`Fetched ${rates.length} market rate observations from FRED API`);
     return rates;
   } catch (error: any) {
-    console.error('[FRED API] ❌ ========================================');
-    console.error('[FRED API] ❌ FRED API call failed!');
-    console.error('[FRED API] ❌ Error:', error.message);
-    console.error('[FRED API] ❌ Stack:', error.stack);
-    console.error('[FRED API] ❌ ========================================');
-    logError(`Failed to fetch market rates from FRED API: ${error.message}`, error);
+    console.error("[FRED API] ❌ ========================================");
+    console.error("[FRED API] ❌ FRED API call failed!");
+    console.error("[FRED API] ❌ Error:", error.message);
+    console.error("[FRED API] ❌ Stack:", error.stack);
+    console.error("[FRED API] ❌ ========================================");
+    logError(
+      `Failed to fetch market rates from FRED API: ${error.message}`,
+      error,
+    );
     throw error;
   }
 }
@@ -144,14 +172,14 @@ export async function storeMarketRates(rates: MarketRate[]): Promise<number> {
   let updatedCount = 0;
   let errorCount = 0;
 
-  console.log('[FRED API] ========================================');
-  console.log('[FRED API] Storing market rates in database...');
-  console.log('[FRED API] Rates to store:', rates.length);
+  console.log("[FRED API] ========================================");
+  console.log("[FRED API] Storing market rates in database...");
+  console.log("[FRED API] Rates to store:", rates.length);
 
   try {
     // Use transaction for batch insert
-    await pool.query('BEGIN');
-    console.log('[FRED API] Database transaction started');
+    await pool.query("BEGIN");
+    console.log("[FRED API] Database transaction started");
 
     for (const rate of rates) {
       try {
@@ -163,9 +191,9 @@ export async function storeMarketRates(rates: MarketRate[]): Promise<number> {
              rate = EXCLUDED.rate,
              updated_at = NOW()
            RETURNING (xmax = 0) AS inserted`,
-          [rate.date, rate.rate, FRED_SERIES_ID]
+          [rate.date, rate.rate, FRED_SERIES_ID],
         );
-        
+
         const wasInserted = result.rows[0]?.inserted !== false;
         if (wasInserted) {
           storedCount++;
@@ -174,32 +202,40 @@ export async function storeMarketRates(rates: MarketRate[]): Promise<number> {
         }
       } catch (error: any) {
         errorCount++;
-        console.error(`[FRED API] ❌ Failed to store rate for ${rate.date}:`, error.message);
-        logError(`Failed to store market rate for ${rate.date}: ${error.message}`, error);
+        console.error(
+          `[FRED API] ❌ Failed to store rate for ${rate.date}:`,
+          error.message,
+        );
+        logError(
+          `Failed to store market rate for ${rate.date}: ${error.message}`,
+          error,
+        );
         // Continue with other rates
       }
     }
 
-    await pool.query('COMMIT');
-    console.log('[FRED API] ✅ Database transaction committed');
-    console.log('[FRED API] Storage results:');
-    console.log('[FRED API]   - New rates inserted:', storedCount);
-    console.log('[FRED API]   - Existing rates updated:', updatedCount);
-    console.log('[FRED API]   - Errors:', errorCount);
-    console.log('[FRED API]   - Total processed:', storedCount + updatedCount);
-    console.log('[FRED API] ========================================');
-    
+    await pool.query("COMMIT");
+    console.log("[FRED API] ✅ Database transaction committed");
+    console.log("[FRED API] Storage results:");
+    console.log("[FRED API]   - New rates inserted:", storedCount);
+    console.log("[FRED API]   - Existing rates updated:", updatedCount);
+    console.log("[FRED API]   - Errors:", errorCount);
+    console.log("[FRED API]   - Total processed:", storedCount + updatedCount);
+    console.log("[FRED API] ========================================");
+
     // Clear cache so next bucketing will reload fresh rates
     clearMarketRateCache();
-    
-    logInfo(`Stored ${storedCount} new market rates, updated ${updatedCount} existing rates in database`);
+
+    logInfo(
+      `Stored ${storedCount} new market rates, updated ${updatedCount} existing rates in database`,
+    );
     return storedCount + updatedCount;
   } catch (error: any) {
-    await pool.query('ROLLBACK');
-    console.error('[FRED API] ❌ ========================================');
-    console.error('[FRED API] ❌ Database transaction rolled back!');
-    console.error('[FRED API] ❌ Error:', error.message);
-    console.error('[FRED API] ❌ ========================================');
+    await pool.query("ROLLBACK");
+    console.error("[FRED API] ❌ ========================================");
+    console.error("[FRED API] ❌ Database transaction rolled back!");
+    console.error("[FRED API] ❌ Error:", error.message);
+    console.error("[FRED API] ❌ ========================================");
     logError(`Failed to store market rates: ${error.message}`, error);
     throw error;
   }
@@ -213,27 +249,27 @@ export async function storeMarketRates(rates: MarketRate[]): Promise<number> {
  */
 export async function syncMarketRatesFromFRED(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
 ): Promise<number> {
-  console.log('[FRED API] ========================================');
-  console.log('[FRED API] 🚀 Starting syncMarketRatesFromFRED');
-  console.log('[FRED API] ========================================');
-  
+  console.log("[FRED API] ========================================");
+  console.log("[FRED API] 🚀 Starting syncMarketRatesFromFRED");
+  console.log("[FRED API] ========================================");
+
   try {
     const rates = await fetchMarketRatesFromFRED(startDate, endDate);
     const storedCount = await storeMarketRates(rates);
-    
-    console.log('[FRED API] ========================================');
-    console.log('[FRED API] ✅ Sync completed successfully!');
-    console.log('[FRED API] Total rates stored:', storedCount);
-    console.log('[FRED API] ========================================');
-    
+
+    console.log("[FRED API] ========================================");
+    console.log("[FRED API] ✅ Sync completed successfully!");
+    console.log("[FRED API] Total rates stored:", storedCount);
+    console.log("[FRED API] ========================================");
+
     return storedCount;
   } catch (error: any) {
-    console.error('[FRED API] ========================================');
-    console.error('[FRED API] ❌ Sync failed!');
-    console.error('[FRED API] Error:', error.message);
-    console.error('[FRED API] ========================================');
+    console.error("[FRED API] ========================================");
+    console.error("[FRED API] ❌ Sync failed!");
+    console.error("[FRED API] Error:", error.message);
+    console.error("[FRED API] ========================================");
     logError(`Failed to sync market rates from FRED: ${error.message}`, error);
     throw error;
   }
@@ -257,15 +293,16 @@ export async function initializeMarketRateCache(): Promise<void> {
 
   try {
     const result = await pool.query(
-      'SELECT rate_date, rate FROM public.market_rates ORDER BY rate_date'
+      "SELECT rate_date, rate FROM public.market_rates ORDER BY rate_date",
     );
 
     marketRateCache.clear();
     for (const row of result.rows) {
       // Normalize to YYYY-MM-DD string - node-pg returns DATE as Date object, but lookups use strings
-      const dateStr = row.rate_date instanceof Date
-        ? row.rate_date.toISOString().split('T')[0]
-        : String(row.rate_date).split('T')[0];
+      const dateStr =
+        row.rate_date instanceof Date
+          ? row.rate_date.toISOString().split("T")[0]
+          : String(row.rate_date).split("T")[0];
       marketRateCache.set(dateStr, parseFloat(row.rate));
     }
 
@@ -273,22 +310,29 @@ export async function initializeMarketRateCache(): Promise<void> {
     cacheExpiry = Date.now() + CACHE_TTL;
     const count = marketRateCache.size;
     const dates = Array.from(marketRateCache.keys()).sort();
-    const minDate = dates[0] ?? 'N/A';
-    const maxDate = dates[dates.length - 1] ?? 'N/A';
-    console.log(`[FRED API] 📊 Market rate cache initialized: ${count} rates (${minDate} to ${maxDate})`);
+    const minDate = dates[0] ?? "N/A";
+    const maxDate = dates[dates.length - 1] ?? "N/A";
+    console.log(
+      `[FRED API] 📊 Market rate cache initialized: ${count} rates (${minDate} to ${maxDate})`,
+    );
   } catch (error: any) {
     // If table doesn't exist or connection timeout, silently continue with empty cache
-    if (error?.message?.includes('does not exist') || 
-        error?.code === '42P01' ||
-        error?.message?.includes('timeout')) {
+    if (
+      error?.message?.includes("does not exist") ||
+      error?.code === "42P01" ||
+      error?.message?.includes("timeout")
+    ) {
       marketRateCache.clear();
       cacheInitialized = true;
       cacheExpiry = Date.now() + CACHE_TTL;
       return;
     }
     // For other errors, log but don't block
-    console.error('[FRED API] ❌ Error initializing market rate cache:', error.message);
-    logError('Failed to initialize market rate cache', error);
+    console.error(
+      "[FRED API] ❌ Error initializing market rate cache:",
+      error.message,
+    );
+    logError("Failed to initialize market rate cache", error);
     // Continue with empty cache
     marketRateCache.clear();
     cacheInitialized = true;
@@ -312,86 +356,99 @@ const AUTO_SYNC_COOLDOWN = 60 * 1000; // 1 minute cooldown between auto-syncs
  * Auto-sync missing market rates from FRED API
  * Called automatically before predictions to ensure market delta data is available
  * Only fetches missing days (incremental sync)
- * 
+ *
  * @returns Number of new rates synced, or 0 if already up to date / skipped
  */
 export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
   // Check cooldown to avoid repeated calls
   if (Date.now() - lastAutoSyncTime < AUTO_SYNC_COOLDOWN) {
-    console.log('[FRED API] ⏳ Skipping auto-sync (cooldown active)');
+    console.log("[FRED API] ⏳ Skipping auto-sync (cooldown active)");
     return 0;
   }
 
   if (!getFredApiKey()) {
-    console.log('[FRED API] ⚠️ FRED_API_KEY not configured, skipping market rate sync');
+    console.log(
+      "[FRED API] ⚠️ FRED_API_KEY not configured, skipping market rate sync",
+    );
     return 0;
   }
 
   try {
     // Get the most recent rate date from the database
     const result = await pool.query(
-      'SELECT MAX(rate_date) as last_date FROM public.market_rates'
+      "SELECT MAX(rate_date) as last_date FROM public.market_rates",
     );
-    
+
     const lastDateInDb = result.rows[0]?.last_date;
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    
+    const todayStr = today.toISOString().split("T")[0];
+
     // Calculate start date for sync
     let startDate: string;
     let needsSync = false;
-    
+
     if (!lastDateInDb) {
       // Table is empty - fetch last 3 years (for historical lookups)
       const threeYearsAgo = new Date();
       threeYearsAgo.setFullYear(today.getFullYear() - 3);
-      startDate = threeYearsAgo.toISOString().split('T')[0];
+      startDate = threeYearsAgo.toISOString().split("T")[0];
       needsSync = true;
-      console.log('[FRED API] 📊 Market rates table is empty, fetching 3 years of data...');
+      console.log(
+        "[FRED API] 📊 Market rates table is empty, fetching 3 years of data...",
+      );
     } else {
       // Calculate days since last sync
       const lastDate = new Date(lastDateInDb);
-      const daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-      
+      const daysDiff = Math.floor(
+        (today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
       if (daysDiff > 1) {
         // Missing days - fetch from day after last date to today
         const nextDay = new Date(lastDate);
         nextDay.setDate(nextDay.getDate() + 1);
-        startDate = nextDay.toISOString().split('T')[0];
+        startDate = nextDay.toISOString().split("T")[0];
         needsSync = true;
-        console.log(`[FRED API] 📊 Missing ${daysDiff} days of market rates, syncing from ${startDate}...`);
+        console.log(
+          `[FRED API] 📊 Missing ${daysDiff} days of market rates, syncing from ${startDate}...`,
+        );
       } else {
-        console.log('[FRED API] ✅ Market rates are up to date');
+        console.log("[FRED API] ✅ Market rates are up to date");
         lastAutoSyncTime = Date.now();
         return 0;
       }
     }
-    
+
     if (needsSync) {
       lastAutoSyncTime = Date.now();
-      
+
       // Fetch and store the missing rates
       const rates = await fetchMarketRatesFromFRED(startDate, todayStr);
-      
+
       if (rates.length === 0) {
-        console.log('[FRED API] ℹ️ No new rates available from FRED');
+        console.log("[FRED API] ℹ️ No new rates available from FRED");
         return 0;
       }
-      
+
       const storedCount = await storeMarketRates(rates);
-      
+
       // Clear cache so new rates are picked up
       clearMarketRateCache();
-      
-      console.log(`[FRED API] ✅ Auto-synced ${storedCount} market rates from FRED`);
+
+      console.log(
+        `[FRED API] ✅ Auto-synced ${storedCount} market rates from FRED`,
+      );
       return storedCount;
     }
-    
+
     return 0;
   } catch (error: any) {
     // Log error but don't block prediction - market delta is optional
-    console.error('[FRED API] ⚠️ Auto-sync failed (non-blocking):', error.message);
-    logError('Market rate auto-sync failed', error);
+    console.error(
+      "[FRED API] ⚠️ Auto-sync failed (non-blocking):",
+      error.message,
+    );
+    logError("Market rate auto-sync failed", error);
     lastAutoSyncTime = Date.now(); // Still set cooldown to avoid spam
     return 0;
   }
@@ -402,16 +459,18 @@ export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
  * @param date - Date in YYYY-MM-DD format or Date object
  * @returns Market rate or null if not found
  */
-export async function getMarketRateForDate(date: string | Date): Promise<number | null> {
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
+export async function getMarketRateForDate(
+  date: string | Date,
+): Promise<number | null> {
+  const dateObj = typeof date === "string" ? new Date(date) : date;
   if (isNaN(dateObj.getTime())) return null;
-  const dateStr = dateObj.toISOString().split('T')[0];
+  const dateStr = dateObj.toISOString().split("T")[0];
 
   // Try exact date first, then walk back up to 7 days (FRED publishes weekly on Thursdays)
   for (let offset = 0; offset <= 7; offset++) {
     const lookupDate = new Date(dateObj);
     lookupDate.setDate(lookupDate.getDate() - offset);
-    const lookupStr = lookupDate.toISOString().split('T')[0];
+    const lookupStr = lookupDate.toISOString().split("T")[0];
 
     // Check cache first (if initialized and not expired)
     if (cacheInitialized && Date.now() < cacheExpiry) {
@@ -426,8 +485,8 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
     // Query database for this date
     try {
       const result = await pool.query(
-        'SELECT rate FROM public.market_rates WHERE rate_date = $1',
-        [lookupStr]
+        "SELECT rate FROM public.market_rates WHERE rate_date = $1",
+        [lookupStr],
       );
 
       if (result.rows.length > 0) {
@@ -437,14 +496,22 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
         return rate;
       }
     } catch (error: any) {
-      if (error?.message?.includes('does not exist') || 
-          error?.code === '42P01' ||
-          error?.message?.includes('timeout')) {
+      if (
+        error?.message?.includes("does not exist") ||
+        error?.code === "42P01" ||
+        error?.message?.includes("timeout")
+      ) {
         return null;
       }
       if (offset === 0) {
-        console.error(`[FRED API] ❌ Error getting rate for ${lookupStr}:`, error.message);
-        logError(`Failed to get market rate for date ${lookupStr}: ${error.message}`, error);
+        console.error(
+          `[FRED API] ❌ Error getting rate for ${lookupStr}:`,
+          error.message,
+        );
+        logError(
+          `Failed to get market rate for date ${lookupStr}: ${error.message}`,
+          error,
+        );
       }
       return null;
     }
@@ -462,20 +529,22 @@ export async function getMarketRateForDate(date: string | Date): Promise<number 
  */
 export async function computeMarketDeltaForDates(
   lockDate: string | Date | null,
-  outcomeDate: string | Date | null
+  outcomeDate: string | Date | null,
 ): Promise<number | null> {
   if (!lockDate || !outcomeDate) return null;
-  const lockObj = typeof lockDate === 'string' ? new Date(lockDate) : lockDate;
-  const outObj = typeof outcomeDate === 'string' ? new Date(outcomeDate) : outcomeDate;
-  if (isNaN(lockObj.getTime()) || isNaN(outObj.getTime()) || outObj < lockObj) return null;
-  const lockStr = lockObj.toISOString().split('T')[0];
-  const outStr = outObj.toISOString().split('T')[0];
+  const lockObj = typeof lockDate === "string" ? new Date(lockDate) : lockDate;
+  const outObj =
+    typeof outcomeDate === "string" ? new Date(outcomeDate) : outcomeDate;
+  if (isNaN(lockObj.getTime()) || isNaN(outObj.getTime()) || outObj < lockObj)
+    return null;
+  const lockStr = lockObj.toISOString().split("T")[0];
+  const outStr = outObj.toISOString().split("T")[0];
   let lockRate = await getMarketRateForDate(lockStr);
   if (lockRate === null) {
     for (let d = 1; d <= 7; d++) {
       const d2 = new Date(lockObj);
       d2.setDate(d2.getDate() - d);
-      lockRate = await getMarketRateForDate(d2.toISOString().split('T')[0]);
+      lockRate = await getMarketRateForDate(d2.toISOString().split("T")[0]);
       if (lockRate !== null) break;
     }
   }
@@ -484,7 +553,7 @@ export async function computeMarketDeltaForDates(
     for (let d = 1; d <= 7; d++) {
       const d2 = new Date(outObj);
       d2.setDate(d2.getDate() - d);
-      closeRate = await getMarketRateForDate(d2.toISOString().split('T')[0]);
+      closeRate = await getMarketRateForDate(d2.toISOString().split("T")[0]);
       if (closeRate !== null) break;
     }
   }
@@ -500,27 +569,34 @@ export async function computeMarketDeltaForDates(
  */
 export async function getMarketRatesForRange(
   startDate: string | Date,
-  endDate: string | Date
+  endDate: string | Date,
 ): Promise<MarketRate[]> {
-  const startStr = typeof startDate === 'string' ? startDate : startDate.toISOString().split('T')[0];
-  const endStr = typeof endDate === 'string' ? endDate : endDate.toISOString().split('T')[0];
+  const startStr =
+    typeof startDate === "string"
+      ? startDate
+      : startDate.toISOString().split("T")[0];
+  const endStr =
+    typeof endDate === "string" ? endDate : endDate.toISOString().split("T")[0];
 
   try {
     const result = await pool.query(
-      'SELECT rate_date, rate FROM public.market_rates WHERE rate_date >= $1 AND rate_date <= $2 ORDER BY rate_date ASC',
-      [startStr, endStr]
+      "SELECT rate_date, rate FROM public.market_rates WHERE rate_date >= $1 AND rate_date <= $2 ORDER BY rate_date ASC",
+      [startStr, endStr],
     );
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       date: row.rate_date,
-      rate: parseFloat(row.rate)
+      rate: parseFloat(row.rate),
     }));
   } catch (error: any) {
     // If table doesn't exist, silently return empty array (don't spam errors)
-    if (error?.message?.includes('does not exist') || error?.code === '42P01') {
+    if (error?.message?.includes("does not exist") || error?.code === "42P01") {
       return [];
     }
-    logError(`Failed to get market rates for range ${startStr} to ${endStr}: ${error.message}`, error);
+    logError(
+      `Failed to get market rates for range ${startStr} to ${endStr}: ${error.message}`,
+      error,
+    );
     return [];
   }
 }
@@ -543,13 +619,15 @@ export async function getMostRecentMarketRate(): Promise<number | null> {
         mostRecentDate = dateStr;
       }
     }
-    return mostRecentDate ? marketRateCache.get(mostRecentDate) ?? null : null;
+    return mostRecentDate
+      ? (marketRateCache.get(mostRecentDate) ?? null)
+      : null;
   }
 
   // Cache not initialized - query database (but this should rarely happen)
   try {
     const result = await pool.query(
-      'SELECT rate FROM public.market_rates ORDER BY rate_date DESC LIMIT 1'
+      "SELECT rate FROM public.market_rates ORDER BY rate_date DESC LIMIT 1",
     );
 
     if (result.rows.length === 0) {
@@ -559,9 +637,11 @@ export async function getMostRecentMarketRate(): Promise<number | null> {
     return parseFloat(result.rows[0].rate);
   } catch (error: any) {
     // If table doesn't exist or timeout, silently return null
-    if (error?.message?.includes('does not exist') || 
-        error?.code === '42P01' ||
-        error?.message?.includes('timeout')) {
+    if (
+      error?.message?.includes("does not exist") ||
+      error?.code === "42P01" ||
+      error?.message?.includes("timeout")
+    ) {
       return null;
     }
     logError(`Failed to get most recent market rate: ${error.message}`, error);
@@ -576,16 +656,21 @@ export async function getMostRecentMarketRate(): Promise<number | null> {
 export async function getAllMarketRates(): Promise<MarketRate[]> {
   try {
     const result = await pool.query(
-      'SELECT rate_date, rate FROM public.market_rates ORDER BY rate_date ASC'
+      "SELECT rate_date, rate FROM public.market_rates ORDER BY rate_date ASC",
     );
 
-    console.log(`[FRED API] Retrieved ${result.rows.length} market rates from database`);
-    return result.rows.map(row => ({
+    console.log(
+      `[FRED API] Retrieved ${result.rows.length} market rates from database`,
+    );
+    return result.rows.map((row) => ({
       date: row.rate_date,
-      rate: parseFloat(row.rate)
+      rate: parseFloat(row.rate),
     }));
   } catch (error: any) {
-    console.error('[FRED API] ❌ Error getting all market rates:', error.message);
+    console.error(
+      "[FRED API] ❌ Error getting all market rates:",
+      error.message,
+    );
     logError(`Failed to get all market rates: ${error.message}`, error);
     return [];
   }
@@ -602,43 +687,43 @@ export async function testFREDAPI(): Promise<{
   sampleRates?: MarketRate[];
   error?: string;
 }> {
-  console.log('[FRED API] ========================================');
-  console.log('[FRED API] 🧪 Testing FRED API connection...');
-  console.log('[FRED API] ========================================');
-  
+  console.log("[FRED API] ========================================");
+  console.log("[FRED API] 🧪 Testing FRED API connection...");
+  console.log("[FRED API] ========================================");
+
   try {
     // Test with last 7 days
     const today = new Date();
     const weekAgo = new Date();
     weekAgo.setDate(today.getDate() - 7);
-    
-    const testStart = weekAgo.toISOString().split('T')[0];
-    const testEnd = today.toISOString().split('T')[0];
-    
-    console.log('[FRED API] Test date range:', testStart, 'to', testEnd);
-    
+
+    const testStart = weekAgo.toISOString().split("T")[0];
+    const testEnd = today.toISOString().split("T")[0];
+
+    console.log("[FRED API] Test date range:", testStart, "to", testEnd);
+
     const rates = await fetchMarketRatesFromFRED(testStart, testEnd);
-    
-    console.log('[FRED API] ========================================');
-    console.log('[FRED API] ✅ FRED API test PASSED!');
-    console.log('[FRED API] Retrieved', rates.length, 'rates for test period');
-    console.log('[FRED API] ========================================');
-    
+
+    console.log("[FRED API] ========================================");
+    console.log("[FRED API] ✅ FRED API test PASSED!");
+    console.log("[FRED API] Retrieved", rates.length, "rates for test period");
+    console.log("[FRED API] ========================================");
+
     return {
       success: true,
       message: `FRED API is working correctly. Retrieved ${rates.length} rates for the last 7 days.`,
-      sampleRates: rates.slice(0, 5) // Return first 5 as samples
+      sampleRates: rates.slice(0, 5), // Return first 5 as samples
     };
   } catch (error: any) {
-    console.error('[FRED API] ========================================');
-    console.error('[FRED API] ❌ FRED API test FAILED!');
-    console.error('[FRED API] Error:', error.message);
-    console.error('[FRED API] ========================================');
-    
+    console.error("[FRED API] ========================================");
+    console.error("[FRED API] ❌ FRED API test FAILED!");
+    console.error("[FRED API] Error:", error.message);
+    console.error("[FRED API] ========================================");
+
     return {
       success: false,
-      message: 'FRED API test failed',
-      error: error.message
+      message: "FRED API test failed",
+      error: error.message,
     };
   }
 }
