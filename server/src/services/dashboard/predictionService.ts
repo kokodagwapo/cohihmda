@@ -1269,7 +1269,7 @@ async function calculateMarketDelta(loan: any): Promise<{
  * Note: raw_data column has been removed. This function now primarily relies on
  * structured loan columns and metadata fields.
  */
-export function calculatePullthroughForRole(
+function calculatePullthroughForRole(
   allLoans: any[],
   roleColumnCandidates: string[]
 ): Record<string, number> {

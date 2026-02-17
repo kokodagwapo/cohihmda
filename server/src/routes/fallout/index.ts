@@ -184,10 +184,10 @@ router.get('/executive-rollup', async (req: AuthRequest, res) => {
  * Admin: triggers numeric outcome profile derivation + fallout sequencer (no legacy aggregation/turn-time/human jobs).
  */
 router.post('/recompute', async (req: AuthRequest, res) => {
-  const tenantId = getTenantContext(req).tenantId;
-  logInfo('[Fallout] POST /api/fallout/recompute started', { tenantId });
   try {
     const tenantPool = getTenantContext(req).tenantPool;
+    const tenantId = getTenantContext(req).tenantId;
+    logInfo('Fallout recompute started', { tenantId });
 
     const agg = { totalsInserted: 0, combosInserted: 0, yearsProcessed: [] as number[], persistentPatternsInserted: 0 };
     const bands = { inserted: 0, categoricalInserted: 0, driftDetected: false };

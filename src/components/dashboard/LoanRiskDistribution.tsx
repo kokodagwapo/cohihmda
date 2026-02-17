@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 
-/** Reason code from fallout sequencer (bucket_type = feature or Outcome/TurnTime, bucket_value = Zone1–Zone6 or label). */
+/** Reason code from fallout sequencer (bucket_type = feature or Outcome/TurnTime, bucket_value = Zone1–Zone4 or label). */
 export type ReasonCodeEntry = { bucket_type: string; bucket_value: string; risk_score?: number };
 
 interface LoanRiskDistributionProps {
@@ -19,15 +19,15 @@ interface LoanRiskDistributionProps {
   interestRate?: number | null;
   marketRate?: number | null;
   marketChangeDelta?: number | null;
-  /** When present, zone-based colors are used for FICO/LTV/DTI/Time in Motion: Zone1=red (6pts) … Zone6=lowest (1pt). */
+  /** When present, zone-based colors are used for FICO/LTV/DTI/Time in Motion: Zone1=red, Zone2=orange, Zone3=yellow, Zone4=no color. */
   reasonCodes?: ReasonCodeEntry[] | null;
 }
 
-/** Get zone number (1–6) from reason_codes for a given bucket_type (e.g. fico_score, ltv_ratio, be_dti_ratio, days_active). */
+/** Get zone number (1–4) from reason_codes for a given bucket_type (e.g. fico_score, ltv_ratio, be_dti_ratio, days_active). */
 export function getZoneFromReasonCodes(
   reasonCodes: ReasonCodeEntry[] | null | undefined,
   bucketType: string
-): 1 | 2 | 3 | 4 | 5 | 6 | null {
+): 1 | 2 | 3 | 4 | null {
   if (!reasonCodes || !Array.isArray(reasonCodes)) return null;
   const entry = reasonCodes.find((r) => (r?.bucket_type ?? '') === bucketType);
   const bv = (entry?.bucket_value ?? '').toString();
@@ -35,18 +35,16 @@ export function getZoneFromReasonCodes(
   if (bv === 'Zone2') return 2;
   if (bv === 'Zone3') return 3;
   if (bv === 'Zone4') return 4;
-  if (bv === 'Zone5') return 5;
-  if (bv === 'Zone6') return 6;
   return null;
 }
 
-/** Zone-based text color: Zones 1&2 = red (highest risk), 3&4 = yellow (middle), 5&6 = green (lowest risk). */
-export function getZoneColorClass(zone: 1 | 2 | 3 | 4 | 5 | 6 | null, isDarkMode: boolean): string | undefined {
+/** Zone-based text color: Zone1=red, Zone2=orange, Zone3=yellow, Zone4=no color (caller uses default). */
+export function getZoneColorClass(zone: 1 | 2 | 3 | 4 | null, isDarkMode: boolean): string | undefined {
   if (zone == null) return undefined;
-  if (zone === 1 || zone === 2) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
-  if (zone === 3 || zone === 4) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
-  if (zone === 5 || zone === 6) return isDarkMode ? 'text-emerald-400' : 'text-emerald-600';
-  return undefined;
+  if (zone === 1) return isDarkMode ? 'text-rose-400' : 'text-rose-600';
+  if (zone === 2) return isDarkMode ? 'text-orange-400' : 'text-orange-600';
+  if (zone === 3) return isDarkMode ? 'text-amber-400' : 'text-amber-600';
+  return undefined; // Zone4 = no color
 }
 
 function MetricItem({
@@ -101,7 +99,7 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
   const hasAny = hasFico || hasLtv || hasDti || hasLoanType || hasLoanPurpose || hasChannel || hasMilestone || hasTimeInMotion || hasEstimatedClosing || hasLoPullthrough || hasLockVsMarket;
   if (!hasAny) return null;
 
-  // Zone-based colors when reason_codes present: Zone1=red … Zone6=no color
+  // Zone-based colors when reason_codes present: Zone1=red, Zone2=orange, Zone3=yellow, Zone4=no color
   const zoneFico = getZoneFromReasonCodes(reasonCodes, 'fico_score');
   const zoneLtv = getZoneFromReasonCodes(reasonCodes, 'ltv_ratio');
   const zoneDti = getZoneFromReasonCodes(reasonCodes, 'be_dti_ratio');
@@ -145,14 +143,12 @@ export const LoanRiskDistribution: React.FC<LoanRiskDistributionProps> = memo(({
     return defaultMetricColor;
   };
 
-  /** Pullthrough %: high = green (low risk), mid = yellow, low = red (high risk). Aligns with signal buckets 1–6. */
   const getPullthroughColor = (pct: number) => {
     if (pct >= 80) return 'text-emerald-500';
     if (pct >= 60) return 'text-amber-500';
     return 'text-rose-500';
   };
 
-  /** Lock vs market delta: unfavorable = red, neutral = yellow, favorable = green. */
   const getLockVsMarketColor = (diff: number) => {
     if (diff < -0.25) return 'text-rose-500';
     if (diff <= 0.25) return 'text-amber-500';

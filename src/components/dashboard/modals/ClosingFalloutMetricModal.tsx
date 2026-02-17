@@ -147,7 +147,7 @@ export function ClosingFalloutMetricModal({
     ? 'High Risk Loans'
     : (content?.title || label || '');
   const description = isHighRiskMode
-    ? 'Predicted withdraw or decline with risk score ≥ 80/100. Sorted by risk score.'
+    ? 'Loans predicted to withdraw, decline, or close late with risk score 80 or higher. Sorted by risk score.'
     : (content?.description || '');
 
   const alethiaInsights = useMemo(() => {

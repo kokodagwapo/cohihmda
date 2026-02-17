@@ -111,7 +111,7 @@ export interface NumericProfileSegment {
   occupancy: string;
 }
 
-/** Blended feature stats (computed from yearly profiles, not persisted). Denied: direction-aware — Zone 1 = middle OR worse tail only; Zone 6 = good tail. Withdrawn: symmetric only — Zone 1 = middle (P45–P55) only; Zone 6 = both tails (<P10 or >P90) = 1 pt. */
+/** Blended feature stats (computed from yearly profiles, not persisted). Percentiles used for zones: P40-P60=Zone1, P30-P70=Zone2, P20-P80=Zone3, outside P10-P90=Zone4 (outliers). */
 export interface BlendedFeatureStats {
   blended_mean: number;
   blended_q1: number;
@@ -119,26 +119,17 @@ export interface BlendedFeatureStats {
   blended_iqr: number;
   /** When set, zone scoring uses percentile bands; otherwise falls back to IQR. */
   blended_p10?: number;
-  blended_p15?: number;
   blended_p20?: number;
   blended_p30?: number;
-  blended_p35?: number;
   blended_p40?: number;
-  blended_p45?: number;
-  blended_p55?: number;
   blended_p60?: number;
-  blended_p65?: number;
   blended_p70?: number;
-  blended_p75?: number;
   blended_p80?: number;
   blended_p90?: number;
 }
 
-/** Status type for outcome profiles: Denied/Withdrawn/ClosingLate (fallout) + Originated (UI zones only). */
-export type OutcomeProfileStatusType = FalloutStatusType | 'Originated';
-
 /** Blended profile: status_type -> segmentKey (loan_type|loan_purpose|occupancy) -> feature_name -> stats */
 export type BlendedProfileMap = Map<
-  OutcomeProfileStatusType,
+  FalloutStatusType,
   Map<string, Map<string, BlendedFeatureStats>>
 >;

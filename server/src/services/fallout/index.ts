@@ -7,6 +7,5 @@ export { getHistoricalFalloutRates } from './historicalAggregationService.js';
 export { getTurnTimeBaseline, getAvgApplicationToFundingDays } from './turnTimeProjectionService.js';
 export { runFalloutSequencer } from './falloutSequencer.js';
 export { runNumericOutcomeProfileDerivation } from './numericOutcomeProfileService.js';
-export { runSegmentFalloutRates } from './segmentFalloutRateService.js';
 export { getBlendedProfiles, getProfileForLoan } from './numericProfileBlendService.js';
 export * from './falloutTypes.js';

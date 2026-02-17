@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, memo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, memo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { LoanCardContent } from "./LoanCardContent";
 import { LoanRiskDistribution } from "./LoanRiskDistribution";
@@ -84,12 +84,9 @@ interface LoanCardsContainerProps {
   selectedTenantId?: string | null;
   openLoanId?: string;
   onOpenLoanIdHandled?: () => void;
-  /** When provided, filter tab is controlled by parent (shared with critical loans table). */
-  activeTab?: TabType;
-  onActiveTabChange?: (tab: TabType) => void;
 }
 
-export type TabType = "all" | "likely-withdraw" | "likely-decline" | "past-est-closing" | "likely-close-late" | "favorites";
+type TabType = "all" | "likely-withdraw" | "likely-decline" | "past-est-closing" | "likely-close-late" | "favorites";
 type SortType = "risk" | "amount" | "loan" | "officer";
 
 const ITEMS_PER_PAGE_OPTIONS = [6, 10, 20, 50, 100] as const;
@@ -193,18 +190,8 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
     selectedTenantId,
     openLoanId,
     onOpenLoanIdHandled,
-    activeTab: controlledActiveTab,
-    onActiveTabChange,
   }) => {
-    const [internalActiveTab, setInternalActiveTab] = useState<TabType>("all");
-    const activeTab = controlledActiveTab ?? internalActiveTab;
-    const setActiveTab = useCallback(
-      (tab: TabType) => {
-        if (onActiveTabChange) onActiveTabChange(tab);
-        else setInternalActiveTab(tab);
-      },
-      [onActiveTabChange]
-    );
+    const [activeTab, setActiveTab] = useState<TabType>("all");
     const [searchTerm, setSearchTerm] = useState("");
     const [sortBy, setSortBy] = useState<SortType>("risk");
     const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
