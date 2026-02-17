@@ -706,6 +706,154 @@ router.get(
 );
 
 /**
+ * GET /api/loans/detail-list
+ * Returns all loans for the Loan Detail table with a wide set of columns.
+ * No filtering (only user-level loan access). Paginated.
+ * Query: limit (default 100), offset (default 0).
+ */
+router.get(
+  "/detail-list",
+  authenticateToken,
+  attachTenantContext,
+  apiLimiter,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantPool = getTenantContext(req).tenantPool;
+      const limit = Math.min(
+        Math.max(parseInt((req.query.limit as string) || "100", 10) || 100, 1),
+        50000,
+      );
+      const offset = Math.max(parseInt((req.query.offset as string) || "0", 10) || 0, 0);
+
+      const conditions: string[] = [];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (req.userId) {
+        const accessFilter = await getUserLoanAccessFilter(
+          req.userId,
+          tenantPool,
+          { loanTableAlias: "", startParamIndex: paramIndex },
+        );
+        if (accessFilter) {
+          if (accessFilter.sql === "FALSE") {
+            return res.json({
+              loans: [],
+              total: 0,
+              limit,
+              offset,
+              page: 1,
+              totalPages: 0,
+            });
+          }
+          conditions.push(accessFilter.sql);
+          params.push(...accessFilter.params);
+          paramIndex += accessFilter.paramOffset;
+        }
+      }
+
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const selectColumns = [
+        "loan_id",
+        "loan_number",
+        "loan_amount",
+        "interest_rate",
+        "fico_score",
+        "ltv_ratio",
+        "be_dti_ratio",
+        "channel",
+        "branch",
+        "loan_officer",
+        "processor",
+        "underwriter",
+        "closer",
+        "investor",
+        "property_street",
+        "property_city",
+        "property_state",
+        "property_county",
+        "property_zip",
+        "loan_term",
+        "current_loan_status",
+        "current_milestone",
+        "loan_folder",
+        "loan_type",
+        "loan_program",
+        "loan_purpose",
+        "occupancy_type",
+        "property_type",
+        "lien_position",
+        "started_date",
+        "credit_pull_date",
+        "application_date",
+        "loan_estimate_sent_date",
+        "loan_estimate_received_date",
+        "uw_final_approval_date",
+        "uw_suspended_date",
+        "uw_denied_date",
+        "investor_lock_date",
+        "lock_expiration_date",
+        "lock_days",
+        "estimated_closing_date",
+        "ctc_date",
+        "closing_disclosure_sent_date",
+        "closing_disclosure_received_date",
+        "closing_date",
+        "funding_date",
+        "investor_purchase_date",
+        "shipped_date",
+        "mers_min",
+        "number_of_months_interest_only_payments",
+        "income_total_mo_income",
+        "origination_points",
+        "orig_fee_borr_pd",
+        "subject_property_type_fannie_mae",
+        "fees_va_fund_fee_borr",
+        "fha_lender_id",
+        "fees_loan_discount_fee",
+        "fees_loan_discount_fee_borr",
+        "rush_closing_on_file",
+        "scrub_rating_of_file",
+      ].join(", ");
+
+      const query = `
+        SELECT ${selectColumns}
+        FROM public.loans
+        ${whereClause}
+        ORDER BY COALESCE(application_date, started_date, created_at) DESC NULLS LAST
+        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      `;
+      params.push(limit, offset);
+
+      const result = await tenantPool.query(query, params);
+      const countParams = params.slice(0, -2);
+      const countQuery = `SELECT COUNT(*) FROM public.loans ${whereClause}`;
+      const countResult = await tenantPool.query(countQuery, countParams);
+      const total = parseInt(countResult.rows[0].count, 10);
+
+      res.json({
+        loans: result.rows,
+        total,
+        limit,
+        offset,
+        page: Math.floor(offset / limit) + 1,
+        totalPages: Math.ceil(total / limit) || 1,
+      });
+    } catch (error: any) {
+      logError("Error fetching loan detail list", error, { userId: req.userId });
+      if (handleDatabaseError(error, res, "Failed to fetch loan detail list")) {
+        return;
+      }
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to fetch loan detail list" });
+    }
+  },
+);
+
+/**
  * GET /api/loans/stats
  * Get aggregated loan statistics for business overview
  * Uses tenant-specific database via attachTenantContext middleware

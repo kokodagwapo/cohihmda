@@ -11,6 +11,7 @@ import {
   LineChart,
   PanelLeftClose,
   PanelLeftOpen,
+  FileText,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,7 @@ const topTieringNavLinks = [
   { path: '/sales-trends', label: 'Sales Trends', icon: TrendingUp, variant: 'mint' as const },
   { path: '/performance/operation-scorecard', label: 'Operations Scorecard', icon: Target, variant: 'sky' as const },
   { path: '/performance/operation-scorecard-trends', label: 'Operations Trends', icon: LineChart, variant: 'fuchsia' as const },
+  { path: '/loan-detail', label: 'Loan Detail', icon: FileText, variant: 'sky' as const },
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
 ];
 

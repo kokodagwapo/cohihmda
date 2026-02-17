@@ -37,6 +37,7 @@ import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
+import LoanDetail from "./pages/LoanDetail";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
@@ -160,6 +161,11 @@ const App = () => (
               <Route path="/loan-funnel" element={
                 <ProtectedRoute>
                   <LoanFunnel />
+                </ProtectedRoute>
+              } />
+              <Route path="/loan-detail" element={
+                <ProtectedRoute>
+                  <LoanDetail />
                 </ProtectedRoute>
               } />
               <Route path="/credit-risk-management" element={

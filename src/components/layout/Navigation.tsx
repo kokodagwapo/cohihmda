@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3, FileText } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -43,6 +43,7 @@ const topTieringMenuGroups = {
       { id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, iconColor: 'blue' as const },
       { id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, iconColor: 'emerald' as const },
       { id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, iconColor: 'indigo' as const },
+      { id: 'loanDetail', label: 'Loan Detail', icon: FileText, iconColor: 'blue' as const },
     ]
   },
   performance: {
@@ -93,6 +94,7 @@ const routeMap: Record<string, string> = {
   'creditRiskManagement': '/credit-risk-management',
   'companyScorecard': '/company-scorecard',
   'topTieringComparison': '/performance/toptiering-comparison',
+  'loanDetail': '/loan-detail',
   'salesScorecard': '/sales-scorecard',
   'salesTrends': '/sales-trends',
   'operationsScorecard': '/performance/operation-scorecard',
@@ -303,6 +305,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       '/credit-risk-management',
       '/company-scorecard',
       '/performance/toptiering-comparison',
+      '/loan-detail',
       '/sales-scorecard',
       '/sales-trends',
       '/performance/operation-scorecard',
