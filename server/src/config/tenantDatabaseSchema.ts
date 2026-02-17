@@ -2120,7 +2120,7 @@ export async function createTenantDatabaseSchema(pool: pg.Pool): Promise<void> {
         `
       CREATE TABLE IF NOT EXISTS public.outcome_numeric_risk_profiles (
         year INTEGER NOT NULL,
-        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate')),
+        status_type TEXT NOT NULL CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate', 'Originated')),
         loan_type TEXT NOT NULL,
         loan_purpose TEXT NOT NULL,
         occupancy TEXT NOT NULL,

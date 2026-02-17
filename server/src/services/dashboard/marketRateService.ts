@@ -10,7 +10,10 @@
 import { pool } from '../../config/managementDatabase.js';
 import { logInfo, logError } from '../logger.js';
 
-const FRED_API_KEY = process.env.FRED_API_KEY;
+/** Read at call time so dotenv has already run (index.ts loads .env before first request). */
+function getFredApiKey(): string | undefined {
+  return process.env.FRED_API_KEY;
+}
 const FRED_API_BASE_URL = 'https://api.stlouisfed.org/fred/series/observations';
 const FRED_SERIES_ID = 'OBMMIC30YF'; // 30-Year Fixed Rate Conforming Mortgage Index
 
@@ -42,7 +45,8 @@ export async function fetchMarketRatesFromFRED(
   startDate?: string,
   endDate?: string
 ): Promise<MarketRate[]> {
-  if (!FRED_API_KEY) {
+  const apiKey = getFredApiKey();
+  if (!apiKey) {
     throw new Error('FRED_API_KEY is not configured. Please set it in environment variables.');
   }
 
@@ -56,7 +60,7 @@ export async function fetchMarketRatesFromFRED(
 
   const url = new URL(FRED_API_BASE_URL);
   url.searchParams.append('series_id', FRED_SERIES_ID);
-  url.searchParams.append('api_key', FRED_API_KEY);
+  url.searchParams.append('api_key', apiKey);
   url.searchParams.append('file_type', 'json');
   url.searchParams.append('observation_start', observationStart);
   url.searchParams.append('observation_end', observationEnd);
@@ -66,8 +70,8 @@ export async function fetchMarketRatesFromFRED(
     console.log('[FRED API] Starting FRED API call...');
     console.log('[FRED API] Series ID:', FRED_SERIES_ID);
     console.log('[FRED API] Date Range:', observationStart, 'to', observationEnd);
-    console.log('[FRED API] API Key configured:', !!FRED_API_KEY);
-    console.log('[FRED API] Full URL:', url.toString().replace(FRED_API_KEY || '', '***REDACTED***'));
+    console.log('[FRED API] API Key configured:', !!apiKey);
+    console.log('[FRED API] Full URL:', url.toString().replace(apiKey, '***REDACTED***'));
     logInfo(`Fetching market rates from FRED API (${observationStart} to ${observationEnd})`);
 
     const response = await fetch(url.toString());
@@ -321,7 +325,7 @@ export async function autoSyncMarketRatesIfNeeded(): Promise<number> {
     return 0;
   }
 
-  if (!FRED_API_KEY) {
+  if (!getFredApiKey()) {
     console.log('[FRED API] ⚠️ FRED_API_KEY not configured, skipping market rate sync');
     return 0;
   }

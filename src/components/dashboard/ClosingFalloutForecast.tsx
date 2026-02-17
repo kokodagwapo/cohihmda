@@ -38,6 +38,7 @@ import { useMetrics } from "@/hooks/useMetrics";
 import { LoanCardsContainer } from "./LoanCardsContainer";
 import {
   getZoneFromReasonCodes,
+  type ReasonCodeEntry,
   getZoneColorClass,
 } from "./LoanRiskDistribution";
 import { LoanDrilldownModal } from "./LoanDrilldownModal";
@@ -90,6 +91,17 @@ const hasAnyValue = (v: unknown): boolean => {
   if (typeof v === "string") return v.trim().length > 0;
   return true;
 };
+
+// Global guard: only one POST /api/predictions at a time across all component instances
+// (Dashboard + Workbench widget can both mount ClosingFalloutForecast; each has its own ref)
+let predictionInFlightGlobal = false;
+
+/** Claim the global prediction lock. Returns true if we got it, false if another instance already has it. */
+function claimPredictionLock(): boolean {
+  if (predictionInFlightGlobal) return false;
+  predictionInFlightGlobal = true;
+  return true;
+}
 
 // Helper to extract status from loan (checks both top-level and raw_data)
 const getLoanStatus = (loan: any): string | null => {
@@ -646,16 +658,6 @@ function computeMetricsFromLoans(
       strictAppDate != null && String(strictAppDate).trim() !== "";
 
     if (isActiveLoan(loan) && hasStrictAppDate) {
-      // Past est. close is a snapshot metric — count ALL active loans regardless of period filter
-      const estClose =
-        loan?.estimated_closing_date || loan?.estimatedClosingDate;
-      if (estClose) {
-        const estCloseDate = new Date(estClose);
-        if (!Number.isNaN(estCloseDate.getTime()) && estCloseDate < now) {
-          pastEstCloseCount++;
-        }
-      }
-
       // Apply active loans period filter if specified (filters by application date range)
       const passesActivePeriodFilter =
         !activeLoansPeriodFilter ||
@@ -670,6 +672,16 @@ function computeMetricsFromLoans(
       if (passesActivePeriodFilter) {
         activeCount++;
         activePipelineValue += getLoanAmountNumber(loan);
+
+        // Past est. close: only count active loans past ECD that fall within the active period filter (same as other KPIs)
+        const estClose =
+          loan?.estimated_closing_date || loan?.estimatedClosingDate;
+        if (estClose) {
+          const estCloseDate = new Date(estClose);
+          if (!Number.isNaN(estCloseDate.getTime()) && estCloseDate < now) {
+            pastEstCloseCount++;
+          }
+        }
 
         // Check if likely close late (only for active loans)
         if (isLikelyCloseLateForecast(loan, 30, now)) {
@@ -807,11 +819,11 @@ function computeMetricsFromLoans(
   const pullThroughRateDisplay =
     pullThroughRate > 0 ? Math.round(pullThroughRate) : 0;
 
-  // Predicted Closing - current active loans * period's pull-through rate
-  const predictedClosing =
-    activeLoansToday > 0
-      ? Math.round((activeLoansToday * pullThroughRate) / 100)
-      : 0;
+  // Predicted Closing = Active Loans Today − (Likely Withdraw + Likely Decline)
+  const predictedClosing = Math.max(
+    0,
+    activeLoansToday - (likelyWithdraw + likelyDecline),
+  );
 
   // Locked loans - active loans with lock dates, filtered by period
   // For 'all' period: count all active loans with lock dates
@@ -879,7 +891,7 @@ const getMetricExplanation = (label: string) => {
     case "Predicted Closing":
       return {
         title: "Closing Forecast",
-        desc: "Projected number of loans expected to successfully close based on pipeline health and historical conversion rates.",
+        desc: "Active loans minus those likely to withdraw or decline. Equals Active Loans Today − (Likely Withdraw + Likely Decline).",
       };
     case "Likely Withdraw":
       return {
@@ -1130,11 +1142,16 @@ export const ClosingFalloutForecast = ({
       }
     };
 
-    // Past est. close count from bucketed loans (date-only, matches critical-loans filter).
-    // Use this as the single source when available so KPI and filter match; no double-count with loansRaw.
+    // Past est. close count from bucketed loans, filtered by active period (same as Active Loans Today / critical cards).
     const bucketedPastEstCloseCount = (() => {
       if (!bucketedLoans || bucketedLoans.length === 0) return null;
-      return bucketedLoans.filter((l: any) => isPastEcd(l)).length;
+      const inPeriod = activeLoansPeriod
+        ? bucketedLoans.filter((l: any) => {
+            const appDate = getApplicationDate(l);
+            return appDate && isDateInPeriod(appDate, activeLoansPeriod, now);
+          })
+        : bucketedLoans;
+      return inPeriod.filter((l: any) => isPastEcd(l)).length;
     })();
 
     // Close-late count excluding past-ECD so we don't double-count (past ECD has its own KPI).
@@ -1383,10 +1400,7 @@ export const ClosingFalloutForecast = ({
             funnelData.loansStarted.units) *
           100
         : 0);
-    const predictedClosing =
-      activeLoansToday > 0
-        ? Math.round((activeLoansToday * pullThroughRate) / 100)
-        : 0;
+    // Predicted Closing computed below after likelyWithdrawFallback / likelyDeclineFallback
 
     // Likely Close Late - use server-computed count from document pipeline (or legacy summary) if available
     const likelyCloseLate =
@@ -1423,6 +1437,12 @@ export const ClosingFalloutForecast = ({
         : (predictions?.predictedFalloutTotal ??
             likelyWithdrawFallback +
               likelyDeclineFallback);
+
+    // Predicted Closing = Active Loans Today − (Likely Withdraw + Likely Decline)
+    const predictedClosing = Math.max(
+      0,
+      activeLoansToday - (likelyWithdrawFallback + likelyDeclineFallback),
+    );
 
     // Pipeline value
     const pipelineValue =
@@ -1735,7 +1755,7 @@ export const ClosingFalloutForecast = ({
             endDate: string;
             period?: string;
           } | null;
-        }>(url, { method: "GET" });
+        }>(url, { method: "GET", headers: { "Cache-Control": "no-cache" } });
 
         if (response.predictions && Array.isArray(response.predictions)) {
           setFullPredictions(response.predictions);
@@ -1807,8 +1827,17 @@ export const ClosingFalloutForecast = ({
     [selectedTenantId, activeLoansPeriod],
   );
 
+  // Per-instance guard (avoids double-click / Strict Mode double-invoke in this instance)
+  const predictionInFlightRef = useRef(false);
+
   // Manual prediction trigger: runs bucketing with rule-based summaries (instant)
   const runPrediction = useCallback(async () => {
+    if (predictionInFlightRef.current) return;
+    predictionInFlightRef.current = true; // set immediately so same-tick second call (e.g. duplicate handler) bails
+    if (!claimPredictionLock()) {
+      predictionInFlightRef.current = false;
+      return; // another instance (Dashboard or Widget) is already running
+    }
     setPredictionsLoading(true);
     try {
       // Don't send loanIds - let the backend query the full database with proper filters
@@ -1868,6 +1897,9 @@ export const ClosingFalloutForecast = ({
       setLoanPredictions({});
       setBucketedLoans([]);
       setPredictionsLoading(false);
+    } finally {
+      predictionInFlightRef.current = false;
+      predictionInFlightGlobal = false;
     }
   }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1913,7 +1945,7 @@ export const ClosingFalloutForecast = ({
             endDate: string;
             period?: string;
           } | null;
-        }>(url, { method: "GET" });
+        }>(url, { method: "GET", headers: { "Cache-Control": "no-cache" } });
 
         // Only update state if this request hasn't been superseded
         if (isCancelled) return;
@@ -2063,6 +2095,50 @@ export const ClosingFalloutForecast = ({
     };
   }, [selectedTenantId]);
 
+  /** Derive signal bucket (1–6) from reason_codes zones. Backend: Zone 1 = worst (red), Zone 6 = best (green). FICO & market_delta: lower value → Zone 1; LTV, DTI, days_active: higher value → Zone 1. Display bucket = 7 − zone. Credit Metrics = avg(FICO, LTV, DTI); Time in Motion = days_active; Lock vs Market = market_delta. */
+  const signalBucketsFromReasonCodes = (
+    reasonCodes: ReasonCodeEntry[] | null | undefined
+  ): { creditMetrics: number | null; loanCharacteristics: number | null; timeInMotion: number | null; lockVsMarket: number | null } => {
+    if (!reasonCodes || !Array.isArray(reasonCodes) || reasonCodes.length === 0) {
+      return { creditMetrics: null, loanCharacteristics: null, timeInMotion: null, lockVsMarket: null };
+    }
+    const zoneFico = getZoneFromReasonCodes(reasonCodes, "fico_score");
+    const zoneLtv = getZoneFromReasonCodes(reasonCodes, "ltv_ratio");
+    const zoneDti = getZoneFromReasonCodes(reasonCodes, "be_dti_ratio");
+    const zoneDays = getZoneFromReasonCodes(reasonCodes, "days_active");
+    const zoneMarketDelta = getZoneFromReasonCodes(reasonCodes, "market_delta");
+    // Zone 1 (highest risk) → display 6, Zone 6 (lowest) → display 1. So bucket value = 7 - zone.
+    const toSignal = (z: number | null): number | null => (z != null ? 7 - z : null);
+    const ficoSignal = toSignal(zoneFico);
+    const ltvSignal = toSignal(zoneLtv);
+    const dtiSignal = toSignal(zoneDti);
+    const creditSignals = [ficoSignal, ltvSignal, dtiSignal].filter((x): x is number => x != null);
+    const creditMetrics =
+      creditSignals.length > 0
+        ? Math.round(creditSignals.reduce((a, b) => a + b, 0) / creditSignals.length)
+        : null;
+    return {
+      creditMetrics,
+      loanCharacteristics: toSignal(zoneLtv),
+      timeInMotion: toSignal(zoneDays),
+      lockVsMarket: toSignal(zoneMarketDelta),
+    };
+  };
+
+  /** MLO Fallout Prone bucket (1–6) from LO pullthrough % only. 1=90-100%, 2=80-90%, 3=70-80%, 4=60-70%, 5=30-60%, 6=0-30%. Accepts percentage (0-100) or decimal (0-1). */
+  const pullthroughPctToMloBucket = (pct: number | null | undefined): number | null => {
+    if (pct == null) return null;
+    const p = Number(pct);
+    if (Number.isNaN(p)) return null;
+    const percent = p > 1 ? p : p * 100;
+    if (percent >= 90) return 1;
+    if (percent >= 80) return 2;
+    if (percent >= 70) return 3;
+    if (percent >= 60) return 4;
+    if (percent >= 30) return 5;
+    return 6;
+  };
+
   const criticalLoanCards = useMemo(() => {
     // Build map of raw loan data by loan_id/guid for filling missing fields when bucketed data is incomplete
     // Index by loan_id, id, and guid so we can match regardless of which identifier the bucketed loan uses
@@ -2096,9 +2172,20 @@ export const ClosingFalloutForecast = ({
 
     const getRaw = (loanId: string) => rawByLoanId.get(String(loanId));
 
-    // Use bucketedLoans (from prediction endpoint) as primary source - show all active loans; user can sort by risk
+    const now = new Date();
+    // When activeLoansPeriod is set, filter to loans whose application_date falls in that period (same as Active Loans Today)
+    const filterByPeriod = (list: any[]) => {
+      if (!activeLoansPeriod || activeLoansPeriod === "all") return list;
+      return list.filter((l: any) => {
+        const appDate = l.application_date ?? l.applicationDate ?? null;
+        return appDate && isDateInPeriod(appDate, activeLoansPeriod, now);
+      });
+    };
+
+    // Use bucketedLoans (from prediction endpoint) as primary source; filter by active period when set
     if (bucketedLoans && bucketedLoans.length > 0) {
-      return bucketedLoans.map((l: any) => {
+      const inPeriod = filterByPeriod(bucketedLoans);
+      return inPeriod.map((l: any) => {
         // Use snake_case field names matching database columns
         const loanId = l.loan_id || l.id || l.guid || "";
         const raw = getRaw(loanId);
@@ -2202,35 +2289,44 @@ export const ClosingFalloutForecast = ({
           marketRate: l.market_rate ?? l.closeMarketRate ?? marketRateVal ?? null,
           lockMarketRate: l.lockMarketRate ?? l.market_rate_at_lock != null ? Number(l.market_rate_at_lock) : lockRate ?? null,
           marketChangeDelta:
-            l.marketChangeDelta ?? l.market_change_delta != null
-              ? Number(l.market_change_delta)
-              : marketDeltaComputed ?? null,
+            (l.marketChangeDelta != null && l.marketChangeDelta !== "" ? Number(l.marketChangeDelta) : null)
+            ?? (l.market_change_delta != null ? Number(l.market_change_delta) : null)
+            ?? marketDeltaComputed ?? null,
           lockDate: lockDate ?? null,
           lockExpirationDate: lockExpirationDate ?? null,
           applicationDate: l.application_date ?? l.applicationDate ?? null,
           estimatedClosingDate: estimatedClosingDate ?? null,
-          // Pullthrough percentages (actual values; snake_case from DB)
+          // Pullthrough percentages (actual values; snake_case from DB; backend sends null when missing so key is always present)
           loPullthroughPct:
-            l.loPullthroughPercentage ??
-            l.lo_pullthrough_percentage != null
-              ? Number(l.lo_pullthrough_percentage)
-              : null,
+            (l.loPullthroughPercentage != null && l.loPullthroughPercentage !== "")
+              ? Number(l.loPullthroughPercentage)
+              : (l.lo_pullthrough_percentage != null ? Number(l.lo_pullthrough_percentage) : null),
           uwPullthroughPct: l.uwPullthroughPercentage ?? null,
           closerPullthroughPct: l.closerPullthroughPercentage ?? null,
           processorPullthroughPct: l.processorPullthroughPercentage ?? null,
           // Rule-based risk summary from backend (contains risks, positives, overallRisk, predictedOutcome, confidence)
           riskSummary: l.riskSummary || null,
-          // Signal bucket scores (camelCase - computed fields)
-          creditMetricsSignalStrength: l.creditMetricsSignalStrength ?? null,
-          loanCharacteristicsSignalStrength:
-            l.loanCharacteristicsSignalStrength ?? null,
-          timeInMotionSignalStrength: l.timeInMotionSignalStrength ?? null,
+          // Signal bucket scores (1–6): Credit Metrics = avg(FICO,LTV,DTI); Time in Motion = days_active; Lock vs Market = market_delta; MLO Fallout Prone = LO pullthrough % only
+          ...((): {
+            creditMetricsSignalStrength: number | null;
+            loanCharacteristicsSignalStrength: number | null;
+            timeInMotionSignalStrength: number | null;
+            interestLockVsMarketSignalStrength: number | null;
+          } => {
+            const codes = l.reasonCodes ?? l.reason_codes ?? null;
+            const fromZones = signalBucketsFromReasonCodes(codes);
+            return {
+              creditMetricsSignalStrength: fromZones.creditMetrics ?? l.creditMetricsSignalStrength ?? null,
+              // Prefer backend segment-fallout Loan Characteristics bucket; only use reason_codes LTV zone when missing
+              loanCharacteristicsSignalStrength: l.loanCharacteristicsSignalStrength ?? fromZones.loanCharacteristics ?? null,
+              timeInMotionSignalStrength: fromZones.timeInMotion ?? l.timeInMotionSignalStrength ?? null,
+              interestLockVsMarketSignalStrength: fromZones.lockVsMarket ?? l.interestLockVsMarketSignalStrength ?? null,
+            };
+          })(),
           mloAeFalloutProneSignalStrength:
-            l.mloAeFalloutProneSignalStrength ??
-            l.loPullthroughSignal ??
-            null,
-          interestLockVsMarketSignalStrength:
-            l.interestLockVsMarketSignalStrength ?? null,
+            pullthroughPctToMloBucket(
+              l.loPullthroughPercentage ?? (l.lo_pullthrough_percentage != null ? Number(l.lo_pullthrough_percentage) : null),
+            ) ?? l.mloAeFalloutProneSignalStrength ?? l.loPullthroughSignal ?? null,
           uwPullthroughSignalStrength: l.uwPullthroughSignalStrength ?? null,
           closerPullthroughSignalStrength:
             l.closerPullthroughSignalStrength ?? null,
@@ -2251,11 +2347,16 @@ export const ClosingFalloutForecast = ({
       });
     }
 
-    // Fallback: use loansRaw if no bucketed data available - show all active loans
+    // Fallback: use loansRaw if no bucketed data available - show active loans, filtered by period when set
     if (!loansRaw || loansRaw.length === 0) return [];
 
-    const now = new Date();
-    const activeRaw = loansRaw.filter((l) => mapForecastStatus(l) === "Active");
+    let activeRaw = loansRaw.filter((l) => mapForecastStatus(l) === "Active");
+    if (activeLoansPeriod && activeLoansPeriod !== "all") {
+      activeRaw = activeRaw.filter((l) => {
+        const appDate = l.application_date ?? l.applicationDate ?? null;
+        return appDate && isDateInPeriod(appDate, activeLoansPeriod, now);
+      });
+    }
 
     return activeRaw.map((l) => {
       const base = transformLoanToCard(l);
@@ -2343,7 +2444,7 @@ export const ClosingFalloutForecast = ({
         closeLateRisk: (l as any).closeLateRisk ?? isLikelyCloseLateForecast(l, 30, now) ?? null,
       };
     });
-  }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap]);
+  }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap, activeLoansPeriod]);
 
   // High-risk loans (withdraw / decline / close late with risk >= 80) in card shape for the metric modal
   const HIGH_RISK_SCORE_MIN = 80;
@@ -3102,7 +3203,10 @@ export const ClosingFalloutForecast = ({
                       {/* Start Prediction - manual trigger; disabled until run completes */}
                       <Button
                         type="button"
-                        onClick={runPrediction}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          runPrediction();
+                        }}
                         disabled={predictionsLoading}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 text-[10px] sm:text-xs font-medium uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white border-0 shadow-sm disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed"
                         title={
@@ -4083,7 +4187,7 @@ export const ClosingFalloutForecast = ({
                                 {formatPercent(loan.dtiRatio)}
                               </td>
                               <td
-                                className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getPullthroughColor(loan.loPullthroughPct)}`}
+                                className={`px-3 py-2 text-xs font-mono whitespace-nowrap ${getSignalBucketColor(pullthroughPctToMloBucket(loan.loPullthroughPct))}`}
                               >
                                 {formatPercent(loan.loPullthroughPct)}
                               </td>
