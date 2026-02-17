@@ -35,7 +35,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { useMetrics } from "@/hooks/useMetrics";
-import { LoanCardsContainer } from "./LoanCardsContainer";
+import { useLoanFavorites } from "@/hooks/useLoanFavorites";
+import { LoanCardsContainer, type TabType } from "./LoanCardsContainer";
 import {
   getZoneFromReasonCodes,
   type ReasonCodeEntry,
@@ -886,7 +887,7 @@ const getMetricExplanation = (label: string) => {
     case "High Risk":
       return {
         title: "High Risk Loans",
-        desc: "Loans predicted to withdraw, decline, or close late with a risk score of 80 or higher. Click to see the list sorted by risk score.",
+        desc: "Predicted withdraw or decline with risk score ≥ 80/100. Count is shown as High Risk # of # fallout (fallout = predicted withdraw + predicted decline). Click to see the list sorted by risk score.",
       };
     case "Predicted Closing":
       return {
@@ -956,8 +957,11 @@ export const ClosingFalloutForecast = ({
   const [insightsTab, setInsightsTab] = useState<"critical" | "officers">(
     "critical",
   );
+  const [criticalOutcomeFilter, setCriticalOutcomeFilter] =
+    useState<TabType>("all");
   const [selectedOfficer, setSelectedOfficer] = useState<string | null>(null);
   const { theme } = useTheme();
+  const { favoriteIds } = useLoanFavorites();
   const isDarkMode = theme === "dark";
 
   // State for locked loans fetched via useMetrics (rolling 90 days)
@@ -1098,20 +1102,31 @@ export const ClosingFalloutForecast = ({
   // PERFORMANCE: Uses deferredPeriod to allow UI to remain responsive during rapid period changes
   const metrics = useMemo(() => {
     const now = new Date();
-    // High risk: likely withdraw, likely decline, or likely close late with risk score >= 80
+    // High risk: predicted withdraw or deny only, with risk score >= 80 (excludes close-late)
     const HIGH_RISK_SCORE_THRESHOLD = 80;
     const isHighRiskLoan = (l: any) => {
       const score = l?.riskScore ?? 0;
       if (score < HIGH_RISK_SCORE_THRESHOLD) return false;
       const outcome = l?.riskSummary?.predictedOutcome;
-      if (outcome === "withdraw" || outcome === "deny") return true;
-      if (outcome === "originate" && l?.closeLateRisk === true) return true;
-      return false;
+      return outcome === "withdraw" || outcome === "deny";
     };
+    // When activeLoansPeriod is set, restrict counts to loans whose application_date falls in that period (sync with Active filter)
+    const bucketedLoansInPeriod =
+      bucketedLoans && bucketedLoans.length > 0 && activeLoansPeriod
+        ? bucketedLoans.filter((l: any) => {
+            const appDate = getApplicationDate(l);
+            return appDate && isDateInPeriod(appDate, activeLoansPeriod, now);
+          })
+        : bucketedLoans && bucketedLoans.length > 0
+          ? bucketedLoans
+          : null;
+
     const highRiskCount =
-      bucketedLoans?.length > 0
-        ? bucketedLoans.filter((l: any) => isHighRiskLoan(l)).length
-        : 0;
+      bucketedLoansInPeriod && bucketedLoansInPeriod.length > 0
+        ? bucketedLoansInPeriod.filter((l: any) => isHighRiskLoan(l)).length
+        : bucketedLoans?.length > 0
+          ? bucketedLoans.filter((l: any) => isHighRiskLoan(l)).length
+          : 0;
 
     // Locked count from bucketed loans (snapshot metric — active loans with lock dates).
     // Bucketed loans include lock_date in essentialFields from prediction save.
@@ -1211,7 +1226,9 @@ export const ClosingFalloutForecast = ({
       const cached = cache.cache.get(periodKey);
       if (cached) {
         const totalActiveInPanel =
-          bucketedLoans?.length ?? cached.activeLoansToday ?? 0;
+          (bucketedLoansInPeriod ?? bucketedLoans)?.length ??
+          cached.activeLoansToday ??
+          0;
         const highRiskRate =
           totalActiveInPanel > 0
             ? Math.round((highRiskCount / totalActiveInPanel) * 100)
@@ -1351,7 +1368,9 @@ export const ClosingFalloutForecast = ({
       }
 
       const totalActiveInPanel =
-        bucketedLoans?.length ?? result.activeLoansToday ?? 0;
+        (bucketedLoansInPeriod ?? bucketedLoans)?.length ??
+        result.activeLoansToday ??
+        0;
       const highRiskRate =
         totalActiveInPanel > 0
           ? Math.round((highRiskCount / totalActiveInPanel) * 100)
@@ -1379,9 +1398,14 @@ export const ClosingFalloutForecast = ({
       };
     }
 
-    // Active Loans Today
+    // Active Loans Today - use server count when available so filter (e.g. ACTIVE: Last 6 months) stays in sync
     const activeLoansToday =
-      statsData?.active ?? funnelData?.stillActive?.units ?? 0;
+      (!serverActiveLoansCount.loading && serverActiveLoansCount.count > 0
+        ? serverActiveLoansCount.count
+        : null) ??
+      statsData?.active ??
+      funnelData?.stillActive?.units ??
+      0;
 
     // Closed Loans (Funded Loans)
     const closedLoansMTD =
@@ -1465,8 +1489,9 @@ export const ClosingFalloutForecast = ({
           )
         : 0;
 
-    // High risk: use count from top of useMemo; totalActiveInPanel/highRiskRate use activeLoansToday when no bucketed data
-    const totalActiveInPanel = bucketedLoans?.length ?? activeLoansToday;
+    // High risk: use count from top of useMemo; totalActiveInPanel syncs with active filter when bucketed data exists
+    const totalActiveInPanel =
+      (bucketedLoansInPeriod ?? bucketedLoans)?.length ?? activeLoansToday;
     const highRiskRate =
       totalActiveInPanel > 0
         ? Math.round((highRiskCount / totalActiveInPanel) * 100)
@@ -1483,7 +1508,7 @@ export const ClosingFalloutForecast = ({
       closedLoansMTD,
       predictedClosing,
       likelyCloseLate,
-      pastEstClose: 0,
+      pastEstClose: bucketedPastEstCloseCount ?? 0,
       likelyWithdraw: likelyWithdrawFallback,
       likelyDecline: likelyDeclineFallback,
       predictedFalloutTotal: predictedFalloutTotalFallback,
@@ -1527,8 +1552,8 @@ export const ClosingFalloutForecast = ({
           ["Likely Decline", metrics.likelyDecline],
           ["Predicted Fallout Total", metrics.predictedFalloutTotal],
           [
-            "High Risk (active)",
-            `${metrics.highRiskCount} of ${metrics.totalActiveInPanel}`,
+            "High Risk # of # fallout (80/100 risk or higher)",
+            `${metrics.highRiskCount} of ${metrics.predictedFalloutTotal} fallout`,
           ],
           ["Pipeline Value (M)", metrics.pipelineValueM],
           ["Pull-Through Rate", `${metrics.pullThroughRateDisplay}%`],
@@ -1552,6 +1577,18 @@ export const ClosingFalloutForecast = ({
 
     const pullThrough = `${metrics.pullThroughRateDisplay}%`;
 
+    // Projected Pullthrough = (active loans today - (withdraw + deny)) / active loans today (filter-aware)
+    const projectedPullthroughPct =
+      metrics.activeLoansToday > 0
+        ? Math.round(
+            100 *
+              (metrics.activeLoansToday -
+                (metrics.likelyWithdraw + metrics.likelyDecline)) /
+              metrics.activeLoansToday,
+          )
+        : 0;
+    const projectedPullthrough = `${projectedPullthroughPct}%`;
+
     return [
       {
         label: "Pipeline UPB",
@@ -1570,12 +1607,20 @@ export const ClosingFalloutForecast = ({
           "Active loans that have a rate lock date. Only counts loans currently in the active pipeline.",
       },
       {
-        label: "Pull-Through",
+        label: "Historical Rolling 90 Days Pullthrough",
         value: pullThrough,
         secondaryLabel: "Rolling 90D",
         secondaryValue: pullThrough,
         explanation:
           "Historical success rate - % of loans that successfully fund. Uses rolling 90-day window for accuracy.",
+      },
+      {
+        label: "Projected Pullthrough",
+        value: projectedPullthrough,
+        secondaryLabel: "Forecast",
+        secondaryValue: projectedPullthrough,
+        explanation:
+          "Expected pullthrough for current pipeline: (Active Loans − Likely Withdraw − Likely Decline) ÷ Active Loans. Respects the active loans period filter.",
       },
     ];
   }, [metrics]);
@@ -2446,16 +2491,14 @@ export const ClosingFalloutForecast = ({
     });
   }, [bucketedLoans, loansRaw, loanPredictions, officerTtsMap, activeLoansPeriod]);
 
-  // High-risk loans (withdraw / decline / close late with risk >= 80) in card shape for the metric modal
+  // High-risk loans (predicted withdraw or deny only, risk >= 80) in card shape for the metric modal
   const HIGH_RISK_SCORE_MIN = 80;
   const highRiskLoansForModal = useMemo(() => {
     const isHighRisk = (l: (typeof criticalLoanCards)[0]) => {
       const score = l.riskScore ?? 0;
       if (score < HIGH_RISK_SCORE_MIN) return false;
       const outcome = l.riskSummary?.predictedOutcome;
-      if (outcome === "withdraw" || outcome === "deny") return true;
-      if (outcome === "originate" && l.closeLateRisk === true) return true;
-      return false;
+      return outcome === "withdraw" || outcome === "deny";
     };
     const list = criticalLoanCards.filter((l) => isHighRisk(l));
     list.sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0));
@@ -2463,9 +2506,122 @@ export const ClosingFalloutForecast = ({
     return { loans: list, volume };
   }, [criticalLoanCards]);
 
-  // Sorted critical loans for table display
+  // Prediction map for critical outcome filter (same as LoanCardsContainer)
+  const criticalPredictionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    fullPredictions.forEach((p) => {
+      if (p.loanId && p.predictedOutcome) map.set(p.loanId, p.predictedOutcome);
+    });
+    return map;
+  }, [fullPredictions]);
+
+  // Filter critical loans by outcome tab (shared state with cards; same logic as LoanCardsContainer)
+  const filteredCriticalLoanCards = useMemo(() => {
+    if (criticalOutcomeFilter === "all") return criticalLoanCards;
+    return criticalLoanCards.filter((loan) => {
+      switch (criticalOutcomeFilter) {
+        case "likely-withdraw":
+          if (loan.riskSummary?.predictedOutcome === "withdraw") return true;
+          return criticalPredictionMap.get(loan.id) === "withdraw";
+        case "likely-decline":
+          if (loan.riskSummary?.predictedOutcome === "deny") return true;
+          return criticalPredictionMap.get(loan.id) === "deny";
+        case "past-est-closing": {
+          const ecdRaw = (loan as { estimatedClosingDate?: string | null })
+            .estimatedClosingDate;
+          if (ecdRaw == null || ecdRaw === "") return false;
+          try {
+            const ecd = new Date(ecdRaw);
+            if (Number.isNaN(ecd.getTime())) return false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            ecd.setHours(0, 0, 0, 0);
+            return today > ecd;
+          } catch {
+            return false;
+          }
+        }
+        case "likely-close-late": {
+          if ((loan as { closeLateRisk?: boolean }).closeLateRisk !== true)
+            return false;
+          const ecdRaw = (loan as { estimatedClosingDate?: string | null })
+            .estimatedClosingDate;
+          if (ecdRaw == null || ecdRaw === "") return true;
+          try {
+            const ecd = new Date(ecdRaw);
+            if (Number.isNaN(ecd.getTime())) return true;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            ecd.setHours(0, 0, 0, 0);
+            return today <= ecd;
+          } catch {
+            return true;
+          }
+        }
+        case "favorites":
+          return favoriteIds.has(loan.id);
+        default:
+          return true;
+      }
+    });
+  }, [
+    criticalLoanCards,
+    criticalOutcomeFilter,
+    criticalPredictionMap,
+    favoriteIds,
+  ]);
+
+  // Tab counts for critical outcome filter (shared with cards and table)
+  const criticalTabCounts = useMemo(() => {
+    return {
+      all: criticalLoanCards.length,
+      "likely-withdraw": criticalLoanCards.filter((l) => {
+        if (l.riskSummary?.predictedOutcome === "withdraw") return true;
+        return criticalPredictionMap.get(l.id) === "withdraw";
+      }).length,
+      "likely-decline": criticalLoanCards.filter((l) => {
+        if (l.riskSummary?.predictedOutcome === "deny") return true;
+        return criticalPredictionMap.get(l.id) === "deny";
+      }).length,
+      "past-est-closing": criticalLoanCards.filter((l) => {
+        const ecdRaw = (l as { estimatedClosingDate?: string | null })
+          .estimatedClosingDate;
+        if (ecdRaw == null || ecdRaw === "") return false;
+        try {
+          const ecd = new Date(ecdRaw);
+          if (Number.isNaN(ecd.getTime())) return false;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          ecd.setHours(0, 0, 0, 0);
+          return today > ecd;
+        } catch {
+          return false;
+        }
+      }).length,
+      "likely-close-late": criticalLoanCards.filter((l) => {
+        if ((l as { closeLateRisk?: boolean }).closeLateRisk !== true)
+          return false;
+        const ecdRaw = (l as { estimatedClosingDate?: string | null })
+          .estimatedClosingDate;
+        if (ecdRaw == null || ecdRaw === "") return true;
+        try {
+          const ecd = new Date(ecdRaw);
+          if (Number.isNaN(ecd.getTime())) return true;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          ecd.setHours(0, 0, 0, 0);
+          return today <= ecd;
+        } catch {
+          return true;
+        }
+      }).length,
+      favorites: criticalLoanCards.filter((l) => favoriteIds.has(l.id)).length,
+    };
+  }, [criticalLoanCards, criticalPredictionMap, favoriteIds]);
+
+  // Sorted critical loans for table display (uses filtered list)
   const sortedCriticalLoans = useMemo(() => {
-    const loans = [...criticalLoanCards];
+    const loans = [...filteredCriticalLoanCards];
 
     const getSortValue = (
       loan: (typeof criticalLoanCards)[0],
@@ -2557,7 +2713,7 @@ export const ClosingFalloutForecast = ({
     });
 
     return loans;
-  }, [criticalLoanCards, sortColumn, sortDirection]);
+  }, [filteredCriticalLoanCards, sortColumn, sortDirection]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -3364,8 +3520,8 @@ export const ClosingFalloutForecast = ({
                     </Tooltip>
                   </div>
 
-                  {/* Pipeline Volume / Projected Pullthrough / Locked Loans row (matches Outcome Metrics Grid width/gap for alignment) */}
-                  <div className="grid grid-cols-3 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mb-8 md:mb-12">
+                  {/* Pipeline Volume / Historical Rolling 90D Pullthrough / Locked Loans / Projected Pullthrough row */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 md:gap-6 lg:gap-8 mb-8 md:mb-12">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <div className="text-center space-y-1 sm:space-y-2 cursor-default">
@@ -3390,19 +3546,39 @@ export const ClosingFalloutForecast = ({
                       <TooltipTrigger asChild>
                         <div className="text-center space-y-1 sm:space-y-2 cursor-default">
                           <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
-                            Projected Pullthrough
+                            Historical Rolling 90 Days Pullthrough
                           </p>
                           <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
                             {kpis[2].value}
                           </p>
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent className="max-w-[230px] bg-black text-white border-slate-700">
+                      <TooltipContent className="max-w-[280px] bg-black text-white border-slate-700">
+                        <p className="font-semibold mb-1 text-white">
+                          Historical Rolling 90 Days Pullthrough
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {kpis[2].explanation}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="text-center space-y-1 sm:space-y-2 cursor-default">
+                          <p className="text-[9px] sm:text-[10px] md:text-[11px] lg:text-sm font-semibold uppercase tracking-widest leading-tight text-slate-500 dark:text-slate-400">
+                            Projected Pullthrough
+                          </p>
+                          <p className="text-xl sm:text-2xl md:text-3xl font-thin tracking-tight text-slate-900 dark:text-slate-50">
+                            {kpis[3].value}
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[280px] bg-black text-white border-slate-700">
                         <p className="font-semibold mb-1 text-white">
                           Projected Pullthrough
                         </p>
                         <p className="text-xs text-slate-300">
-                          {kpis[2].explanation}
+                          {kpis[3].explanation}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -3446,7 +3622,10 @@ export const ClosingFalloutForecast = ({
                               : metrics.highRiskCount.toLocaleString()}
                           </p>
                           <p className="text-[8px] sm:text-xs md:text-sm text-slate-400 font-normal mt-1 uppercase">
-                            of {metrics.totalActiveInPanel} active
+                            of {metrics.predictedFalloutTotal} fallout
+                          </p>
+                          <p className="text-[7px] sm:text-[9px] md:text-[10px] text-slate-400 font-normal mt-0.5 uppercase">
+                            80/100 risk or higher
                           </p>
                         </div>
                       </TooltipTrigger>
@@ -4012,6 +4191,8 @@ export const ClosingFalloutForecast = ({
                   selectedTenantId={selectedTenantId}
                   openLoanId={openLoanId}
                   onOpenLoanIdHandled={onOpenLoanIdHandled}
+                  activeTab={criticalOutcomeFilter}
+                  onActiveTabChange={setCriticalOutcomeFilter}
                 />
               </div>
             )}
@@ -4024,20 +4205,160 @@ export const ClosingFalloutForecast = ({
                   >
                     Loading loans…
                   </div>
-                ) : sortedCriticalLoans.length === 0 ? (
-                  <div
-                    className={`text-center py-12 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
-                  >
-                    <Table className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                    <p className="text-sm font-medium">
-                      No critical loans found
-                    </p>
-                    <p className="text-xs mt-1 opacity-70">
-                      Run predictions to see critical loans in the table
-                    </p>
-                  </div>
                 ) : (
-                  <div className="w-full">
+                  <div className="w-full space-y-3">
+                    {/* Critical outcome filter (shared with cards) - show when we have critical loans data */}
+                    {criticalLoanCards.length > 0 && (() => {
+                      const criticalTabs: {
+                        id: TabType;
+                        label: string;
+                        shortLabel: string;
+                        color: string;
+                      }[] = [
+                        {
+                          id: "all",
+                          label: "All Loans",
+                          shortLabel: "All",
+                          color: "darkred",
+                        },
+                        {
+                          id: "likely-withdraw",
+                          label: "Likely Withdrawal",
+                          shortLabel: "Withdraw",
+                          color: "red",
+                        },
+                        {
+                          id: "likely-decline",
+                          label: "Likely Decline",
+                          shortLabel: "Decline",
+                          color: "lightred",
+                        },
+                        {
+                          id: "past-est-closing",
+                          label: "Past Est. Closing",
+                          shortLabel: "Past ECD",
+                          color: "red",
+                        },
+                        {
+                          id: "likely-close-late",
+                          label: "Likely Close Late",
+                          shortLabel: "Close Late",
+                          color: "amber",
+                        },
+                        {
+                          id: "favorites",
+                          label: "Favorites",
+                          shortLabel: "Favorites",
+                          color: "blue",
+                        },
+                      ];
+                      const baseStyle = isDarkMode
+                        ? "bg-slate-800 border border-slate-700"
+                        : "bg-slate-100 border border-slate-200";
+                      const tabColors: Record<
+                        string,
+                        { active: string; inactive: string }
+                      > = {
+                        darkred: {
+                          active: isDarkMode
+                            ? "bg-rose-900 text-white"
+                            : "bg-rose-800 text-white",
+                          inactive: isDarkMode
+                            ? `${baseStyle} text-slate-400`
+                            : `${baseStyle} text-slate-600`,
+                        },
+                        red: {
+                          active: isDarkMode
+                            ? "bg-rose-600 text-white"
+                            : "bg-rose-600 text-white",
+                          inactive: isDarkMode
+                            ? `${baseStyle} text-slate-400`
+                            : `${baseStyle} text-slate-600`,
+                        },
+                        lightred: {
+                          active: isDarkMode
+                            ? "bg-rose-400 text-white"
+                            : "bg-rose-400 text-white",
+                          inactive: isDarkMode
+                            ? `${baseStyle} text-slate-400`
+                            : `${baseStyle} text-slate-600`,
+                        },
+                        amber: {
+                          active: isDarkMode
+                            ? "bg-amber-600 text-white"
+                            : "bg-amber-500 text-white",
+                          inactive: isDarkMode
+                            ? `${baseStyle} text-slate-400`
+                            : `${baseStyle} text-slate-600`,
+                        },
+                        blue: {
+                          active: isDarkMode
+                            ? "bg-blue-600 text-white"
+                            : "bg-blue-600 text-white",
+                          inactive: isDarkMode
+                            ? `${baseStyle} text-slate-400`
+                            : `${baseStyle} text-slate-600`,
+                        },
+                      };
+                      return (
+                        <div className="flex gap-1 sm:gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                          {criticalTabs.map((tab) => {
+                            const isActive =
+                              criticalOutcomeFilter === tab.id;
+                            const style = isActive
+                              ? tabColors[tab.color]?.active ??
+                                tabColors.red.active
+                              : tabColors[tab.color]?.inactive ??
+                                tabColors.red.inactive;
+                            return (
+                              <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() =>
+                                  setCriticalOutcomeFilter(tab.id)
+                                }
+                                className={`flex items-center gap-1 px-2 sm:px-3 py-1.5 text-[10px] sm:text-[11px] font-medium whitespace-nowrap transition-all rounded-full active:scale-95 ${style}`}
+                              >
+                                <span className="sm:hidden">
+                                  {tab.shortLabel}
+                                </span>
+                                <span className="hidden sm:inline">
+                                  {tab.label}
+                                </span>
+                                <span
+                                  className={`min-w-[16px] h-[16px] sm:min-w-[18px] sm:h-[18px] px-1 rounded-full text-[8px] sm:text-[9px] font-semibold flex items-center justify-center ${
+                                    isActive
+                                      ? "bg-white/25"
+                                      : isDarkMode
+                                        ? "bg-slate-700/80"
+                                        : "bg-slate-200/60"
+                                  }`}
+                                >
+                                  {criticalTabCounts[tab.id]}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    {sortedCriticalLoans.length === 0 ? (
+                      <div
+                        className={`text-center py-12 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                      >
+                        <Table className="w-12 h-12 mx-auto mb-4 opacity-40" />
+                        <p className="text-sm font-medium">
+                          {criticalLoanCards.length === 0
+                            ? "No critical loans found"
+                            : "No loans match this filter"}
+                        </p>
+                        <p className="text-xs mt-1 opacity-70">
+                          {criticalLoanCards.length === 0
+                            ? "Run predictions to see critical loans in the table"
+                            : "Try a different filter"}
+                        </p>
+                      </div>
+                    ) : (
                     <div
                       className={`overflow-x-auto overflow-y-auto border rounded-lg ${isDarkMode ? "border-white/10" : "border-slate-200"}`}
                       style={{ maxHeight: "45rem" }}
@@ -4289,6 +4610,7 @@ export const ClosingFalloutForecast = ({
                         </tbody>
                       </table>
                     </div>
+                    )}
                     {sortedCriticalLoans.length > 0 && (
                       <div
                         className={`mt-2 flex items-center justify-center gap-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
@@ -4380,7 +4702,7 @@ export const ClosingFalloutForecast = ({
                   : metricModalLabel === "Predicted Fallout"
                     ? `${metrics.falloutRate}%`
                     : metricModalLabel === "High Risk"
-                      ? `${metrics.highRiskCount} of ${metrics.totalActiveInPanel} active`
+                      ? `${metrics.highRiskCount} of ${metrics.predictedFalloutTotal} fallout (80/100 risk or higher)`
                       : undefined
           }
           fallbackActiveVolume={metrics.pipelineValue}

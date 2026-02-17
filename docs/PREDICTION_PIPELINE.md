@@ -12,7 +12,8 @@ This document explains how the system predicts **Decline (Denied)**, **Withdraw*
    - [Recency weighting: recent is weighted more](#recency-weighting-recent-is-weighted-more)
 4. [Step 2: Likely Close Late Prediction](#step-2-likely-close-late-prediction)
 5. [Step 3: Risk Scores (0–100)](#step-3-risk-scores-0100)
-6. [Origination profiles for signal buckets](#origination-profiles-for-signal-buckets)
+6. [Origination profiles for signal buckets](#origination-profiles-for-signal-buckets)  
+   - [Loan Characteristics and MLO Fallout Prone (UI buckets)](#loan-characteristics-and-mlo-fallout-prone-ui-buckets)
 7. [High Risk: How It’s Defined in the UI](#high-risk-how-its-defined-in-the-ui)
 8. [Where Predictions Are Stored and Used](#where-predictions-are-stored-and-used)
 
@@ -93,18 +94,20 @@ We weight **more recent** historical loans higher so that recent mix and market 
 
 For each outcome \| loan type \| purpose \| occupancy \| feature we:
 
-1. **Split historical data** (all loans from 2023–present) by how recent the loan’s outcome was: **≤180 days** (outcome date = funding date, or current status date, or application date—whichever is available—within the last 180 days) and **\&gt;180 days** (older).
+1. **Split historical data** (all loans from 2023–present) by how recent the loan’s outcome was: **≤180 days** (outcome date = funding date, or current status date, or denial date, or application date—whichever is available—within the last 180 days) and **\&gt;180 days** (older).
 2. **Build two profiles** per segment/feature: one for “≤180 days” and one for “\&gt;180 days,” each with its own mean and percentiles (P10–P90). Each profile uses **all** loans in that recency bucket in the 2023–present range (no per-year grouping).
 3. **When scoring active loans**, we **merge** the two profiles into a single set of zone thresholds (P40–P60, etc.) using a **weighted average**: the “≤180 days” profile is weighted **1.2** and the “\&gt;180 days” profile **1.0**. So the final P40, P60, mean, and other stats are **(1.2 × recent + 1.0 × older) / 2.2**. Recent history is weighted more, so zone boundaries and similarity scores reflect current conditions more than older ones.
 
 For each feature we see where the loan’s value falls in the profile’s percentiles (P10–P90, plus P45 and P55) and assign **zone points** (6 zones):
 
-- **Zone 1** (middle band, P45–P55): **6 points**
-- **Zone 2** (P40–P45 or P55–P60): **5 points**
-- **Zone 3** (P30–P40 or P60–P70): **4 points**
-- **Zone 4** (P20–P30 or P70–P80): **3 points**
-- **Zone 5** (P10–P20 or P80–P90): **2 points**
-- **Zone 6** (below P10 or above P90, remaining tails): **1 point**
+**Denied (direction-aware)** — only the worse tail is high risk (Zone 1) along with the middle:
+- **Zone 1** (6 pts): middle (P45–P55) OR worse tail only. FICO/market_delta: below P10 → Zone 1, above P90 → Zone 6. LTV/DTI/days_active: above P90 → Zone 1, below P10 → Zone 6.
+- **Zones 2–5**: symmetric (P40–P45|P55–P60, etc.). So e.g. 800 FICO gets 1 pt for Deny; very low FICO or middle gets 6 pts.
+
+**Withdrawn (symmetric only)** — no direction on tails; both tails get 1 point:
+- **Zone 1** (6 pts): middle (P45–P55) only.
+- **Zone 2–5**: P40–P45|P55–P60, P30–P40|P60–P70, P20–P30|P70–P80, P10–P20|P80–P90.
+- **Zone 6** (1 pt): **both tails** (below P10 or above P90).
 
 We add up the points across the features we use:
 
@@ -237,9 +240,38 @@ The **worse** of the two dimensions (urgency or lateness) is weighted 75%, and t
   The sequencer appends one `reason_codes` entry per feature with `bucket_type` = feature name, `bucket_value` = `Zone1`–`Zone6`, and `risk_score: 0` so the official 0–100 risk score is unchanged.
 - **UI derivation**: The dashboard uses **signalBucketsFromReasonCodes**: it reads zone entries from `reason_codes` for `fico_score`, `ltv_ratio`, `be_dti_ratio`, `days_active`, and **market_delta**. Display bucket = 7 − zone (Zone1 → 6 = red, Zone6 → 1 = green). **Credit Metrics** = average of FICO, LTV, and DTI bucket values (1–6). **Time in Motion** = days_active bucket. **Lock vs Market** = **market_delta** zone from `reason_codes` when present (otherwise the API may use FRED-based market_delta for a fallback display).
 
-**Loan Characteristics** is **not** from Originated profiles. It is driven by **segment-level historical fallout rates** (same historical loan set and classifications as the outcome profiles, but **independent** of the prediction logic). For each segment (loan_type | loan_purpose | occupancy), we compute **withdrawn %** = # withdrawn / all loans in segment, **denied %** = # denied / all loans in segment, and **fallout %** = (withdrawn + denied) / all loans. If a segment has ≤10 loans we use the same fallbacks as outcome profiles: type | purpose | All → type | All | All → All | All | All. Segments are then **ranked by the relevant rate** (highest % = worst). **Predicted denied** loans use **denied %** to rank segments; **predicted withdrawn** use **withdrawn %**; **predicted originated** (close on time and closing late) use **fallout %**. Bucket assignment is **rank-based**: top 1/6 of segments (worst rate) → bucket 6, next 1/6 → bucket 5, … bottom 1/6 → bucket 1. This is computed in **segment fallout rate service** (`runSegmentFalloutRates`) after profile derivation and before the sequencer; the bucket is **applied** when building **bucketedLoans** in POST /api/predictions (after reading back from `loan_predictions`). The UI prefers this backend-provided **loanCharacteristicsSignalStrength** when present (so the segment-fallout bucket is shown on critical loan cards and tables; reason_codes LTV zone is only used as a fallback when the backend does not send Loan Characteristics).
+### Loan Characteristics and MLO Fallout Prone (UI buckets)
 
-**MLO Fallout Prone** is **not** from Originated profiles. It comes from **LO pullthrough %** (historical originated / finalized by loan officer). The UI and API map pullthrough % to a 1–6 bucket: **1** = 90–100% (best), **2** = 80–90%, **3** = 70–80%, **4** = 60–70%, **5** = 30–60%, **6** = 0–30% (worst). So the buckets align with "fallout prone": low pullthrough → bucket 6 (red), high pullthrough → bucket 1 (green).
+These two signals are **not** from Originated profiles. They use separate data and formulas and are applied when building **bucketedLoans** for the UI.
+
+#### Loan Characteristics (segment fallout bucket 1–6)
+
+- **Data source**: Same historical loan set and outcome classifications as the outcome profiles (Denied, Withdrawn, etc.), but **independent** of the prediction logic.
+- **Segment**: Each segment is **loan_type | loan_purpose | occupancy** (e.g. VA | Purchase | Owner).
+- **Rates per segment**:
+  - **Withdrawn %** = (# withdrawn in segment) ÷ (all loans in segment).
+  - **Denied %** = (# denied in segment) ÷ (all loans in segment).
+  - **Fallout %** = (# withdrawn + # denied) ÷ (all loans in segment).
+- **Fallbacks**: If a segment has **≤10 loans**, we use the same fallback order as outcome profiles: **type | purpose | All** → **type | All | All** → **All | All | All**.
+- **Which rate ranks segments** (by predicted outcome):
+  - **Predicted denied** loans → rank segments by **denied %** (highest % = worst).
+  - **Predicted withdrawn** loans → rank segments by **withdrawn %**.
+  - **Predicted originated** (Projected to Close or Closing Late) → rank segments by **fallout %**.
+- **Bucket assignment**: **Rank-based** into six buckets. Segments ordered by the chosen rate (worst first). Top 1/6 of segments → **bucket 6** (red), next 1/6 → **bucket 5**, … bottom 1/6 → **bucket 1** (green).
+- **When it’s computed**: In **segment fallout rate service** (`runSegmentFalloutRates`) after profile derivation and before the sequencer.
+- **When it’s applied**: The bucket is attached to each loan when building **bucketedLoans** in POST /api/predictions (after reading back from `loan_predictions`). The UI uses **loanCharacteristicsSignalStrength** from the API when present; **reason_codes** LTV zone is only a fallback if the backend does not send Loan Characteristics.
+
+#### MLO Fallout Prone (bucket 1–6)
+
+- **Data source**: **LO pullthrough %** — for each loan officer, (historical loans **originated** / finalized by that LO) ÷ (all loans that reached that LO), expressed as a percentage.
+- **Bucket mapping** (pullthrough % → display bucket 1–6):
+  - **Bucket 1** (green, best): 90–100% pullthrough.
+  - **Bucket 2**: 80–90%.
+  - **Bucket 3**: 70–80%.
+  - **Bucket 4**: 60–70%.
+  - **Bucket 5**: 30–60%.
+  - **Bucket 6** (red, worst): 0–30% pullthrough.
+- **Interpretation**: Low pullthrough → more fallout prone → bucket 6 (red); high pullthrough → less fallout prone → bucket 1 (green). The UI and API use this same mapping.
 
 ---
 
@@ -288,7 +320,7 @@ Counts and lists for “High Risk” in the UI use this definition (e.g. critica
 | **Likely Close Late** | Originate and projected funding date &gt; ECD | 100×(0.75×max(urgency,lateness) + 0.25×min(urgency,lateness)) (then stored as points ÷ 18 × 100) |
 | **High Risk** (UI) | (Deny or Withdraw or Likely Close Late) and risk score ≥ 80 | Same as above, per outcome |
 
-This document reflects the behavior of the **fallout sequencer** and the **predictions API** as of the last update. It includes: **End-to-end pipeline** (POST /api/predictions → profile derivation → sequencer → persist → bucketedLoans); **compare-risks** sequencer (Deny when deny &gt; 60% and (withdraw ≤ 60% or deny &gt; withdraw); Withdraw when withdraw &gt; 60% and (deny ≤ 60% or withdraw ≥ deny); ties to Withdraw; then Closing Late; then **Originated profiles** for signal buckets only for ProjectedToClose/ClosingLate); **Origination profiles for buckets** (FICO and **market_delta**: lower = worse, zone 1 = low percentiles; LTV, DTI, **days_active**: higher = worse, zone 1 = high percentiles; same features as Withdrawn; UI **signalBucketsFromReasonCodes** for Credit Metrics, Time in Motion, **Lock vs Market**); **Loan Characteristics** from segment (type|purpose|occupancy) historical fallout rates (denied % / withdrawn % / fallout %), rank-based buckets 1–6, fallback ≤10 loans; **MLO Fallout Prone** from LO pullthrough % only (1=90–100%, …, 6=0–30%); **Deny** using four features (FICO, LTV, DTI, **days_active**); for historical Denied loans, days_active = application to **denial_date** (with **current_status_date** as fallback); segment fallbacks (All|All|All); recency-weighted profiles (≤180 days 1.2×, \&gt;180 days 1.0×); risk score max **24** (Deny), **30** (Withdraw), **18** (Originate); application-to-funding fallback for close-late. For implementation details, see `server/src/services/fallout/falloutSequencer.ts`, `server/src/services/fallout/numericOutcomeProfileService.ts`, `server/src/services/fallout/numericProfileBlendService.ts`, `server/src/services/fallout/segmentFalloutRateService.ts`, `server/src/services/fallout/turnTimeProjectionService.ts`, `server/src/routes/predictions/index.ts`, and the `denial_date` column on `public.loans` (migration `036_loans_denial_date.sql`).
+This document reflects the behavior of the **fallout sequencer** and the **predictions API** as of the last update. It includes: **End-to-end pipeline** (POST /api/predictions → profile derivation → sequencer → persist → bucketedLoans); **compare-risks** sequencer (Deny when deny &gt; 60% and (withdraw ≤ 60% or deny &gt; withdraw); Withdraw when withdraw &gt; 60% and (deny ≤ 60% or withdraw ≥ deny); ties to Withdraw; then Closing Late; then **Originated profiles** for signal buckets only for ProjectedToClose/ClosingLate); **Deny/Withdraw zone logic** (Denied = direction-aware: Zone 1 = middle OR worse tail only; Withdrawn = symmetric only: Zone 1 = middle only, Zone 6 = both tails. Zones 2–5 = symmetric bands.); **Origination profiles for buckets** (FICO and **market_delta**: lower = worse, zone 1 = low percentiles; LTV, DTI, **days_active**: higher = worse, zone 1 = high percentiles; same features as Withdrawn; UI **signalBucketsFromReasonCodes** for Credit Metrics, Time in Motion, **Lock vs Market**); **Loan Characteristics** from segment (type|purpose|occupancy) historical fallout rates (denied % / withdrawn % / fallout %), rank-based buckets 1–6, fallback ≤10 loans; **MLO Fallout Prone** from LO pullthrough % only (1=90–100%, …, 6=0–30%); **Deny** using four features (FICO, LTV, DTI, **days_active**); for historical Denied loans, days_active = application to **denial_date** (with **current_status_date** as fallback); segment fallbacks (All|All|All); recency-weighted profiles (≤180 days 1.2×, \&gt;180 days 1.0×); risk score max **24** (Deny), **30** (Withdraw), **18** (Originate); application-to-funding fallback for close-late. For implementation details, see `server/src/services/fallout/falloutSequencer.ts`, `server/src/services/fallout/numericOutcomeProfileService.ts`, `server/src/services/fallout/numericProfileBlendService.ts`, `server/src/services/fallout/segmentFalloutRateService.ts`, `server/src/services/fallout/turnTimeProjectionService.ts`, `server/src/routes/predictions/index.ts`, and the `denial_date` column on `public.loans` (migration `036_loans_denial_date.sql`).
 
 ---
 
@@ -318,7 +350,7 @@ Below are suggestions that could make the pipeline more accurate, easier to oper
 - **Days active for Denied** – **Implemented.** Deny prediction now uses **days_active** as a fourth feature. For historical Denied loans we use **denial_date** (application → denial) with **current_status_date** as fallback; for active loans we use application → today. The `denial_date` column is on `public.loans` (migration `036_loans_denial_date.sql`).
 - **Fallback segments** – **Implemented.** We use fallbacks for deny/withdraw: exact segment → loan type + purpose → loan type only → **All \| All \| All** (global profile for all denied and all withdrawn loans). New or unknown segments (e.g. a new loan type) still get sensible similarity scores from the global profile.
 - **Recency weighting** – **Implemented.** Historical data is filtered to 2023–present; year is not used to split or weight profiles. Profiles are built only by recency: “≤180 days” and “\&gt;180 days” (by outcome date). When scoring active loans, the two are merged with weights 1.2 (recent) and 1.0 (older) so more recent historical loans have a stronger influence on zone thresholds (P40–P60, etc.) and thus on similarity scores.
-- **Zone boundaries** – The pipeline uses six zones (P45–P55 = 5 pts down to &lt;P10 or &gt;P90 = 0 pts). Revisit if back-tests show that “middle” loans are not actually lower risk; the current design assumes middle = more like historical outcomes.
+- **Zone boundaries** – Denied uses direction-aware zones (worse tail + middle → Zone 1). Withdrawn uses symmetric bands only (middle → Zone 1; both tails → Zone 6). Revisit if back-tests show that “middle” loans are not actually lower risk; the current design assumes middle = more like historical outcomes.
 
 ### 5. Close-late and turn-time
 

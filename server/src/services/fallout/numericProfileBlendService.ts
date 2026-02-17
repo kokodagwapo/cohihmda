@@ -419,18 +419,19 @@ function aggregateFeatureMaps(maps: Map<string, BlendedFeatureStats>[]): Map<str
 }
 
 /**
- * Originate zones (UI only). Returns zone 1–6 for a value given blended stats (P15, P35, P55, P75, P90).
- * Used for loans predicted to originate (not deny/withdraw). UI maps zone to display bucket as 7 − zone (zone 1 = worst, zone 6 = best).
+ * Originate zones (UI only). Returns zone 1–6 for a value given blended stats (P10, P15, P35, P55, P75, P90).
+ * Used for loans predicted to originate (not deny/withdraw). UI maps zone to display bucket as 7 − zone (zone 1 = worst → bucket 6, zone 6 = best → bucket 1).
  *
- * Direction of "worse":
- * - lowerIsWorse (default): FICO, market_delta — lower value → zone 1 (worst). Zone1 P0–P15, Zone6 P90–P100.
- * - higherIsWorse: LTV, DTI, days_active — higher value → zone 1 (worst). Zone1 P90–P100, Zone6 P0–P15.
+ * Either <P10 or >P90 goes into zone 1 (display bucket 6), depending on direction:
+ * - lowerIsWorse (default): FICO, market_delta — lower value = worse. Zone1 = <P10 (bucket 6), Zone6 = P90–P100 (bucket 1).
+ * - higherIsWorse: LTV, DTI, days_active — higher value = worse. Zone1 = >P90 (bucket 6), Zone6 = P0–P15 (bucket 1).
  */
 export function zoneAndPointsOriginate(
   value: number,
   stats: BlendedFeatureStats,
   higherIsWorse: boolean = false
 ): { zone: number } | null {
+  const p10 = stats.blended_p10;
   const p15 = stats.blended_p15;
   const p35 = stats.blended_p35;
   const p55 = stats.blended_p55;
@@ -438,7 +439,7 @@ export function zoneAndPointsOriginate(
   const p90 = stats.blended_p90;
   if (p15 == null || p35 == null || p55 == null || p75 == null || p90 == null) return null;
   if (higherIsWorse) {
-    // Higher value = worse: high percentile → zone 1 (worst)
+    // Higher value = worse: >P90 → zone 1 (display bucket 6)
     if (value > p90) return { zone: 1 };
     if (value > p75) return { zone: 2 };
     if (value > p55) return { zone: 3 };
@@ -446,11 +447,12 @@ export function zoneAndPointsOriginate(
     if (value > p15) return { zone: 5 };
     return { zone: 6 };
   }
-  // Lower value = worse (FICO, market_delta): low percentile → zone 1 (worst)
-  if (value <= p15) return { zone: 1 };
-  if (value <= p35) return { zone: 2 };
-  if (value <= p55) return { zone: 3 };
-  if (value <= p75) return { zone: 4 };
-  if (value <= p90) return { zone: 5 };
+  // Lower value = worse (FICO, market_delta): <P10 → zone 1 (display bucket 6). Fall back to <=P15 when P10 missing.
+  const lowTailThreshold = p10 ?? p15;
+  if (value < lowTailThreshold) return { zone: 1 };
+  if (value <= p15) return { zone: 2 };
+  if (value <= p35) return { zone: 3 };
+  if (value <= p55) return { zone: 4 };
+  if (value <= p75) return { zone: 5 };
   return { zone: 6 };
 }

@@ -21,7 +21,7 @@ import type { BlendedProfileMap, BlendedFeatureStats } from './falloutTypes.js';
 /** Max number of reason codes (feature contributions) stored per loan. */
 const MAX_REASON_CODES = 10;
 
-/** Similarity zones (6): Zone1 P45–P55 (middle) = 6 pts, Zone2 P40–P45 or P55–P60 = 5, Zone3 P30–P40 or P60–P70 = 4, Zone4 P20–P30 or P70–P80 = 3, Zone5 P10–P20 or P80–P90 = 2, Zone6 <P10 or >P90 = 1. */
+/** Zone points: 6 pts = bucket 6 (worst), 1 pt = best. Both middle (P45–P55) and worse tail get 6 pts (direction-aware). */
 const ZONE_POINTS = [6, 5, 4, 3, 2, 1];
 
 /** Risk threshold: only predict Denied/Withdrawn when risk score (0-100) is above this. */
@@ -31,9 +31,16 @@ const RISK_THRESHOLD_PCT = 60;
 const MAX_DENIED_POINTS = 4 * 6;
 const MAX_WITHDRAWN_POINTS = 5 * 6;
 
+/**
+ * Zone scoring for Denied vs Withdrawn.
+ * Denied (symmetricBands = false): Direction-aware. Zone 1 = middle (P45–P55) OR worse tail only. Zone 6 = good tail (1 pt).
+ * Withdrawn (symmetricBands = true): Symmetric only. Zone 1 = middle (P45–P55) only. Zone 6 = both tails (<P10 or >P90) = 1 pt.
+ */
 function zoneAndPoints(
   value: number,
-  stats: BlendedFeatureStats
+  stats: BlendedFeatureStats,
+  higherIsWorse: boolean,
+  symmetricBands: boolean
 ): { zone: number; points: number } {
   const p10 = stats.blended_p10;
   const p20 = stats.blended_p20;
@@ -57,34 +64,68 @@ function zoneAndPoints(
     p80 != null &&
     p90 != null
   ) {
-    // Zone 1: P45–P55 (middle band) → 6 points
+    if (symmetricBands) {
+      // Withdrawn: symmetric only. Middle = Zone 1, both tails = Zone 6.
+      if (value >= p45 && value <= p55) return { zone: 1, points: ZONE_POINTS[0] };
+      if ((value >= p40 && value < p45) || (value > p55 && value <= p60)) return { zone: 2, points: ZONE_POINTS[1] };
+      if ((value >= p30 && value < p40) || (value > p60 && value <= p70)) return { zone: 3, points: ZONE_POINTS[2] };
+      if ((value >= p20 && value < p30) || (value > p70 && value <= p80)) return { zone: 4, points: ZONE_POINTS[3] };
+      if ((value >= p10 && value < p20) || (value > p80 && value <= p90)) return { zone: 5, points: ZONE_POINTS[4] };
+      return { zone: 6, points: ZONE_POINTS[5] }; // both tails
+    }
+    // Denied: direction-aware. Worse tail → Zone 1, good tail → Zone 6.
+    if (higherIsWorse) {
+      if (value > p90) return { zone: 1, points: ZONE_POINTS[0] };
+      if (value < p10) return { zone: 6, points: ZONE_POINTS[5] };
+    } else {
+      if (value < p10) return { zone: 1, points: ZONE_POINTS[0] };
+      if (value > p90) return { zone: 6, points: ZONE_POINTS[5] };
+    }
     if (value >= p45 && value <= p55) return { zone: 1, points: ZONE_POINTS[0] };
-    // Zone 2: P40–P45 or P55–P60 → 5 points
     if ((value >= p40 && value < p45) || (value > p55 && value <= p60)) return { zone: 2, points: ZONE_POINTS[1] };
-    // Zone 3: P30–P40 or P60–P70 → 4 points
     if ((value >= p30 && value < p40) || (value > p60 && value <= p70)) return { zone: 3, points: ZONE_POINTS[2] };
-    // Zone 4: P20–P30 or P70–P80 → 3 points
     if ((value >= p20 && value < p30) || (value > p70 && value <= p80)) return { zone: 4, points: ZONE_POINTS[3] };
-    // Zone 5: P10–P20 or P80–P90 → 2 points
     if ((value >= p10 && value < p20) || (value > p80 && value <= p90)) return { zone: 5, points: ZONE_POINTS[4] };
-    // Zone 6: Below P10 or above P90 (tails) → 1 point
-    return { zone: 6, points: ZONE_POINTS[5] };
+    return { zone: 5, points: ZONE_POINTS[4] };
   }
   const { blended_q1, blended_q3, blended_iqr } = stats;
   const iqr = Math.max(blended_iqr, 0.01);
-  if (value >= blended_q1 && value <= blended_q3) return { zone: 1, points: ZONE_POINTS[0] };
-  if (value < blended_q1) {
-    if (value >= blended_q1 - iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
-    if (value >= blended_q1 - iqr) return { zone: 3, points: ZONE_POINTS[2] };
-    if (value >= blended_q1 - 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
-    if (value >= blended_q1 - 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+  if (symmetricBands) {
+    if (value >= blended_q1 && value <= blended_q3) return { zone: 1, points: ZONE_POINTS[0] };
+    if (value < blended_q1) {
+      if (value >= blended_q1 - iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+      if (value >= blended_q1 - iqr) return { zone: 3, points: ZONE_POINTS[2] };
+      if (value >= blended_q1 - 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+      if (value >= blended_q1 - 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+      return { zone: 6, points: ZONE_POINTS[5] };
+    }
+    if (value <= blended_q3 + iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+    if (value <= blended_q3 + iqr) return { zone: 3, points: ZONE_POINTS[2] };
+    if (value <= blended_q3 + 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+    if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
     return { zone: 6, points: ZONE_POINTS[5] };
   }
-  if (value <= blended_q3 + iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
-  if (value <= blended_q3 + iqr) return { zone: 3, points: ZONE_POINTS[2] };
-  if (value <= blended_q3 + 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
-  if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
-  return { zone: 6, points: ZONE_POINTS[5] };
+  if (higherIsWorse) {
+    if (value > blended_q3) {
+      if (value <= blended_q3 + iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+      if (value <= blended_q3 + iqr) return { zone: 3, points: ZONE_POINTS[2] };
+      if (value <= blended_q3 + 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+      if (value <= blended_q3 + 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+      return { zone: 1, points: ZONE_POINTS[0] };
+    }
+    if (value < blended_q1) return { zone: 6, points: ZONE_POINTS[5] };
+  } else {
+    if (value < blended_q1) {
+      if (value >= blended_q1 - iqr / 2) return { zone: 2, points: ZONE_POINTS[1] };
+      if (value >= blended_q1 - iqr) return { zone: 3, points: ZONE_POINTS[2] };
+      if (value >= blended_q1 - 1.5 * iqr) return { zone: 4, points: ZONE_POINTS[3] };
+      if (value >= blended_q1 - 2 * iqr) return { zone: 5, points: ZONE_POINTS[4] };
+      return { zone: 1, points: ZONE_POINTS[0] };
+    }
+    if (value > blended_q3) return { zone: 6, points: ZONE_POINTS[5] };
+  }
+  if (value >= blended_q1 && value <= blended_q3) return { zone: 1, points: ZONE_POINTS[0] };
+  return { zone: 4, points: ZONE_POINTS[3] };
 }
 
 /** Raw segment key (loan_type, loan_purpose, occupancy) for profile lookup. */
@@ -147,6 +188,9 @@ function computeSimilarityScore(
       ? (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active', 'market_delta'] as const)
       : (['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active'] as const); // Denied: days_active = app to today
 
+  // Lower value = worse: fico_score, market_delta. Higher value = worse: ltv_ratio, be_dti_ratio, days_active.
+  const higherIsWorseFeatures = new Set(['ltv_ratio', 'be_dti_ratio', 'days_active']);
+
   let score = 0;
   const reasonCodes: Array<{ bucket_type: string; bucket_value: string; risk_score: number }> = [];
 
@@ -164,7 +208,9 @@ function computeSimilarityScore(
     if (value == null || isNaN(value)) continue; // skip null/missing
     const stats = profile.get(f);
     if (!stats) continue;
-    const { zone, points } = zoneAndPoints(value, stats);
+    const higherIsWorse = higherIsWorseFeatures.has(f);
+    const symmetricBands = statusType === 'Withdrawn'; // Denied = direction-aware; Withdrawn = symmetric only
+    const { zone, points } = zoneAndPoints(value, stats, higherIsWorse, symmetricBands);
     score += points;
     reasonCodes.push({
       bucket_type: f,

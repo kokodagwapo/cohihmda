@@ -111,7 +111,7 @@ export interface NumericProfileSegment {
   occupancy: string;
 }
 
-/** Blended feature stats (computed from yearly profiles, not persisted). Six zones: Zone1 P45–P55=6pts, Zone2 P40–P45 or P55–P60=5, Zone3 P30–P40 or P60–P70=4, Zone4 P20–P30 or P70–P80=3, Zone5 P10–P20 or P80–P90=2, Zone6 <P10 or >P90=1. */
+/** Blended feature stats (computed from yearly profiles, not persisted). Denied: direction-aware — Zone 1 = middle OR worse tail only; Zone 6 = good tail. Withdrawn: symmetric only — Zone 1 = middle (P45–P55) only; Zone 6 = both tails (<P10 or >P90) = 1 pt. */
 export interface BlendedFeatureStats {
   blended_mean: number;
   blended_q1: number;

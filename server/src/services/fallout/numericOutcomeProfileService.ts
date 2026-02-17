@@ -90,10 +90,10 @@ function outcomeEndDateForDaysActive(row: any, statusType: FalloutStatusType | n
   return isNaN(date.getTime()) ? null : date;
 }
 
-/** Date used for recency bucket: first available of funding_date, current_status_date, application_date */
+/** Date used for recency bucket: first available of funding_date, current_status_date, denial_date, application_date (and closing_date) */
 function outcomeDateForRecency(row: any): Date | null {
   const d =
-    row.funding_date ?? row.fund_date ?? row.current_status_date ?? row.closing_date ?? row.application_date;
+    row.funding_date ?? row.fund_date ?? row.current_status_date ?? row.denial_date ?? row.closing_date ?? row.application_date;
   if (!d) return null;
   const date = new Date(d);
   return isNaN(date.getTime()) ? null : date;
