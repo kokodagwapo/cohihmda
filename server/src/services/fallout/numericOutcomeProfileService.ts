@@ -17,7 +17,7 @@
 import pg from 'pg';
 import { logInfo, logError } from '../logger.js';
 import { computeMarketDeltaForDates } from '../dashboard/marketRateService.js';
-import type { FalloutStatusType } from './falloutTypes.js';
+import type { FalloutStatusType, OutcomeProfileStatusType } from './falloutTypes.js';
 
 const START_YEAR = 2023;
 /** Minimum loans in a segment/feature to save a profile row (skip saving below this). */
@@ -36,8 +36,10 @@ export type SegmentKey = { loan_type: string; loan_purpose: string; occupancy: s
 /** Denied: fico, ltv, be_dti, days_active (days_active = application_date to denial_date for historical Denied). */
 const FEATURES_DENIED = ['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active'] as const;
 const FEATURES_WITHDRAWN = ['fico_score', 'ltv_ratio', 'be_dti_ratio', 'days_active', 'market_delta'] as const;
+/** Originated (Loan Originated): same as Withdrawn (includes market_delta); used only for UI zone colors, not prediction. */
+const FEATURES_ORIGINATED = FEATURES_WITHDRAWN;
 
-function classifyStatus(row: any): FalloutStatusType | 'FundedOnTime' | null {
+export function classifyStatus(row: any): FalloutStatusType | 'FundedOnTime' | null {
   const status = (row.current_loan_status ?? '').toString().trim().toUpperCase();
   if (!status) return null;
   if (status === 'ACTIVE LOAN' || status === 'ACTIVE' || status === 'INQUIRY') return null;
@@ -68,7 +70,7 @@ function classifyStatus(row: any): FalloutStatusType | 'FundedOnTime' | null {
   return 'FundedOnTime';
 }
 
-function norm(s: any): string {
+export function norm(s: any): string {
   const v = (s ?? '').toString().trim();
   return v || 'Unknown';
 }
@@ -88,10 +90,10 @@ function outcomeEndDateForDaysActive(row: any, statusType: FalloutStatusType | n
   return isNaN(date.getTime()) ? null : date;
 }
 
-/** Date used for recency bucket: first available of funding_date, current_status_date, application_date */
+/** Date used for recency bucket: first available of funding_date, current_status_date, denial_date, application_date (and closing_date) */
 function outcomeDateForRecency(row: any): Date | null {
   const d =
-    row.funding_date ?? row.fund_date ?? row.current_status_date ?? row.closing_date ?? row.application_date;
+    row.funding_date ?? row.fund_date ?? row.current_status_date ?? row.denial_date ?? row.closing_date ?? row.application_date;
   if (!d) return null;
   const date = new Date(d);
   return isNaN(date.getTime()) ? null : date;
@@ -100,7 +102,7 @@ function outcomeDateForRecency(row: any): Date | null {
 /**
  * Load historical loans from 2023 through present year (year from application_date).
  */
-async function loadHistoricalLoans(pool: pg.Pool): Promise<any[]> {
+export async function loadHistoricalLoans(pool: pg.Pool): Promise<any[]> {
   const endYear = new Date().getFullYear();
   const startStr = `${START_YEAR}-01-01`;
   const baseCols = `
@@ -142,7 +144,7 @@ function getDistinctSegments(rows: any[]): SegmentKey[] {
 
 interface FeatureRow {
   year: number;
-  status_type: FalloutStatusType;
+  status_type: OutcomeProfileStatusType;
   loan_type: string;
   loan_purpose: string;
   occupancy: string;
@@ -153,11 +155,17 @@ interface FeatureRow {
   q3_value: number | null;
   iqr_value: number | null;
   p10_value: number | null;
+  p15_value: number | null;
   p20_value: number | null;
   p30_value: number | null;
+  p35_value: number | null;
   p40_value: number | null;
+  p45_value: number | null;
+  p55_value: number | null;
   p60_value: number | null;
+  p65_value: number | null;
   p70_value: number | null;
+  p75_value: number | null;
   p80_value: number | null;
   p90_value: number | null;
   sample_size: number;
@@ -174,7 +182,7 @@ function quantile(sorted: number[], p: number): number | null {
 }
 
 /**
- * Ensure outcome_numeric_risk_profiles has P10–P90 columns (for tenants created before migration 034).
+ * Ensure outcome_numeric_risk_profiles has P10–P90 and P45/P65 columns (for 6-zone scoring).
  * Safe to call every time; uses ADD COLUMN IF NOT EXISTS.
  */
 async function ensureOutcomeNumericRiskProfilesPercentileColumns(pool: pg.Pool): Promise<void> {
@@ -182,11 +190,17 @@ async function ensureOutcomeNumericRiskProfilesPercentileColumns(pool: pg.Pool):
     await pool.query(`
       ALTER TABLE public.outcome_numeric_risk_profiles
         ADD COLUMN IF NOT EXISTS p10_value NUMERIC,
+        ADD COLUMN IF NOT EXISTS p15_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p20_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p30_value NUMERIC,
+        ADD COLUMN IF NOT EXISTS p35_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p40_value NUMERIC,
+        ADD COLUMN IF NOT EXISTS p45_value NUMERIC,
+        ADD COLUMN IF NOT EXISTS p55_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p60_value NUMERIC,
+        ADD COLUMN IF NOT EXISTS p65_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p70_value NUMERIC,
+        ADD COLUMN IF NOT EXISTS p75_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p80_value NUMERIC,
         ADD COLUMN IF NOT EXISTS p90_value NUMERIC
     `);
@@ -229,6 +243,37 @@ async function ensureOutcomeNumericRiskProfilesRecencyBucket(pool: pg.Pool): Pro
 }
 
 /**
+ * Ensure outcome_numeric_risk_profiles allows status_type = 'Originated' (for UI zone profiles).
+ * Drops the existing status_type check constraint and re-adds it including 'Originated'.
+ * Safe to call every time; avoids insert failures when migration 037 has not been run.
+ */
+async function ensureOutcomeNumericRiskProfilesOriginatedStatus(pool: pg.Pool): Promise<void> {
+  try {
+    const nameResult = await pool.query(
+      `SELECT c.conname FROM pg_constraint c
+       JOIN pg_class t ON c.conrelid = t.oid
+       WHERE t.relname = 'outcome_numeric_risk_profiles' AND c.contype = 'c'
+         AND (pg_get_constraintdef(c.oid) LIKE '%status_type%' OR c.conname = 'outcome_numeric_risk_profiles_status_type_check')
+       LIMIT 1`
+    );
+    const conname = (nameResult.rows[0] as { conname: string } | undefined)?.conname;
+    const constraintId = conname ? `"${String(conname).replace(/"/g, '""')}"` : 'outcome_numeric_risk_profiles_status_type_check';
+    await pool.query(
+      `ALTER TABLE public.outcome_numeric_risk_profiles DROP CONSTRAINT IF EXISTS ${constraintId}`
+    );
+    await pool.query(
+      `ALTER TABLE public.outcome_numeric_risk_profiles
+       ADD CONSTRAINT outcome_numeric_risk_profiles_status_type_check
+       CHECK (status_type IN ('Denied', 'Withdrawn', 'ClosingLate', 'Originated'))`
+    );
+  } catch (e: any) {
+    if (e.code !== '42710') {
+      logError('numericOutcomeProfileService: ensure Originated status constraint failed', e);
+    }
+  }
+}
+
+/**
  * Run profile derivation: compute profiles by segment and recency only (2023–present data).
  * Year is used only to filter the date range; aggregation is by (status, segment, recency_bucket).
  */
@@ -238,6 +283,7 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
 }> {
   await ensureOutcomeNumericRiskProfilesPercentileColumns(pool);
   await ensureOutcomeNumericRiskProfilesRecencyBucket(pool);
+  await ensureOutcomeNumericRiskProfilesOriginatedStatus(pool);
 
   const currentYear = new Date().getFullYear();
   const referenceDate = new Date();
@@ -247,7 +293,7 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
 
   // Normalize: status, segment, recency_bucket (year only used to filter 2023–present)
   type LoanRec = {
-    status_type: FalloutStatusType;
+    status_type: OutcomeProfileStatusType;
     segment: SegmentKey;
     recency_bucket: string;
     fico_score: number | null;
@@ -258,9 +304,13 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
   };
 
   const recs: LoanRec[] = [];
+  const marketDeltaToPersist: { loan_id: string; market_delta: number }[] = [];
   for (const row of rows) {
-    const status_type = classifyStatus(row);
-    if (status_type == null || status_type === 'FundedOnTime') continue;
+    const rawStatus = classifyStatus(row);
+    if (rawStatus == null) continue;
+    // Map FundedOnTime (Loan Originated) to 'Originated' for profile building (UI zones only; not used for deny/withdraw prediction).
+    const status_type: OutcomeProfileStatusType =
+      rawStatus === 'FundedOnTime' ? 'Originated' : rawStatus;
     const appDate = row.application_date;
     const year = appDate ? new Date(appDate).getFullYear() : currentYear;
     if (year < START_YEAR || year > currentYear) continue;
@@ -272,7 +322,7 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
         : 9999;
     const recency_bucket = daysAgo <= RECENCY_DAYS ? RECENCY_BUCKET_RECENT : RECENCY_BUCKET_OLDER;
 
-    const endDate = outcomeEndDateForDaysActive(row, status_type);
+    const endDate = outcomeEndDateForDaysActive(row, rawStatus === 'FundedOnTime' ? 'Withdrawn' : rawStatus);
     let days_active: number | null = null;
     if (appDate && endDate) {
       days_active = Math.floor(
@@ -293,12 +343,16 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     };
 
     let market_delta: number | null = null;
-    if (status_type === 'Withdrawn') {
+    if (rawStatus === 'Withdrawn' || rawStatus === 'FundedOnTime') {
       const lockDate = row.lock_date ?? row.application_date;
       const outcomeDate = row.current_status_date ?? row.funding_date ?? row.closing_date;
       if (lockDate && outcomeDate) {
         market_delta = await computeMarketDeltaForDates(lockDate, outcomeDate);
       }
+    }
+
+    if (market_delta != null && row.loan_id != null && !Number.isNaN(Number(market_delta))) {
+      marketDeltaToPersist.push({ loan_id: String(row.loan_id), market_delta: Number(market_delta) });
     }
 
     recs.push({
@@ -313,6 +367,23 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     });
   }
 
+  // Persist market_delta to loans table when column exists (migration 038) so UI and sequencer can use it
+  if (marketDeltaToPersist.length > 0) {
+    try {
+      await pool.query(
+        `UPDATE public.loans AS l SET market_change_delta = v.delta
+         FROM (SELECT unnest($1::text[]) AS loan_id, unnest($2::decimal[]) AS delta) AS v
+         WHERE l.loan_id = v.loan_id`,
+        [
+          marketDeltaToPersist.map((r) => r.loan_id),
+          marketDeltaToPersist.map((r) => r.market_delta),
+        ]
+      );
+    } catch (e: any) {
+      if (e?.code !== '42703') logError('numericOutcomeProfileService: persist market_change_delta failed', e);
+    }
+  }
+
   // Aggregate by (status_type, segment, recency_bucket) only — no year in key
   const agg = new Map<
     string,
@@ -325,6 +396,16 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     }
   >();
   const aggByLoanType = new Map<
+    string,
+    {
+      fico: number[];
+      ltv: number[];
+      dti: number[];
+      days_active: number[];
+      market_delta: number[];
+    }
+  >();
+  const aggByLoanTypePurpose = new Map<
     string,
     {
       fico: number[];
@@ -370,6 +451,18 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     if (r.days_active != null) fallbackEntry.days_active.push(r.days_active);
     if (r.market_delta != null) fallbackEntry.market_delta.push(r.market_delta);
 
+    const typePurposeKey = `${r.status_type}|${r.segment.loan_type}|${r.segment.loan_purpose}|${r.recency_bucket}`;
+    let typePurposeEntry = aggByLoanTypePurpose.get(typePurposeKey);
+    if (!typePurposeEntry) {
+      typePurposeEntry = { fico: [], ltv: [], dti: [], days_active: [], market_delta: [] };
+      aggByLoanTypePurpose.set(typePurposeKey, typePurposeEntry);
+    }
+    if (r.fico_score != null) typePurposeEntry.fico.push(r.fico_score);
+    if (r.ltv_ratio != null) typePurposeEntry.ltv.push(r.ltv_ratio);
+    if (r.be_dti_ratio != null) typePurposeEntry.dti.push(r.be_dti_ratio);
+    if (r.days_active != null) typePurposeEntry.days_active.push(r.days_active);
+    if (r.market_delta != null) typePurposeEntry.market_delta.push(r.market_delta);
+
     const allKey = `${r.status_type}|${r.recency_bucket}`;
     let allEntry = aggAll.get(allKey);
     if (!allEntry) {
@@ -388,11 +481,13 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     const parts = key.split('|');
     const recency_bucket = parts[4] ?? RECENCY_BUCKET_OLDER;
     const [status_type, loan_type, loan_purpose, occupancy] = parts;
-    const status = status_type as FalloutStatusType;
+    const status = status_type as OutcomeProfileStatusType;
     const features =
       status === 'Withdrawn'
         ? FEATURES_WITHDRAWN
-        : (FEATURES_DENIED as readonly string[]);
+        : status === 'Originated'
+          ? (FEATURES_ORIGINATED as readonly string[])
+          : (FEATURES_DENIED as readonly string[]);
 
     for (const f of features) {
       let arr: number[] = [];
@@ -410,11 +505,17 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
       const q3 = quantile(sorted, 0.75);
       const iqr = q1 != null && q3 != null ? q3 - q1 : null;
       const p10 = quantile(sorted, 0.1);
+      const p15 = quantile(sorted, 0.15);
       const p20 = quantile(sorted, 0.2);
       const p30 = quantile(sorted, 0.3);
+      const p35 = quantile(sorted, 0.35);
       const p40 = quantile(sorted, 0.4);
+      const p45 = quantile(sorted, 0.45);
+      const p55 = quantile(sorted, 0.55);
       const p60 = quantile(sorted, 0.6);
+      const p65 = quantile(sorted, 0.65);
       const p70 = quantile(sorted, 0.7);
+      const p75 = quantile(sorted, 0.75);
       const p80 = quantile(sorted, 0.8);
       const p90 = quantile(sorted, 0.9);
       featureRows.push({
@@ -430,11 +531,17 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
         q3_value: q3 ?? null,
         iqr_value: iqr,
         p10_value: p10 ?? null,
+        p15_value: p15 ?? null,
         p20_value: p20 ?? null,
         p30_value: p30 ?? null,
+        p35_value: p35 ?? null,
         p40_value: p40 ?? null,
+        p45_value: p45 ?? null,
+        p55_value: p55 ?? null,
         p60_value: p60 ?? null,
+        p65_value: p65 ?? null,
         p70_value: p70 ?? null,
+        p75_value: p75 ?? null,
         p80_value: p80 ?? null,
         p90_value: p90 ?? null,
         sample_size: sorted.length,
@@ -443,16 +550,18 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     }
   }
 
-  // Fallback profiles: one per (status_type, loan_type, recency_bucket) with loan_purpose='All', occupancy='All'
-  for (const [key, data] of aggByLoanType) {
+  // Fallback profiles: one per (status_type, loan_type, loan_purpose, recency_bucket) with occupancy='All' (type + purpose fallback)
+  for (const [key, data] of aggByLoanTypePurpose) {
     const parts = key.split('|');
-    const recency_bucket = parts[2] ?? RECENCY_BUCKET_OLDER;
-    const [status_type, loan_type] = parts;
-    const status = status_type as FalloutStatusType;
+    const recency_bucket = parts[3] ?? RECENCY_BUCKET_OLDER;
+    const [status_type, loan_type, loan_purpose] = parts;
+    const status = status_type as OutcomeProfileStatusType;
     const features =
       status === 'Withdrawn'
         ? FEATURES_WITHDRAWN
-        : (FEATURES_DENIED as readonly string[]);
+        : status === 'Originated'
+          ? (FEATURES_ORIGINATED as readonly string[])
+          : (FEATURES_DENIED as readonly string[]);
 
     for (const f of features) {
       let arr: number[] = [];
@@ -470,11 +579,91 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
       const q3 = quantile(sorted, 0.75);
       const iqr = q1 != null && q3 != null ? q3 - q1 : null;
       const p10 = quantile(sorted, 0.1);
+      const p15 = quantile(sorted, 0.15);
       const p20 = quantile(sorted, 0.2);
       const p30 = quantile(sorted, 0.3);
+      const p35 = quantile(sorted, 0.35);
       const p40 = quantile(sorted, 0.4);
+      const p45 = quantile(sorted, 0.45);
+      const p55 = quantile(sorted, 0.55);
       const p60 = quantile(sorted, 0.6);
+      const p65 = quantile(sorted, 0.65);
       const p70 = quantile(sorted, 0.7);
+      const p75 = quantile(sorted, 0.75);
+      const p80 = quantile(sorted, 0.8);
+      const p90 = quantile(sorted, 0.9);
+      featureRows.push({
+        year: currentYear,
+        status_type: status,
+        loan_type: loan_type!,
+        loan_purpose: loan_purpose!,
+        occupancy: 'All',
+        feature_name: f,
+        recency_bucket,
+        mean_value: mean,
+        q1_value: q1 ?? null,
+        q3_value: q3 ?? null,
+        iqr_value: iqr,
+        p10_value: p10 ?? null,
+        p15_value: p15 ?? null,
+        p20_value: p20 ?? null,
+        p30_value: p30 ?? null,
+        p35_value: p35 ?? null,
+        p40_value: p40 ?? null,
+        p45_value: p45 ?? null,
+        p55_value: p55 ?? null,
+        p60_value: p60 ?? null,
+        p65_value: p65 ?? null,
+        p70_value: p70 ?? null,
+        p75_value: p75 ?? null,
+        p80_value: p80 ?? null,
+        p90_value: p90 ?? null,
+        sample_size: sorted.length,
+        low_confidence: true, // type+purpose fallback profile
+      });
+    }
+  }
+
+  // Fallback profiles: one per (status_type, loan_type, recency_bucket) with loan_purpose='All', occupancy='All'
+  for (const [key, data] of aggByLoanType) {
+    const parts = key.split('|');
+    const recency_bucket = parts[2] ?? RECENCY_BUCKET_OLDER;
+    const [status_type, loan_type] = parts;
+    const status = status_type as OutcomeProfileStatusType;
+    const features =
+      status === 'Withdrawn'
+        ? FEATURES_WITHDRAWN
+        : status === 'Originated'
+          ? (FEATURES_ORIGINATED as readonly string[])
+          : (FEATURES_DENIED as readonly string[]);
+
+    for (const f of features) {
+      let arr: number[] = [];
+      if (f === 'fico_score') arr = data.fico;
+      else if (f === 'ltv_ratio') arr = data.ltv;
+      else if (f === 'be_dti_ratio') arr = data.dti;
+      else if (f === 'days_active') arr = data.days_active;
+      else if (f === 'market_delta') arr = data.market_delta;
+
+      if (arr.length === 0) continue;
+      const sorted = [...arr].sort((a, b) => a - b);
+      if (sorted.length < MIN_SAMPLE_SIZE_FALLBACK) continue;
+      const mean = sorted.reduce((s, x) => s + x, 0) / sorted.length;
+      const q1 = quantile(sorted, 0.25);
+      const q3 = quantile(sorted, 0.75);
+      const iqr = q1 != null && q3 != null ? q3 - q1 : null;
+      const p10 = quantile(sorted, 0.1);
+      const p15 = quantile(sorted, 0.15);
+      const p20 = quantile(sorted, 0.2);
+      const p30 = quantile(sorted, 0.3);
+      const p35 = quantile(sorted, 0.35);
+      const p40 = quantile(sorted, 0.4);
+      const p45 = quantile(sorted, 0.45);
+      const p55 = quantile(sorted, 0.55);
+      const p60 = quantile(sorted, 0.6);
+      const p65 = quantile(sorted, 0.65);
+      const p70 = quantile(sorted, 0.7);
+      const p75 = quantile(sorted, 0.75);
       const p80 = quantile(sorted, 0.8);
       const p90 = quantile(sorted, 0.9);
       featureRows.push({
@@ -490,11 +679,17 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
         q3_value: q3 ?? null,
         iqr_value: iqr,
         p10_value: p10 ?? null,
+        p15_value: p15 ?? null,
         p20_value: p20 ?? null,
         p30_value: p30 ?? null,
+        p35_value: p35 ?? null,
         p40_value: p40 ?? null,
+        p45_value: p45 ?? null,
+        p55_value: p55 ?? null,
         p60_value: p60 ?? null,
+        p65_value: p65 ?? null,
         p70_value: p70 ?? null,
+        p75_value: p75 ?? null,
         p80_value: p80 ?? null,
         p90_value: p90 ?? null,
         sample_size: sorted.length,
@@ -508,11 +703,13 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     const parts = key.split('|');
     const recency_bucket = parts[1] ?? RECENCY_BUCKET_OLDER;
     const [status_type] = parts;
-    const status = status_type as FalloutStatusType;
+    const status = status_type as OutcomeProfileStatusType;
     const features =
       status === 'Withdrawn'
         ? FEATURES_WITHDRAWN
-        : (FEATURES_DENIED as readonly string[]);
+        : status === 'Originated'
+          ? (FEATURES_ORIGINATED as readonly string[])
+          : (FEATURES_DENIED as readonly string[]);
 
     for (const f of features) {
       let arr: number[] = [];
@@ -530,11 +727,17 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
       const q3 = quantile(sorted, 0.75);
       const iqr = q1 != null && q3 != null ? q3 - q1 : null;
       const p10 = quantile(sorted, 0.1);
+      const p15 = quantile(sorted, 0.15);
       const p20 = quantile(sorted, 0.2);
       const p30 = quantile(sorted, 0.3);
+      const p35 = quantile(sorted, 0.35);
       const p40 = quantile(sorted, 0.4);
+      const p45 = quantile(sorted, 0.45);
+      const p55 = quantile(sorted, 0.55);
       const p60 = quantile(sorted, 0.6);
+      const p65 = quantile(sorted, 0.65);
       const p70 = quantile(sorted, 0.7);
+      const p75 = quantile(sorted, 0.75);
       const p80 = quantile(sorted, 0.8);
       const p90 = quantile(sorted, 0.9);
       featureRows.push({
@@ -550,11 +753,17 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
         q3_value: q3 ?? null,
         iqr_value: iqr,
         p10_value: p10 ?? null,
+        p15_value: p15 ?? null,
         p20_value: p20 ?? null,
         p30_value: p30 ?? null,
+        p35_value: p35 ?? null,
         p40_value: p40 ?? null,
+        p45_value: p45 ?? null,
+        p55_value: p55 ?? null,
         p60_value: p60 ?? null,
+        p65_value: p65 ?? null,
         p70_value: p70 ?? null,
+        p75_value: p75 ?? null,
         p80_value: p80 ?? null,
         p90_value: p90 ?? null,
         sample_size: sorted.length,
@@ -573,8 +782,8 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
     try {
       await pool.query(
         `INSERT INTO public.outcome_numeric_risk_profiles
-         (year, status_type, loan_type, loan_purpose, occupancy, feature_name, recency_bucket, mean_value, q1_value, q3_value, iqr_value, p10_value, p20_value, p30_value, p40_value, p60_value, p70_value, p80_value, p90_value, sample_size, low_confidence, calculated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+         (year, status_type, loan_type, loan_purpose, occupancy, feature_name, recency_bucket, mean_value, q1_value, q3_value, iqr_value, p10_value, p15_value, p20_value, p30_value, p35_value, p40_value, p45_value, p55_value, p60_value, p65_value, p70_value, p75_value, p80_value, p90_value, sample_size, low_confidence, calculated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
         [
           r.year,
           r.status_type,
@@ -588,11 +797,17 @@ export async function runNumericOutcomeProfileDerivation(pool: pg.Pool): Promise
           r.q3_value,
           r.iqr_value,
           r.p10_value,
+          r.p15_value,
           r.p20_value,
           r.p30_value,
+          r.p35_value,
           r.p40_value,
+          r.p45_value,
+          r.p55_value,
           r.p60_value,
+          r.p65_value,
           r.p70_value,
+          r.p75_value,
           r.p80_value,
           r.p90_value,
           r.sample_size,

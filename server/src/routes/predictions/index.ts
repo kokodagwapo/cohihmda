@@ -19,8 +19,16 @@ import {
   getHistoricalFalloutRates,
   runFalloutSequencer,
   runNumericOutcomeProfileDerivation,
+  runSegmentFalloutRates,
 } from "../../services/fallout/index.js";
-import { computeMarketDeltaForDates, autoSyncMarketRatesIfNeeded, initializeMarketRateCache, getMarketRateForDate } from "../../services/dashboard/marketRateService.js";
+import { norm } from "../../services/fallout/numericOutcomeProfileService.js";
+import {
+  computeMarketDeltaForDates,
+  getMarketRateForDate,
+  autoSyncMarketRatesIfNeeded,
+  initializeMarketRateCache,
+} from "../../services/dashboard/marketRateService.js";
+import { calculatePullthroughForRole } from "../../services/dashboard/predictionService.js";
 
 const router = Router();
 
@@ -41,13 +49,12 @@ router.post(
   apiLimiter,
   async (req: AuthRequest, res) => {
     const startMs = Date.now();
+    const tenantContext = getTenantContext(req);
+    const tenantId = tenantContext.tenantId;
+    logInfo("[Predict] POST /api/predictions started", { tenantId });
     try {
-      const tenantContext = getTenantContext(req);
       const tenantPool = tenantContext.tenantPool;
-      const tenantId = tenantContext.tenantId;
       const { loanIds } = req.body || {};
-
-      logInfo("[Predictions] Starting document pipeline (fallout sequencer)", { tenantId });
 
       // Fetch active loans: sequencer columns + display fields so UI shows loan number, amount, channel, etc.
       const baseCols = `
@@ -57,25 +64,44 @@ router.post(
         estimated_closing_date, funding_date, closing_date, current_status_date, ctc_date, uw_final_approval_date, conditional_approval_date,
         loan_officer_id, loan_officer, loan_processor_id, processor, underwriter_id, underwriter, closer_id, closer,
         channel`;
+      const activeLoansQuery = `
+        SELECT ${baseCols}
+        FROM public.loans
+        WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+        ORDER BY application_date DESC
+        LIMIT 5000`;
       let activeLoans: any[];
       try {
-        const withMarket = await tenantPool.query(
-          `SELECT ${baseCols}, market_rate, market_rate_at_lock
+        const withAll = await tenantPool.query(
+          `SELECT ${baseCols}, market_rate, market_rate_at_lock, market_change_delta
            FROM public.loans
            WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
            ORDER BY application_date DESC
            LIMIT 5000`
         );
-        activeLoans = withMarket.rows;
-      } catch {
-        const withoutMarket = await tenantPool.query(
-          `SELECT ${baseCols}
-           FROM public.loans
-           WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
-           ORDER BY application_date DESC
-           LIMIT 5000`
-        );
-        activeLoans = withoutMarket.rows;
+        activeLoans = withAll.rows;
+      } catch (e: any) {
+        if (e?.code === "42703") {
+          try {
+            const withDelta = await tenantPool.query(
+              `SELECT ${baseCols}, market_change_delta
+               FROM public.loans
+               WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+               ORDER BY application_date DESC
+               LIMIT 5000`
+            );
+            activeLoans = withDelta.rows;
+          } catch (e2: any) {
+            if (e2?.code === "42703") {
+              const baseOnly = await tenantPool.query(activeLoansQuery);
+              activeLoans = baseOnly.rows;
+            } else {
+              throw e2;
+            }
+          }
+        } else {
+          throw e;
+        }
       }
 
       if (loanIds && Array.isArray(loanIds) && loanIds.length > 0) {
@@ -109,32 +135,111 @@ router.post(
         logError("Numeric outcome profile derivation failed in Predict", e, {});
       });
 
-      // Ensure market rates are synced from FRED API and cache is warm before computing deltas
-      await autoSyncMarketRatesIfNeeded().catch((e) => {
-        logWarn("[Predictions] Market rate auto-sync failed (non-blocking)", { error: e.message });
-      });
-      await initializeMarketRateCache().catch((e) => {
-        logWarn("[Predictions] Market rate cache init failed (non-blocking)", { error: e.message });
-      });
+      // Loan Characteristics bucket: segment (type|purpose|occupancy) fallout rates, rank-based 1–6. Does not affect prediction.
+      const getLoanCharacteristicsBucket = await runSegmentFalloutRates(tenantPool).catch(() => () => 3);
 
-      // Enrich active loans with market delta and reference rate (lock vs application date).
+      // Ensure market rates are available so Market Delta populates on cards (FRED sync + cache).
+      await autoSyncMarketRatesIfNeeded().catch(() => 0);
+      await initializeMarketRateCache().catch(() => {});
+
+      // Enrich active loans with market delta and market_rate_at_lock when missing.
       const today = new Date();
       await Promise.all(
         activeLoans.map(async (loan: any) => {
-          const hasLock = loan.lock_date != null;
-          const referenceDate = hasLock ? loan.lock_date : loan.application_date;
-          if (referenceDate) {
-            const delta = await computeMarketDeltaForDates(referenceDate, today);
-            loan.marketChangeDelta = delta ?? undefined;
+          const stored = loan.market_change_delta != null && !isNaN(Number(loan.market_change_delta))
+            ? Number(loan.market_change_delta)
+            : null;
+          if (stored != null) {
+            loan.marketChangeDelta = stored;
+          } else {
+            const lockDate = loan.lock_date ?? loan.application_date;
+            if (lockDate) {
+              const delta = await computeMarketDeltaForDates(lockDate, today);
+              loan.marketChangeDelta = delta ?? undefined;
+            }
+          }
+          // Market rate at lock: use lock date, else application date; get market rate for that date
+          const hasRateAtLock = loan.market_rate_at_lock != null && !isNaN(Number(loan.market_rate_at_lock));
+          if (!hasRateAtLock && (loan.lock_date || loan.application_date)) {
+            const refDate = loan.lock_date ?? loan.application_date;
+            const refObj = typeof refDate === "string" ? new Date(refDate) : refDate;
+            if (!isNaN(refObj.getTime())) {
+              let dateStr = refObj.toISOString().split("T")[0];
+              let rate = await getMarketRateForDate(dateStr);
+              if (rate === null) {
+                for (let d = 1; d <= 7; d++) {
+                  const d2 = new Date(refObj);
+                  d2.setDate(d2.getDate() - d);
+                  rate = await getMarketRateForDate(d2.toISOString().split("T")[0]);
+                  if (rate !== null) break;
+                }
+              }
+              if (rate != null && !isNaN(rate)) {
+                loan.market_rate_at_lock = rate;
+              }
+            }
           }
           // For unlocked loans, look up the FRED market rate at application date
-          if (!hasLock && loan.application_date) {
+          if (!loan.lock_date && loan.application_date) {
             const appRate = await getMarketRateForDate(loan.application_date);
             loan.rateAtApplicationDate = appRate ?? undefined;
           }
-          loan.rateReferenceType = hasLock ? "lock" : "application";
+          loan.rateReferenceType = loan.lock_date != null ? "lock" : "application";
         })
       );
+      const withMarketDelta = activeLoans.filter((l: any) => l.marketChangeDelta != null && !isNaN(Number(l.marketChangeDelta)));
+      if (withMarketDelta.length < activeLoans.length) {
+        logInfo("[Predict] Market delta missing for some active loans (will show — on UI)", {
+          total: activeLoans.length,
+          withDelta: withMarketDelta.length,
+          withoutDelta: activeLoans.length - withMarketDelta.length,
+          sampleLoanIds: activeLoans.filter((l: any) => !(l.marketChangeDelta != null && !isNaN(Number(l.marketChangeDelta)))).slice(0, 3).map((l: any) => l.loan_id),
+        });
+      }
+
+      // Persist market_change_delta to loans when column exists (migration 038).
+      const withDelta = activeLoans.filter(
+        (l: any) => l.loan_id != null && l.marketChangeDelta != null && !isNaN(Number(l.marketChangeDelta))
+      );
+      if (withDelta.length > 0) {
+        try {
+          await tenantPool.query(
+            `UPDATE public.loans AS l SET market_change_delta = v.delta
+             FROM (SELECT unnest($1::text[]) AS loan_id, unnest($2::decimal[]) AS delta) AS v
+             WHERE l.loan_id = v.loan_id`,
+            [
+              withDelta.map((l: any) => l.loan_id),
+              withDelta.map((l: any) => Number(l.marketChangeDelta)),
+            ]
+          );
+        } catch (e: any) {
+          if (e?.code !== "42703") logWarn("[Predict] Persist market_change_delta failed", { message: e?.message });
+        }
+      }
+
+      // LO pullthrough % by role (from historical loans) so MLO Fallout Prone and LO Pullthrough show on cards.
+      let loPullthroughPctByRole = new Map<string, number>();
+      try {
+        const histResult = await tenantPool.query(
+          `SELECT loan_officer, current_loan_status FROM public.loans
+           WHERE current_loan_status IS NOT NULL AND TRIM(current_loan_status) <> 'Active Loan'
+           AND (loan_officer IS NOT NULL AND TRIM(loan_officer) <> '')
+           ORDER BY application_date DESC NULLS LAST
+           LIMIT 15000`
+        );
+        if (histResult.rows.length > 0) {
+          const pullthroughMap = calculatePullthroughForRole(histResult.rows, ["loan_officer"]);
+          loPullthroughPctByRole = new Map(Object.entries(pullthroughMap));
+          logInfo("[Predict] LO pullthrough from historical loans", {
+            historicalCount: histResult.rows.length,
+            pullthroughEntries: loPullthroughPctByRole.size,
+          });
+        }
+      } catch (e: any) {
+        logWarn("[Predict] Historical pullthrough query failed, cards will show — for LO/MLO", {
+          message: e?.message,
+        });
+      }
 
       const rates = await getHistoricalFalloutRates(tenantPool);
 
@@ -154,9 +259,9 @@ router.post(
       );
       const predByLoanId = new Map(predResult.rows.map((r: any) => [r.loan_id, r]));
 
-      // Helper: risk score 0-100 from reason_codes; use outcome-specific max to match sequencer (deny=12, withdraw=15, else 18)
-      const MAX_DENIED_POINTS = 12;
-      const MAX_WITHDRAWN_POINTS = 15;
+      // Helper: risk score 0-100 from reason_codes; use outcome-specific max to match sequencer (deny=24, withdraw=30, else 18)
+      const MAX_DENIED_POINTS = 24;
+      const MAX_WITHDRAWN_POINTS = 30;
       const MAX_OTHER_POINTS = 18;
       const reasonCodesToRiskScore = (raw: any, predictedOutcome?: string): number | null => {
         if (raw == null) return null;
@@ -184,42 +289,14 @@ router.post(
         return Math.min(100, Math.max(0, Math.round((sum / maxPoints) * 100)));
       };
 
-      // LO pullthrough % from historical loan data (originated / total finalized per officer, last 12 months)
-      // Encompass statuses: "Active Loan" = in-pipeline; withdrawn/denied = fallout; everything else = originated/funded
-      const loPullthroughPctByRole = new Map<string, number>();
-      try {
-        const ptResult = await tenantPool.query(`
-          SELECT loan_officer,
-            COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE UPPER(TRIM(current_loan_status)) NOT IN (
-              'ACTIVE LOAN', 'ACTIVE', 'INQUIRY',
-              'APPLICATION WITHDRAWN', 'WITHDRAWN', 'APPLICATION APPROVED BUT NOT ACCEPTED',
-              'FILE CLOSED FOR INCOMPLETENESS', 'PREAPPROVAL REQUEST APPROVED BUT NOT ACCEPTED',
-              'APPLICATION DENIED', 'DENIED', 'DECLINED',
-              'PREAPPROVAL REQUEST DENIED BY FINANCIAL INSTITUTION'
-            )) AS funded
-          FROM public.loans
-          WHERE loan_officer IS NOT NULL AND TRIM(loan_officer) != ''
-            AND application_date >= NOW() - INTERVAL '12 months'
-            AND UPPER(TRIM(current_loan_status)) NOT IN ('ACTIVE LOAN', 'ACTIVE', 'INQUIRY')
-          GROUP BY loan_officer
-          HAVING COUNT(*) >= 3
-        `);
-        for (const r of ptResult.rows) {
-          const pct = Math.round((Number(r.funded) / Number(r.total)) * 100);
-          loPullthroughPctByRole.set(r.loan_officer.trim(), pct);
-        }
-        logDebug("[Predictions] LO pullthrough map built", { entries: loPullthroughPctByRole.size });
-      } catch (e: any) {
-        logWarn("[Predictions] Could not compute LO pullthrough", { error: e.message });
-      }
-      // Bucket pullthrough % to signal 1-6 (1 = best, 6 = worst) for MLO Fallout Prone display
+      // MLO Fallout Prone: bucket from LO pullthrough % only. 1=90-100%, 2=80-90%, 3=70-80%, 4=60-70%, 5=30-60%, 6=0-30%. Accept pct as 0-100 or 0-1.
       const pullthroughPctToSignal = (pct: number): number => {
-        if (pct >= 90) return 1;
-        if (pct >= 80) return 2;
-        if (pct >= 70) return 3;
-        if (pct >= 60) return 4;
-        if (pct >= 50) return 5;
+        const p = pct > 1 ? pct : pct * 100;
+        if (p >= 90) return 1;
+        if (p >= 80) return 2;
+        if (p >= 70) return 3;
+        if (p >= 60) return 4;
+        if (p >= 30) return 5;
         return 6;
       };
 
@@ -259,6 +336,11 @@ router.post(
         }
         return Math.round((ficoB + ltvB + dtiB) / 3);
       };
+      const getSegment = (l: any) => ({
+        loan_type: norm(l.loan_type),
+        loan_purpose: norm(l.loan_purpose),
+        occupancy: norm(l.occupancy_type ?? l.occupancyType),
+      });
       const calcLoanCharacteristicsSignal = (l: any): number | null => {
         const lt = (l.loan_type || "").toLowerCase();
         const lp = (l.loan_purpose || "").toLowerCase();
@@ -290,6 +372,18 @@ router.post(
         return 6;
       };
       const calcInterestLockVsMarketSignal = (l: any): number | null => {
+        // Prefer FRED-computed market delta (lock - close); positive = rates dropped = unfavorable
+        const deltaFromFred = l.marketChangeDelta != null && !isNaN(Number(l.marketChangeDelta))
+          ? Number(l.marketChangeDelta)
+          : null;
+        if (deltaFromFred !== null) {
+          if (deltaFromFred <= -0.3) return 1;
+          if (deltaFromFred <= -0.1) return 2;
+          if (deltaFromFred <= 0.05) return 3;
+          if (deltaFromFred <= 0.2) return 4;
+          if (deltaFromFred <= 0.5) return 5;
+          return 6;
+        }
         const rate = l.interest_rate != null ? Number(l.interest_rate) : null;
         if (rate === null) return null;
         const market = l.market_rate ?? l.market_rate_at_lock;
@@ -330,11 +424,24 @@ router.post(
 
         const loName = (loan.loan_officer ?? "").toString().trim() || null;
         const loId = (loan.loan_officer_id ?? loan.loan_officer ?? "Unknown").toString().trim() || "Unknown";
-        const loPullthroughPct =
-          (loName && loPullthroughPctByRole.get(loName)) ??
-          loPullthroughPctByRole.get(loId) ??
-          loPullthroughPctByRole.get("Unknown") ??
-          null;
+        // Pullthrough map keys are lowercase (from calculatePullthroughForRole). Try exact, normalized, stripped suffix, then prefix match.
+        const loNameLower = loName ? loName.toLowerCase() : "";
+        const getPullthroughForOfficer = (): number | null => {
+          if (loName && loPullthroughPctByRole.has(loName)) return loPullthroughPctByRole.get(loName)!;
+          if (loNameLower && loPullthroughPctByRole.has(loNameLower)) return loPullthroughPctByRole.get(loNameLower)!;
+          const stripped = loNameLower.replace(/\s+second tier\s*-\s*\d+$/i, "").trim();
+          if (stripped && loPullthroughPctByRole.has(stripped)) return loPullthroughPctByRole.get(stripped)!;
+          const noSuffix = loNameLower.replace(/\s*-\s*\d+$/, "").trim();
+          if (noSuffix && loPullthroughPctByRole.has(noSuffix)) return loPullthroughPctByRole.get(noSuffix)!;
+          for (const [key, pct] of loPullthroughPctByRole) {
+            if (loNameLower.startsWith(key) || key.startsWith(loNameLower)) return pct;
+          }
+          if (loPullthroughPctByRole.has(loId)) return loPullthroughPctByRole.get(loId)!;
+          if (loPullthroughPctByRole.has(loId.toLowerCase())) return loPullthroughPctByRole.get(loId.toLowerCase())!;
+          if (loPullthroughPctByRole.has("unknown")) return loPullthroughPctByRole.get("unknown")!;
+          return null;
+        };
+        const loPullthroughPct = getPullthroughForOfficer();
         const mloSignal = loPullthroughPct != null ? pullthroughPctToSignal(loPullthroughPct) : null;
 
         const appDate = loan.application_date;
@@ -349,12 +456,15 @@ router.post(
             : loan.market_rate_at_lock != null
               ? Number(loan.market_rate_at_lock)
               : null;
-        const marketChangeDelta =
+        const marketChangeDeltaFromDb =
           lockRate != null && marketRate != null && !isNaN(lockRate) && !isNaN(marketRate)
             ? marketRate - lockRate
-            : loan.marketChangeDelta ?? null;
+            : null;
+        const marketChangeDelta =
+          loan.marketChangeDelta != null && !isNaN(Number(loan.marketChangeDelta))
+            ? Number(loan.marketChangeDelta)
+            : marketChangeDeltaFromDb;
 
-        // Market change delta signal (1=best/rate dropped, 6=worst/rate spiked)
         const calcMarketChangeDeltaSignal = (delta: number | null): number | null => {
           if (delta == null) return null;
           if (delta <= -0.5) return 1;
@@ -387,24 +497,22 @@ router.post(
           closeLateRisk: isClosingLate,
           riskScore: sequencerRisk ?? confidence,
           reasonCodes: normalizedReasonCodes,
-          loPullthroughPercentage: loPullthroughPct ?? undefined,
+          loPullthroughPercentage: loPullthroughPct != null ? loPullthroughPct : null,
           mloAeFalloutProneSignalStrength: mloSignal ?? undefined,
           loPullthroughSignal: mloSignal ?? undefined,
           creditMetricsSignalStrength: calcCreditMetricsSignal(loan) ?? undefined,
-          loanCharacteristicsSignalStrength: calcLoanCharacteristicsSignal(loan) ?? undefined,
+          loanCharacteristicsSignalStrength:
+            getLoanCharacteristicsBucket(getSegment(loan), outcome === "deny" ? "deny" : outcome === "withdraw" ? "withdraw" : "originate")
+            ?? calcLoanCharacteristicsSignal(loan)
+            ?? undefined,
           timeInMotionSignalStrength: calcTimeInMotionSignal(loan) ?? undefined,
           interestLockVsMarketSignalStrength: calcInterestLockVsMarketSignal(loan) ?? undefined,
           marketChangeDeltaSignal: calcMarketChangeDeltaSignal(marketChangeDelta) ?? undefined,
           activeDays: activeDays ?? undefined,
           market_rate: loan.market_rate ?? undefined,
           market_rate_at_lock: loan.market_rate_at_lock ?? undefined,
-          rateReferenceType: loan.rateReferenceType ?? (loan.lock_date != null ? "lock" : "application"),
-          rateAtApplicationDate: loan.rateAtApplicationDate ?? undefined,
-          lockMarketRate: loan.lock_date != null
-            ? (loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock)
-              : loan.interest_rate != null ? Number(loan.interest_rate) : undefined)
-            : (loan.rateAtApplicationDate != null ? Number(loan.rateAtApplicationDate) : undefined),
-          marketChangeDelta: marketChangeDelta ?? undefined,
+          lockMarketRate: loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock) : loan.interest_rate != null ? Number(loan.interest_rate) : undefined,
+          marketChangeDelta: marketChangeDelta != null ? marketChangeDelta : null,
           riskSummary: {
             predictedOutcome: outcome,
             confidence,
@@ -698,7 +806,7 @@ router.get(
       const result = await tenantPool.query(query, params);
 
       // Build loanDataMap from the joined result (no second query needed)
-      const loanDataMap: Record<string, any> = {};
+      let loanDataMap: Record<string, any> = {};
       result.rows.forEach((row) => {
         if (row.loan_number != null || row.l_fico_score != null) {
           loanDataMap[row.loan_id] = {
@@ -730,32 +838,114 @@ router.get(
         }
       });
 
-      // LO pullthrough % from historical loan data (originated / total finalized per officer, last 12 months)
-      const getLoPullthroughMap = new Map<string, number>();
+      // LO pullthrough % for MLO Fallout Prone (same as POST so period-filtered GET has same data)
+      let getLoPullthroughMap = new Map<string, number>();
       try {
-        const ptResult = await tenantPool.query(`
-          SELECT loan_officer,
-            COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE UPPER(TRIM(current_loan_status)) NOT IN (
-              'ACTIVE LOAN', 'ACTIVE', 'INQUIRY',
-              'APPLICATION WITHDRAWN', 'WITHDRAWN', 'APPLICATION APPROVED BUT NOT ACCEPTED',
-              'FILE CLOSED FOR INCOMPLETENESS', 'PREAPPROVAL REQUEST APPROVED BUT NOT ACCEPTED',
-              'APPLICATION DENIED', 'DENIED', 'DECLINED',
-              'PREAPPROVAL REQUEST DENIED BY FINANCIAL INSTITUTION'
-            )) AS funded
-          FROM public.loans
-          WHERE loan_officer IS NOT NULL AND TRIM(loan_officer) != ''
-            AND application_date >= NOW() - INTERVAL '12 months'
-            AND UPPER(TRIM(current_loan_status)) NOT IN ('ACTIVE LOAN', 'ACTIVE', 'INQUIRY')
-          GROUP BY loan_officer
-          HAVING COUNT(*) >= 3
-        `);
-        for (const r of ptResult.rows) {
-          const pct = Math.round((Number(r.funded) / Number(r.total)) * 100);
-          getLoPullthroughMap.set(r.loan_officer.trim(), pct);
+        const histResult = await tenantPool.query(
+          `SELECT loan_officer, current_loan_status FROM public.loans
+           WHERE current_loan_status IS NOT NULL AND TRIM(current_loan_status) <> 'Active Loan'
+           AND (loan_officer IS NOT NULL AND TRIM(loan_officer) <> '')
+           ORDER BY application_date DESC NULLS LAST
+           LIMIT 15000`
+        );
+        if (histResult.rows.length > 0) {
+          const pullthroughMap = calculatePullthroughForRole(histResult.rows, ["loan_officer"]);
+          getLoPullthroughMap = new Map(Object.entries(pullthroughMap));
         }
       } catch (e: any) {
-        logWarn("[Predictions GET] Could not compute LO pullthrough", { error: e.message });
+        logWarn("[Predictions GET] Historical pullthrough query failed", { message: e?.message });
+      }
+
+      // Fetch loan data with signal strengths and market fields for the critical loan cards
+      const predictionLoanIds = result.rows.map((r: any) => r.loan_id).filter(Boolean);
+      loanDataMap = {};
+      if (predictionLoanIds.length > 0) {
+        let loanDataResult: { rows: any[] };
+        try {
+          loanDataResult = await tenantPool.query(
+            `SELECT 
+              loan_id, loan_number, loan_officer, loan_amount, loan_type,
+              current_milestone, fico_score, ltv_ratio, be_dti_ratio,
+              interest_rate, application_date, lock_date, lock_expiration_date,
+              estimated_closing_date, channel, property_type, loan_purpose,
+              underwriter, closer, processor, current_loan_status,
+              market_rate, market_rate_at_lock, market_change_delta
+            FROM public.loans 
+            WHERE loan_id = ANY($1)`,
+            [predictionLoanIds]
+          );
+        } catch (e: any) {
+          if (e?.code === "42703") {
+            loanDataResult = await tenantPool.query(
+              `SELECT 
+                loan_id, loan_number, loan_officer, loan_amount, loan_type,
+                current_milestone, fico_score, ltv_ratio, be_dti_ratio,
+                interest_rate, application_date, lock_date, lock_expiration_date,
+                estimated_closing_date, channel, property_type, loan_purpose,
+                underwriter, closer, processor, current_loan_status
+              FROM public.loans 
+              WHERE loan_id = ANY($1)`,
+              [predictionLoanIds]
+            );
+          } else {
+            throw e;
+          }
+        }
+        loanDataResult.rows.forEach((row) => {
+          loanDataMap[row.loan_id] = row;
+        });
+
+        // Enrich with computed market delta when missing (so period-filtered GET shows market data like POST)
+        const today = new Date();
+        const needDelta = loanDataResult.rows.filter(
+          (row: any) =>
+            (row.market_change_delta == null || (typeof row.market_change_delta === "number" && isNaN(row.market_change_delta))) &&
+            (row.lock_date || row.application_date)
+        );
+        if (needDelta.length > 0) {
+          await initializeMarketRateCache().catch(() => {});
+          for (const row of needDelta) {
+            const lockDate = row.lock_date ?? row.application_date;
+            if (lockDate) {
+              const delta = await computeMarketDeltaForDates(lockDate, today);
+              if (delta != null && !isNaN(delta)) {
+                loanDataMap[row.loan_id] = { ...row, market_change_delta: delta };
+              }
+            }
+          }
+        }
+
+        // Enrich market_rate_at_lock when missing: use lock date, else application date, then get market rate for that date
+        const needMarketRateAtLock = loanDataResult.rows.filter(
+          (row: any) => {
+            const current = loanDataMap[row.loan_id] ?? row;
+            const hasRate = current.market_rate_at_lock != null && !isNaN(Number(current.market_rate_at_lock));
+            return !hasRate && (row.lock_date || row.application_date);
+          }
+        );
+        if (needMarketRateAtLock.length > 0) {
+          await initializeMarketRateCache().catch(() => {});
+          for (const row of needMarketRateAtLock) {
+            const refDate = row.lock_date ?? row.application_date;
+            if (!refDate) continue;
+            const refObj = typeof refDate === "string" ? new Date(refDate) : refDate;
+            if (isNaN(refObj.getTime())) continue;
+            let dateStr = refObj.toISOString().split("T")[0];
+            let rate = await getMarketRateForDate(dateStr);
+            if (rate === null) {
+              for (let d = 1; d <= 7; d++) {
+                const d2 = new Date(refObj);
+                d2.setDate(d2.getDate() - d);
+                rate = await getMarketRateForDate(d2.toISOString().split("T")[0]);
+                if (rate !== null) break;
+              }
+            }
+            if (rate != null && !isNaN(rate)) {
+              const current = loanDataMap[row.loan_id] ?? row;
+              loanDataMap[row.loan_id] = { ...current, market_rate_at_lock: rate };
+            }
+          }
+        }
       }
 
       // Calculate signal strengths from loan data (since loan_prediction_buckets table may not exist)
@@ -866,18 +1056,32 @@ router.get(
         return 6;
       }
 
+      // Lock vs Market: prefer market delta (same bands as POST); fallback to rate-only
       function calculateInterestLockVsMarketSignal(loan: any): number | null {
+        const delta =
+          loan.market_change_delta != null && !isNaN(Number(loan.market_change_delta))
+            ? Number(loan.market_change_delta)
+            : loan.marketChangeDelta != null && !isNaN(Number(loan.marketChangeDelta))
+              ? Number(loan.marketChangeDelta)
+              : null;
+        if (delta !== null) {
+          if (delta <= -0.3) return 1;
+          if (delta <= -0.1) return 2;
+          if (delta <= 0.05) return 3;
+          if (delta <= 0.2) return 4;
+          if (delta <= 0.5) return 5;
+          return 6;
+        }
         const interestRate =
           loan.interest_rate != null ? Number(loan.interest_rate) : null;
         if (interestRate === null) return null;
-
-        const marketVal = loan.market_rate ?? loan.market_rate_at_lock;
-        if (marketVal != null && !isNaN(Number(marketVal))) {
-          const delta = Number(marketVal) - interestRate;
-          if (delta <= -0.3) return 1;
-          if (delta <= 0) return 2;
-          if (delta <= 0.25) return 3;
-          if (delta <= 0.5) return 5;
+        const market = loan.market_rate ?? loan.market_rate_at_lock;
+        if (market != null && !isNaN(Number(market))) {
+          const d = Number(market) - interestRate;
+          if (d <= -0.3) return 1;
+          if (d <= 0) return 2;
+          if (d <= 0.25) return 3;
+          if (d <= 0.5) return 5;
           return 6;
         }
         if (interestRate <= 5.5) return 2;
@@ -907,19 +1111,20 @@ router.get(
         return 6;
       }
 
-      // Calculate pullthrough signal from percentage (1=best >90%, 6=worst <40%)
+      // MLO Fallout Prone: from LO pullthrough % only. 1=90-100%, 2=80-90%, 3=70-80%, 4=60-70%, 5=30-60%, 6=0-30%. Accept decimal (0-1) or percentage.
       function calculatePullthroughSignal(
         pct: number | null | undefined
       ): number | null {
         if (pct == null) return null;
         const percentage = Number(pct);
         if (isNaN(percentage)) return null;
+        const p = percentage > 1 ? percentage : percentage * 100;
 
-        if (percentage >= 90) return 1;
-        if (percentage >= 80) return 2;
-        if (percentage >= 70) return 3;
-        if (percentage >= 60) return 4;
-        if (percentage >= 50) return 5;
+        if (p >= 90) return 1;
+        if (p >= 80) return 2;
+        if (p >= 70) return 3;
+        if (p >= 60) return 4;
+        if (p >= 30) return 5;
         return 6;
       }
 
@@ -972,9 +1177,9 @@ router.get(
           mergedLoanData.mloAeFalloutProneSignalStrength ?? loPullthroughSignal;
 
         // Risk score from fallout sequencer reason_codes (zone points sum scaled to 0-100).
-        // Use outcome-specific max to match sequencer: Denied max=12 (4 features incl. days_active), Withdrawn max=15, else 18.
-        const MAX_DENIED_POINTS = 12;
-        const MAX_WITHDRAWN_POINTS = 15;
+        // Use outcome-specific max to match sequencer: Denied max=24 (4 features × 6 pts), Withdrawn max=30 (5 × 6), else 18.
+        const MAX_DENIED_POINTS = 24;
+        const MAX_WITHDRAWN_POINTS = 30;
         const MAX_OTHER_POINTS = 18;
         let sequencerRiskScore100: number | null = null;
         const rawReasonCodes = row.reason_codes;
@@ -1066,15 +1271,19 @@ router.get(
           current_loan_status:
             mergedLoanData.current_loan_status ??
             mergedLoanData.currentLoanStatus,
-          activeDays: (() => {
-            // Always recompute from application_date so it stays current (stored value is stale)
-            const appDate = mergedLoanData.application_date;
-            if (appDate != null) {
-              const days = Math.floor((Date.now() - new Date(appDate).getTime()) / (1000 * 60 * 60 * 24));
-              if (!isNaN(days) && days >= 0) return days;
-            }
-            return mergedLoanData.activeDays ?? null;
-          })(),
+          activeDays: mergedLoanData.activeDays ?? null,
+          market_rate: mergedLoanData.market_rate ?? undefined,
+          market_rate_at_lock: mergedLoanData.market_rate_at_lock ?? undefined,
+          lockMarketRate:
+            mergedLoanData.market_rate_at_lock != null && !isNaN(Number(mergedLoanData.market_rate_at_lock))
+              ? Number(mergedLoanData.market_rate_at_lock)
+              : mergedLoanData.interest_rate != null ? Number(mergedLoanData.interest_rate) : undefined,
+          marketChangeDelta:
+            mergedLoanData.market_change_delta != null && !isNaN(Number(mergedLoanData.market_change_delta))
+              ? Number(mergedLoanData.market_change_delta)
+              : mergedLoanData.marketChangeDelta != null && !isNaN(Number(mergedLoanData.marketChangeDelta))
+                ? Number(mergedLoanData.marketChangeDelta)
+                : null,
           loPullthroughPercentage: loPullthroughPercentage ?? null,
           uwPullthroughPercentage:
             mergedLoanData.uwPullthroughPercentage ?? null,

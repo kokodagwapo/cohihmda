@@ -332,6 +332,11 @@ export class ApiClient {
     // The frontend should never be the layer that kills a request.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
+    const isSlowEndpoint =
+      endpoint.includes("/loans/funnel") ||
+      endpoint.includes("/dashboard/analytics") ||
+      endpoint.includes("/dashboard/insights") ||
+      (endpoint.includes("/api/predictions") && options.method === "POST");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
