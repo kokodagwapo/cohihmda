@@ -96,10 +96,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "closed_loans",
     name: "Closed Loans",
     description:
-      "Count of loans where funding_date is not empty (funded loans).",
+      "Count of funded loans (funding_date IS NOT NULL).",
     category: "status",
-    formula: "funding_date IS NOT NULL AND funding_date <= today",
-    sqlQuery: `COUNT(CASE WHEN l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE THEN 1 END)`,
+    formula: "funding_date IS NOT NULL",
+    sqlQuery: `COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END)`,
     dependencies: [],
     defaultDateField: "funding_date",
   },
@@ -176,19 +176,16 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "pull_through_rate",
     name: "Pull-Through Rate",
     description:
-      "Percentage of non-active applications that funded or closed. Calculated as: (funded loans / total applications) * 100",
+      "Percentage of completed applications that originated. Canonical: originated (status-based) / completed * 100",
     category: "pull_through",
     formula:
-      "(funded_loans / total_applications) * 100, excluding active loans",
+      "(originated_loans / completed_loans) * 100, where originated = status ILIKE Originated or purchased",
     sqlQuery: `
       COUNT(CASE 
-        WHEN l.current_loan_status IS DISTINCT FROM 'Active Loan'
-        AND l.application_date IS NOT NULL
-        AND (l.funding_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
+        WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
         THEN 1 
       END)::float / NULLIF(COUNT(CASE 
-        WHEN l.current_loan_status IS DISTINCT FROM 'Active Loan'
-        AND l.application_date IS NOT NULL
+        WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
         THEN 1 
       END), 0) * 100
     `,
@@ -221,10 +218,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "funded_volume",
     name: "Funded Volume",
     description:
-      "Sum of loan_amount for loans where funding_date is not empty.",
+      "Sum of loan_amount for funded loans (funding_date IS NOT NULL).",
     category: "volume",
     formula: "SUM(loan_amount) WHERE funding_date IS NOT NULL",
-    sqlQuery: `SUM(CASE WHEN l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE THEN l.loan_amount ELSE 0 END)`,
+    sqlQuery: `SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END)`,
     dependencies: [],
     defaultDateField: "funding_date",
   },
@@ -263,10 +260,10 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   closed_volume: {
     id: "closed_volume",
     name: "Closed Loans Volume",
-    description: "Sum of loan amounts for closed/funded loans",
+    description: "Sum of loan amounts for funded loans (funding_date IS NOT NULL)",
     category: "volume",
-    formula: "Sum({<[Funded Flag]={Yes}>}[Loan Amount])",
-    sqlQuery: `SUM(CASE WHEN l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE THEN COALESCE(l.loan_amount, 0) ELSE 0 END)`,
+    formula: "SUM(loan_amount) WHERE funding_date IS NOT NULL",
+    sqlQuery: `SUM(CASE WHEN l.funding_date IS NOT NULL THEN COALESCE(l.loan_amount, 0) ELSE 0 END)`,
     dependencies: [],
     defaultDateField: "funding_date",
   },
@@ -537,13 +534,13 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "lo_pull_through",
     name: "Loan Officer Pull Through Rate",
     description:
-      "Pull through rate for loan officer (originated / total applications). Use with loan_officer filter.",
+      "Pull through rate for loan officer: originated (status-based) / completed. Use with loan_officer filter.",
     category: "pull_through",
     formula:
-      "Count({<[Loan Officer], [Pull Through Originated Flag]={Yes}>}[Loan Number]) / Count({<[Loan Officer], [RESPA App Status]={Yes}>}[Loan Number])",
+      "originated_loans / completed_loans * 100, where originated = status ILIKE Originated or purchased",
     sqlQuery: `ROUND(
-      COUNT(CASE WHEN l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%' THEN 1 END)::float 
-      / NULLIF(COUNT(CASE WHEN l.application_date IS NOT NULL AND l.current_loan_status NOT ILIKE '%active%' THEN 1 END), 0) * 100
+      COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END)::float 
+      / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0) * 100
     , 1)`,
     dependencies: [],
     defaultDateField: "started_date",
@@ -1209,18 +1206,18 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
   // Funnel Metrics - Used in LoanFunnelView
   // ==========================================================================
 
-  // Conversion Rate - Originated loans as percentage of loans started
+  // Conversion Rate - Funded loans as percentage of loans started
   conversion_rate: {
     id: "conversion_rate",
     name: "Conversion Rate",
     description:
-      "Percentage of loans started that were originated. Calculated as (Originated Loans / Loans Started) * 100.",
+      "Percentage of loans started that funded. Canonical: (funded / started) * 100.",
     category: "pull_through",
-    formula: "(originated_loans / loans_started) * 100",
+    formula: "(funded_loans / loans_started) * 100",
     sqlQuery: `CASE 
       WHEN COUNT(CASE WHEN l.started_date IS NOT NULL THEN 1 END) > 0 THEN
         COUNT(CASE 
-          WHEN (l.funding_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
+          WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
           THEN 1 
         END)::float / NULLIF(COUNT(CASE WHEN l.started_date IS NOT NULL THEN 1 END), 0) * 100
       ELSE 0
@@ -1465,28 +1462,22 @@ function buildWhereClause(
   }
 
   // Consolidated Channel filter - matches channel groups or individual channel values
-  // Channel grouping logic:
-  // - Retail = Direct origination (channels containing "retail")
-  // - TPO = Third Party Origination (brokers, wholesale, correspondent)
-  // - Individual channel values matched exactly
+  // TPO requires BOTH a TPO channel pattern AND populated account_executive.
+  // Loans with a TPO channel but no AE are classified as Retail (brokered-retail).
   if (filters.consolidated_channel) {
     const cc = filters.consolidated_channel.toLowerCase();
+    const tpoPat = `(l.channel ILIKE '%broker%' OR l.channel ILIKE '%brokered%' OR l.channel ILIKE '%wholesale%' OR l.channel ILIKE '%correspondent%' OR l.channel ILIKE '%corresp%' OR l.channel ILIKE '%tpo%')`;
     if (cc === "retail") {
-      // Retail channels: Direct origination only
-      // NOTE: "Brokered" is NOT Retail - it's TPO
-      clauses.push(`(l.channel ILIKE '%retail%')`);
+      // Retail = direct origination OR brokered-retail (TPO channel but no account_executive)
+      clauses.push(`((l.channel ILIKE '%retail%') OR (${tpoPat} AND (l.account_executive IS NULL OR TRIM(l.account_executive) = '')))`);
     } else if (cc === "tpo") {
-      // TPO channels: Brokers, Wholesale, Correspondent
+      // TPO = TPO channel pattern AND account_executive populated
       clauses.push(
-        `(l.channel ILIKE '%broker%' OR l.channel ILIKE '%brokered%' 
-          OR l.channel ILIKE '%wholesale%' OR l.channel ILIKE '%correspondent%' 
-          OR l.channel ILIKE '%corresp%' OR l.channel ILIKE '%tpo%')`
+        `(${tpoPat} AND l.account_executive IS NOT NULL AND TRIM(l.account_executive) != '')`
       );
     } else if (cc === "99-missing") {
-      // Missing/null channels
       clauses.push(`(l.channel IS NULL OR TRIM(l.channel) = '')`);
     } else if (cc !== "all" && cc !== "*") {
-      // Specific individual channel value (exact match, case-insensitive)
       clauses.push(
         `LOWER(TRIM(l.channel)) = LOWER($${paramOffset + params.length + 1})`
       );
@@ -1536,10 +1527,10 @@ function buildWhereClause(
     );
   }
 
-  // Closed Loans: funding_date IS NOT NULL AND funding_date <= CURRENT_DATE
+  // Closed Loans: canonical funded definition
   if (filters.closed_loan_filter) {
     clauses.push(
-      `(l.funding_date IS NOT NULL AND l.funding_date <= CURRENT_DATE)`
+      `(l.funding_date IS NOT NULL)`
     );
   }
 

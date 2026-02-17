@@ -179,7 +179,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
             dateField: "application_date",
           };
         case "closedLoans":
-          // Closed loans: funding_date IS NOT NULL AND funding_date <= CURRENT_DATE
+          // Funded loans: funding_date IS NOT NULL
           // Date range filters on funding_date
           return {
             additionalFilters: { closed_loan_filter: true },

@@ -16,10 +16,10 @@ const DEFAULT_SEGMENT_KEY = 'All';
  */
 export async function getAvgApplicationToFundingDays(pool: pg.Pool): Promise<number | null> {
   const result = await pool.query(
-    `SELECT AVG(EXTRACT(EPOCH FROM (COALESCE(funding_date, closing_date) - application_date::date)) / 86400) AS avg_days
+    `SELECT AVG(EXTRACT(EPOCH FROM (funding_date::date - application_date::date)) / 86400) AS avg_days
      FROM public.loans
      WHERE application_date IS NOT NULL
-       AND (funding_date IS NOT NULL OR closing_date IS NOT NULL)
+       AND funding_date IS NOT NULL
        AND (current_loan_status IS NULL OR current_loan_status NOT IN ('Active Loan', 'Active', 'Inquiry'))`
   );
   if (result.rows.length === 0 || result.rows[0].avg_days == null) return null;

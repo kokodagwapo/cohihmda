@@ -70,11 +70,9 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
         COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-          AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS funded,
+        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) AS funded,
         ROUND(
-          COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-            AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) * 100.0
+          COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) * 100.0
           / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
         1) AS pull_through_rate
       FROM public.loans l
@@ -97,10 +95,10 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
       sql: `SELECT
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
-        ROUND(AVG(COALESCE(l.funding_date::date, l.closing_date) - l.application_date)) AS avg_cycle_days,
+        ROUND(AVG(l.funding_date::date - l.application_date)) AS avg_cycle_days,
         COUNT(*) AS funded_count
       FROM public.loans l
-      WHERE (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
+      WHERE l.funding_date IS NOT NULL
         AND l.application_date >= '${daysAgo(365)}'
       GROUP BY sort_period, period
       ORDER BY sort_period`,
@@ -120,8 +118,8 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
       sql: `SELECT
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
-        ROUND(SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL) THEN l.loan_amount ELSE 0 END)) AS funded_volume,
-        ROUND(SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL) THEN (${revenueExpr}) ELSE 0 END)) AS revenue
+        ROUND(SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END)) AS funded_volume,
+        ROUND(SUM(CASE WHEN l.funding_date IS NOT NULL THEN (${revenueExpr}) ELSE 0 END)) AS revenue
       FROM public.loans l
       WHERE l.application_date >= '${daysAgo(365)}'
       GROUP BY sort_period, period
@@ -155,10 +153,10 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
         COUNT(DISTINCT COALESCE(l.loan_number, l.loan_id::text)) AS units,
         ROUND(SUM(l.loan_amount)) AS volume,
         ROUND(SUM(${revenueExpr})) AS revenue,
-        ROUND(AVG(COALESCE(l.funding_date::date, l.closing_date) - l.application_date)) AS avg_cycle
+        ROUND(AVG(l.funding_date::date - l.application_date)) AS avg_cycle
       FROM public.loans l
-      WHERE (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
-        AND COALESCE(l.funding_date::date, l.closing_date) >= '${startOfYear()}'
+      WHERE l.funding_date IS NOT NULL
+        AND l.funding_date::date >= '${startOfYear()}'
         AND COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) IS NOT NULL
         ${nameFilter}
       GROUP BY officer
@@ -181,11 +179,9 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
       sql: `SELECT
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-          AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS funded,
+        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) AS funded,
         ROUND(
-          COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-            AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) * 100.0
+          COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) * 100.0
           / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
         1) AS pull_through
       FROM public.loans l
@@ -217,10 +213,10 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
         CASE WHEN SUM(l.loan_amount) > 0
           THEN ROUND((SUM(${revenueExpr}) / SUM(l.loan_amount)) * 10000)
           ELSE 0 END AS bps,
-        ROUND(AVG(COALESCE(l.funding_date::date, l.closing_date) - l.application_date)) AS avg_cycle
+        ROUND(AVG(l.funding_date::date - l.application_date)) AS avg_cycle
       FROM public.loans l
-      WHERE (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
-        AND COALESCE(l.funding_date::date, l.closing_date) >= '${startOfYear()}'
+      WHERE l.funding_date IS NOT NULL
+        AND l.funding_date::date >= '${startOfYear()}'
         AND COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) IS NOT NULL
         ${nameFilter}
       GROUP BY officer

@@ -12,6 +12,7 @@ import {
   getLeaderboardData,
   getInsights,
   refreshInsights,
+  refreshAllChannels,
   getClosingFalloutForecast,
   getDashboardOverview,
   getFinancialModelingBaseline,
@@ -267,6 +268,61 @@ router.post(
 );
 
 /**
+ * POST /api/dashboard/insights/refresh-all-channels
+ * Triggers fresh insight generation for ALL channel variants (Retail, TPO, All) in parallel.
+ * This pre-populates insights for every channel so switching channels is instant.
+ * Query params:
+ * - dateFilter: 'today' | 'mtd' | 'ytd' (default: 'ytd')
+ */
+router.post(
+  "/insights/refresh-all-channels",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { dateFilter = "ytd" } = req.query;
+
+      const accessCtx = await getLoanAccessContext(
+        req,
+        tenantContext.tenantPool
+      );
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          channels: [],
+          results: {},
+          accessFiltered: true,
+          noAccess: true,
+        });
+      }
+
+      const result = await refreshAllChannels(
+        tenantContext.tenantPool,
+        dateFilter as string,
+        {
+          tenantId: tenantContext.tenantId,
+        }
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error refreshing all-channel insights:", error);
+
+      if (
+        handleDatabaseError(error, res, "Failed to refresh all-channel insights")
+      ) {
+        return;
+      }
+
+      res.status(500).json({
+        error: "Failed to refresh all-channel insights",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
  * POST /api/dashboard/insights/refresh-bucket
  * Regenerates insights for a single bucket (working, attention, critical, context) without touching others.
  * Query params:
@@ -309,28 +365,38 @@ router.post(
       );
 
       // Map to API response format (same mapping as getInsights)
-      const insights = allInsights.map((ins: any) => ({
-        id: ins.id,
-        type: ins.insight_type,
-        message: ins.headline,
-        priority:
-          ins.severity_score >= 0.8
-            ? "critical"
-            : ins.severity_score >= 0.55
-              ? "high"
-              : ins.severity_score >= 0.3
-                ? "medium"
-                : "low",
-        reasoning: ins.understory,
-        source: ins.source,
-        bucket: ins.bucket,
-        headline: ins.headline,
-        understory: ins.understory,
-        severity_score: ins.severity_score,
-        bucketPriority: ins.priority,
-        impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-        evidence: typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : ins.evidence,
-      }));
+      const insights = allInsights.map((ins: any) => {
+        const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
+        return {
+          id: ins.id,
+          type: ins.insight_type,
+          message: ins.headline,
+          priority:
+            ins.severity_score >= 0.8
+              ? "critical"
+              : ins.severity_score >= 0.55
+                ? "high"
+                : ins.severity_score >= 0.3
+                  ? "medium"
+                  : "low",
+          reasoning: ins.understory,
+          source: ins.source,
+          bucket: ins.bucket,
+          headline: ins.headline,
+          understory: ins.understory,
+          severity_score: ins.severity_score,
+          bucketPriority: ins.priority,
+          impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+          evidence: ev,
+          // ETM fields (stored in evidence JSONB)
+          what_changed: ev.what_changed,
+          why: ev.why,
+          business_impact: ev.business_impact,
+          risk_if_ignored: ev.risk_if_ignored,
+          recommended_action: ev.recommended_action,
+          owner: ev.owner,
+        };
+      });
 
       res.json({
         insights,
@@ -389,28 +455,37 @@ router.post(
         { channelGroup: channel_group as string | undefined }
       );
 
-      const insights = allInsights.map((ins: any) => ({
-        id: ins.id,
-        type: ins.insight_type,
-        message: ins.headline,
-        priority:
-          ins.severity_score >= 0.8
-            ? "critical"
-            : ins.severity_score >= 0.55
-              ? "high"
-              : ins.severity_score >= 0.3
-                ? "medium"
-                : "low",
-        reasoning: ins.understory,
-        source: ins.source,
-        bucket: ins.bucket,
-        headline: ins.headline,
-        understory: ins.understory,
-        severity_score: ins.severity_score,
-        bucketPriority: ins.priority,
-        impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-        evidence: typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : ins.evidence,
-      }));
+      const insights = allInsights.map((ins: any) => {
+        const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
+        return {
+          id: ins.id,
+          type: ins.insight_type,
+          message: ins.headline,
+          priority:
+            ins.severity_score >= 0.8
+              ? "critical"
+              : ins.severity_score >= 0.55
+                ? "high"
+                : ins.severity_score >= 0.3
+                  ? "medium"
+                  : "low",
+          reasoning: ins.understory,
+          source: ins.source,
+          bucket: ins.bucket,
+          headline: ins.headline,
+          understory: ins.understory,
+          severity_score: ins.severity_score,
+          bucketPriority: ins.priority,
+          impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+          evidence: ev,
+          what_changed: ev.what_changed,
+          why: ev.why,
+          business_impact: ev.business_impact,
+          risk_if_ignored: ev.risk_if_ignored,
+          recommended_action: ev.recommended_action,
+          owner: ev.owner,
+        };
+      });
 
       res.json({
         insights,

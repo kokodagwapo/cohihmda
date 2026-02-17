@@ -87,6 +87,23 @@ export const FIELD_REGISTRY: Record<string, FieldConfig> = {
   loansStarted:      { label: "Started",       format: "number",   align: "right" },
   loansFunded:       { label: "Funded",        format: "number",   align: "right" },
 
+  // ---- Product breakdown fields ----
+  productType:       { label: "Product",        format: "text",     align: "left" },
+  active:            { label: "Active",         format: "number",   align: "right" },
+  funded:            { label: "Funded",         format: "number",   align: "right" },
+  withdrawn:         { label: "Withdrawn",      format: "number",   align: "right" },
+  denied:            { label: "Denied",         format: "number",   align: "right" },
+  pullThroughRate:   { label: "Pull-Through %", format: "percent",  align: "right" },
+  falloutRate:       { label: "Fallout %",      format: "percent",  align: "right" },
+  totalCompleted:    { label: "Completed",      format: "number",   align: "right" },
+
+  // ---- Risk cross-tab fields ----
+  product:           { label: "Product",        format: "text",     align: "left" },
+  ficoBand:          { label: "FICO Band",      format: "text",     align: "left" },
+  dtiBand:           { label: "DTI Band",       format: "text",     align: "left" },
+  total:             { label: "Total Loans",    format: "number",   align: "right" },
+  fallenOut:         { label: "Fallen Out",     format: "number",   align: "right" },
+
   // ---- Tiering fields ----
   tier:              { label: "Tier",           format: "badge",    align: "left" },
   revenue:           { label: "Revenue",        format: "currency", align: "right" },
@@ -177,6 +194,16 @@ export const SUMMARY_REGISTRY: Record<string, SummaryMetricConfig> = {
   bottomCount:         { label: "Bottom Tier",           format: "number",   color: "red" },
   totalRevenue:        { label: "Total Revenue",         format: "currency", color: "purple" },
 
+  // Product breakdown
+  totalProducts:       { label: "Product Types",         format: "number",   color: "blue" },
+  totalFallout:        { label: "Total Fallout",         format: "number",   color: "red" },
+  avgPullThrough:      { label: "Avg Pull-Through",      format: "percent",  color: "green" },
+
+  // Risk cross-tab
+  totalPockets:        { label: "Risk Segments",         format: "number",   color: "blue" },
+  worstFalloutRate:    { label: "Worst Fallout Rate",    format: "percent",  color: "red" },
+  totalFallenOut:      { label: "Total Fallen Out",      format: "number",   color: "red" },
+
   // Tiering — officer-specific view (used when drilldown filters to named officers)
   officerUnits:        { label: "Units",                 format: "number",   color: "green" },
   officerVolume:       { label: "Volume",                format: "currency", color: "purple" },
@@ -204,6 +231,8 @@ export const DEFAULT_COLUMNS: Record<string, string[]> = {
   margin:            [],
   condition_backlog: ["loanNumber", "loanAmount", "conditions", "milestone", "loanType", "status", "loanOfficer"],
   tiering:           ["name", "tier", "revenue", "units", "fundedVolume", "revenueBps", "pullThrough", "avgCycleTime", "lostOpportunityUnits", "deniedUnits"],
+  product_breakdown: ["productType", "active", "funded", "withdrawn", "denied", "fundedVolume", "pullThroughRate", "falloutRate"],
+  risk_cross_tab:    ["product", "ficoBand", "dtiBand", "total", "funded", "fallenOut", "falloutRate"],
 };
 
 export const DEFAULT_SUMMARY_METRICS: Record<string, string[]> = {
@@ -219,4 +248,6 @@ export const DEFAULT_SUMMARY_METRICS: Record<string, string[]> = {
   margin:            ["currentMonthBps", "priorMonthBps", "deltaBps"],
   condition_backlog: ["totalLoans", "avgConditions", "totalVolume"],
   tiering:           ["totalActors", "topCount", "secondCount", "bottomCount"],
+  product_breakdown: ["totalProducts", "totalActive", "totalFunded", "totalFallout", "totalVolume"],
+  risk_cross_tab:    ["totalPockets", "worstFalloutRate", "totalLoans", "totalFunded", "totalFallenOut"],
 };
