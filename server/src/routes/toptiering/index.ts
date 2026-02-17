@@ -30,6 +30,7 @@ import {
   getActorLabelForChannel,
   getTenantRevenueExpression,
   REVENUE_SQL_EXPRESSION,
+  buildFundedFilter,
   type ActorMissingMode,
 } from "../../utils/scorecard-utils.js";
 
@@ -135,6 +136,9 @@ router.get(
         ? `AND guid IN (SELECT loan_guid FROM user_loan_access WHERE user_id = $3)`
         : "";
 
+      // Channel-aware funded filter: Retail uses rate_lock > 0, TPO/All do not.
+      const fundedFilter = buildFundedFilter(channelGroup);
+
       // Fetch FUNDED loans with tenant-specific revenue calculation
       const fundedLoansResult = await retryQuery(
         () =>
@@ -147,8 +151,9 @@ router.get(
           rate_lock_buy_side_base_price_rate,
           (${revenueExpression}) AS revenue
          FROM public.loans 
-         WHERE COALESCE(funding_date, closing_date) >= $1
-           AND COALESCE(funding_date, closing_date) <= $2
+         WHERE ${fundedFilter}
+           AND funding_date >= $1
+           AND funding_date <= $2
            ${accessWhereClause}
            ${channelClause}`,
             queryParams
@@ -209,7 +214,7 @@ router.get(
         () =>
           tenantPool.query(
             `SELECT 
-          loan_id, branch, loan_officer
+          loan_id, branch, loan_officer, current_loan_status
          FROM public.loans 
          WHERE COALESCE(started_date, application_date) >= $1
            AND COALESCE(started_date, application_date) <= $2
@@ -405,10 +410,17 @@ router.get(
         const tierStartedLoans = startedLoans.filter((l: any) =>
           tierNames.has(l[actorColumn])
         );
-        const tierFundedCount = tierActors.reduce((sum, a) => sum + a.units, 0);
+        const tierOriginatedCount = tierStartedLoans.filter((l: any) => {
+          const s = (l.current_loan_status || "").toLowerCase();
+          return s.includes("originated") || s.includes("purchased");
+        }).length;
+        const tierCompleted = tierStartedLoans.filter((l: any) => {
+          const s = (l.current_loan_status || "").toLowerCase();
+          return !["active loan","active","locked","submitted","approved"].includes(s);
+        }).length;
         const pullThrough =
-          tierStartedLoans.length > 0
-            ? (tierFundedCount / tierStartedLoans.length) * 100
+          tierCompleted > 0
+            ? (tierOriginatedCount / tierCompleted) * 100
             : 0;
 
         const validTurnTimes = tierActors.filter((a) => a.avgTurnTime > 0);
@@ -467,9 +479,17 @@ router.get(
         0
       );
       const totalDeniedUnits = deniedLoans.length;
+      const totalOriginated = startedLoans.filter((l: any) => {
+        const s = (l.current_loan_status || "").toLowerCase();
+        return s.includes("originated") || s.includes("purchased");
+      }).length;
+      const totalCompleted = startedLoans.filter((l: any) => {
+        const s = (l.current_loan_status || "").toLowerCase();
+        return !["active loan","active","locked","submitted","approved"].includes(s);
+      }).length;
       const totalPullThrough =
-        startedLoans.length > 0
-          ? (fundedLoans.length / startedLoans.length) * 100
+        totalCompleted > 0
+          ? (totalOriginated / totalCompleted) * 100
           : 0;
 
       const allTurnTimes = actors.filter((a) => a.avgTurnTime > 0);
@@ -691,6 +711,8 @@ router.get(
 
       // Build channel filter using shared utility (correctly handles Retail vs TPO grouping)
       const channelCondition = buildChannelWhereClause(channelGroup);
+      // Channel-aware funded filter: Retail uses rate_lock > 0, TPO/All do not.
+      const compFundedFilter = buildFundedFilter(channelGroup);
       const queryParams: any[] = [
         effectiveStartDate.toISOString().split("T")[0],
         effectiveEndDate.toISOString().split("T")[0],
@@ -708,7 +730,7 @@ router.get(
           funding_date,
           (${revenueExpression}) AS revenue
         FROM public.loans
-        WHERE funding_date IS NOT NULL
+        WHERE ${compFundedFilter}
           AND funding_date >= $1
           AND funding_date <= $2
           ${channelCondition}
@@ -864,7 +886,7 @@ router.get(
         const lastYearQuery = `
         SELECT SUM(${revenueExpression}) AS last_year_revenue
         FROM public.loans
-        WHERE funding_date IS NOT NULL
+        WHERE ${compFundedFilter}
           AND funding_date >= $1
           AND funding_date <= $2
           ${channelCondition}

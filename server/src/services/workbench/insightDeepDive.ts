@@ -70,11 +70,9 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
         COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-          AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS funded,
+        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) AS funded,
         ROUND(
-          COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-            AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) * 100.0
+          COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) * 100.0
           / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
         1) AS pull_through_rate
       FROM public.loans l
@@ -97,10 +95,10 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
       sql: `SELECT
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
-        ROUND(AVG(COALESCE(l.funding_date::date, l.closing_date) - l.application_date)) AS avg_cycle_days,
+        ROUND(AVG(l.funding_date::date - l.application_date)) AS avg_cycle_days,
         COUNT(*) AS funded_count
       FROM public.loans l
-      WHERE (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
+      WHERE l.funding_date IS NOT NULL
         AND l.application_date >= '${daysAgo(365)}'
       GROUP BY sort_period, period
       ORDER BY sort_period`,
@@ -120,8 +118,8 @@ function performanceWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepD
       sql: `SELECT
         DATE_TRUNC('month', l.application_date) AS sort_period,
         TO_CHAR(DATE_TRUNC('month', l.application_date), 'Mon YYYY') AS period,
-        ROUND(SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL) THEN l.loan_amount ELSE 0 END)) AS funded_volume,
-        ROUND(SUM(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL) THEN (${revenueExpr}) ELSE 0 END)) AS revenue
+        ROUND(SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END)) AS funded_volume,
+        ROUND(SUM(CASE WHEN l.funding_date IS NOT NULL THEN (${revenueExpr}) ELSE 0 END)) AS revenue
       FROM public.loans l
       WHERE l.application_date >= '${daysAgo(365)}'
       GROUP BY sort_period, period
@@ -155,10 +153,10 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
         COUNT(DISTINCT COALESCE(l.loan_number, l.loan_id::text)) AS units,
         ROUND(SUM(l.loan_amount)) AS volume,
         ROUND(SUM(${revenueExpr})) AS revenue,
-        ROUND(AVG(COALESCE(l.funding_date::date, l.closing_date) - l.application_date)) AS avg_cycle
+        ROUND(AVG(l.funding_date::date - l.application_date)) AS avg_cycle
       FROM public.loans l
-      WHERE (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
-        AND COALESCE(l.funding_date::date, l.closing_date) >= '${startOfYear()}'
+      WHERE l.funding_date IS NOT NULL
+        AND l.funding_date::date >= '${startOfYear()}'
         AND COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) IS NOT NULL
         ${nameFilter}
       GROUP BY officer
@@ -181,11 +179,9 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
       sql: `SELECT
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS completed,
-        COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-          AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) AS funded,
+        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) AS funded,
         ROUND(
-          COUNT(CASE WHEN (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
-            AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END) * 100.0
+          COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END) * 100.0
           / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
         1) AS pull_through
       FROM public.loans l
@@ -217,10 +213,10 @@ function tieringWidgets(meta: SourceInsightMeta, revenueExpr: string): DeepDiveW
         CASE WHEN SUM(l.loan_amount) > 0
           THEN ROUND((SUM(${revenueExpr}) / SUM(l.loan_amount)) * 10000)
           ELSE 0 END AS bps,
-        ROUND(AVG(COALESCE(l.funding_date::date, l.closing_date) - l.application_date)) AS avg_cycle
+        ROUND(AVG(l.funding_date::date - l.application_date)) AS avg_cycle
       FROM public.loans l
-      WHERE (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL)
-        AND COALESCE(l.funding_date::date, l.closing_date) >= '${startOfYear()}'
+      WHERE l.funding_date IS NOT NULL
+        AND l.funding_date::date >= '${startOfYear()}'
         AND COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) IS NOT NULL
         ${nameFilter}
       GROUP BY officer
@@ -283,7 +279,7 @@ function pipelineWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "At-Risk Loans (Closing Soon, No CTC)",
       sql: `SELECT
-        l.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         l.estimated_closing_date,
@@ -301,7 +297,7 @@ function pipelineWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "At-Risk Loans (Closing ≤10 Days, No CTC)",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "estimated_closing_date", label: "Est. Close", format: "date" },
@@ -434,7 +430,7 @@ function creditRiskWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "High-Risk Loans Detail",
       sql: `SELECT
-        l.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         l.fico_score,
@@ -454,7 +450,7 @@ function creditRiskWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "High-Risk Active Loans",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "fico_score", label: "FICO", format: "number" },
@@ -495,7 +491,7 @@ function predictionsWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "High-Risk Predictions (≥70% Confidence)",
       sql: `SELECT
-        p.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         p.predicted_outcome,
@@ -513,7 +509,7 @@ function predictionsWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "High-Confidence Risk Predictions",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "predicted_outcome", label: "Prediction" },
@@ -538,7 +534,7 @@ function lockExpirationWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
     {
       title: "Expiring Locks Detail",
       sql: `SELECT
-        l.loan_id,
+        COALESCE(l.loan_number, l.loan_id::text) AS loan_number,
         COALESCE(NULLIF(TRIM(l.loan_officer), ''), NULLIF(TRIM(l.account_executive), '')) AS officer,
         l.loan_amount,
         l.lock_expiration_date,
@@ -557,7 +553,7 @@ function lockExpirationWidgets(meta: SourceInsightMeta): DeepDiveWidget[] {
         type: "table",
         title: "Locks Expiring Within 7 Days (No CTC)",
         columns: [
-          { key: "loan_id", label: "Loan ID" },
+          { key: "loan_number", label: "Loan #" },
           { key: "officer", label: "Officer" },
           { key: "loan_amount", label: "Amount", format: "currency" },
           { key: "lock_expiration_date", label: "Lock Expires", format: "date" },

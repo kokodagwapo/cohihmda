@@ -266,7 +266,7 @@ export const SystemSection = ({ systemInfo, loading }: SystemSectionProps) => {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Loan ID</TableHead>
+                        <TableHead>Loan #</TableHead>
                         <TableHead>Borrower</TableHead>
                         <TableHead>Amount</TableHead>
                         <TableHead>Type</TableHead>
@@ -287,7 +287,7 @@ export const SystemSection = ({ systemInfo, loading }: SystemSectionProps) => {
                       ) : (
                         loans.map((loan) => (
                           <TableRow key={loan.loan_id}>
-                            <TableCell className="font-mono text-xs">{loan.loan_id}</TableCell>
+                            <TableCell className="font-mono text-xs">{loan.loan_number || loan.loan_id}</TableCell>
                             <TableCell>{loan.borrower_name || '-'}</TableCell>
                             <TableCell>
                               {loan.loan_amount ? `$${parseInt(loan.loan_amount).toLocaleString()}` : '-'}
@@ -338,7 +338,7 @@ export const SystemSection = ({ systemInfo, loading }: SystemSectionProps) => {
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                   <div className="p-6">
                     <DialogHeader>
-                      <DialogTitle>Edit Loan: {editingLoan.loan_id}</DialogTitle>
+                      <DialogTitle>Edit Loan: {editingLoan.loan_number || editingLoan.loan_id}</DialogTitle>
                       <DialogDescription>
                         Update loan information. Leave fields empty to keep current values.
                       </DialogDescription>

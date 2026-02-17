@@ -146,45 +146,69 @@ export const SALES_ACTOR_CONFIGS: Record<
  */
 export type ChannelGroup = "Retail" | "TPO" | "99-Missing" | "Other" | "All";
 
+// Helper: does this channel string match any TPO-pattern keyword?
+const hasTPOChannelPattern = (chLower: string): boolean =>
+  chLower.includes("broker") ||
+  chLower.includes("brok") ||
+  chLower.includes("whole") ||
+  chLower.includes("corresp") ||
+  chLower.includes("tpo");
+
 /**
  * Filter a channel value by channel group (for JavaScript filtering).
  *
+ * TPO classification requires BOTH a TPO channel pattern AND a populated
+ * account_executive. Loans with a TPO channel pattern but no AE are
+ * classified as Retail (brokered-retail — closed in lender's name).
+ *
  * @param channel - The channel value from the loan
  * @param channelGroup - The channel group to filter by
+ * @param accountExecutive - The account_executive value from the loan (needed for TPO/Retail distinction)
  * @returns true if the channel matches the group
  */
 export const filterByChannel = (
   channel: string | null | undefined,
   channelGroup: string | undefined,
+  accountExecutive?: string | null,
 ): boolean => {
   if (!channelGroup || channelGroup === "All") return true;
   const ch = (channel || "").toLowerCase();
+  const hasAE = !!(accountExecutive && accountExecutive.trim());
+  const tpoPattern = hasTPOChannelPattern(ch);
 
   switch (channelGroup) {
     case "Retail":
-      return ch.includes("retail") || ch.includes("brok");
+      // Retail = channel says "retail" OR (TPO channel pattern but no account_executive)
+      return ch.includes("retail") || (tpoPattern && !hasAE);
     case "TPO":
-      return ch.includes("whole") || ch.includes("corresp");
+      // TPO = TPO channel pattern AND account_executive populated
+      return tpoPattern && hasAE;
     case "99-Missing":
       return !ch || ch.trim() === "";
     case "Other":
       return (
         ch.trim() !== "" &&
         !ch.includes("retail") &&
-        !ch.includes("brok") &&
-        !ch.includes("whole") &&
-        !ch.includes("corresp")
+        !tpoPattern
       );
     default:
       return true;
   }
 };
 
+// SQL fragment for the TPO channel pattern (reused across multiple functions)
+const tpoChannelPatternSql = (col: string): string =>
+  `(${col} ILIKE '%broker%' OR ${col} ILIKE '%brokered%' OR ${col} ILIKE '%wholesale%' OR ${col} ILIKE '%correspondent%' OR ${col} ILIKE '%corresp%' OR ${col} ILIKE '%tpo%')`;
+
 /**
  * Build SQL WHERE clause fragment for channel filtering.
  * Use this for efficient database-level filtering.
  *
+ * TPO classification requires BOTH a TPO channel pattern AND a populated
+ * account_executive. Loans with a TPO channel but no AE are Retail.
+ *
  * @param channelGroup - The channel group to filter by
+ * @param tableAlias - Optional table alias (e.g. "l")
  * @returns SQL fragment to add to WHERE clause (includes leading AND)
  */
 export const buildChannelWhereClause = (
@@ -193,36 +217,51 @@ export const buildChannelWhereClause = (
 ): string => {
   if (!channelGroup || channelGroup === "All") return "";
 
-  // Prefix with table alias if provided (e.g., "l." for "l.channel")
   const col = tableAlias ? `${tableAlias}.channel` : "channel";
+  const aeCol = tableAlias ? `${tableAlias}.account_executive` : "account_executive";
+  const tpoPat = tpoChannelPatternSql(col);
 
-  // Handle consolidated channel groups
   switch (channelGroup) {
     case "Retail":
-      // Retail = Direct origination (company's own loan officers)
-      // NOTE: "Brokered" is NOT Retail - it's TPO
-      return `AND (${col} ILIKE '%retail%')`;
+      // Retail = Direct origination OR brokered-retail (TPO channel pattern but no account_executive)
+      return `AND ((${col} ILIKE '%retail%') OR (${tpoPat} AND (${aeCol} IS NULL OR TRIM(${aeCol}) = '')))`;
     case "TPO":
-      // TPO = Third Party Origination (brokers, wholesale, correspondent)
-      return `AND (${col} ILIKE '%broker%' OR ${col} ILIKE '%brokered%' 
-              OR ${col} ILIKE '%wholesale%' OR ${col} ILIKE '%correspondent%' 
-              OR ${col} ILIKE '%corresp%' OR ${col} ILIKE '%tpo%')`;
+      // TPO = TPO channel pattern AND account_executive populated
+      return `AND (${tpoPat} AND ${aeCol} IS NOT NULL AND TRIM(${aeCol}) != '')`;
     case "99-Missing":
       return `AND (${col} IS NULL OR TRIM(${col}) = '')`;
     case "Other":
-      return `AND ${col} IS NOT NULL AND TRIM(${col}) != '' 
-              AND ${col} NOT ILIKE '%retail%'
-              AND ${col} NOT ILIKE '%broker%' AND ${col} NOT ILIKE '%brokered%'
-              AND ${col} NOT ILIKE '%wholesale%' AND ${col} NOT ILIKE '%corresp%'
-              AND ${col} NOT ILIKE '%tpo%'`;
+      return `AND ${col} IS NOT NULL AND TRIM(${col}) != '' AND ${col} NOT ILIKE '%retail%' AND NOT ${tpoPat}`;
     default:
-      // Not a known group - treat as an individual channel value (exact match)
-      // This handles when users select individual channels from the dropdown
+      // Individual channel value (exact match)
       return `AND LOWER(TRIM(${col})) = LOWER('${channelGroup.replace(
         /'/g,
         "''",
       )}')`;
   }
+};
+
+/**
+ * Build a SQL CASE expression that classifies a loan into a channel group.
+ * TPO requires BOTH a TPO channel pattern AND a populated account_executive.
+ * Loans with a TPO channel but no AE are classified as Retail.
+ *
+ * NOTE: TPO check comes FIRST so that channel+AE → TPO takes precedence
+ * over the Retail catch-all for TPO-pattern channels without AE.
+ *
+ * @param tableAlias - Optional table alias (e.g. "l")
+ * @returns SQL CASE expression that evaluates to 'Retail', 'TPO', '99-Missing', or 'Other'
+ */
+export const buildChannelGroupCaseExpr = (tableAlias = ""): string => {
+  const col = tableAlias ? `${tableAlias}.channel` : "channel";
+  const ae = tableAlias ? `${tableAlias}.account_executive` : "account_executive";
+  const tpoPat = tpoChannelPatternSql(col);
+  return `CASE
+    WHEN ${tpoPat} AND ${ae} IS NOT NULL AND TRIM(${ae}) != '' THEN 'TPO'
+    WHEN ${col} ILIKE '%retail%' OR (${tpoPat} AND (${ae} IS NULL OR TRIM(${ae}) = '')) THEN 'Retail'
+    WHEN ${col} IS NULL OR TRIM(${col}) = '' THEN '99-Missing'
+    ELSE 'Other'
+  END`;
 };
 
 // ============================================================================
@@ -307,6 +346,36 @@ export const buildActorNotMissingClauseForChannel = (
  */
 export const isTPOChannel = (channelGroup?: string): boolean => {
   return (channelGroup || "").toLowerCase() === "tpo";
+};
+
+/**
+ * Build the SQL condition for "funded loan" that is channel-aware.
+ *
+ * Qlik uses separate apps per channel (Retail vs TPO). The Retail app's
+ * TopTiering sheet applies `[Rate Lock Buy Side Base Price Rate] = {">0"}`
+ * because all Retail loans carry buy-side pricing. TPO/brokered loans do NOT
+ * have buy-side rate lock pricing, so the rate_lock filter would exclude them.
+ *
+ * Rules:
+ *  - Retail:  funding_date IS NOT NULL AND rate_lock > 0
+ *  - TPO:     funding_date IS NOT NULL  (no rate_lock — brokered loans lack it)
+ *  - All/other: funding_date IS NOT NULL  (otherwise TPO loans silently disappear)
+ *
+ * @param channelGroup - "Retail", "TPO", "All", or undefined
+ * @param tableAlias   - Table alias prefix (e.g. "l") — will be prepended with dot
+ * @returns SQL fragment like "l.funding_date IS NOT NULL AND ..."
+ */
+export const buildFundedFilter = (
+  channelGroup?: string,
+  tableAlias = "",
+): string => {
+  const col = tableAlias ? `${tableAlias}.` : "";
+  const base = `${col}funding_date IS NOT NULL`;
+  // Rate lock filter only for Retail (matches Qlik TopTiering behavior)
+  if (channelGroup?.toLowerCase() === "retail") {
+    return `${base} AND COALESCE(${col}rate_lock_buy_side_base_price_rate, 0) > 0`;
+  }
+  return base;
 };
 
 // ============================================================================

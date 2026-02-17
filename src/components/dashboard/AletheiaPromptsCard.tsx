@@ -739,33 +739,15 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       window.removeEventListener("cohi-demo-seeded", handler as EventListener);
   }, [refreshInsights, selectedTenantId]);
 
-  // Drill-down logic
-  const drillableSources = useMemo(
-    () => [
-      "predictions",
-      "credit_risk",
-      "lost_opportunity",
-      "pipeline",
-      "performance",
-      "comparisons",
-      "closing_risk",
-      "lock_expiration",
-      "trid",
-      "margin",
-      "condition_backlog",
-      "tiering",
-    ],
-    []
-  );
-
+  // Drill-down logic — all insights are drillable now (evidence tables are self-describing)
   const handleInsightClick = useCallback(
     (insight: AletheiaInsight) => {
-      if (insight.source && drillableSources.includes(insight.source)) {
+      if (insight.source) {
         setSelectedInsight(insight);
         setIsModalOpen(true);
       }
     },
-    [drillableSources]
+    []
   );
 
   // Deep-dive: create a workbench canvas from an insight and navigate to it
@@ -793,9 +775,9 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   const isDrillable = useCallback(
     (insight: AletheiaInsight) => {
-      return !!(insight.source && drillableSources.includes(insight.source));
+      return !!insight.source;
     },
-    [drillableSources]
+    []
   );
 
   // Group insights by bucket
@@ -1074,6 +1056,15 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         insightId={selectedInsight?.insightId}
         dateFilter={dateFilter}
         selectedTenantId={selectedTenantId}
+        isAdmin={isAdmin}
+        etmData={selectedInsight ? {
+          what_changed: selectedInsight.what_changed,
+          why: selectedInsight.why,
+          business_impact: selectedInsight.business_impact,
+          risk_if_ignored: selectedInsight.risk_if_ignored,
+          recommended_action: selectedInsight.recommended_action,
+          owner: selectedInsight.owner,
+        } : undefined}
       />
     </div>
   );

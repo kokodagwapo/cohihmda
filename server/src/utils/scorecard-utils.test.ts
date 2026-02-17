@@ -14,6 +14,7 @@ import {
   formatDateForSQL,
   formatMonthKey,
   buildChannelWhereClause,
+  buildChannelGroupCaseExpr,
   buildActorNotMissingClause,
   parseComplexityConfig,
   DEFAULT_COMPLEXITY_WEIGHTS,
@@ -62,17 +63,44 @@ describe("filterByChannel", () => {
     expect(filterByChannel(null, "All")).toBe(true);
   });
 
-  it("should filter Retail channels", () => {
+  it("should filter Retail channels (direct retail)", () => {
     expect(filterByChannel("Retail", "Retail")).toBe(true);
-    expect(filterByChannel("Brokered", "Retail")).toBe(true);
-    expect(filterByChannel("Wholesale", "Retail")).toBe(false);
-    expect(filterByChannel("Correspondent", "Retail")).toBe(false);
+    expect(filterByChannel("Retail Direct", "Retail")).toBe(true);
   });
 
-  it("should filter TPO channels", () => {
-    expect(filterByChannel("Wholesale", "TPO")).toBe(true);
-    expect(filterByChannel("Correspondent", "TPO")).toBe(true);
-    expect(filterByChannel("Retail", "TPO")).toBe(false);
+  it("should classify Brokered without AE as Retail (brokered-retail)", () => {
+    // TPO channel pattern but no account_executive → Retail
+    expect(filterByChannel("Brokered", "Retail")).toBe(true);
+    expect(filterByChannel("Brokered", "Retail", null)).toBe(true);
+    expect(filterByChannel("Brokered", "Retail", "")).toBe(true);
+    expect(filterByChannel("Brokered", "Retail", "  ")).toBe(true);
+    expect(filterByChannel("Wholesale", "Retail", null)).toBe(true);
+    expect(filterByChannel("Correspondent", "Retail", "")).toBe(true);
+  });
+
+  it("should NOT classify Brokered with AE as Retail", () => {
+    // TPO channel pattern with account_executive → TPO, not Retail
+    expect(filterByChannel("Brokered", "Retail", "John Smith")).toBe(false);
+    expect(filterByChannel("Wholesale", "Retail", "Jane Doe")).toBe(false);
+  });
+
+  it("should filter TPO channels (requires AE populated)", () => {
+    expect(filterByChannel("Wholesale", "TPO", "John Smith")).toBe(true);
+    expect(filterByChannel("Correspondent", "TPO", "Jane Doe")).toBe(true);
+    expect(filterByChannel("Broker", "TPO", "Some AE")).toBe(true);
+    expect(filterByChannel("Brokered", "TPO", "Some AE")).toBe(true);
+    expect(filterByChannel("TPO", "TPO", "AE Name")).toBe(true);
+  });
+
+  it("should NOT classify TPO pattern without AE as TPO", () => {
+    expect(filterByChannel("Wholesale", "TPO")).toBe(false);
+    expect(filterByChannel("Wholesale", "TPO", null)).toBe(false);
+    expect(filterByChannel("Wholesale", "TPO", "")).toBe(false);
+    expect(filterByChannel("Correspondent", "TPO", "  ")).toBe(false);
+  });
+
+  it("should NOT classify Retail channel as TPO even with AE", () => {
+    expect(filterByChannel("Retail", "TPO", "Some AE")).toBe(false);
   });
 
   it("should filter 99-Missing channels", () => {
@@ -81,10 +109,11 @@ describe("filterByChannel", () => {
     expect(filterByChannel("Retail", "99-Missing")).toBe(false);
   });
 
-  it("should filter Other channels", () => {
+  it("should filter Other channels (not Retail, not TPO pattern)", () => {
     expect(filterByChannel("Consumer Direct", "Other")).toBe(true);
     expect(filterByChannel("Retail", "Other")).toBe(false);
     expect(filterByChannel("Wholesale", "Other")).toBe(false);
+    expect(filterByChannel("Broker", "Other")).toBe(false);
     expect(filterByChannel("", "Other")).toBe(false);
   });
 });
@@ -127,10 +156,75 @@ describe("buildChannelWhereClause", () => {
     expect(buildChannelWhereClause("All")).toBe("");
   });
 
-  it("should return SQL for known channels", () => {
-    expect(buildChannelWhereClause("Retail")).toContain("ILIKE '%retail%'");
-    expect(buildChannelWhereClause("TPO")).toContain("ILIKE '%broker%'");
+  it("should return SQL for Retail that includes AE fallback", () => {
+    const sql = buildChannelWhereClause("Retail");
+    expect(sql).toContain("ILIKE '%retail%'");
+    // Should also capture TPO-pattern channels with no AE
+    expect(sql).toContain("account_executive IS NULL");
+  });
+
+  it("should return SQL for TPO that requires AE populated", () => {
+    const sql = buildChannelWhereClause("TPO");
+    expect(sql).toContain("ILIKE '%broker%'");
+    expect(sql).toContain("account_executive IS NOT NULL");
+    expect(sql).toContain("TRIM(account_executive)");
+  });
+
+  it("should return SQL for 99-Missing", () => {
     expect(buildChannelWhereClause("99-Missing")).toContain("IS NULL");
+  });
+
+  it("should handle table alias", () => {
+    const sql = buildChannelWhereClause("TPO", "l");
+    expect(sql).toContain("l.channel");
+    expect(sql).toContain("l.account_executive IS NOT NULL");
+  });
+
+  it("should return exact match for unknown channel groups", () => {
+    const sql = buildChannelWhereClause("Some Custom Channel");
+    expect(sql).toContain("LOWER(TRIM(channel))");
+    expect(sql).toContain("Some Custom Channel");
+  });
+});
+
+// ============================================================================
+// buildChannelGroupCaseExpr
+// ============================================================================
+describe("buildChannelGroupCaseExpr", () => {
+  it("should return a CASE expression", () => {
+    const expr = buildChannelGroupCaseExpr();
+    expect(expr).toContain("CASE");
+    expect(expr).toContain("END");
+  });
+
+  it("should classify TPO first (requires AE)", () => {
+    const expr = buildChannelGroupCaseExpr();
+    // TPO WHEN must come before Retail WHEN
+    const tpoIdx = expr.indexOf("THEN 'TPO'");
+    const retailIdx = expr.indexOf("THEN 'Retail'");
+    expect(tpoIdx).toBeGreaterThan(-1);
+    expect(retailIdx).toBeGreaterThan(-1);
+    expect(tpoIdx).toBeLessThan(retailIdx);
+    // AE check for TPO
+    expect(expr).toContain("account_executive IS NOT NULL");
+  });
+
+  it("should include Retail fallback for TPO patterns without AE", () => {
+    const expr = buildChannelGroupCaseExpr();
+    // Retail clause should reference account_executive IS NULL
+    expect(expr).toContain("account_executive IS NULL");
+  });
+
+  it("should handle table alias", () => {
+    const expr = buildChannelGroupCaseExpr("l");
+    expect(expr).toContain("l.channel");
+    expect(expr).toContain("l.account_executive");
+  });
+
+  it("should include 99-Missing and Other cases", () => {
+    const expr = buildChannelGroupCaseExpr();
+    expect(expr).toContain("'99-Missing'");
+    expect(expr).toContain("'Other'");
   });
 });
 

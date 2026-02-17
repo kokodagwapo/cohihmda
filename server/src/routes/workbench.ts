@@ -4,7 +4,9 @@
  * All operations persist to the tenant-specific database (via attachTenantContext).
  * Platform admins can target a specific tenant via ?tenant_id= query param.
  *
- * Table: public.workbench_canvases (created by migration 035_workbench_canvases.sql)
+ * Table: public.workbench_canvases
+ *   - migration 035_workbench_canvases.sql (base table)
+ *   - migration 050_workbench_canvas_sharing.sql (visibility, sharing columns)
  */
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
@@ -15,8 +17,41 @@ import {
 
 const router = Router();
 
+/** Roles allowed to set visibility = 'global' */
+const GLOBAL_VISIBILITY_ROLES = ['super_admin', 'platform_admin', 'tenant_admin', 'admin'];
+
 // ---------------------------------------------------------------------------
-// GET /  — List canvases for the current user
+// GET /tenant-users  — List users in the current tenant (for sharing picker)
+// Must be defined BEFORE the /:id route to avoid matching "tenant-users" as :id
+// ---------------------------------------------------------------------------
+router.get(
+  '/tenant-users',
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const { tenantPool } = getTenantContext(req);
+
+      const result = await tenantPool.query(
+        `SELECT id, email, full_name, role
+         FROM public.users
+         WHERE COALESCE(is_active, true) = true
+           AND (is_platform_user IS NULL OR is_platform_user = false)
+         ORDER BY COALESCE(full_name, email) ASC
+         LIMIT 500`,
+      );
+
+      res.json({ users: result.rows });
+    } catch (error: any) {
+      console.error('[Workbench] Error listing tenant users:', error.message);
+      res.status(500).json({ error: 'Failed to list tenant users', message: error.message });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// GET /  — List canvases visible to the current user
+// Returns own canvases + global canvases + canvases shared with user
 // ---------------------------------------------------------------------------
 router.get(
   '/',
@@ -27,10 +62,19 @@ router.get(
       const { tenantPool } = getTenantContext(req);
 
       const result = await tenantPool.query(
-        `SELECT id, title, content, favorited, shared, created_at, updated_at
-         FROM public.workbench_canvases
-         WHERE user_id = $1
-         ORDER BY updated_at DESC`,
+        `SELECT
+           c.id, c.title, c.content, c.favorited, c.shared, c.created_at, c.updated_at,
+           c.visibility, c.shared_with_user_ids,
+           c.user_id,
+           (c.user_id = $1) AS is_owner,
+           u.email AS owner_email,
+           u.full_name AS owner_name
+         FROM public.workbench_canvases c
+         LEFT JOIN public.users u ON u.id = c.user_id
+         WHERE c.user_id = $1
+            OR c.visibility = 'global'
+            OR (c.visibility = 'shared' AND $1 = ANY(c.shared_with_user_ids))
+         ORDER BY c.updated_at DESC`,
         [req.userId],
       );
 
@@ -43,7 +87,7 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// GET /:id  — Get a single canvas
+// GET /:id  — Get a single canvas (owner, global, or shared-with)
 // ---------------------------------------------------------------------------
 router.get(
   '/:id',
@@ -54,10 +98,23 @@ router.get(
       const { tenantPool } = getTenantContext(req);
 
       const result = await tenantPool.query(
-        `SELECT id, title, content, favorited, shared, share_pin, share_scope,
-                created_at, updated_at
-         FROM public.workbench_canvases
-         WHERE id = $1 AND user_id = $2`,
+        `SELECT
+           c.id, c.title, c.content, c.favorited, c.shared,
+           c.share_pin, c.share_scope,
+           c.visibility, c.shared_with_user_ids,
+           c.created_at, c.updated_at,
+           c.user_id,
+           (c.user_id = $2) AS is_owner,
+           u.email AS owner_email,
+           u.full_name AS owner_name
+         FROM public.workbench_canvases c
+         LEFT JOIN public.users u ON u.id = c.user_id
+         WHERE c.id = $1
+           AND (
+             c.user_id = $2
+             OR c.visibility = 'global'
+             OR (c.visibility = 'shared' AND $2 = ANY(c.shared_with_user_ids))
+           )`,
         [req.params.id, req.userId],
       );
 
@@ -90,7 +147,22 @@ router.post(
         background,
         uploadsMeta,
         content: rawContent,
+        visibility: reqVisibility,
+        shared_with_user_ids: reqSharedWith,
       } = req.body;
+
+      // Validate visibility
+      let visibility: string = reqVisibility ?? 'private';
+      if (!['private', 'global', 'shared'].includes(visibility)) {
+        visibility = 'private';
+      }
+      // Only admins can create global canvases
+      if (visibility === 'global' && !GLOBAL_VISIBILITY_ROLES.includes(req.userRole || '')) {
+        return res.status(403).json({ error: 'Only admins can create global canvases' });
+      }
+
+      const sharedWith: string[] = Array.isArray(reqSharedWith) ? reqSharedWith : [];
+      const createdByRole = req.userRole || 'user';
 
       // Support both flat fields (from "Open in Workbench") and a pre-packed
       // content object (from future callers).
@@ -106,10 +178,10 @@ router.post(
 
       const result = await tenantPool.query(
         `INSERT INTO public.workbench_canvases
-           (user_id, title, layout_version, content)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, title, created_at, updated_at`,
-        [req.userId, title, layoutVersion, JSON.stringify(content)],
+           (user_id, title, layout_version, content, visibility, created_by_role, shared_with_user_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, title, visibility, created_at, updated_at`,
+        [req.userId, title, layoutVersion, JSON.stringify(content), visibility, createdByRole, sharedWith],
       );
 
       res.json(result.rows[0]);
@@ -234,7 +306,7 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// POST /:id/share  — Share a canvas (generate or update share settings)
+// POST /:id/share  — Legacy share endpoint (kept for backward compat)
 // ---------------------------------------------------------------------------
 router.post(
   '/:id/share',
@@ -262,6 +334,60 @@ router.post(
     } catch (error: any) {
       console.error('[Workbench] Error sharing canvas:', error.message);
       res.status(500).json({ error: 'Failed to share canvas', message: error.message });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// PUT /:id/visibility  — Update canvas visibility / sharing settings
+// ---------------------------------------------------------------------------
+router.put(
+  '/:id/visibility',
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { visibility, shared_with_user_ids } = req.body;
+      const { tenantPool } = getTenantContext(req);
+
+      // Ownership check — only owners can change visibility
+      const ownership = await tenantPool.query(
+        'SELECT id, visibility FROM public.workbench_canvases WHERE id = $1 AND user_id = $2',
+        [id, req.userId],
+      );
+      if (ownership.rows.length === 0) {
+        return res.status(404).json({ error: 'Canvas not found or you are not the owner' });
+      }
+
+      // Validate visibility value
+      if (!['private', 'global', 'shared'].includes(visibility)) {
+        return res.status(400).json({ error: 'Invalid visibility. Must be private, global, or shared.' });
+      }
+
+      // Only admins can set global
+      if (visibility === 'global' && !GLOBAL_VISIBILITY_ROLES.includes(req.userRole || '')) {
+        return res.status(403).json({ error: 'Only admins can set global visibility' });
+      }
+
+      const sharedWith: string[] = Array.isArray(shared_with_user_ids) ? shared_with_user_ids : [];
+
+      const result = await tenantPool.query(
+        `UPDATE public.workbench_canvases
+         SET visibility = $1, shared_with_user_ids = $2, updated_at = NOW()
+         WHERE id = $3 AND user_id = $4
+         RETURNING id, visibility, shared_with_user_ids`,
+        [visibility, sharedWith, id, req.userId],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Canvas not found' });
+      }
+
+      res.json({ success: true, ...result.rows[0] });
+    } catch (error: any) {
+      console.error('[Workbench] Error updating visibility:', error.message);
+      res.status(500).json({ error: 'Failed to update visibility', message: error.message });
     }
   },
 );
@@ -437,10 +563,10 @@ router.post(
       const canvasTitle = `Deep Dive: ${meta.headline.substring(0, 60)}${meta.headline.length > 60 ? '...' : ''}`;
       const createRes = await tenantPool.query(
         `INSERT INTO public.workbench_canvases
-           (user_id, title, layout_version, content)
-         VALUES ($1, $2, $3, $4)
+           (user_id, title, layout_version, content, created_by_role)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id, title, created_at, updated_at`,
-        [req.userId, canvasTitle, 'freeform-v1', JSON.stringify(content)],
+        [req.userId, canvasTitle, 'freeform-v1', JSON.stringify(content), req.userRole || 'user'],
       );
 
       console.log(`[Workbench] Created deep-dive canvas ${createRes.rows[0].id} for insight ${insightId}`);

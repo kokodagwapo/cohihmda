@@ -957,8 +957,8 @@ router.post(
     
       const result = await tenantPool.query(
         `
-      INSERT INTO users (email, encrypted_password, full_name, role, is_active)
-      VALUES ($1, $2, $3, $4, true)
+      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode)
+      VALUES ($1, $2, $3, $4, true, 'full_access')
       RETURNING id, email, full_name, role, is_active, created_at
     `,
         [

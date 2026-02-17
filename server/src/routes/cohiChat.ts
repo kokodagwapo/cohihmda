@@ -140,6 +140,14 @@ router.post('/ask', authenticateToken, attachTenantContext, apiLimiter, async (r
             error: response.error
           })
         ]);
+
+        // Auto-title the session with the first user question & bump updated_at
+        await tenantPool.query(`
+          UPDATE public.chat_sessions
+          SET title = CASE WHEN title = 'New conversation' THEN $1 ELSE title END,
+              updated_at = NOW()
+          WHERE id = $2 AND user_id = $3
+        `, [question.trim().substring(0, 80), sessionId, req.userId]);
       } catch (historyError) {
         console.warn('[CohiChat] Failed to save chat history:', historyError);
       }
@@ -208,6 +216,12 @@ router.post('/refine', authenticateToken, attachTenantContext, apiLimiter, async
             rowCount: response.data?.length || 0
           })
         ]);
+
+        // Bump session updated_at
+        await tenantPool.query(`
+          UPDATE public.chat_sessions SET updated_at = NOW()
+          WHERE id = $1 AND user_id = $2
+        `, [sessionId, req.userId]);
       } catch (historyError) {
         console.warn('[CohiChat] Failed to save chat history:', historyError);
       }
@@ -278,6 +292,181 @@ router.get('/history', authenticateToken, attachTenantContext, async (req: AuthR
     res.status(500).json({ 
       error: 'Failed to fetch chat history',
       message: error.message 
+    });
+  }
+});
+
+// ============================================================================
+// Chat Sessions CRUD
+// ============================================================================
+
+/**
+ * GET /api/cohi-chat/sessions
+ * List chat sessions for the current user, ordered by most recent first.
+ * Supports ?limit=25&offset=0 pagination.
+ */
+router.get('/sessions', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 25, 100);
+    const offset = parseInt(req.query.offset as string, 10) || 0;
+
+    const result = await tenantPool.query(`
+      SELECT
+        s.id,
+        s.title,
+        s.created_at,
+        s.updated_at,
+        COUNT(h.id)::int AS message_count,
+        MAX(h.created_at) AS last_message_at
+      FROM public.chat_sessions s
+      LEFT JOIN public.chat_history h ON h.session_id = s.id AND h.user_id = s.user_id
+      WHERE s.user_id = $1
+      GROUP BY s.id
+      ORDER BY s.updated_at DESC
+      LIMIT $2 OFFSET $3
+    `, [req.userId, limit, offset]);
+
+    const sessions = result.rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      messageCount: row.message_count,
+      lastMessageAt: row.last_message_at || row.updated_at,
+      createdAt: row.created_at,
+    }));
+
+    res.json({ sessions });
+  } catch (error: any) {
+    console.error('[CohiChat] Error fetching sessions:', error);
+    res.status(500).json({
+      error: 'Failed to fetch chat sessions',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/cohi-chat/sessions/:sessionId
+ * Load all messages for a specific session.
+ */
+router.get('/sessions/:sessionId', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+    const { sessionId } = req.params;
+
+    // Fetch session metadata
+    const sessionResult = await tenantPool.query(`
+      SELECT id, title, created_at, updated_at
+      FROM public.chat_sessions
+      WHERE id = $1 AND user_id = $2
+    `, [sessionId, req.userId]);
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Fetch messages
+    const messagesResult = await tenantPool.query(`
+      SELECT id, role, content, visualization_id, metadata, created_at
+      FROM public.chat_history
+      WHERE session_id = $1 AND user_id = $2
+      ORDER BY created_at ASC
+    `, [sessionId, req.userId]);
+
+    const session = sessionResult.rows[0];
+
+    res.json({
+      session: {
+        id: session.id,
+        title: session.title,
+        createdAt: session.created_at,
+        updatedAt: session.updated_at,
+      },
+      messages: messagesResult.rows.map(row => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        visualizationId: row.visualization_id,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error: any) {
+    console.error('[CohiChat] Error fetching session:', error);
+    res.status(500).json({
+      error: 'Failed to fetch session',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/cohi-chat/sessions/:sessionId
+ * Rename a chat session.
+ */
+router.put('/sessions/:sessionId', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+    const { sessionId } = req.params;
+    const { title } = req.body;
+
+    if (!title || typeof title !== 'string') {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const result = await tenantPool.query(`
+      UPDATE public.chat_sessions
+      SET title = $1
+      WHERE id = $2 AND user_id = $3
+      RETURNING id, title, updated_at
+    `, [title.trim().substring(0, 200), sessionId, req.userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({ session: result.rows[0] });
+  } catch (error: any) {
+    console.error('[CohiChat] Error renaming session:', error);
+    res.status(500).json({
+      error: 'Failed to rename session',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/cohi-chat/sessions/:sessionId
+ * Delete a chat session and all its messages.
+ */
+router.delete('/sessions/:sessionId', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
+  try {
+    const tenantPool = getTenantContext(req).tenantPool;
+    const { sessionId } = req.params;
+
+    // Delete messages first (no FK from history -> sessions, so manual)
+    await tenantPool.query(`
+      DELETE FROM public.chat_history
+      WHERE session_id = $1 AND user_id = $2
+    `, [sessionId, req.userId]);
+
+    // Delete session
+    const result = await tenantPool.query(`
+      DELETE FROM public.chat_sessions
+      WHERE id = $1 AND user_id = $2
+      RETURNING id
+    `, [sessionId, req.userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('[CohiChat] Error deleting session:', error);
+    res.status(500).json({
+      error: 'Failed to delete session',
+      message: error.message,
     });
   }
 });
@@ -665,9 +854,24 @@ router.post('/refresh-visualization/:id', authenticateToken, attachTenantContext
  * POST /api/cohi-chat/new-session
  * Create a new chat session
  */
-router.post('/new-session', authenticateToken, async (req: AuthRequest, res) => {
+router.post('/new-session', authenticateToken, attachTenantContext, async (req: AuthRequest, res) => {
   try {
     const sessionId = uuidv4();
+
+    // Persist the session row so it appears in the sessions list
+    if (req.tenantContext) {
+      try {
+        const tenantPool = req.tenantContext.tenantPool;
+        await tenantPool.query(`
+          INSERT INTO public.chat_sessions (id, user_id, title)
+          VALUES ($1, $2, 'New conversation')
+          ON CONFLICT (id) DO NOTHING
+        `, [sessionId, req.userId]);
+      } catch (sessionErr) {
+        console.warn('[CohiChat] Failed to persist session row:', sessionErr);
+      }
+    }
+
     res.json({ sessionId });
   } catch (error: any) {
     console.error('[CohiChat] Error creating session:', error);

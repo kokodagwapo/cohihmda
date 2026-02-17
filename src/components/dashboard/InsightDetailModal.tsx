@@ -1,8 +1,19 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Loader2, Download, Calendar, Telescope } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Download, Calendar, Telescope, Lightbulb, Target, ShieldAlert, Zap, User, ChevronDown, ChevronRight, Database, ArrowUpDown, ArrowUp, ArrowDown, Search } from 'lucide-react';
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getFilteredRowModel,
+  flexRender,
+  type ColumnDef as TanstackColumnDef,
+  type SortingState,
+  type ColumnFiltersState,
+} from '@tanstack/react-table';
 import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   FIELD_REGISTRY,
   SUMMARY_REGISTRY,
@@ -23,11 +34,115 @@ interface InsightDetailModalProps {
   insightId?: number;
   dateFilter: string;
   selectedTenantId?: string | null;
+  isAdmin?: boolean;
+  // ETM fields passed from the insight
+  etmData?: {
+    what_changed?: string;
+    why?: string;
+    business_impact?: string;
+    risk_if_ignored?: string;
+    recommended_action?: string;
+    owner?: string;
+  };
+}
+
+interface AuditSummaryDef {
+  key: string;
+  label: string;
+  value: number | string;
+  format: string;
+  color: string;
+}
+
+interface AuditCorrection {
+  key: string;
+  label: string;
+  from: number;
+  to: number;
+  reason: string;
+}
+
+interface DomainStat {
+  id: string;
+  candidateCount: number;
+  promptLength: number;
+}
+
+interface PipelineContextData {
+  generationBatch: string;
+  dateFilter: string;
+  channelGroup?: string;
+  metricsPrompt: string;
+  signalsText: string;
+  signalCount: number;
+  generatorModel: string;
+  generatorCandidateCount: number;
+  judgeModel?: string;
+  curatorModel?: string;
+  domains?: DomainStat[];
+  stepTimings: {
+    signals: number;
+    rag: number;
+    generator: number;
+    factCheck: number;
+    judge: number;
+    curator: number;
+    evidence: number;
+    total: number;
+  };
+}
+
+interface InsightJourneyData {
+  generatorIndex: number;
+  headline: string;
+  reasoningChain?: string;
+  citedNumbers?: string[];
+  sourceDomain?: string;
+  factCheck: {
+    score: number;
+    issues: string[];
+  };
+  judgeScore: number;
+  judgeIssues?: string[];
+  curatorBucket: string;
+  curatorPriority: string;
+}
+
+interface EvidenceAuditData {
+  pipelineContext?: PipelineContextData;
+  insightJourney?: InsightJourneyData;
+  generatedSql: string;
+  rowCount: number;
+  rawSummary: AuditSummaryDef[];
+  resolvedSummary: AuditSummaryDef[];
+  finalSummary: AuditSummaryDef[];
+  corrections: AuditCorrection[];
+  comparisonSql?: string;
+  comparisonRowCount?: number;
+  sqlExecutionMs?: number;
+  totalMs?: number;
+}
+
+interface ColumnDef {
+  key: string;
+  label: string;
+  format: string;
+  align: string;
+}
+
+interface SummaryDef {
+  key: string;
+  label: string;
+  value: number | string;
+  format: string;
+  color: string;
 }
 
 interface DisplayConfig {
   columns: string[];
   summaryMetrics: string[];
+  column_defs?: ColumnDef[];
+  summary_defs?: SummaryDef[];
 }
 
 interface DateRangeInfo {
@@ -36,16 +151,35 @@ interface DateRangeInfo {
   endDate: string;
 }
 
+interface ETMSection {
+  what_changed?: string;
+  why?: string;
+  business_impact?: string;
+  risk_if_ignored?: string;
+  recommended_action?: string;
+  owner?: string;
+}
+
+interface ComparisonData {
+  label: string;
+  currentLabel: string;
+  rows: Record<string, any>[];
+  summary: Record<string, number>;
+  summary_defs?: SummaryDef[];
+}
+
 interface DetailData {
   source: string;
   title: string;
   summary: Record<string, number>;
   displayConfig?: DisplayConfig;
   dateRange?: DateRangeInfo;
-  /** ISO timestamp of when the insight was generated (data freshness) */
   dataAsOf?: string;
   rows?: Record<string, any>[];
-  // Legacy fields — kept for backward compat
+  etm?: ETMSection;
+  comparison?: ComparisonData | null;
+  audit?: EvidenceAuditData | null;
+  // Legacy fields
   loans?: Record<string, any>[];
   officers?: Record<string, any>[];
   months?: Record<string, any>[];
@@ -235,6 +369,174 @@ function BadgeCell({ value }: { value: string }) {
 }
 
 // ============================================================================
+// Sortable + Searchable Data Table (powered by @tanstack/react-table)
+// ============================================================================
+
+interface InsightDataTableProps {
+  columns: string[];
+  rows: Record<string, any>[];
+  columnDefMap: Record<string, ColumnDef>;
+}
+
+function InsightDataTable({ columns, rows, columnDefMap }: InsightDataTableProps) {
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [showFilters, setShowFilters] = useState(false);
+
+  const tableColumns = useMemo<TanstackColumnDef<Record<string, any>>[]>(() =>
+    columns
+      .filter(colKey => {
+        const cDef = columnDefMap[colKey];
+        const field = FIELD_REGISTRY[colKey];
+        return cDef?.label || field?.label;
+      })
+      .map(colKey => {
+        const cDef = columnDefMap[colKey];
+        const field = FIELD_REGISTRY[colKey];
+        const fmt = (cDef?.format || field?.format || 'text') as FieldFormat;
+        const align = cDef?.align || field?.align || 'left';
+        const label = cDef?.label || field?.label || colKey;
+
+        return {
+          accessorKey: colKey,
+          header: label,
+          sortingFn: (fmt === 'currency' || fmt === 'number' || fmt === 'percent' || fmt === 'days' || fmt === 'bps' || fmt === 'rate')
+            ? 'alphanumeric' as const
+            : 'text' as const,
+          filterFn: 'includesString' as const,
+          cell: ({ getValue }: { getValue: () => any }) => {
+            const raw = getValue();
+            if (fmt === 'mono') {
+              return <span className="font-mono text-xs">{formatCell(raw, fmt)}</span>;
+            }
+            if (fmt === 'badge') {
+              return <BadgeCell value={String(raw || '-')} />;
+            }
+            if (fmt === 'boolean') {
+              return raw
+                ? <span className="text-emerald-600">Yes</span>
+                : <span className="text-slate-400">No</span>;
+            }
+            return <span className={`text-${align}`}>{formatCell(raw, fmt)}</span>;
+          },
+          meta: { align, format: fmt },
+        };
+      }),
+    [columns, columnDefMap]
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns: tableColumns,
+    state: { sorting, columnFilters },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+  });
+
+  const filteredCount = table.getFilteredRowModel().rows.length;
+  const hasActiveFilters = columnFilters.length > 0;
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          Detail ({hasActiveFilters ? `${filteredCount} of ${rows.length}` : rows.length} {rows.length === 1 ? 'row' : 'rows'})
+        </span>
+        <button
+          onClick={() => setShowFilters(f => !f)}
+          className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${
+            showFilters
+              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
+              : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-300'
+          }`}
+        >
+          <Search className="w-3 h-3" />
+          {showFilters ? 'Hide Filters' : 'Filter'}
+        </button>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900">
+          {table.getHeaderGroups().map(headerGroup => (
+            <tr key={headerGroup.id} className="border-b border-slate-200 dark:border-slate-700">
+              {headerGroup.headers.map(header => {
+                const meta = header.column.columnDef.meta as { align: string; format: string } | undefined;
+                const align = meta?.align || 'left';
+                const canSort = header.column.getCanSort();
+                const sortDir = header.column.getIsSorted();
+
+                return (
+                  <th
+                    key={header.id}
+                    className={`py-3 px-2 font-medium text-slate-600 dark:text-slate-400 text-${align}`}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                        className={`flex items-center gap-1 ${canSort ? 'cursor-pointer select-none hover:text-slate-900 dark:hover:text-slate-200' : ''} ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {canSort && (
+                          <span className="inline-flex w-3.5 h-3.5 flex-shrink-0">
+                            {sortDir === 'asc' ? (
+                              <ArrowUp className="w-3.5 h-3.5 text-indigo-500" />
+                            ) : sortDir === 'desc' ? (
+                              <ArrowDown className="w-3.5 h-3.5 text-indigo-500" />
+                            ) : (
+                              <ArrowUpDown className="w-3.5 h-3.5 opacity-30" />
+                            )}
+                          </span>
+                        )}
+                      </button>
+                      {showFilters && (
+                        <input
+                          type="text"
+                          value={(header.column.getFilterValue() as string) ?? ''}
+                          onChange={e => header.column.setFilterValue(e.target.value || undefined)}
+                          placeholder="Search..."
+                          className="w-full min-w-[60px] px-1.5 py-0.5 text-xs font-normal border border-slate-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map(row => (
+            <tr
+              key={row.id}
+              className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+            >
+              {row.getVisibleCells().map(cell => {
+                const meta = cell.column.columnDef.meta as { align: string; format: string } | undefined;
+                const align = meta?.align || 'left';
+                return (
+                  <td key={cell.id} className={`py-3 px-2 text-${align}`}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+          {filteredCount === 0 && hasActiveFilters && (
+            <tr>
+              <td colSpan={columns.length} className="py-6 text-center text-slate-400 text-sm">
+                No rows match the current filters.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ============================================================================
 // Main component
 // ============================================================================
 
@@ -246,12 +548,19 @@ export const InsightDetailModal = ({
   insightId,
   dateFilter,
   selectedTenantId,
+  isAdmin,
+  etmData,
 }: InsightDetailModalProps) => {
   const navigate = useNavigate();
+  const { isPlatformStaff } = useAuth();
+  const isAdminUser = isAdmin ?? isPlatformStaff();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DetailData | null>(null);
   const [isCreatingDeepDive, setIsCreatingDeepDive] = useState(false);
+  const [activePeriod, setActivePeriod] = useState<'current' | 'prior'>('current');
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const [auditSection, setAuditSection] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && insightSource) {
@@ -270,6 +579,7 @@ export const InsightDetailModal = ({
         `/api/dashboard/insights/details/${insightSource}?dateFilter=${dateFilter}${tenantParam}${idParam}${headlineParam}`
       );
       setData(result);
+      setActivePeriod('current');
     } catch (err: any) {
       console.error('Error fetching insight details see:', err);
       setError(err.message || 'Failed to load details');
@@ -300,16 +610,36 @@ export const InsightDetailModal = ({
     }
   }, [insightId, isCreatingDeepDive, selectedTenantId, onClose, navigate]);
 
+  const hasComparison = useMemo(() => !!data?.comparison, [data]);
+
   // Unified rows from new `rows` field or legacy `loans`/`officers`/`months`
   const rows = useMemo(() => {
     if (!data) return [];
+    if (activePeriod === 'prior' && data.comparison?.rows) {
+      return data.comparison.rows;
+    }
     return data.rows || data.loans || data.officers || data.months || [];
+  }, [data, activePeriod]);
+
+  // Check if we have self-describing column_defs from the evidence table
+  const hasColumnDefs = useMemo(() => {
+    return (data?.displayConfig?.column_defs?.length || 0) > 0;
   }, [data]);
 
-  // Resolve columns: prefer LLM-chosen columns → but validate they actually exist
-  // in the row data. If <2 of the LLM columns have data, fall back to defaults.
-  // RULE: If the rows contain loanId, it MUST always be the first column.
+  const hasSummaryDefs = useMemo(() => {
+    return (data?.displayConfig?.summary_defs?.length || 0) > 0;
+  }, [data]);
+
+  // Resolve ETM data from the detail response or from props
+  const etm = useMemo(() => {
+    return data?.etm || etmData || null;
+  }, [data, etmData]);
+
+  // Resolve columns: prefer column_defs (self-describing) → LLM columns → defaults
   const columns = useMemo(() => {
+    if (hasColumnDefs) {
+      return data!.displayConfig!.column_defs!.map(c => c.key);
+    }
     let cols: string[];
     const llmCols = data?.displayConfig?.columns;
     if (llmCols?.length && rows.length > 0) {
@@ -319,25 +649,49 @@ export const InsightDetailModal = ({
     } else {
       cols = DEFAULT_COLUMNS[insightSource] || [];
     }
-
-    // Enforce: if this is loan-level data, loanId is always first
-    if (rows.length > 0 && rows[0].loanId !== undefined) {
-      const without = cols.filter(c => c !== 'loanId');
-      cols = ['loanId', ...without];
+    if (rows.length > 0 && rows[0].loanNumber !== undefined) {
+      const without = cols.filter(c => c !== 'loanNumber');
+      cols = ['loanNumber', ...without];
     }
-
     return cols;
-  }, [data, insightSource, rows]);
+  }, [data, insightSource, rows, hasColumnDefs]);
 
-  // Resolve summary metrics: prefer LLM-chosen → validate against actual summary → fall back
+  // Build a lookup map for column_defs by key
+  const columnDefMap = useMemo(() => {
+    const map: Record<string, ColumnDef> = {};
+    if (data?.displayConfig?.column_defs) {
+      for (const def of data.displayConfig.column_defs) {
+        map[def.key] = def;
+      }
+    }
+    return map;
+  }, [data]);
+
+  // Resolve summary metrics: prefer summary_defs → LLM metrics → defaults
   const summaryMetricKeys = useMemo(() => {
+    if (hasSummaryDefs) return data!.displayConfig!.summary_defs!.map(s => s.key);
     const llmMetrics = data?.displayConfig?.summaryMetrics;
     if (llmMetrics?.length && data?.summary) {
       const validMetrics = llmMetrics.filter(k => data.summary[k] != null);
       if (validMetrics.length >= 1) return validMetrics;
     }
     return DEFAULT_SUMMARY_METRICS[insightSource] || [];
-  }, [data, insightSource]);
+  }, [data, insightSource, hasSummaryDefs]);
+
+  // Build a lookup map for summary_defs by key (period-aware)
+  const summaryDefMap = useMemo(() => {
+    const map: Record<string, SummaryDef> = {};
+    if (activePeriod === 'prior' && data?.comparison?.summary_defs) {
+      for (const def of data.comparison.summary_defs) {
+        map[def.key] = def;
+      }
+    } else if (data?.displayConfig?.summary_defs) {
+      for (const def of data.displayConfig.summary_defs) {
+        map[def.key] = def;
+      }
+    }
+    return map;
+  }, [data, activePeriod]);
 
   // ==============================
   // CSV Export
@@ -345,12 +699,18 @@ export const InsightDetailModal = ({
 
   const exportCSV = () => {
     if (!columns.length || !rows.length) return;
-    const headers = columns.map(k => FIELD_REGISTRY[k]?.label || k);
+    const headers = columns.map(k => {
+      const def = columnDefMap[k];
+      if (def) return def.label;
+      return FIELD_REGISTRY[k]?.label || k;
+    });
     const csvRows = rows.map(row =>
       columns.map(k => {
+        const def = columnDefMap[k];
         const field = FIELD_REGISTRY[k];
+        const fmt = (def?.format || field?.format || 'text') as FieldFormat;
         const raw = row[k];
-        return `"${formatCellPlain(raw, field?.format || 'text').replace(/"/g, '""')}"`;
+        return `"${formatCellPlain(raw, fmt).replace(/"/g, '""')}"`;
       }).join(',')
     );
     const csv = [headers.join(','), ...csvRows].join('\n');
@@ -379,7 +739,7 @@ export const InsightDetailModal = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="relative w-full max-w-5xl max-h-[85vh] overflow-hidden bg-white dark:bg-slate-900 rounded-2xl shadow-2xl"
+          className="relative w-full max-w-5xl max-h-[92vh] overflow-hidden bg-white dark:bg-slate-900 rounded-2xl shadow-2xl flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -445,7 +805,7 @@ export const InsightDetailModal = ({
           </div>
 
           {/* Content */}
-          <div className="p-4 sm:p-6 overflow-y-auto max-h-[calc(85vh-80px)]">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0">
             {loading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -464,10 +824,114 @@ export const InsightDetailModal = ({
               </div>
             ) : data ? (
               <div className="space-y-6">
+                {/* ========== ETM Reasoning Panel ========== */}
+                {etm && (etm.what_changed || etm.why || etm.business_impact) && (
+                  <div className="rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/30 p-4 space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                      <Lightbulb className="w-4 h-4 text-amber-500" />
+                      Executive Analysis
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      {etm.what_changed && (
+                        <div className="space-y-1">
+                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                            <Target className="w-3.5 h-3.5 text-blue-500" />
+                            What Changed
+                          </span>
+                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.what_changed}</p>
+                        </div>
+                      )}
+                      {etm.why && (
+                        <div className="space-y-1">
+                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                            <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                            Why
+                          </span>
+                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.why}</p>
+                        </div>
+                      )}
+                      {etm.business_impact && (
+                        <div className="space-y-1">
+                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                            Business Impact
+                          </span>
+                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.business_impact}</p>
+                        </div>
+                      )}
+                      {etm.risk_if_ignored && (
+                        <div className="space-y-1">
+                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                            <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+                            Risk if Ignored
+                          </span>
+                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.risk_if_ignored}</p>
+                        </div>
+                      )}
+                      {etm.recommended_action && (
+                        <div className="space-y-1">
+                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                            <Target className="w-3.5 h-3.5 text-indigo-500" />
+                            Recommended Action
+                          </span>
+                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.recommended_action}</p>
+                        </div>
+                      )}
+                      {etm.owner && (
+                        <div className="space-y-1">
+                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-purple-500" />
+                            Owner
+                          </span>
+                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.owner}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ========== Period Toggle (comparison insights only) ========== */}
+                {hasComparison && data?.comparison && (
+                  <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800 w-fit">
+                    <button
+                      onClick={() => setActivePeriod('current')}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+                        activePeriod === 'current'
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                      }`}
+                    >
+                      {data.comparison.currentLabel || 'Current Period'}
+                    </button>
+                    <button
+                      onClick={() => setActivePeriod('prior')}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+                        activePeriod === 'prior'
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                      }`}
+                    >
+                      {data.comparison.label || 'Prior Period'}
+                    </button>
+                  </div>
+                )}
+
                 {/* ========== Dynamic Summary Cards ========== */}
                 {summaryMetricKeys.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                     {summaryMetricKeys.map(metricKey => {
+                      // Prefer self-describing summary_defs, fall back to SUMMARY_REGISTRY
+                      const sDef = summaryDefMap[metricKey];
+                      if (sDef) {
+                        return (
+                          <SummaryCard
+                            key={metricKey}
+                            label={sDef.label}
+                            value={formatSummaryValue(sDef.value, sDef.format)}
+                            color={(sDef.color as any) || 'blue'}
+                          />
+                        );
+                      }
                       const config = SUMMARY_REGISTRY[metricKey];
                       const value = data.summary?.[metricKey];
                       if (value == null || !config) return null;
@@ -483,83 +947,13 @@ export const InsightDetailModal = ({
                   </div>
                 )}
 
-                {/* ========== Dynamic Data Table ========== */}
+                {/* ========== Dynamic Data Table (sortable + searchable) ========== */}
                 {columns.length > 0 && rows.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                        Detail ({rows.length} {rows.length === 1 ? 'row' : 'rows'})
-                      </span>
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-200 dark:border-slate-700">
-                          {columns.map(colKey => {
-                            const field = FIELD_REGISTRY[colKey];
-                            if (!field) return null;
-                            return (
-                              <th
-                                key={colKey}
-                                className={`py-3 px-2 font-medium text-slate-600 dark:text-slate-400 text-${field.align}`}
-                              >
-                                {field.label}
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row, idx) => (
-                          <tr
-                            key={row.loanId || row.name || row.month || idx}
-                            className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                          >
-                            {columns.map(colKey => {
-                              const field = FIELD_REGISTRY[colKey];
-                              if (!field) return <td key={colKey} />;
-                              const raw = row[colKey];
-
-                              // Special rendering for certain formats
-                              if (field.format === 'mono') {
-                                return (
-                                  <td key={colKey} className="py-3 px-2 font-mono text-xs">
-                                    {formatCell(raw, field.format)}
-                                  </td>
-                                );
-                              }
-                              if (field.format === 'badge') {
-                                return (
-                                  <td key={colKey} className="py-3 px-2">
-                                    <BadgeCell value={String(raw || '-')} />
-                                  </td>
-                                );
-                              }
-                              if (field.format === 'boolean') {
-                                return (
-                                  <td key={colKey} className="py-3 px-2 text-center">
-                                    {raw ? (
-                                      <span className="text-emerald-600">Yes</span>
-                                    ) : (
-                                      <span className="text-slate-400">No</span>
-                                    )}
-                                  </td>
-                                );
-                              }
-
-                              return (
-                                <td
-                                  key={colKey}
-                                  className={`py-3 px-2 text-${field.align}`}
-                                >
-                                  {formatCell(raw, field.format)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <InsightDataTable
+                    columns={columns}
+                    rows={rows}
+                    columnDefMap={columnDefMap}
+                  />
                 ) : columns.length === 0 && rows.length === 0 ? (
                   <div className="text-center py-8 text-slate-500">
                     {insightSource === 'margin'
@@ -572,6 +966,310 @@ export const InsightDetailModal = ({
                 {data?.dateRange && (
                   <div className="text-xs text-slate-400 text-right pt-2">
                     Data as of {new Date(data.dateRange.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </div>
+                )}
+
+                {/* Admin-only: Data Provenance Audit Panel */}
+                {isAdminUser && (
+                  <div className="mt-4 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => { setIsAuditOpen(!isAuditOpen); if (isAuditOpen) setAuditSection(null); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      {isAuditOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                      <Database className="w-3.5 h-3.5" />
+                      Data Provenance
+                      {data?.audit && data.audit.corrections.length > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 text-[10px] font-semibold">
+                          {data.audit.corrections.length} correction{data.audit.corrections.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {data?.audit?.pipelineContext ? (
+                        <span className="ml-auto text-[10px] text-slate-400">
+                          {data.audit.rowCount} rows · {data.audit.pipelineContext.stepTimings.total}ms total
+                        </span>
+                      ) : data?.audit ? (
+                        <span className="ml-auto text-[10px] text-slate-400">
+                          {data.audit.rowCount} rows
+                          {data.audit.totalMs != null && ` · ${data.audit.totalMs}ms`}
+                        </span>
+                      ) : (
+                        <span className="ml-auto text-[10px] text-slate-400">no audit data</span>
+                      )}
+                    </button>
+
+                    {isAuditOpen && (
+                      <div className="text-xs bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700">
+                        {!data?.audit ? (
+                          <div className="px-3 py-3 text-slate-400 text-[11px]">
+                            No provenance data available for this insight. Regenerate insights to populate the audit trail.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+
+                            {/* ── Section: Pipeline Overview ── */}
+                            {data.audit.pipelineContext && (
+                              <div>
+                                <button
+                                  onClick={() => setAuditSection(auditSection === 'pipeline' ? null : 'pipeline')}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                                >
+                                  {auditSection === 'pipeline' ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                  Pipeline Overview
+                                  <span className="ml-auto text-[10px] text-slate-400 font-normal">
+                                    {data.audit.pipelineContext.generatorCandidateCount} candidates &rarr; {data.audit.rowCount} rows
+                                  </span>
+                                </button>
+                                {auditSection === 'pipeline' && (
+                                  <div className="px-3 pb-3 space-y-2">
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                                      <span>Batch</span><span className="truncate">{data.audit.pipelineContext.generationBatch}</span>
+                                      <span>Date Filter</span><span>{data.audit.pipelineContext.dateFilter}</span>
+                                      {data.audit.pipelineContext.channelGroup && (<><span>Channel</span><span>{data.audit.pipelineContext.channelGroup}</span></>)}
+                                      <span>Generator</span><span>{data.audit.pipelineContext.generatorModel} ({data.audit.pipelineContext.generatorCandidateCount} candidates)</span>
+                                      {data.audit.pipelineContext.judgeModel && (<><span>Judge</span><span>{data.audit.pipelineContext.judgeModel}</span></>)}
+                                      {data.audit.pipelineContext.curatorModel && (<><span>Curator</span><span>{data.audit.pipelineContext.curatorModel}</span></>)}
+                                      <span>Signals</span><span>{data.audit.pipelineContext.signalCount} computed</span>
+                                    </div>
+                                    {data.audit.pipelineContext.domains && data.audit.pipelineContext.domains.length > 0 && (
+                                      <div className="pt-1">
+                                        <div className="text-[10px] font-medium text-slate-400 mb-1">Domain-Split Generation</div>
+                                        <div className="grid grid-cols-3 gap-1 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                          {data.audit.pipelineContext.domains.map(d => (
+                                            <div key={d.id} className="bg-slate-50 dark:bg-slate-800 rounded px-2 py-1">
+                                              <div className="font-medium text-slate-600 dark:text-slate-300">{d.id.replace(/_/g, ' ')}</div>
+                                              <div>{d.candidateCount} candidates · {(d.promptLength / 1000).toFixed(1)}KB</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div className="text-[10px] text-slate-400 pt-1">
+                                      <span className="font-medium">Step Timings:</span>{' '}
+                                      Signals {data.audit.pipelineContext.stepTimings.signals}ms
+                                      {' · '}RAG {data.audit.pipelineContext.stepTimings.rag}ms
+                                      {' · '}Generator {data.audit.pipelineContext.stepTimings.generator}ms
+                                      {' · '}Fact-Check {data.audit.pipelineContext.stepTimings.factCheck}ms
+                                      {' · '}Judge {data.audit.pipelineContext.stepTimings.judge}ms
+                                      {' · '}Curator {data.audit.pipelineContext.stepTimings.curator}ms
+                                      {' · '}Evidence {data.audit.pipelineContext.stepTimings.evidence}ms
+                                      {' · '}Total {data.audit.pipelineContext.stepTimings.total}ms
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* ── Section: Metrics Prompt ── */}
+                            {data.audit.pipelineContext?.metricsPrompt && (
+                              <div>
+                                <button
+                                  onClick={() => setAuditSection(auditSection === 'metrics' ? null : 'metrics')}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                                >
+                                  {auditSection === 'metrics' ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                  Metrics Prompt (LLM Input)
+                                  <span className="ml-auto text-[10px] text-slate-400 font-normal">
+                                    {data.audit.pipelineContext.metricsPrompt.length.toLocaleString()} chars
+                                  </span>
+                                </button>
+                                {auditSection === 'metrics' && (
+                                  <div className="px-3 pb-3">
+                                    <pre className="bg-slate-50 dark:bg-slate-800 rounded p-2 text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
+                                      {data.audit.pipelineContext.metricsPrompt}
+                                    </pre>
+                                    {data.audit.pipelineContext.signalsText && (
+                                      <>
+                                        <div className="font-medium text-slate-500 dark:text-slate-400 mt-2 mb-1 text-[11px]">Signals Text</div>
+                                        <pre className="bg-slate-50 dark:bg-slate-800 rounded p-2 text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                                          {data.audit.pipelineContext.signalsText}
+                                        </pre>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* ── Section: Insight Journey ── */}
+                            {data.audit.insightJourney && (
+                              <div>
+                                <button
+                                  onClick={() => setAuditSection(auditSection === 'journey' ? null : 'journey')}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                                >
+                                  {auditSection === 'journey' ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                  Insight Journey
+                                  <span className="ml-auto text-[10px] text-slate-400 font-normal">
+                                    {data.audit.insightJourney.sourceDomain && <>{data.audit.insightJourney.sourceDomain.replace(/_/g, ' ')} · </>}
+                                    FC {data.audit.insightJourney.factCheck.score.toFixed(2)}
+                                    {' · '}Judge {data.audit.insightJourney.judgeScore.toFixed(1)}
+                                    {' · '}{data.audit.insightJourney.curatorBucket}/{data.audit.insightJourney.curatorPriority}
+                                  </span>
+                                </button>
+                                {auditSection === 'journey' && (
+                                  <div className="px-3 pb-3 space-y-2">
+                                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                                      <span className="font-medium">Generator Index</span>
+                                      <span>#{data.audit.insightJourney.generatorIndex}</span>
+                                      {data.audit.insightJourney.sourceDomain && (
+                                        <>
+                                          <span className="font-medium">Source Domain</span>
+                                          <span className="capitalize">{data.audit.insightJourney.sourceDomain.replace(/_/g, ' ')}</span>
+                                        </>
+                                      )}
+                                      <span className="font-medium">Fact-Check Score</span>
+                                      <span className={data.audit.insightJourney.factCheck.score < 0.7 ? 'text-amber-500' : 'text-emerald-500'}>
+                                        {data.audit.insightJourney.factCheck.score.toFixed(2)}
+                                        {data.audit.insightJourney.factCheck.issues.length > 0 &&
+                                          ` (${data.audit.insightJourney.factCheck.issues.length} issue${data.audit.insightJourney.factCheck.issues.length > 1 ? 's' : ''})`}
+                                      </span>
+                                      {data.audit.insightJourney.factCheck.issues.length > 0 && (
+                                        <>
+                                          <span className="font-medium">FC Issues</span>
+                                          <span className="text-amber-500">{data.audit.insightJourney.factCheck.issues.join('; ')}</span>
+                                        </>
+                                      )}
+                                      <span className="font-medium">Judge Score</span>
+                                      <span className={data.audit.insightJourney.judgeScore < 5 ? 'text-amber-500' : 'text-emerald-500'}>
+                                        {data.audit.insightJourney.judgeScore.toFixed(1)}/10
+                                      </span>
+                                      {data.audit.insightJourney.judgeIssues && data.audit.insightJourney.judgeIssues.length > 0 && (
+                                        <>
+                                          <span className="font-medium">Judge Issues</span>
+                                          <span className="text-amber-500">{data.audit.insightJourney.judgeIssues.join('; ')}</span>
+                                        </>
+                                      )}
+                                      <span className="font-medium">Curator</span>
+                                      <span>{data.audit.insightJourney.curatorBucket} / {data.audit.insightJourney.curatorPriority}</span>
+                                      {data.audit.insightJourney.citedNumbers && data.audit.insightJourney.citedNumbers.length > 0 && (
+                                        <>
+                                          <span className="font-medium">Cited Numbers</span>
+                                          <span>{data.audit.insightJourney.citedNumbers.join(', ')}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {data.audit.insightJourney.reasoningChain && (
+                                      <div>
+                                        <div className="font-medium text-slate-500 dark:text-slate-400 mb-1 text-[11px]">LLM Reasoning Chain</div>
+                                        <pre className="bg-slate-50 dark:bg-slate-800 rounded p-2 text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                                          {data.audit.insightJourney.reasoningChain}
+                                        </pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* ── Section: Evidence Agent ── */}
+                            <div>
+                              <button
+                                onClick={() => setAuditSection(auditSection === 'evidence' ? null : 'evidence')}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                              >
+                                {auditSection === 'evidence' ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                Evidence Agent (SQL + KPIs)
+                                <span className="ml-auto text-[10px] text-slate-400 font-normal">
+                                  {data.audit.rowCount} rows
+                                  {data.audit.corrections.length > 0 && ` · ${data.audit.corrections.length} corrections`}
+                                  {data.audit.sqlExecutionMs != null && ` · ${data.audit.sqlExecutionMs}ms`}
+                                </span>
+                              </button>
+                              {auditSection === 'evidence' && (
+                                <div className="px-3 pb-3 space-y-2">
+                                  {/* KPI corrections */}
+                                  {data.audit.corrections.length > 0 && (
+                                    <div>
+                                      <div className="font-semibold text-amber-600 dark:text-amber-400 mb-1 text-[11px]">KPI Corrections Applied</div>
+                                      <div className="space-y-1">
+                                        {data.audit.corrections.map((c, i) => (
+                                          <div key={i} className="flex items-center gap-2 text-slate-600 dark:text-slate-300 font-mono text-[11px]">
+                                            <span className="font-medium">{c.label}</span>
+                                            <span className="text-rose-500 line-through">{c.from}</span>
+                                            <span className="text-slate-400">&rarr;</span>
+                                            <span className="text-emerald-600">{c.to}</span>
+                                            <span className="text-slate-400 text-[10px]">({c.reason})</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Summary pipeline */}
+                                  {data.audit.rawSummary.length > 0 && (
+                                    <div>
+                                      <div className="font-medium text-slate-500 dark:text-slate-400 mb-1 text-[11px]">Summary Pipeline</div>
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-[11px] font-mono">
+                                          <thead>
+                                            <tr className="text-slate-400 text-left">
+                                              <th className="pr-3 py-0.5">KPI</th>
+                                              <th className="pr-3 py-0.5">Raw (LLM)</th>
+                                              <th className="pr-3 py-0.5">Resolved</th>
+                                              <th className="pr-3 py-0.5">Final</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {data.audit.rawSummary.map((raw, i) => {
+                                              const resolved = data.audit!.resolvedSummary[i];
+                                              const final_ = data.audit!.finalSummary[i];
+                                              const changed = String(raw.value) !== String(final_?.value);
+                                              return (
+                                                <tr key={raw.key} className={changed ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}>
+                                                  <td className="pr-3 py-0.5 font-medium">{raw.label}</td>
+                                                  <td className="pr-3 py-0.5">{String(raw.value)}</td>
+                                                  <td className="pr-3 py-0.5">{String(resolved?.value ?? '-')}</td>
+                                                  <td className="pr-3 py-0.5">{String(final_?.value ?? '-')}</td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Evidence SQL */}
+                                  {data.audit.generatedSql && (
+                                    <div>
+                                      <div className="font-medium text-slate-500 dark:text-slate-400 mb-1 text-[11px]">Evidence SQL</div>
+                                      <pre className="bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                                        {data.audit.generatedSql}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {/* Comparison SQL */}
+                                  {data.audit.comparisonSql && (
+                                    <div>
+                                      <div className="font-medium text-slate-500 dark:text-slate-400 mb-1 text-[11px]">
+                                        Comparison SQL
+                                        {data.audit.comparisonRowCount != null && (
+                                          <span className="ml-2 font-normal text-slate-400">({data.audit.comparisonRowCount} rows)</span>
+                                        )}
+                                      </div>
+                                      <pre className="bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                                        {data.audit.comparisonSql}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {/* Timing */}
+                                  {(data.audit.sqlExecutionMs != null || data.audit.totalMs != null) && (
+                                    <div className="flex gap-4 text-slate-400 text-[10px]">
+                                      {data.audit.sqlExecutionMs != null && <span>SQL exec: {data.audit.sqlExecutionMs}ms</span>}
+                                      {data.audit.totalMs != null && <span>Evidence agent: {data.audit.totalMs}ms</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

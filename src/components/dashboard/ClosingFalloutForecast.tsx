@@ -3479,7 +3479,7 @@ export const ClosingFalloutForecast = ({
                     }`}
                   >
                     <th className="text-left py-3 px-3 font-semibold text-slate-700 dark:text-slate-300 sticky left-0 z-10 bg-inherit text-[11px]">
-                      Loan ID
+                      Loan #
                     </th>
                     <th className="text-center py-3 px-2 font-semibold text-slate-700 dark:text-slate-300 text-[11px]">
                       Loan Type
@@ -3599,7 +3599,7 @@ export const ClosingFalloutForecast = ({
                                 isDarkMode ? "bg-slate-900/50" : "bg-white"
                               } shadow-[2px_0_4px_rgba(0,0,0,0.05)]`}
                             >
-                              {loan.loanId || loan.loan_id || loan.id || "N/A"}
+                              {loan.loan_number || loan.loanNumber || loan.loanId || loan.loan_id || loan.id || "N/A"}
                             </td>
                             <BucketCell value={loan.loanTypeSignal} />
                             <BucketCell value={loan.loanPurposeSignal} />

@@ -89,6 +89,14 @@ export interface CohiChatResponse {
   };
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  messageCount: number;
+  lastMessageAt: string;
+  createdAt: string;
+}
+
 export interface UseCohiChatOptions {
   tenantId?: string;
   onError?: (error: Error) => void;
@@ -110,6 +118,9 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     "What are the FHA requirements?",
     "Top loan officers by revenue",
   ]);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
 
   const messageIdCounter = useRef(0);
   const defaultTenantIdRef = useRef<string | null | undefined>(undefined);
@@ -411,6 +422,136 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     ]);
   }, []);
 
+  // ===========================================================================
+  // Session management
+  // ===========================================================================
+
+  /**
+   * Fetch the list of saved chat sessions
+   */
+  const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    try {
+      const effectiveTenantId = await getEffectiveTenantId();
+      const qs = effectiveTenantId
+        ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+        : "";
+      const response = await api.request<{ sessions: ChatSession[] }>(
+        `/api/cohi-chat/sessions${qs}`
+      );
+      setChatSessions(response.sessions || []);
+    } catch (error) {
+      console.error("[CohiChat] Failed to fetch sessions:", error);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, [getEffectiveTenantId]);
+
+  /**
+   * Load a specific session's messages into the chat
+   */
+  const loadSession = useCallback(
+    async (targetSessionId: string) => {
+      setIsLoadingSession(true);
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        const qs = effectiveTenantId
+          ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+          : "";
+        const response = await api.request<{
+          session: { id: string; title: string };
+          messages: {
+            id: string;
+            role: "user" | "assistant";
+            content: string;
+            metadata: any;
+            createdAt: string;
+          }[];
+        }>(`/api/cohi-chat/sessions/${targetSessionId}${qs}`);
+
+        const loadedMessages: ChatMessage[] = response.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.createdAt),
+          visualization: m.metadata?.visualization,
+          sqlQuery: m.metadata?.sqlQuery,
+          sources: m.metadata?.sources,
+        }));
+
+        setMessages(loadedMessages);
+        setSessionId(targetSessionId);
+        setSuggestedQuestions([
+          "What's important to know today?",
+          "Show me loan volume by month",
+          "What are the FHA requirements?",
+          "Top loan officers by revenue",
+        ]);
+      } catch (error) {
+        console.error("[CohiChat] Failed to load session:", error);
+      } finally {
+        setIsLoadingSession(false);
+      }
+    },
+    [getEffectiveTenantId]
+  );
+
+  /**
+   * Delete a chat session
+   */
+  const deleteSession = useCallback(
+    async (targetSessionId: string) => {
+      const previousSessions = chatSessions;
+      setChatSessions((prev) => prev.filter((s) => s.id !== targetSessionId));
+
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        const qs = effectiveTenantId
+          ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+          : "";
+        await api.request(`/api/cohi-chat/sessions/${targetSessionId}${qs}`, {
+          method: "DELETE",
+        });
+
+        if (sessionId === targetSessionId) {
+          clearMessages();
+          setSessionId(null);
+        }
+      } catch (error) {
+        console.error("[CohiChat] Failed to delete session:", error);
+        setChatSessions(previousSessions);
+      }
+    },
+    [chatSessions, clearMessages, getEffectiveTenantId, sessionId]
+  );
+
+  /**
+   * Rename a chat session
+   */
+  const renameSession = useCallback(
+    async (targetSessionId: string, title: string) => {
+      const previousSessions = chatSessions;
+      setChatSessions((prev) =>
+        prev.map((s) => (s.id === targetSessionId ? { ...s, title } : s))
+      );
+
+      try {
+        const effectiveTenantId = await getEffectiveTenantId();
+        const qs = effectiveTenantId
+          ? `?tenant_id=${encodeURIComponent(effectiveTenantId)}`
+          : "";
+        await api.request(`/api/cohi-chat/sessions/${targetSessionId}${qs}`, {
+          method: "PUT",
+          body: JSON.stringify({ title }),
+        });
+      } catch (error) {
+        console.error("[CohiChat] Failed to rename session:", error);
+        setChatSessions(previousSessions);
+      }
+    },
+    [chatSessions, getEffectiveTenantId]
+  );
+
   /**
    * Start a new session
    */
@@ -424,10 +565,11 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
       if (response.sessionId) {
         setSessionId(response.sessionId);
       }
+      fetchSessions();
     } catch (error) {
       console.error("[CohiChat] Failed to create new session:", error);
     }
-  }, [clearMessages]);
+  }, [clearMessages, fetchSessions]);
 
   return {
     messages,
@@ -439,5 +581,12 @@ export function useCohiChat(options: UseCohiChatOptions = {}) {
     refineQuery,
     clearMessages,
     newSession,
+    chatSessions,
+    isLoadingSessions,
+    isLoadingSession,
+    fetchSessions,
+    loadSession,
+    deleteSession,
+    renameSession,
   };
 }
