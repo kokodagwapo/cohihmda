@@ -16,7 +16,7 @@ const DEFAULT_SEGMENT_KEY = 'All';
  */
 export async function getAvgApplicationToFundingDays(pool: pg.Pool): Promise<number | null> {
   const result = await pool.query(
-    `SELECT AVG(EXTRACT(EPOCH FROM (funding_date::date - application_date::date)) / 86400) AS avg_days
+    `SELECT AVG(funding_date::date - application_date::date) AS avg_days
      FROM public.loans
      WHERE application_date IS NOT NULL
        AND funding_date IS NOT NULL
