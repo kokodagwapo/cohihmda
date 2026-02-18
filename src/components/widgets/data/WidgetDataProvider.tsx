@@ -27,6 +27,7 @@ import { useSalesTrendsData } from '@/hooks/useSalesTrendsData';
 import { useFunnelData } from '@/hooks/useFunnelData';
 import { useTopTieringComparisonData } from '@/hooks/useTopTieringComparisonData';
 import { useLeaderboardData } from '@/hooks/useLeaderboardData';
+import { useLoanDetailData } from '@/hooks/useLoanDetailData';
 import type { DataSourceId } from '../registry/types';
 
 // ---------------------------------------------------------------------------
@@ -190,6 +191,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const fnFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'funnel'), [sections, scopedFilters]);
   const ttcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'top-tiering-comparison'), [sections, scopedFilters]);
   const lbFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'leaderboard'), [sections, scopedFilters]);
+  const ldFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-detail'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
@@ -299,6 +301,25 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     },
   );
 
+  // Loan detail: only apply date filter when user has explicitly selected a period (preset/year/custom).
+  // When periodSelection is missing, show all loans so the table isn't empty by default.
+  const loanDetailFilters = useMemo(
+    () =>
+      ldFilters
+        ? {
+            dateField: ldFilters.dateField,
+            dateRange:
+              ldFilters.sectionType === 'loan-detail'
+                ? (ldFilters.periodSelection?.dateRange ?? undefined)
+                : (ldFilters.periodSelection?.dateRange ?? ldFilters.dateRange),
+            branch: ldFilters.branch,
+            loanOfficer: ldFilters.loanOfficer,
+          }
+        : undefined,
+    [ldFilters],
+  );
+  const loanDetail = useLoanDetailData(selectedTenantId, loanDetailFilters ?? undefined);
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -373,6 +394,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
+    'loan-detail': {
+      data: loanDetail.data,
+      loading: loanDetail.loading,
+      error: loanDetail.error,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -383,6 +409,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     funnelData, funnelLoading,
     topTieringComparison.data, topTieringComparison.loading, topTieringComparison.error,
     leaderboardData, leaderboardLoading,
+    loanDetail.data, loanDetail.loading, loanDetail.error,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

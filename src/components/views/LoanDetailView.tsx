@@ -9,11 +9,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   useLoanDetailData,
   type LoanDetailRow,
+  type LoanDetailListResponse,
 } from "@/hooks/useLoanDetailData";
 import { useTheme } from "@/components/theme-provider";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Download } from "lucide-react";
+import { Loader2, Download, ArrowUp, ArrowDown } from "lucide-react";
 
 const ROW_HEIGHT = 40;
 const HEADER_HEIGHT = 40;
@@ -28,6 +29,14 @@ const MAX_COL_WIDTH = 800;
 export interface LoanDetailViewProps {
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
+  /** When provided (e.g. workbench widget), use these instead of fetching; no Export to Excel. */
+  data?: LoanDetailListResponse | null;
+  loading?: boolean;
+  error?: string | null;
+  /** When true (e.g. workbench widget), fill container height and use flex layout so table scroll area is visible. */
+  fillHeight?: boolean;
+  /** When set (workbench only), subtitle shows "Loans from {periodLabel}." instead of default. */
+  periodLabel?: string | null;
 }
 
 type ColumnDef = {
@@ -72,18 +81,13 @@ const COLUMNS: ColumnDef[] = [
   { id: "started_date", label: "Started Date", field: "started_date" },
   { id: "credit_pull_date", label: "Credit Pull Date", field: "credit_pull_date" },
   { id: "application_date", label: "Application Date", field: "application_date" },
-  { id: "application_mtd", label: "Application MTD", field: null },
-  { id: "application_mtd_previous", label: "Application MTD Previous", field: null },
-  { id: "application_month_previous", label: "Application Month Previous", field: null },
   { id: "loan_estimate_sent", label: "Loan Estimate Sent", field: "loan_estimate_sent_date" },
   { id: "loan_estimate_received", label: "Loan Estimate Received", field: "loan_estimate_received_date" },
   { id: "uw_final_approval_date", label: "UW Final Approval Date", field: "uw_final_approval_date" },
   { id: "uw_suspended_date", label: "UW Suspended Date", field: "uw_suspended_date" },
   { id: "uw_denied_date", label: "UW Denied Date", field: "uw_denied_date" },
+  { id: "denial_date", label: "Denial Date", field: "denial_date" },
   { id: "investor_lock_date", label: "Investor Lock Date", field: "investor_lock_date" },
-  { id: "investor_lock_mtd", label: "Investor Lock MTD", field: null },
-  { id: "investor_lock_mtd_previous", label: "Investor Lock MTDPrevious", field: null },
-  { id: "investor_lock_month_previous", label: "Investor Lock MonthPrevious", field: null },
   { id: "locked_flag", label: "Locked Flag", field: null },
   { id: "lock_expiration_date", label: "Lock Expiration Date", field: "lock_expiration_date" },
   { id: "locked_days", label: "Locked Days", field: "lock_days" },
@@ -92,14 +96,8 @@ const COLUMNS: ColumnDef[] = [
   { id: "closing_disclosure_sent", label: "Closing Disclosure Sent", field: "closing_disclosure_sent_date" },
   { id: "closing_disclosure_received", label: "Closing Disclosure Received", field: "closing_disclosure_received_date" },
   { id: "closing_date", label: "Closing Date", field: "closing_date" },
-  { id: "closing_mtd", label: "Closing MTD", field: null },
-  { id: "closing_mtd_previous", label: "Closing MTD Previous", field: null },
-  { id: "closing_month_previous", label: "Closing Month Previous", field: null },
   { id: "funding_date", label: "Funding Date", field: "funding_date" },
   { id: "investor_purchase_date", label: "Investor Purchase Date", field: "investor_purchase_date" },
-  { id: "investor_purchase_mtd", label: "Investor Purchase MTD", field: null },
-  { id: "investor_purchase_mtd_previous", label: "Investor Purchase MTD Previous", field: null },
-  { id: "investor_purchase_month_previous", label: "Investor Purchase Month Previous", field: null },
   { id: "shipped_date", label: "Shipped Date", field: "shipped_date" },
   { id: "subject_property_type_fannie_mae", label: "Subject Property Type Fannie Mae", field: "subject_property_type_fannie_mae" },
   { id: "fees_va_fund_fee_borr", label: "Fees VA Fund Fee Borr", field: "fees_va_fund_fee_borr" },
@@ -108,7 +106,6 @@ const COLUMNS: ColumnDef[] = [
   { id: "fees_loan_discount_fee_pct", label: "Fees Loan Discount Fee %", field: "fees_loan_discount_fee" },
   { id: "fees_loan_discount_fee_borr", label: "Fees Loan Discount Fee Borr", field: "fees_loan_discount_fee_borr" },
   { id: "subject_property_street", label: "Subject Property Street", field: "property_street", minWidth: 220 },
-  { id: "loan_amt", label: "Loan Amt", field: "loan_amount" },
   { id: "loan_type_2", label: "Loan Type", field: "loan_type" },
   { id: "interest_only_mos", label: "Interest Only Mos", field: "number_of_months_interest_only_payments" },
   { id: "borr_info_points_paid", label: "Borr Info Points Paid", field: "origination_points" },
@@ -123,18 +120,47 @@ export const UNPOPULATED_LOAN_DETAIL_COLUMNS = COLUMNS.filter((c) => c.field ===
   (c) => c.label,
 );
 
+const BLANK_PLACEHOLDER = "-";
+
+/** Format volume (loan amount) with commas and 2 decimals (e.g. 3,093,200.00). Used only for volume column. */
+function formatVolumeWithCommas(value: number | string | null): string {
+  if (value === null || value === undefined) return BLANK_PLACEHOLDER;
+  const num = typeof value === "number" ? value : parseFloat(String(value).replace(/,/g, ""));
+  if (Number.isNaN(num)) return BLANK_PLACEHOLDER;
+  return num.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function formatCellValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
+  if (value === null || value === undefined) return BLANK_PLACEHOLDER;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   if (typeof value === "number") {
-    if (Number.isInteger(value)) return value.toLocaleString();
+    if (Number.isInteger(value)) return String(value);
     return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return BLANK_PLACEHOLDER;
     if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
     return value;
   }
   return String(value);
+}
+
+/** Locked Flag = Yes when lock date exists and lock expiration date is after today; No when before today. */
+function isLockedFlagYes(row: LoanDetailRow): boolean {
+  const lockDate = row.investor_lock_date;
+  if (lockDate == null || String(lockDate).trim() === "") return false;
+  const exp = row.lock_expiration_date;
+  if (exp == null || String(exp).trim() === "") return false;
+  const expDate = new Date(String(exp).trim().slice(0, 10));
+  if (Number.isNaN(expDate.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  expDate.setHours(0, 0, 0, 0);
+  return expDate > today;
 }
 
 /** WAC = Sum(Loan Amount * Interest Rate) / Sum(Loan Amount), formatted as #,##0.000 (Qlik formula). Same value for every row. */
@@ -156,26 +182,72 @@ function computeWacFormatted(loans: LoanDetailRow[]): string {
   });
 }
 
-/** Display value for a cell: handles Units (1), WAC (aggregate), Locked Flag (Yes/No), and Fees Loan Discount Fee % */
+/** Display value for a cell: handles Units (1), WAC (aggregate), Locked Flag (Yes/No), Volume (comma-separated), and Fees Loan Discount Fee % */
 function getCellDisplay(
   col: ColumnDef,
   row: LoanDetailRow,
   wacFormatted: string,
 ): string {
   if (col.id === "units") return "1";
-  if (col.id === "wac") return wacFormatted;
-  if (col.id === "locked_flag")
-    return row.investor_lock_date != null && String(row.investor_lock_date).trim() !== ""
-      ? "Yes"
-      : "No";
+  if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
+  if (col.id === "volume") return formatVolumeWithCommas(row.loan_amount);
+  if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
   if (col.id === "fees_loan_discount_fee_pct" && col.field) {
     const raw = row[col.field as keyof LoanDetailRow];
     if (raw != null && typeof raw === "number")
       return `${Number(raw).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-    return raw != null ? String(raw) : "";
+    return raw != null && String(raw).trim() !== "" ? String(raw) : BLANK_PLACEHOLDER;
   }
   if (col.field) return formatCellValue(row[col.field as keyof LoanDetailRow]);
-  return "";
+  return BLANK_PLACEHOLDER;
+}
+
+/** Value used for sorting: number, string, or null (blank). Enables correct numeric/date/string order. */
+function getSortValue(
+  col: ColumnDef,
+  row: LoanDetailRow,
+  wacFormatted: string,
+): number | string | null {
+  if (col.id === "units") return 1;
+  if (col.id === "wac") {
+    const n = parseFloat(wacFormatted.replace(/,/g, ""));
+    return Number.isNaN(n) ? null : n;
+  }
+  if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
+  if (col.id === "fees_loan_discount_fee_pct" && col.field) {
+    const raw = row[col.field as keyof LoanDetailRow];
+    return raw != null && typeof raw === "number" ? raw : null;
+  }
+  if (!col.field) return null;
+  const raw = row[col.field as keyof LoanDetailRow];
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "number") return raw;
+  const s = String(raw).trim();
+  return s === "" ? null : s;
+}
+
+function sortLoans(
+  loans: LoanDetailRow[],
+  columnId: string,
+  direction: "asc" | "desc",
+  wacFormatted: string,
+): LoanDetailRow[] {
+  const col = COLUMNS.find((c) => c.id === columnId);
+  if (!col) return [...loans];
+  const mult = direction === "asc" ? 1 : -1;
+  return [...loans].sort((a, b) => {
+    const va = getSortValue(col, a, wacFormatted);
+    const vb = getSortValue(col, b, wacFormatted);
+    const aNull = va === null;
+    const bNull = vb === null;
+    if (aNull && bNull) return 0;
+    if (aNull) return mult * 1;
+    if (bNull) return mult * -1;
+    if (typeof va === "number" && typeof vb === "number") return mult * (va - vb);
+    const sa = String(va);
+    const sb = String(vb);
+    return mult * sa.localeCompare(sb, undefined, { numeric: true });
+  });
 }
 
 /** Column ids that get no total (leave blank) */
@@ -184,7 +256,6 @@ const TOTALS_BLANK_COLUMN_IDS = new Set([
   "locked_days",
   "fees_va_fund_fee_borr",
   "fees_loan_discount_fee_borr",
-  "loan_amt",
   "borr_info_points_paid",
   "income_total_mo_income",
 ]);
@@ -194,11 +265,11 @@ function getColumnTotal(
   loans: LoanDetailRow[],
   wacFormatted: string,
 ): string {
-  if (loans.length === 0) return "";
+  if (loans.length === 0) return col.id === "loan_number" ? "Totals" : BLANK_PLACEHOLDER;
   if (col.id === "loan_number") return "Totals";
   if (col.id === "units") return String(loans.length);
-  if (col.id === "wac") return wacFormatted;
-  if (TOTALS_BLANK_COLUMN_IDS.has(col.id)) return "";
+  if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
+  if (TOTALS_BLANK_COLUMN_IDS.has(col.id)) return BLANK_PLACEHOLDER;
 
   // Volume: sum of loan_amount (ensure numeric)
   if (col.id === "volume") {
@@ -229,11 +300,11 @@ function getColumnTotal(
         n++;
       }
     }
-    if (n === 0) return "";
+    if (n === 0) return BLANK_PLACEHOLDER;
     return (sum / n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  return "";
+  return BLANK_PLACEHOLDER;
 }
 
 /** Compute column width from header + all cell values so nothing is cut off */
@@ -262,16 +333,25 @@ function getColumnWidthFromContent(
   return Math.max(minW, Math.min(contentWidth, MAX_COL_WIDTH));
 }
 
-export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
+export function LoanDetailView({
+  selectedTenantId,
+  data: dataProp,
+  loading: loadingProp,
+  error: errorProp,
+  fillHeight = false,
+  periodLabel,
+}: LoanDetailViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === "dark";
-  const { data, loading, error, fetchAll } = useLoanDetailData(selectedTenantId);
+  const fetched = useLoanDetailData(selectedTenantId);
+  const isControlled = dataProp !== undefined;
+  const data = isControlled ? dataProp ?? null : fetched.data;
+  const loading = isControlled ? (loadingProp ?? false) : fetched.loading;
+  const error = isControlled ? (errorProp ?? null) : fetched.error;
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [, setScrollReady] = useState(0);
 
-  useEffect(() => {
-    fetchAll();
-  }, [selectedTenantId, fetchAll]);
+  // Standalone page: useLoanDetailData auto-fetches when tenantId changes
 
   // Callback ref: when the scroll container mounts, trigger re-render so virtualizer can measure it
   const setScrollRef = useCallback((el: HTMLDivElement | null) => {
@@ -282,8 +362,30 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
   const loans = data?.loans ?? [];
   const total = data?.total ?? 0;
 
+  const [sortColumnId, setSortColumnId] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
   // WAC = sum of (Loan Amount * Interest Rate), formatted as #,##0.000
   const wacFormatted = useMemo(() => computeWacFormatted(loans), [loans]);
+
+  const sortedLoans = useMemo(
+    () =>
+      sortColumnId
+        ? sortLoans(loans, sortColumnId, sortDirection, wacFormatted)
+        : loans,
+    [loans, sortColumnId, sortDirection, wacFormatted],
+  );
+
+  const handleSort = useCallback((columnId: string) => {
+    setSortColumnId((prev) => {
+      if (prev === columnId) {
+        setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+        return columnId;
+      }
+      setSortDirection("asc");
+      return columnId;
+    });
+  }, []);
 
   // Size each column to fit header + all cell content (no truncation)
   const { gridColsStyle, totalTableWidth } = useMemo(() => {
@@ -302,7 +404,7 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
   const textTd = isDarkMode ? "text-slate-200" : "text-slate-900";
 
   // Virtualize only data rows; header is rendered separately and made sticky
-  const rowCount = loans.length;
+  const rowCount = sortedLoans.length;
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollContainerRef.current,
@@ -327,11 +429,11 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
     };
     const rows: string[][] = [];
     rows.push(COLUMNS.map((c) => escapeCsv(c.label)));
-    if (loans.length > 0) {
+    if (sortedLoans.length > 0) {
       rows.push(COLUMNS.map((c) => escapeCsv(getColumnTotal(c, loans, wacFormatted))));
-      for (let i = 0; i < loans.length; i++) {
+      for (let i = 0; i < sortedLoans.length; i++) {
         rows.push(
-          COLUMNS.map((c) => escapeCsv(getCellDisplay(c, loans[i], wacFormatted))),
+          COLUMNS.map((c) => escapeCsv(getCellDisplay(c, sortedLoans[i], wacFormatted))),
         );
       }
     }
@@ -342,30 +444,34 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
     link.download = `loan-detail-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-  }, [loans, wacFormatted]);
+  }, [loans, sortedLoans, wacFormatted]);
 
   return (
-    <div className="space-y-4">
-      <Card className="rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden">
-        <div className="flex items-center gap-4 mb-4 flex-wrap p-4 border-b border-slate-200/60 dark:border-slate-700/60">
+    <div className={fillHeight ? "flex flex-1 flex-col min-h-0 min-w-0 h-full" : "space-y-4"}>
+      <Card className={`rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-white dark:bg-slate-800/50 shadow-sm overflow-hidden ${fillHeight ? "flex-1 flex flex-col min-h-0" : ""}`}>
+        <div className={`flex items-center gap-4 flex-wrap p-4 border-b border-slate-200/60 dark:border-slate-700/60 ${fillHeight ? "shrink-0 mb-0" : "mb-4"}`}>
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               Loan Detail
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              All loans. Columns not from the database are left blank. Virtualized for performance.
+              {periodLabel
+                ? `Loans from ${periodLabel}. Click on a column header to sort by that column.`
+                : 'All loans. Click on a column header to sort by that column.'}
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={exportToExcel}
-            disabled={loans.length === 0}
-            className="ml-auto gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
-          >
-            <Download className="h-4 w-4" />
-            Export to Excel
-          </Button>
+          {!isControlled && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportToExcel}
+              disabled={loans.length === 0}
+              className="ml-auto gap-2 border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-800"
+            >
+              <Download className="h-4 w-4" />
+              Export to Excel
+            </Button>
+          )}
         </div>
 
         {error && (
@@ -388,8 +494,8 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
         ) : (
           <div
             ref={setScrollRef}
-            className="overflow-auto h-[70vh] min-h-[400px]"
-            style={{ contain: "strict" }}
+            className={fillHeight ? "flex-1 min-h-0 overflow-auto" : "overflow-auto h-[70vh] min-h-[400px]"}
+            style={fillHeight ? undefined : { contain: "strict" }}
           >
             <div
               style={{
@@ -398,7 +504,7 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
                 minWidth: "100%",
               }}
             >
-              {/* Sticky header – stays at top when scrolling */}
+              {/* Sticky header – stays at top when scrolling; click to sort */}
               <div
                 className={`sticky top-0 z-10 border-b ${borderTh} ${bgTh} grid items-center shrink-0`}
                 style={{
@@ -409,15 +515,27 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
                 }}
                 role="row"
               >
-                {COLUMNS.map((col) => (
-                  <div
-                    key={col.id}
-                    className="whitespace-nowrap py-2.5 px-4 text-xs font-semibold"
-                    role="columnheader"
-                  >
-                    {col.label}
-                  </div>
-                ))}
+                {COLUMNS.map((col) => {
+                  const isSorted = sortColumnId === col.id;
+                  return (
+                    <button
+                      key={col.id}
+                      type="button"
+                      onClick={() => handleSort(col.id)}
+                      className={`whitespace-nowrap py-2.5 px-4 text-xs font-semibold text-left flex items-center gap-1 w-full min-w-0 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}
+                      role="columnheader"
+                      aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
+                    >
+                      <span className="truncate">{col.label}</span>
+                      {isSorted &&
+                        (sortDirection === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        ) : (
+                          <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        ))}
+                    </button>
+                  );
+                })}
               </div>
               {/* Sticky totals row */}
               <div
@@ -452,7 +570,7 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
                 }}
               >
                 {virtualItems.map((virtualRow) => {
-                  const row = loans[virtualRow.index];
+                  const row = sortedLoans[virtualRow.index];
                   if (!row) return null;
                   return (
                     <div
@@ -489,7 +607,7 @@ export function LoanDetailView({ selectedTenantId }: LoanDetailViewProps) {
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/30">
+        <div className={`flex items-center justify-between gap-4 px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-900/30 ${fillHeight ? "shrink-0" : ""}`}>
           <p className="text-xs text-slate-600 dark:text-slate-400">
             {total.toLocaleString()} loans
           </p>

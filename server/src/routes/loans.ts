@@ -708,9 +708,18 @@ router.get(
 /**
  * GET /api/loans/detail-list
  * Returns all loans for the Loan Detail table with a wide set of columns.
- * No filtering (only user-level loan access). Paginated.
- * Query: limit (default 100), offset (default 0).
+ * Optional filters (workbench): date_field, date_from, date_to, branch, loan_officer.
+ * Query: limit (default 100), offset (default 0), date_field, date_from, date_to, branch, loan_officer.
  */
+const DETAIL_LIST_DATE_COLUMNS: Record<string, string> = {
+  application_date: "application_date",
+  started_date: "started_date",
+  funding_date: "funding_date",
+  closing_date: "closing_date",
+  credit_pull_date: "credit_pull_date",
+  investor_lock_date: "investor_lock_date",
+  investor_purchase_date: "investor_purchase_date",
+};
 router.get(
   "/detail-list",
   authenticateToken,
@@ -723,7 +732,7 @@ router.get(
         Math.max(parseInt((req.query.limit as string) || "100", 10) || 100, 1),
         50000,
       );
-      const offset = Math.max(parseInt((req.query.offset as string) || "0", 10) || 0, 0);
+      const offset = Math.max(parseInt((req.query.offset as string) || "0", 10) || 0);
 
       const conditions: string[] = [];
       const params: any[] = [];
@@ -750,6 +759,30 @@ router.get(
           params.push(...accessFilter.params);
           paramIndex += accessFilter.paramOffset;
         }
+      }
+
+      const dateField = (req.query.date_field as string) || "application_date";
+      const dateFrom = req.query.date_from as string | undefined;
+      const dateTo = req.query.date_to as string | undefined;
+      const branch = req.query.branch as string | undefined;
+      const loanOfficer = req.query.loan_officer as string | undefined;
+
+      if (dateFrom && dateTo && DETAIL_LIST_DATE_COLUMNS[dateField]) {
+        conditions.push(
+          `(${DETAIL_LIST_DATE_COLUMNS[dateField]} IS NOT NULL AND ${DETAIL_LIST_DATE_COLUMNS[dateField]}::date >= $${paramIndex} AND ${DETAIL_LIST_DATE_COLUMNS[dateField]}::date <= $${paramIndex + 1})`,
+        );
+        params.push(dateFrom, dateTo);
+        paramIndex += 2;
+      }
+      if (branch && branch !== "all") {
+        conditions.push(`branch = $${paramIndex}`);
+        params.push(branch);
+        paramIndex += 1;
+      }
+      if (loanOfficer && loanOfficer !== "all") {
+        conditions.push(`loan_officer = $${paramIndex}`);
+        params.push(loanOfficer);
+        paramIndex += 1;
       }
 
       const whereClause =
@@ -793,6 +826,7 @@ router.get(
         "uw_final_approval_date",
         "uw_suspended_date",
         "uw_denied_date",
+        "denial_date",
         "investor_lock_date",
         "lock_expiration_date",
         "lock_days",

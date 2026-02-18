@@ -3,7 +3,7 @@
  * No filtering - all loans (subject to user loan access).
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 
 export interface LoanDetailRow {
@@ -44,6 +44,7 @@ export interface LoanDetailRow {
   uw_final_approval_date: string | null;
   uw_suspended_date: string | null;
   uw_denied_date: string | null;
+  denial_date: string | null;
   investor_lock_date: string | null;
   lock_expiration_date: string | null;
   lock_days: number | null;
@@ -81,7 +82,17 @@ export interface LoanDetailListResponse {
 /** Request all loans in one call (no pagination). Backend max is 50000. */
 const ALL_LOANS_LIMIT = 50000;
 
-export function useLoanDetailData(tenantId?: string | null) {
+export interface LoanDetailFilters {
+  dateField?: string;
+  dateRange?: { start: string; end: string };
+  branch?: string;
+  loanOfficer?: string;
+}
+
+export function useLoanDetailData(
+  tenantId?: string | null,
+  filters?: LoanDetailFilters | null,
+) {
   const [data, setData] = useState<LoanDetailListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +105,20 @@ export function useLoanDetailData(tenantId?: string | null) {
       params.set("limit", String(ALL_LOANS_LIMIT));
       params.set("offset", "0");
       if (tenantId) params.set("tenant_id", tenantId);
+      if (filters?.dateField) params.set("date_field", filters.dateField);
+      // Only send date range when explicitly set (avoid sending when "All" is selected)
+      const hasDateRange =
+        filters?.dateRange &&
+        typeof filters.dateRange.start === "string" &&
+        filters.dateRange.start.length > 0 &&
+        typeof filters.dateRange.end === "string" &&
+        filters.dateRange.end.length > 0;
+      if (hasDateRange) {
+        params.set("date_from", filters!.dateRange!.start);
+        params.set("date_to", filters!.dateRange!.end);
+      }
+      if (filters?.branch && filters.branch !== "all") params.set("branch", filters.branch);
+      if (filters?.loanOfficer && filters.loanOfficer !== "all") params.set("loan_officer", filters.loanOfficer);
       const url = `/api/loans/detail-list?${params.toString()}`;
       const res = await api.request<LoanDetailListResponse>(url);
       setData(res);
@@ -107,7 +132,18 @@ export function useLoanDetailData(tenantId?: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [tenantId]);
+  }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer]);
+
+  useEffect(() => {
+    // Backend returns 400 when tenant_id is missing (e.g. super_admin with no tenant selected)
+    if (!tenantId) {
+      setLoading(false);
+      setData(null);
+      setError(null);
+      return;
+    }
+    fetchAll();
+  }, [tenantId, fetchAll]);
 
   return { data, loading, error, fetchAll };
 }

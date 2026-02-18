@@ -194,6 +194,11 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
     { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
     { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
   ],
+  'loan-detail': [
+    { key: 'dateField', label: 'Date Field', allLabel: '', staticOptions: DATE_FIELD_OPTIONS },
+    { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
+    { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
+  ],
   'credit-risk': [
     { key: 'applicationType', label: 'Type', allLabel: '', staticOptions: APPLICATION_TYPE_OPTIONS },
   ],
@@ -235,6 +240,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'top-tiering-comparison': { border: 'border-cyan-400/50',  bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',     accent: 'text-cyan-600 dark:text-cyan-400',     dot: 'bg-cyan-500' },
   'leaderboard':          { border: 'border-rose-400/50',    bg: 'bg-rose-50/50 dark:bg-rose-950/20',     accent: 'text-rose-600 dark:text-rose-400',     dot: 'bg-rose-500' },
   'executive-dashboard':  { border: 'border-blue-400/50',    bg: 'bg-blue-50/50 dark:bg-blue-950/20',     accent: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500' },
+  'loan-detail':          { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',     dot: 'bg-sky-500' },
 };
 
 /**
@@ -536,6 +542,33 @@ function GridCellWidget({
   );
 }
 
+/** Human-readable period label for Loan Detail subtitle (workbench only). Returns undefined when "All". */
+function getLoanDetailPeriodLabel(periodSelection: PeriodSelection | undefined): string | undefined {
+  if (!periodSelection?.dateRange) return undefined;
+  const { type, preset, year, dateRange } = periodSelection;
+  if (type === 'year' && year != null) return String(year);
+  if (type === 'preset' && preset) {
+    const presetLabels: Record<PeriodPreset, string> = {
+      'rolling-3': 'Last 3 Months',
+      'rolling-6': 'Last 6 Months',
+      'rolling-12': 'Last 12 Months',
+      'rolling-13': 'Last 13 Months',
+      'mtd': 'Month to Date',
+      'qtd': 'Quarter to Date',
+      'ytd': dateRange.start ? `${dateRange.start.slice(0, 4)} YTD` : 'YTD',
+      'last-month': 'Last Month',
+      'last-quarter': 'Last Quarter',
+      'last-year': 'Last Year',
+      'trailing-12': 'Last 12 Months',
+    };
+    return presetLabels[preset] ?? preset;
+  }
+  if (type === 'custom' && dateRange?.start && dateRange?.end) {
+    return 'custom date range';
+  }
+  return undefined;
+}
+
 function GridCellRegistryWidget({
   defId,
   canvasItemId,
@@ -550,6 +583,8 @@ function GridCellRegistryWidget({
   const definition = getWidgetDefinition(defId);
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
   const removeWidget = useCanvasDataStore((s) => s.removeWidget);
+  const groupId = canvasItemId.split('__')[0] ?? '';
+  const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
 
   const { data: selectedData, loading, error } = useWidgetData(
     definition?.dataSource ?? '',
@@ -575,17 +610,27 @@ function GridCellRegistryWidget({
   if (!definition) return null;
 
   const Component = definition.component;
+  const periodLabel =
+    definition.dataSource === 'loan-detail'
+      ? getLoanDetailPeriodLabel(filters.periodSelection)
+      : undefined;
+  const config =
+    periodLabel != null
+      ? { ...definition.config, periodLabel }
+      : definition.config;
 
   return (
-    <div className="h-full w-full">
-      <Component
-        data={selectedData}
-        loading={loading}
-        error={error}
-        width={width}
-        height={height}
-        config={definition.config}
-      />
+    <div className="h-full w-full flex flex-col min-h-0">
+      <div className="flex-1 min-h-0 min-w-0">
+        <Component
+          data={selectedData}
+          loading={loading}
+          error={error}
+          width={width}
+          height={height}
+          config={config}
+        />
+      </div>
     </div>
   );
 }
@@ -792,7 +837,12 @@ export function WidgetGroup({
     registerSection(groupId, sectionType);
     if (savedFiltersProp && !filtersRestoredRef.current) {
       filtersRestoredRef.current = true;
-      updateFilters(groupId, savedFiltersProp);
+      // Loan-detail always defaults to "All" (no date filter); don't restore periodSelection/dateRange
+      const toRestore =
+        sectionType === 'loan-detail'
+          ? { ...savedFiltersProp, periodSelection: undefined, dateRange: undefined }
+          : savedFiltersProp;
+      updateFilters(groupId, toRestore);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, sectionType, registerSection]);
@@ -1297,6 +1347,13 @@ export function WidgetGroup({
               size="sm"
               showLabel={false}
               yearsToShow={4}
+              showAllOption={sectionType === 'loan-detail'}
+              onAllSelect={
+                sectionType === 'loan-detail'
+                  ? () => updateFilters(groupId, { periodSelection: undefined, dateRange: undefined })
+                  : undefined
+              }
+              periodSelectionFromStore={sectionType === 'loan-detail' ? filters.periodSelection : undefined}
             />
 
             {/* Data-driven filters from SECTION_FILTER_CONFIG */}

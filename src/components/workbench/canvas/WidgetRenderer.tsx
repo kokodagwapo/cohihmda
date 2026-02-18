@@ -12,6 +12,7 @@ import { TopTieringComparisonView } from "@/components/views/TopTieringCompariso
 import { OperationsScorecardView } from "@/components/views/OperationsScorecardView";
 import { OperationScorecardTrendsView } from "@/components/views/OperationScorecardTrendsView";
 import { FinancialModelingSandboxView } from "@/components/views/FinancialModelingSandboxView";
+import { LoanDetailView } from "@/components/views/LoanDetailView";
 import { AletheiaPromptsCard } from "@/components/dashboard/AletheiaPromptsCard";
 import { IndustryNewsCard } from "@/components/dashboard/IndustryNewsCard";
 import { useTenantStore } from "@/stores/tenantStore";
@@ -333,6 +334,18 @@ function DashboardSectionEmbed({
           style={scrollStyle}
         >
           <FinancialModelingSandboxView />
+        </div>
+      );
+    case "loanDetail":
+      return (
+        <div
+          className="h-full w-full overflow-auto rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200/70 dark:border-slate-700/70"
+          style={scrollStyle}
+        >
+          <LoanDetailView
+            selectedTenantId={selectedTenantId}
+            selectedChannel={selectedChannel}
+          />
         </div>
       );
     case "creditRiskManagement":
@@ -751,6 +764,7 @@ const SECTION_ACCENT: Record<string, string> = {
   'company-scorecard': 'border-l-indigo-500',
   'credit-risk': 'border-l-emerald-500',
   'sales-scorecard': 'border-l-violet-500',
+  'loan-detail': 'border-l-sky-500',
 };
 
 /** Renders a registry-based widget using the widget architecture.

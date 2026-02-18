@@ -20,6 +20,7 @@ import { closingForecastWidgets } from './closingForecastWidgets';
 import { financialModelingWidgets } from './financialModelingWidgets';
 import { aletheiaInsightsWidgets } from './aletheiaInsightsWidgets';
 import { industryNewsWidgets } from './industryNewsWidgets';
+import { loanDetailWidgets } from './loanDetailWidgets';
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -40,6 +41,7 @@ const allWidgets: WidgetDefinition[] = [
   ...financialModelingWidgets,
   ...aletheiaInsightsWidgets,
   ...industryNewsWidgets,
+  ...loanDetailWidgets,
 ];
 
 // ---------------------------------------------------------------------------

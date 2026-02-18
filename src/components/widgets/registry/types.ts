@@ -27,7 +27,8 @@ export type DataSourceId =
   | 'closing-forecast'
   | 'financial-modeling'
   | 'aletheia-insights'
-  | 'industry-news';
+  | 'industry-news'
+  | 'loan-detail';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

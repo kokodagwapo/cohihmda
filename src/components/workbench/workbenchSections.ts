@@ -16,6 +16,7 @@ import {
   ArrowLeftRight,
   TrendingUp,
   LineChart,
+  FileText,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
       { id: 'salesScorecard', title: 'Sales Scorecard', icon: Target, iconClass: 'text-violet-500' },
       { id: 'operationsScorecard', title: 'Operations Scorecard', icon: Target, iconClass: 'text-indigo-500' },
       { id: 'creditRiskManagement', title: 'Credit Risk Management', icon: Shield, iconClass: 'text-emerald-500' },
+      { id: 'loanDetail', title: 'Loan Detail', icon: FileText, iconClass: 'text-sky-500' },
     ],
   },
   {

@@ -20,7 +20,8 @@ export type SectionType =
   | 'funnel'
   | 'top-tiering-comparison'
   | 'leaderboard'
-  | 'executive-dashboard';
+  | 'executive-dashboard'
+  | 'loan-detail';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -121,10 +122,16 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
   registerSection: (sectionId: string, sectionType: SectionType) => {
     set((state) => {
       if (state.sections[sectionId]) return state; // Already registered
+      const base = { ...DEFAULT_SECTION_FILTERS, sectionType };
+      // Loan detail defaults to "All" (no date filter) so the table shows all loans
+      const filters =
+        sectionType === 'loan-detail'
+          ? { ...base, periodSelection: undefined, dateRange: undefined }
+          : base;
       return {
         sections: {
           ...state.sections,
-          [sectionId]: { ...DEFAULT_SECTION_FILTERS, sectionType },
+          [sectionId]: filters,
         },
       };
     });

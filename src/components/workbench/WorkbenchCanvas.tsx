@@ -413,7 +413,34 @@ const SECTION_TO_WIDGETS: Record<string, {
       'exec-dashboard-embed',
     ],
   },
+  loanDetail: {
+    sectionType: 'loan-detail',
+    widgetIds: ['loan-detail-table'],
+  },
 };
+
+/**
+ * Migrate legacy dashboard_section "loanDetail" to widget_group so it gets the filter bar.
+ * Run on load and at render time so existing canvases show Loan Detail with filters.
+ */
+function migrateLoanDetailToWidgetGroup(items: CanvasLayoutItem[]): CanvasLayoutItem[] {
+  return items.map((item) => {
+    if (item.type !== 'dashboard_section' || item.payload.type !== 'dashboard_section') return item;
+    if ((item.payload as { sectionId?: string }).sectionId !== 'loanDetail') return item;
+    const title = (item.payload as { title?: string }).title ?? 'Loan Detail';
+    return {
+      ...item,
+      type: 'widget_group',
+      payload: {
+        type: 'widget_group',
+        groupId: item.i,
+        title,
+        sectionType: 'loan-detail',
+        widgetIds: ['loan-detail-table'],
+      },
+    };
+  });
+}
 
 /** Hideable sub-sections per dashboard_section (for "Hide sections" menu). */
 const DASHBOARD_HIDEABLE_SECTIONS: Record<string, { id: string; label: string }[]> = {
@@ -1042,9 +1069,10 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           const containerWidth = Math.max(width - 32, 480);
           const layoutVersion = content.layoutVersion as string | undefined;
           const shouldConvert = layoutVersion !== 'freeform-v1' && isLikelyGridLayout(content.layout);
-          const nextLayout = shouldConvert
+          let nextLayout = shouldConvert
             ? convertLayoutToPixels(content.layout, containerWidth)
             : content.layout;
+          nextLayout = migrateLoanDetailToWidgetGroup(nextLayout);
           setItems(nextLayout);
         }
         if (Array.isArray(content.annotations)) setAnnotations(content.annotations);
@@ -1066,9 +1094,10 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             const shouldConvert2 = (content.layoutVersion as string | undefined) !== 'freeform-v1' && isLikelyGridLayout(content.layout ?? []);
-            const layoutForSnap = shouldConvert2
+            let layoutForSnap = shouldConvert2
               ? convertLayoutToPixels(content.layout ?? [], Math.max(width - 32, 480))
               : (content.layout ?? []);
+            layoutForSnap = migrateLoanDetailToWidgetGroup(layoutForSnap);
             lastSavedSnapshotRef.current = JSON.stringify({
               items: layoutForSnap,
               annotations: content.annotations ?? [],
@@ -1372,8 +1401,13 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         return;
       }
 
+      // ── Loan Detail: always use WidgetGroup (filter bar like Company Scorecard) ──
+      const loanDetailLayout = sectionId === 'loanDetail'
+        ? { sectionType: 'loan-detail' as const, widgetIds: ['loan-detail-table'] as string[] }
+        : null;
+
       // ── Full dashboard sections (WidgetGroup wrapper) ────────────────
-      const widgetLayout = SECTION_TO_WIDGETS[sectionId];
+      const widgetLayout = loanDetailLayout ?? SECTION_TO_WIDGETS[sectionId];
       if (widgetLayout) {
         const groupId = `group-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { x, y: startY } = getNextPosition(items);
@@ -1383,10 +1417,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           const def = getWidgetDefinition(id);
           return def?.category === 'kpi';
         }).length;
-        // Embed sections (ExecDashboard, Leaderboard) get explicit minimum heights
+        // Embed sections (ExecDashboard, Leaderboard, Loan Detail) get explicit minimum heights
         const EMBED_MIN_HEIGHTS: Record<string, number> = {
           executiveDashboard: 700,
           leaderboard: 850,
+          loanDetail: 550,
         };
         const embedOverride = EMBED_MIN_HEIGHTS[sectionId];
         let groupH: number;
@@ -1429,12 +1464,14 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
       const id = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const payload = { type: 'dashboard_section' as const, sectionId, title };
       const { x, y } = getNextPosition(items);
+      // Loan Detail table benefits from a larger default card
+      const size = sectionId === 'loanDetail' ? { w: 1100, h: 550 } : { w: DEFAULT_SECTION_SIZE.w, h: DEFAULT_SECTION_SIZE.h };
       setItemsWithHistory((prev) => {
         const newItem = createLayoutItem(id, 'dashboard_section', payload, {
           x,
           y,
-          w: DEFAULT_SECTION_SIZE.w,
-          h: DEFAULT_SECTION_SIZE.h,
+          w: size.w,
+          h: size.h,
         });
         return [...prev, newItem];
       });
@@ -2927,6 +2964,21 @@ Structure it as a narrative-first executive briefing:
               items.map((item, index) => {
                 const isDashboardSection = item.type === 'dashboard_section' && item.payload.type === 'dashboard_section';
                 const payload = item.payload;
+                // Legacy Loan Detail: show as WidgetGroup (with filters) and migrate on first update
+                const isLegacyLoanDetail = isDashboardSection && (payload as { sectionId?: string }).sectionId === 'loanDetail';
+                const displayItem: CanvasLayoutItem = isLegacyLoanDetail
+                  ? {
+                      ...item,
+                      type: 'widget_group',
+                      payload: {
+                        type: 'widget_group',
+                        groupId: item.i,
+                        title: (payload as { title?: string }).title ?? 'Loan Detail',
+                        sectionType: 'loan-detail',
+                        widgetIds: ['loan-detail-table'],
+                      },
+                    }
+                  : item;
                 const hideableSections = isDashboardSection ? (DASHBOARD_HIDEABLE_SECTIONS[(payload as { sectionId: string }).sectionId] ?? []) : [];
                 const hiddenSections = isDashboardSection ? ((payload as { hiddenSections?: string[] }).hiddenSections ?? []) : [];
                 const displayMode = isDashboardSection ? ((payload as { displayMode?: 'full' | 'compact' | 'hidden' }).displayMode ?? 'full') : undefined;
@@ -3081,23 +3133,25 @@ Structure it as a narrative-first executive briefing:
                       }}
                     >
                       <WidgetRenderer
-                        item={item}
+                        item={displayItem}
                         height={item.h}
                         width={item.w}
                         onUpdatePayload={
                           item.type === 'text_block' || item.type === 'rich_text' || item.type === 'widget_group'
                             ? (p) => updateWidgetPayload(item.i, p)
-                            : undefined
+                            : isLegacyLoanDetail
+                              ? (p) => setItemsWithHistory((prev) => prev.map((i) => i.i === item.i ? { ...i, type: 'widget_group' as const, payload: p } : i))
+                              : undefined
                         }
                         otherGroups={
-                          item.type === 'widget_group'
+                          item.type === 'widget_group' || isLegacyLoanDetail
                             ? items
                                 .filter((it) => it.type === 'widget_group' && it.payload.type === 'widget_group' && it.i !== item.i)
                                 .map((it) => ({ id: it.i, title: (it.payload as any).title || 'Untitled Group' }))
                             : undefined
                         }
                         onMoveItemOut={
-                          item.type === 'widget_group'
+                          (item.type === 'widget_group' || isLegacyLoanDetail)
                             ? (movedItem, targetGroupId) => {
                                 // Add the moved item to the target group's items array
                                 setItemsWithHistory((prev) =>
