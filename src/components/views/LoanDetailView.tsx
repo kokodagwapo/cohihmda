@@ -37,18 +37,21 @@ export interface LoanDetailViewProps {
   fillHeight?: boolean;
   /** When set (workbench only), subtitle shows "Loans from {periodLabel}." instead of default. */
   periodLabel?: string | null;
+  /** When set (workbench only), use these columns instead of default. Enables per-widget column editor. */
+  columns?: ColumnDef[] | null;
 }
 
-type ColumnDef = {
+export type ColumnDef = {
   id: string;
   label: string;
-  field: keyof LoanDetailRow | null;
+  /** DB field key (e.g. loan_amount, fico_score) or null for calculated/blank */
+  field: string | null;
   /** Optional min width (px) for columns with long content (e.g. names, addresses) */
   minWidth?: number;
 };
 
-/** Column definition: label for header, DB field key on LoanDetailRow or null for blank */
-const COLUMNS: ColumnDef[] = [
+/** Default column set for Loan Detail table. Workbench can override via columns prop. */
+export const DEFAULT_LOAN_DETAIL_COLUMNS: ColumnDef[] = [
   { id: "loan_number", label: "Loan number", field: "loan_number" },
   { id: "units", label: "Units", field: null },
   { id: "volume", label: "Volume", field: "loan_amount" },
@@ -114,6 +117,8 @@ const COLUMNS: ColumnDef[] = [
   { id: "rush_closing_on_file", label: "Rush Closing on File", field: "rush_closing_on_file" },
   { id: "scrub_rating_of_file", label: "Scrub Rating of File", field: "scrub_rating_of_file" },
 ];
+
+const COLUMNS = DEFAULT_LOAN_DETAIL_COLUMNS;
 
 /** Column headers that are not populated from the database (calculated or not in schema) */
 export const UNPOPULATED_LOAN_DETAIL_COLUMNS = COLUMNS.filter((c) => c.field === null).map(
@@ -190,15 +195,18 @@ function getCellDisplay(
 ): string {
   if (col.id === "units") return "1";
   if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
-  if (col.id === "volume") return formatVolumeWithCommas(row.loan_amount);
+  if (col.field === "loan_amount") return formatVolumeWithCommas(row.loan_amount);
   if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
   if (col.id === "fees_loan_discount_fee_pct" && col.field) {
-    const raw = row[col.field as keyof LoanDetailRow];
+    const raw = (row as unknown as Record<string, unknown>)[col.field];
     if (raw != null && typeof raw === "number")
       return `${Number(raw).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
     return raw != null && String(raw).trim() !== "" ? String(raw) : BLANK_PLACEHOLDER;
   }
-  if (col.field) return formatCellValue(row[col.field as keyof LoanDetailRow]);
+  if (col.field) {
+    const val = (row as unknown as Record<string, unknown>)[col.field];
+    return formatCellValue(val);
+  }
   return BLANK_PLACEHOLDER;
 }
 
@@ -215,11 +223,11 @@ function getSortValue(
   }
   if (col.id === "locked_flag") return isLockedFlagYes(row) ? "Yes" : "No";
   if (col.id === "fees_loan_discount_fee_pct" && col.field) {
-    const raw = row[col.field as keyof LoanDetailRow];
+    const raw = (row as unknown as Record<string, unknown>)[col.field];
     return raw != null && typeof raw === "number" ? raw : null;
   }
   if (!col.field) return null;
-  const raw = row[col.field as keyof LoanDetailRow];
+  const raw = (row as unknown as Record<string, unknown>)[col.field];
   if (raw === null || raw === undefined) return null;
   if (typeof raw === "number") return raw;
   const s = String(raw).trim();
@@ -231,8 +239,9 @@ function sortLoans(
   columnId: string,
   direction: "asc" | "desc",
   wacFormatted: string,
+  columns: ColumnDef[],
 ): LoanDetailRow[] {
-  const col = COLUMNS.find((c) => c.id === columnId);
+  const col = columns.find((c) => c.id === columnId);
   if (!col) return [...loans];
   const mult = direction === "asc" ? 1 : -1;
   return [...loans].sort((a, b) => {
@@ -271,8 +280,8 @@ function getColumnTotal(
   if (col.id === "wac") return wacFormatted || BLANK_PLACEHOLDER;
   if (TOTALS_BLANK_COLUMN_IDS.has(col.id)) return BLANK_PLACEHOLDER;
 
-  // Volume: sum of loan_amount (ensure numeric)
-  if (col.id === "volume") {
+  // Volume: sum of loan_amount (ensure numeric) – match by field for custom "volume" label
+  if (col.field === "loan_amount") {
     let sum = 0;
     for (let i = 0; i < loans.length; i++) {
       const v = loans[i].loan_amount;
@@ -282,26 +291,33 @@ function getColumnTotal(
     return sum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  // Averages: FICO, LTV, BE DTI
-  const avgFields: Record<string, keyof LoanDetailRow> = {
-    fico: "fico_score",
-    ltv: "ltv_ratio",
-    be_dti: "be_dti_ratio",
-  };
-  const field = avgFields[col.id];
-  if (field) {
-    let sum = 0;
-    let n = 0;
+  // Averages: FICO, LTV, BE DTI (by field for custom columns)
+  if (col.field === "fico_score") {
+    let sum = 0; let n = 0;
     for (let i = 0; i < loans.length; i++) {
-      const v = loans[i][field];
+      const v = (loans[i] as unknown as Record<string, unknown>).fico_score;
       const num = v != null ? Number(v) : NaN;
-      if (!Number.isNaN(num)) {
-        sum += num;
-        n++;
-      }
+      if (!Number.isNaN(num)) { sum += num; n++; }
     }
-    if (n === 0) return BLANK_PLACEHOLDER;
-    return (sum / n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n === 0 ? BLANK_PLACEHOLDER : (sum / n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (col.field === "ltv_ratio") {
+    let sum = 0; let n = 0;
+    for (let i = 0; i < loans.length; i++) {
+      const v = (loans[i] as unknown as Record<string, unknown>).ltv_ratio;
+      const num = v != null ? Number(v) : NaN;
+      if (!Number.isNaN(num)) { sum += num; n++; }
+    }
+    return n === 0 ? BLANK_PLACEHOLDER : (sum / n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (col.field === "be_dti_ratio") {
+    let sum = 0; let n = 0;
+    for (let i = 0; i < loans.length; i++) {
+      const v = (loans[i] as unknown as Record<string, unknown>).be_dti_ratio;
+      const num = v != null ? Number(v) : NaN;
+      if (!Number.isNaN(num)) { sum += num; n++; }
+    }
+    return n === 0 ? BLANK_PLACEHOLDER : (sum / n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   return BLANK_PLACEHOLDER;
@@ -340,6 +356,7 @@ export function LoanDetailView({
   error: errorProp,
   fillHeight = false,
   periodLabel,
+  columns: columnsProp,
 }: LoanDetailViewProps) {
   const { theme } = useTheme();
   const isDarkMode = theme === "dark";
@@ -348,6 +365,7 @@ export function LoanDetailView({
   const data = isControlled ? dataProp ?? null : fetched.data;
   const loading = isControlled ? (loadingProp ?? false) : fetched.loading;
   const error = isControlled ? (errorProp ?? null) : fetched.error;
+  const columnsToUse = columnsProp && columnsProp.length > 0 ? columnsProp : COLUMNS;
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [, setScrollReady] = useState(0);
 
@@ -371,9 +389,9 @@ export function LoanDetailView({
   const sortedLoans = useMemo(
     () =>
       sortColumnId
-        ? sortLoans(loans, sortColumnId, sortDirection, wacFormatted)
+        ? sortLoans(loans, sortColumnId, sortDirection, wacFormatted, columnsToUse)
         : loans,
-    [loans, sortColumnId, sortDirection, wacFormatted],
+    [loans, sortColumnId, sortDirection, wacFormatted, columnsToUse],
   );
 
   const handleSort = useCallback((columnId: string) => {
@@ -389,14 +407,14 @@ export function LoanDetailView({
 
   // Size each column to fit header + all cell content (no truncation)
   const { gridColsStyle, totalTableWidth } = useMemo(() => {
-    const widths = COLUMNS.map((c) => getColumnWidthFromContent(c, loans, wacFormatted));
+    const widths = columnsToUse.map((c) => getColumnWidthFromContent(c, loans, wacFormatted));
     return {
       gridColsStyle: {
         gridTemplateColumns: widths.map((w) => `${w}px`).join(" "),
       },
       totalTableWidth: widths.reduce((a, b) => a + b, 0),
     };
-  }, [loans, wacFormatted]);
+  }, [loans, wacFormatted, columnsToUse]);
   // Match sales scorecard details table: gray header row, horizontal row lines only (no vertical column lines)
   const borderTh = isDarkMode ? "border-slate-700" : "border-slate-200";
   const bgTh = isDarkMode ? "bg-slate-800/50 text-slate-300" : "bg-slate-50 text-slate-600";
@@ -417,8 +435,8 @@ export function LoanDetailView({
   const totalScrollHeight = HEADER_HEIGHT + TOTALS_ROW_HEIGHT + bodyHeight;
 
   const totalsByColumn = useMemo(
-    () => COLUMNS.map((c) => getColumnTotal(c, loans, wacFormatted)),
-    [loans, wacFormatted],
+    () => columnsToUse.map((c) => getColumnTotal(c, loans, wacFormatted)),
+    [loans, wacFormatted, columnsToUse],
   );
 
   const exportToExcel = useCallback(() => {
@@ -428,12 +446,12 @@ export function LoanDetailView({
       return s;
     };
     const rows: string[][] = [];
-    rows.push(COLUMNS.map((c) => escapeCsv(c.label)));
+    rows.push(columnsToUse.map((c) => escapeCsv(c.label)));
     if (sortedLoans.length > 0) {
-      rows.push(COLUMNS.map((c) => escapeCsv(getColumnTotal(c, loans, wacFormatted))));
+      rows.push(columnsToUse.map((c) => escapeCsv(getColumnTotal(c, loans, wacFormatted))));
       for (let i = 0; i < sortedLoans.length; i++) {
         rows.push(
-          COLUMNS.map((c) => escapeCsv(getCellDisplay(c, sortedLoans[i], wacFormatted))),
+          columnsToUse.map((c) => escapeCsv(getCellDisplay(c, sortedLoans[i], wacFormatted))),
         );
       }
     }
@@ -444,7 +462,7 @@ export function LoanDetailView({
     link.download = `loan-detail-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-  }, [loans, sortedLoans, wacFormatted]);
+  }, [loans, sortedLoans, wacFormatted, columnsToUse]);
 
   return (
     <div className={fillHeight ? "flex flex-1 flex-col min-h-0 min-w-0 h-full" : "space-y-4"}>
@@ -515,7 +533,7 @@ export function LoanDetailView({
                 }}
                 role="row"
               >
-                {COLUMNS.map((col) => {
+                {columnsToUse.map((col) => {
                   const isSorted = sortColumnId === col.id;
                   return (
                     <button
@@ -550,13 +568,13 @@ export function LoanDetailView({
                 role="row"
                 aria-label="Totals"
               >
-                {COLUMNS.map((col, idx) => (
+                {columnsToUse.map((col, idx) => (
                   <div
                     key={col.id}
                     className={`whitespace-nowrap py-2 px-4 text-sm ${textTd}`}
                     role="cell"
                   >
-                    {totalsByColumn[idx]}
+                    {idx === 0 ? "Totals" : totalsByColumn[idx]}
                   </div>
                 ))}
               </div>
@@ -587,7 +605,7 @@ export function LoanDetailView({
                       }}
                       role="row"
                     >
-                      {COLUMNS.map((col) => {
+                      {columnsToUse.map((col) => {
                         const display = getCellDisplay(col, row, wacFormatted);
                         return (
                           <div

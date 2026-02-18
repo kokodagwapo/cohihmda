@@ -63,11 +63,14 @@ import {
 import {
   getWidgetDefinition,
 } from '@/components/widgets/registry';
+import type { ColumnDef } from '@/components/views/LoanDetailView';
 import { useWidgetData } from '@/components/widgets/data';
 import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRenderer';
 import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDialog';
 import { AddWidgetDialog } from '@/components/widgets/components/AddWidgetDialog';
+import { LoanDetailColumnsModal } from '@/components/widgets/components/LoanDetailColumnsModal';
 import { WidgetDataProvider } from '@/components/widgets/data';
+import { useLoanDetailColumnsStore } from '@/stores/loanDetailColumnsStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
@@ -394,6 +397,10 @@ function GridCellWidget({
 }) {
   const [hovered, setHovered] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] = useState(false);
+  const { selectedTenantId } = useTenantStore();
+
+  const isLoanDetailTable = item.kind === 'registry' && item.defId === 'loan-detail-table';
 
   const isValid =
     item.kind === 'cohi' ||
@@ -459,6 +466,18 @@ function GridCellWidget({
               aria-label="Edit with Cohi"
             >
               <MessageSquare className="h-3 w-3" />
+            </button>
+          )}
+          {/* Edit columns (only for Loan Detail table) */}
+          {isLoanDetailTable && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setLoanDetailColumnsModalOpen(true); }}
+              className="p-0.5 rounded text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:text-sky-400 dark:hover:bg-sky-900/30 canvas-interactive transition-colors"
+              title="Edit columns"
+              aria-label="Edit columns"
+            >
+              <Pencil className="h-3 w-3" />
             </button>
           )}
           {/* Move to group popover */}
@@ -538,6 +557,15 @@ function GridCellWidget({
           <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} onFilterChange={onFilterChange} onVizTypeChange={onVizTypeChange} />
         )}
       </div>
+
+      {isLoanDetailTable && (
+        <LoanDetailColumnsModal
+          open={loanDetailColumnsModalOpen}
+          onClose={() => setLoanDetailColumnsModalOpen(false)}
+          canvasItemId={itemId}
+          tenantId={selectedTenantId}
+        />
+      )}
     </div>
   );
 }
@@ -609,15 +637,24 @@ function GridCellRegistryWidget({
 
   if (!definition) return null;
 
+  const getColumns = useLoanDetailColumnsStore((s) => s.getColumns);
+  const isLoanDetail = definition.dataSource === 'loan-detail';
+  const savedColumns = isLoanDetail ? getColumns(canvasItemId) : undefined;
+  const customColumns: ColumnDef[] | undefined =
+    savedColumns?.length
+      ? savedColumns.map((c) => ({ id: c.id, label: c.label, field: c.field }))
+      : undefined;
+
   const Component = definition.component;
   const periodLabel =
-    definition.dataSource === 'loan-detail'
+    isLoanDetail
       ? getLoanDetailPeriodLabel(filters.periodSelection)
       : undefined;
-  const config =
-    periodLabel != null
-      ? { ...definition.config, periodLabel }
-      : definition.config;
+  const config = {
+    ...definition.config,
+    ...(periodLabel != null && { periodLabel }),
+    ...(customColumns != null && { customColumns }),
+  };
 
   return (
     <div className="h-full w-full flex flex-col min-h-0">
