@@ -18,7 +18,6 @@ import { ResearchReport } from "@/components/research/ResearchReport";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
 import type { Finding } from "@/hooks/useResearchSession";
 import {
-  FlaskConical,
   Play,
   SendHorizontal,
   RotateCcw,
@@ -379,46 +378,8 @@ export default function ResearchAnalyst() {
   const showBottomInput = isRunning || phase === "complete";
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col pt-14 sm:pt-16">
       <Navigation />
-
-      {/* Header */}
-      <div className="border-b px-6 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FlaskConical className="h-5 w-5 text-primary" />
-            <div>
-              <h1 className="text-lg font-semibold">Research Lab</h1>
-              <p className="text-xs text-muted-foreground">
-                Multi-agent investigation system — experimental
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Pause / Resume */}
-            {isRunning && (
-              isPaused ? (
-                <Button variant="outline" size="sm" onClick={resume}>
-                  <PlayCircle className="h-3.5 w-3.5 mr-1.5" />
-                  Resume
-                </Button>
-              ) : (
-                <Button variant="outline" size="sm" onClick={pause}>
-                  <Pause className="h-3.5 w-3.5 mr-1.5" />
-                  Pause
-                </Button>
-              )
-            )}
-            <PhaseBadge phase={phase} />
-            {phase !== "idle" && (
-              <Button variant="outline" size="sm" onClick={handleNewInvestigation}>
-                <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                New Investigation
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
 
       {/* Body: Sidebar + Content */}
       <div className="flex-1 flex overflow-hidden">
@@ -503,19 +464,26 @@ export default function ResearchAnalyst() {
                 onValueChange={setActiveTab}
                 className="flex-1 flex flex-col overflow-hidden"
               >
-                <div className="px-6 pt-2">
-                  <TabsList>
-                    <TabsTrigger value="timeline" className="relative">
-                      Timeline
-                      {isRunning && <Loader2 className="h-3 w-3 ml-1.5 animate-spin" />}
-                    </TabsTrigger>
-                    <TabsTrigger value="findings" disabled={findings.length === 0}>
-                      Findings ({findings.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="report" disabled={!report}>
-                      Report
-                    </TabsTrigger>
-                  </TabsList>
+                <div className="px-6 pt-2 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <TabsList>
+                      <TabsTrigger value="timeline" className="relative">
+                        Timeline
+                        {isRunning && <Loader2 className="h-3 w-3 ml-1.5 animate-spin" />}
+                      </TabsTrigger>
+                      <TabsTrigger value="findings" disabled={findings.length === 0}>
+                        Findings ({findings.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="report" disabled={!report}>
+                        Report
+                      </TabsTrigger>
+                    </TabsList>
+                    <PhaseBadge phase={phase} />
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleNewInvestigation}>
+                    <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                    New Investigation
+                  </Button>
                 </div>
 
                 {/* Timeline Tab */}
@@ -621,6 +589,19 @@ export default function ResearchAnalyst() {
               {showBottomInput && (
                 <div className="border-t px-6 py-3">
                   <div className="flex gap-2 max-w-2xl">
+                    {isRunning && (
+                      isPaused ? (
+                        <Button variant="outline" size="sm" onClick={resume}>
+                          <PlayCircle className="h-3.5 w-3.5 mr-1.5" />
+                          Resume
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={pause}>
+                          <Pause className="h-3.5 w-3.5 mr-1.5" />
+                          Pause
+                        </Button>
+                      )
+                    )}
                     <Input
                       ref={steerInputRef}
                       value={steerInput}
