@@ -29,14 +29,22 @@ import {
   Send,
   Tag,
   Telescope,
+  Bookmark,
+  Bot,
+  Loader2,
+  FlaskConical,
 } from "lucide-react";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
+import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
+import { FindingDrillDown } from "@/components/research/FindingDrillDown";
+import { InsightChat } from "./InsightChat";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
 import type { ExportData } from "@/utils/exportUtils";
+import type { Finding } from "@/hooks/useResearchSession";
 
 // ============================================================================
 // Bucket configuration
@@ -178,6 +186,8 @@ interface BucketLaneProps {
   onSubmitFeedback?: (insightId: number, rating: -1 | 1, tags?: string[], comment?: string) => Promise<boolean>;
   /** Deep-dive an insight in the workbench */
   onInvestigate?: (insightId: number) => void;
+  /** Track/pin an insight to the watchlist */
+  onTrackInsight?: (insight: AletheiaInsight) => void;
   /** Whether the user is a platform admin */
   isAdmin?: boolean;
 }
@@ -194,6 +204,7 @@ function BucketLane({
   onDeleteInsight,
   onSubmitFeedback,
   onInvestigate,
+  onTrackInsight,
   isAdmin,
 }: BucketLaneProps) {
   const [activeIdx, setActiveIdx] = useState(0);
@@ -313,12 +324,35 @@ function BucketLane({
         onMouseLeave={() => setIsPaused(false)}
       >
         <div className="flex items-start gap-2">
-          <p className="flex-1 text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
-            {insight.headline || insight.message}
-          </p>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
+              {insight.headline || insight.message}
+            </p>
+            {isAdmin && insight.generation_method === "agent" && (
+              <span className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                <Sparkles className="w-2.5 h-2.5" /> Agent
+              </span>
+            )}
+          </div>
           {/* Admin feedback + delete + investigate buttons */}
           {isAdmin && insight.insightId && (
             <div className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover/insight:opacity-100 transition-all">
+              {/* Track / pin to watchlist */}
+              {onTrackInsight && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTrackInsight(insight);
+                  }}
+                  className="p-1 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all"
+                  title="Track this insight"
+                >
+                  <Bookmark
+                    className="w-3 h-3 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                    strokeWidth={2}
+                  />
+                </button>
+              )}
               {/* Investigate (deep dive in workbench) */}
               {onInvestigate && (
                 <button
@@ -708,6 +742,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     generateMoreInsights,
     deleteInsight,
     submitFeedback,
+    loadInsightsByMethod,
   } = useAletheiaData(
     dateFilter,
     onDataAvailabilityChange,
@@ -716,15 +751,49 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   );
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("pipeline");
+  const [isAgentGenerating, setIsAgentGenerating] = useState(false);
+  const [agentFinding, setAgentFinding] = useState<Finding | null>(null);
+  const [agentFindingInsight, setAgentFindingInsight] = useState<AletheiaInsight | null>(null);
 
   const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
     setIsRefreshing(true);
     try {
       await refreshInsights();
     } finally {
       setIsRefreshing(false);
     }
-  }, [refreshInsights]);
+  }, [refreshInsights, isRefreshing]);
+
+  const handleTabSwitch = useCallback(
+    async (tab: "pipeline" | "agent" | "watchlist") => {
+      setActiveTab(tab);
+      if (tab === "pipeline" || tab === "agent") {
+        await loadInsightsByMethod(tab);
+      }
+    },
+    [loadInsightsByMethod]
+  );
+
+  const handleAgentGenerate = useCallback(async () => {
+    if (isAgentGenerating) return;
+    setIsAgentGenerating(true);
+    try {
+      await api.triggerAgentInsights(selectedTenantId);
+      await loadInsightsByMethod("agent");
+    } catch (err: any) {
+      if (err.message?.includes("409") || err.message?.includes("already in progress")) {
+        console.warn("Agent generation already in progress, will poll for results");
+      } else {
+        console.error("Agent generation failed:", err);
+      }
+      // Even on error/conflict, try loading whatever is in the DB
+      try { await loadInsightsByMethod("agent"); } catch {}
+    } finally {
+      setIsAgentGenerating(false);
+    }
+  }, [loadInsightsByMethod, selectedTenantId, isAgentGenerating]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -742,6 +811,27 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   // Drill-down logic — all insights are drillable now (evidence tables are self-describing)
   const handleInsightClick = useCallback(
     (insight: AletheiaInsight) => {
+      if (insight.generation_method === "agent" && insight.detail_data?.type === "agent_finding") {
+        const dd = insight.detail_data;
+        const finding: Finding = {
+          questionId: 0,
+          title: dd.title || insight.headline || "",
+          summary: dd.summary || insight.understory || "",
+          confidence: dd.confidence || "medium",
+          keyMetrics: dd.keyMetrics || {},
+          keyMetricDescriptions: dd.keyMetricDescriptions || {},
+          evidence: (dd.evidence || []).map((e: any) => ({
+            sql: e.sql || "",
+            explanation: e.explanation || "",
+            rows: e.rows || [],
+            rowCount: e.rowCount || 0,
+            fields: e.fields || [],
+          })),
+        };
+        setAgentFinding(finding);
+        setAgentFindingInsight(insight);
+        return;
+      }
       if (insight.source) {
         setSelectedInsight(insight);
         setIsModalOpen(true);
@@ -771,6 +861,59 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       }
     },
     [selectedTenantId, navigate]
+  );
+
+  const [isCreatingResearch, setIsCreatingResearch] = useState(false);
+
+  const handleMoveAgentFindingToResearch = useCallback(async () => {
+    if (!agentFinding || isCreatingResearch) return;
+    setIsCreatingResearch(true);
+    try {
+      const tenantParam = selectedTenantId
+        ? `?tenant_id=${encodeURIComponent(selectedTenantId)}`
+        : "";
+      const result = await api.request<{ sessionId: string }>(
+        `/api/research/sessions${tenantParam}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            initialContext: {
+              headline: agentFinding.title,
+              understory: agentFinding.summary,
+              keyMetrics: agentFinding.keyMetrics,
+              evidenceSummary: agentFinding.evidence
+                ?.map((e: any) => e.explanation)
+                .filter(Boolean)
+                .join("; "),
+            },
+          }),
+        }
+      );
+      setAgentFinding(null);
+      setAgentFindingInsight(null);
+      navigate(`/research?session=${result.sessionId}`);
+    } catch (err) {
+      console.error("Error creating research session from finding:", err);
+    } finally {
+      setIsCreatingResearch(false);
+    }
+  }, [agentFinding, isCreatingResearch, selectedTenantId, navigate]);
+
+  const handleTrackInsight = useCallback(
+    async (insight: AletheiaInsight) => {
+      try {
+        await api.trackInsight({
+          headline: insight.headline || insight.message,
+          understory: insight.understory || insight.reasoning,
+          metric_signature: insight.evidence || { sql: "", keyFields: [] },
+          source_insight_id: insight.insightId,
+          source_type: "pipeline",
+        }, selectedTenantId);
+      } catch (err) {
+        console.error("Error tracking insight:", err);
+      }
+    },
+    [selectedTenantId]
   );
 
   const isDrillable = useCallback(
@@ -904,19 +1047,21 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                 label: "Cohi Insights",
               }}
             />
-            <button
-              onClick={handleRefresh}
-              disabled={insightsLoading || isRefreshing}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
-              title="Refresh insights"
-            >
-              <RefreshCw
-                className={`w-4 h-4 text-slate-500 dark:text-slate-400 ${
-                  isRefreshing ? "animate-spin" : ""
-                }`}
-                strokeWidth={1.5}
-              />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={handleRefresh}
+                disabled={insightsLoading || isRefreshing}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                title="Refresh insights (pipeline)"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 text-slate-500 dark:text-slate-400 ${
+                    isRefreshing ? "animate-spin" : ""
+                  }`}
+                  strokeWidth={1.5}
+                />
+              </button>
+            )}
             <button
               onClick={() => onOpenCohiPanel?.()}
               className="p-2 rounded-lg transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
@@ -931,8 +1076,51 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           </div>
         </div>
 
+        {/* ===== Tab Bar ===== */}
+        <div className="flex items-center gap-1 mb-5 border-b border-slate-200/60 dark:border-slate-700/60 -mx-1 px-1">
+          {([
+            { id: "pipeline" as const, label: "Pipeline", icon: Zap },
+            { id: "agent" as const, label: "Agent", icon: Bot },
+            { id: "watchlist" as const, label: "Watchlist", icon: Bookmark },
+          ]).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => handleTabSwitch(tab.id)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-all ${
+                activeTab === tab.id
+                  ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600"
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5" strokeWidth={2} />
+              {tab.label}
+            </button>
+          ))}
+
+          {/* Agent tab: generate button */}
+          {activeTab === "agent" && isAdmin && (
+            <button
+              onClick={handleAgentGenerate}
+              disabled={isAgentGenerating || insightsLoading}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
+            >
+              {isAgentGenerating ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              {isAgentGenerating ? "Generating..." : "Generate Agent Insights"}
+            </button>
+          )}
+        </div>
+
+        {/* ===== Watchlist Tab ===== */}
+        {activeTab === "watchlist" && (
+          <TrackedInsightsWatchlist selectedTenantId={selectedTenantId} />
+        )}
+
         {/* ===== Loading shimmer ===== */}
-        {insightsLoading && !hasInsights && (
+        {activeTab !== "watchlist" && insightsLoading && !hasInsights && (
           <div className="flex flex-col gap-4">
             {[0, 1, 2].map((i) => (
               <div
@@ -944,7 +1132,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
 
         {/* ===== Needs Generation CTA ===== */}
-        {!insightsLoading && needsGeneration && !hasInsights && (
+        {activeTab !== "watchlist" && !insightsLoading && needsGeneration && !hasInsights && (
           <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-8 text-center">
             <div className="flex flex-col items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -983,7 +1171,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
 
         {/* ===== Empty state (no data at all) ===== */}
-        {!insightsLoading && !needsGeneration && !hasInsights && (
+        {activeTab !== "watchlist" && !insightsLoading && !needsGeneration && !hasInsights && (
           <div className="rounded-2xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-800/40 backdrop-blur-sm p-6 text-center">
             <p className="text-sm text-slate-600 dark:text-slate-400">
               Insights will appear once live data is available for this tenant.
@@ -992,7 +1180,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
 
         {/* ===== Generating overlay ===== */}
-        {isRefreshing && hasInsights && (
+        {activeTab !== "watchlist" && isRefreshing && hasInsights && (
           <div className="mb-4 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/40">
             <RefreshCw
               className="w-3.5 h-3.5 text-blue-500 animate-spin"
@@ -1005,7 +1193,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
 
         {/* ===== Bucket Lanes (stacked) ===== */}
-        {hasInsights && (
+        {activeTab !== "watchlist" && hasInsights && (
           <div className="flex flex-col gap-4">
             {BUCKET_ORDER.map((bucket) => {
               const items = bucketedInsights[bucket.id] || [];
@@ -1036,6 +1224,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
                     isAdmin ? submitFeedback : undefined
                   }
                   onInvestigate={isAdmin ? handleInvestigate : undefined}
+                  onTrackInsight={handleTrackInsight}
                   isAdmin={isAdmin}
                 />
               );
@@ -1044,7 +1233,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         )}
       </motion.div>
 
-      {/* Insight Detail Modal */}
+      {/* Insight Detail Modal (pipeline insights) */}
       <InsightDetailModal
         isOpen={isModalOpen}
         onClose={() => {
@@ -1065,7 +1254,83 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           recommended_action: selectedInsight.recommended_action,
           owner: selectedInsight.owner,
         } : undefined}
+        onTrackInsight={selectedInsight ? () => handleTrackInsight(selectedInsight) : undefined}
       />
+
+      {/* Agent Finding Drilldown Modal */}
+      <AnimatePresence>
+        {agentFinding && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+            onClick={() => { setAgentFinding(null); setAgentFindingInsight(null); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.3 }}
+              className="relative w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto p-6 min-h-0">
+                {/* Action buttons */}
+                <div className="flex justify-end gap-2 mb-2">
+                  <button
+                    onClick={handleMoveAgentFindingToResearch}
+                    disabled={isCreatingResearch}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
+                  >
+                    {isCreatingResearch ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <FlaskConical className="w-3.5 h-3.5" />
+                    )}
+                    {isCreatingResearch ? 'Opening...' : 'Research Lab'}
+                  </button>
+                  {agentFindingInsight && (
+                    <button
+                      onClick={() => {
+                        handleTrackInsight(agentFindingInsight);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" />
+                      Track This Insight
+                    </button>
+                  )}
+                </div>
+                <FindingDrillDown
+                  finding={agentFinding}
+                  onClose={() => { setAgentFinding(null); setAgentFindingInsight(null); }}
+                />
+              </div>
+
+              {/* Fixed chat at bottom */}
+              <div className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-6 pb-4">
+                <InsightChat
+                  insightContext={{
+                    title: agentFinding.title,
+                    summary: agentFinding.summary,
+                    confidence: agentFinding.confidence,
+                    keyMetrics: agentFinding.keyMetrics,
+                    evidence: agentFinding.evidence.map((e) => ({
+                      sql: e.sql,
+                      explanation: e.explanation,
+                      rowCount: e.rowCount,
+                      fields: e.fields,
+                    })),
+                  }}
+                  selectedTenantId={selectedTenantId}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 });

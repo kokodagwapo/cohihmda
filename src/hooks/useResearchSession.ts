@@ -27,6 +27,15 @@ export interface ResearchPlan {
   questions: InvestigationQuestion[];
 }
 
+export interface InsightContext {
+  insightId?: number;
+  headline: string;
+  understory: string;
+  keyMetrics?: Record<string, any>;
+  evidenceSummary?: string;
+  chatHistory?: Array<{ role: string; content: string }>;
+}
+
 export interface EvidenceItem {
   sql: string;
   explanation: string;
@@ -42,6 +51,7 @@ export interface Finding {
   confidence: "high" | "medium" | "low";
   evidence: EvidenceItem[];
   keyMetrics: Record<string, string | number>;
+  keyMetricDescriptions?: Record<string, string>;
 }
 
 export interface ResearchTheme {
@@ -57,6 +67,7 @@ export interface RankedInsight {
   detail: string;
   impact: "high" | "medium" | "low";
   supportingFindingIds: number[];
+  recommendedAction?: string;
 }
 
 export interface FurtherInvestigation {
@@ -232,7 +243,7 @@ export function useResearchSession(tenantId?: string | null) {
 
   // ── Start a new research session ──
   const startSession = useCallback(
-    async (topic?: string) => {
+    async (topic?: string, initialContext?: InsightContext) => {
       setPhase("creating");
       setError(null);
       setPlan(null);
@@ -248,9 +259,13 @@ export function useResearchSession(tenantId?: string | null) {
       }
 
       try {
+        const body: any = {};
+        if (topic) body.topic = topic;
+        if (initialContext) body.initialContext = initialContext;
+
         const result = await api.request<{ sessionId: string }>(
           `/api/research/sessions${tenantParam}`,
-          { method: "POST", body: JSON.stringify({ topic }) }
+          { method: "POST", body: JSON.stringify(body) }
         );
 
         const newSessionId = result.sessionId;
@@ -344,7 +359,7 @@ export function useResearchSession(tenantId?: string | null) {
     [tenantParam, readSSEStream]
   );
 
-  // ── Load a saved session ──
+  // ── Load a saved session (view only, no stream) ──
   const loadSession = useCallback(
     async (id: string) => {
       if (abortRef.current) {
@@ -371,6 +386,30 @@ export function useResearchSession(tenantId?: string | null) {
       }
     },
     [tenantParam]
+  );
+
+  // ── Run an existing session (start the SSE stream for a pre-created session) ──
+  const runSession = useCallback(
+    (id: string) => {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+
+      setSessionId(id);
+      sessionIdRef.current = id;
+      setPhase("creating");
+      setError(null);
+      setPlan(null);
+      setFindings([]);
+      setReport(null);
+      setEvents([]);
+      setIsRunning(true);
+      setIsPaused(false);
+
+      readSSEStream(`/api/research/sessions/${id}/stream${tenantParam}`);
+    },
+    [tenantParam, readSSEStream]
   );
 
   // ── Fetch session list for sidebar ──
@@ -449,6 +488,7 @@ export function useResearchSession(tenantId?: string | null) {
     isPaused,
     sessions,
     startSession,
+    runSession,
     steer,
     pause,
     resume,

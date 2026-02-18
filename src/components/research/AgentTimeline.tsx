@@ -37,6 +37,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useDebugMode } from "@/contexts/DebugModeContext";
 import type { AgentEvent } from "@/hooks/useResearchSession";
 
 // ============================================================================
@@ -375,6 +376,7 @@ function getEventSummary(event: AgentEvent): string {
 }
 
 function EventDetail({ event }: { event: AgentEvent }) {
+  const { isDebugMode } = useDebugMode();
   switch (event.type) {
     case "plan": return <PlanDetail plan={event.data} />;
     case "agent_thinking":
@@ -383,7 +385,7 @@ function EventDetail({ event }: { event: AgentEvent }) {
       return (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">{event.data?.content}</p>
-          {event.data?.sql && (
+          {isDebugMode && event.data?.sql && (
             <pre className="bg-muted rounded-md p-3 text-xs overflow-x-auto font-mono">{event.data.sql}</pre>
           )}
         </div>

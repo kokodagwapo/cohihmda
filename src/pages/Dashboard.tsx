@@ -1301,7 +1301,7 @@ const Dashboard = () => {
           {/* Insights Section - Minimalist */}
           {isAuthenticated && (
             <div className="section-insights mb-16 md:mb-20 w-full">
-              {/* Cohi Insights - First */}
+              {/* Cohi Insights */}
               {dashboardVisibility.aletheiaInsights && (
                 <div
                   id="aletheiaInsights"

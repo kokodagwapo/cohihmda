@@ -52,6 +52,13 @@ export interface EncompassLoan {
   [key: string]: any; // Dynamic structure based on requested fields
 }
 
+export interface LoanSchemaField {
+  fieldId: string;
+  jsonPath: string;
+  description: string;
+  type: string;
+}
+
 // Encompass User types from v1 API
 // Note: The 'id' field IS the username/login ID in Encompass v1 API
 export interface EncompassUserFromApi {
@@ -776,55 +783,81 @@ export class EncompassApiService {
       losConnectionId,
     );
 
-    try {
-      const response = await operation(accessToken);
+    const MAX_THROTTLE_RETRIES = 5;
+    let throttleAttempt = 0;
 
-      // Check concurrency headers and throttle if needed
-      const concurrency = await this.checkConcurrencyAndThrottle(
-        response,
-        losConnectionId,
-      );
+    while (true) {
+      try {
+        const response = await operation(accessToken);
 
-      return {
-        data: response.data,
-        concurrency: concurrency || undefined,
-      };
-    } catch (error: any) {
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        console.warn(`[Sync] Token expired (401), refreshing...`);
-        const clientDetails = await getEncompassCredentials(
-          tenantId,
+        // Check concurrency headers and throttle if needed
+        const concurrency = await this.checkConcurrencyAndThrottle(
+          response,
           losConnectionId,
         );
-        await this.invalidateToken(clientDetails);
-        accessToken = await this.getEncompassAccessToken(
-          tenantId,
-          losConnectionId,
-          true,
-        );
 
-        try {
-          const retryResponse = await operation(accessToken);
+        return {
+          data: response.data,
+          concurrency: concurrency || undefined,
+        };
+      } catch (error: any) {
+        const status = axios.isAxiosError(error)
+          ? error.response?.status
+          : undefined;
 
-          // Check concurrency on retry as well
-          const retryConcurrency = await this.checkConcurrencyAndThrottle(
-            retryResponse,
+        // 429 = concurrency/rate limit exhausted (Too Many Requests)
+        // 409 = pipeline or object state conflict from rapid queries (Conflict)
+        // Both are transient and recoverable with back-off.
+        if (
+          (status === 429 || status === 409) &&
+          throttleAttempt < MAX_THROTTLE_RETRIES
+        ) {
+          throttleAttempt++;
+          const backoff = this.CONCURRENCY_POLL_INTERVAL * throttleAttempt;
+          console.warn(
+            `[EncompassApiService] Transient Encompass error (${status}), retry ${throttleAttempt}/${MAX_THROTTLE_RETRIES} in ${backoff}ms...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoff));
+          continue;
+        }
+
+        // Handle 401 (token expired) with token refresh
+        if (status === 401) {
+          console.warn(`[Sync] Token expired (401), refreshing...`);
+          const clientDetails = await getEncompassCredentials(
+            tenantId,
             losConnectionId,
           );
-
-          return {
-            data: retryResponse.data,
-            concurrency: retryConcurrency || undefined,
-          };
-        } catch (retryError: any) {
-          console.error(
-            `[EncompassApiService] Retry failed after token refresh:`,
-            retryError.response?.data || retryError.message,
+          await this.invalidateToken(clientDetails);
+          accessToken = await this.getEncompassAccessToken(
+            tenantId,
+            losConnectionId,
+            true,
           );
-          throw retryError;
+          throttleAttempt = 0;
+
+          try {
+            const retryResponse = await operation(accessToken);
+
+            const retryConcurrency = await this.checkConcurrencyAndThrottle(
+              retryResponse,
+              losConnectionId,
+            );
+
+            return {
+              data: retryResponse.data,
+              concurrency: retryConcurrency || undefined,
+            };
+          } catch (retryError: any) {
+            console.error(
+              `[EncompassApiService] Retry failed after token refresh:`,
+              retryError.response?.data || retryError.message,
+            );
+            throw retryError;
+          }
         }
+        throw error;
       }
-      throw error;
     }
   }
 
@@ -967,6 +1000,184 @@ export class EncompassApiService {
         concurrency: response.concurrency,
       };
     });
+  }
+
+  /**
+   * Get the full loan schema — every field ID with its JSON path, description, and type.
+   * Endpoint: GET /v1/schema/loan
+   */
+  public async getLoanSchema(
+    tenantId: string,
+    losConnectionId: string,
+  ): Promise<EncompassApiResponse<LoanSchemaField[]>> {
+    console.log(
+      `[EncompassApiService] Fetching loan schema for connection: ${losConnectionId}`,
+    );
+
+    return this.executeWithTokenRetry<any>(
+      tenantId,
+      losConnectionId,
+      async (accessToken) => {
+        return await this.apiClient.get<any>("/v1/schema/loan", {
+          headers: { Authorization: accessToken },
+        });
+      },
+    ).then((response) => {
+      const raw = response.data;
+      const fields: LoanSchemaField[] = [];
+
+      // Debug: log the shape of the raw response
+      console.log(
+        `[EncompassApiService] Loan schema raw: type=${Array.isArray(raw) ? "array" : typeof raw}, ` +
+        `keys=${raw && typeof raw === "object" ? Object.keys(raw).join(", ") : "N/A"}`
+      );
+
+      // Encompass v1 schema comes in format:
+      //   { schema_version, entity_types: { "Loan": { properties: { ... } }, ... } }
+      // Each property leaf may have: { type, description, format, fieldId, ... }
+      // We walk the entire tree looking for leaves that have a "type" or "fieldId".
+      const walkProperties = (obj: any, pathPrefix: string) => {
+        if (!obj || typeof obj !== "object") return;
+        for (const [key, val] of Object.entries(obj)) {
+          if (!val || typeof val !== "object") continue;
+          const entry = val as any;
+          const currentPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+
+          // A leaf field definition typically has { type, description } or { fieldId }
+          if (entry.type && typeof entry.type === "string" && !entry.properties && !entry.entity_types) {
+            fields.push({
+              fieldId: entry.fieldId || entry.id || "",
+              jsonPath: currentPath,
+              description: entry.description || "",
+              type: entry.type || "string",
+            });
+          }
+
+          // Recurse into nested properties
+          if (entry.properties && typeof entry.properties === "object") {
+            walkProperties(entry.properties, currentPath);
+          }
+          // Recurse into items (for array types)
+          if (entry.items && typeof entry.items === "object") {
+            if (entry.items.properties) {
+              walkProperties(entry.items.properties, `${currentPath}.0`);
+            } else {
+              walkProperties(entry.items, `${currentPath}.0`);
+            }
+          }
+          // Recurse into allOf/oneOf/anyOf
+          for (const combo of ["allOf", "oneOf", "anyOf"]) {
+            if (Array.isArray(entry[combo])) {
+              for (const sub of entry[combo]) {
+                if (sub.properties) walkProperties(sub.properties, currentPath);
+              }
+            }
+          }
+        }
+      };
+
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (entry.fieldId || entry.id) {
+            fields.push({
+              fieldId: entry.fieldId || entry.id,
+              jsonPath: entry.jsonPath || entry.modelPath || "",
+              description: entry.description || "",
+              type: entry.type || entry.format || "string",
+            });
+          }
+        }
+      } else if (raw && typeof raw === "object") {
+        // Handle { entity_types: { ... } } wrapper
+        const entityTypes = raw.entity_types || raw.entityTypes || raw;
+        if (entityTypes && typeof entityTypes === "object") {
+          // Log entity type names for debugging
+          const entityNames = Object.keys(entityTypes).slice(0, 20);
+          console.log(`[EncompassApiService] Schema entity types: ${entityNames.join(", ")}`);
+
+          for (const [entityName, entityDef] of Object.entries(entityTypes)) {
+            if (!entityDef || typeof entityDef !== "object") continue;
+            const ed = entityDef as any;
+
+            // Log first entity structure for debugging
+            if (fields.length === 0 && ed.properties) {
+              const propKeys = Object.keys(ed.properties).slice(0, 10);
+              const sampleProp = ed.properties[propKeys[0]];
+              console.log(
+                `[EncompassApiService] Schema entity "${entityName}": ${Object.keys(ed.properties).length} properties. Sample "${propKeys[0]}": ${JSON.stringify(sampleProp).substring(0, 300)}`
+              );
+            }
+
+            if (ed.properties) {
+              walkProperties(ed.properties, entityName === "Loan" ? "" : entityName);
+            }
+          }
+        }
+      }
+
+      console.log(`[EncompassApiService] Loan schema: ${fields.length} fields parsed`);
+      if (fields.length > 0) {
+        const sample = fields.slice(0, 5).map(f => `${f.jsonPath}→${f.fieldId}(${f.type})`);
+        console.log(`[EncompassApiService] Schema samples: ${sample.join("; ")}`);
+      }
+      return { data: fields, concurrency: response.concurrency };
+    });
+  }
+
+  /**
+   * Get schema for a specific field ID — returns the JSON path and metadata.
+   * Endpoint: GET /v1/schema/loan/{fieldId}
+   */
+  public async getFieldSchema(
+    tenantId: string,
+    losConnectionId: string,
+    fieldId: string,
+  ): Promise<EncompassApiResponse<LoanSchemaField | null>> {
+    return this.executeWithTokenRetry<any>(
+      tenantId,
+      losConnectionId,
+      async (accessToken) => {
+        return await this.apiClient.get<any>(`/v1/schema/loan/${encodeURIComponent(fieldId)}`, {
+          headers: { Authorization: accessToken },
+        });
+      },
+    ).then((response) => {
+      const raw = response.data;
+      if (raw && typeof raw === "object") {
+        return {
+          data: {
+            fieldId: raw.fieldId || raw.id || fieldId,
+            jsonPath: raw.jsonPath || raw.modelPath || "",
+            description: raw.description || "",
+            type: raw.type || raw.format || "string",
+          },
+          concurrency: response.concurrency,
+        };
+      }
+      return { data: null, concurrency: response.concurrency };
+    });
+  }
+
+  /**
+   * Get a single loan by GUID — returns the full loan object with ALL fields.
+   * Endpoint: GET /v1/loans/{loanGuid}
+   */
+  public async getLoanById(
+    tenantId: string,
+    losConnectionId: string,
+    loanGuid: string,
+  ): Promise<EncompassApiResponse<Record<string, any>>> {
+    return this.executeWithTokenRetry<Record<string, any>>(
+      tenantId,
+      losConnectionId,
+      async (accessToken) => {
+        const normalizedGuid = loanGuid.replace(/[{}]/g, "");
+        return await this.apiClient.get<Record<string, any>>(
+          `/v1/loans/${normalizedGuid}`,
+          { headers: { Authorization: accessToken } },
+        );
+      },
+    );
   }
 
   /**
@@ -1134,23 +1345,24 @@ export class EncompassApiService {
     const maxLoansPerRequest = 1000; // Always use 1000 as page size (API limit)
     const totalLimit = options.limit; // Total number of loans to fetch (if specified)
 
+    const needsPagination = !totalLimit || totalLimit > maxLoansPerRequest;
+
     do {
       pageNumber++;
       const pageParams: any = {
-        limit: maxLoansPerRequest, // Always use 1000 as page size
+        limit: needsPagination ? maxLoansPerRequest : totalLimit,
       };
 
-      // For first page, use cursorType. For subsequent pages, use both cursor AND start
-      // Only add start if it's less than totalCount (to avoid API error)
+      // Only request a cursor when we expect to paginate (limit > single page).
+      // Unnecessary cursors accumulate server-side and cause 409 Conflict errors.
       if (cursor) {
         pageParams.cursor = cursor;
-        // Only add start parameter if it's less than totalCount
         if (totalCount === undefined || start < totalCount) {
           pageParams.start = start;
         } else {
           break;
         }
-      } else {
+      } else if (needsPagination) {
         pageParams.cursorType = "randomAccess";
       }
 
@@ -1205,7 +1417,7 @@ export class EncompassApiService {
           response.headers["X-Cursor"] ||
           response.headers["X-CURSOR"];
 
-        // Get total count from first page
+        // Get total count from first page (only expected with cursor-based queries)
         if (pageNumber === 1 && totalCountHeader) {
           totalCount = parseInt(totalCountHeader, 10);
           if (isNaN(totalCount)) {
@@ -1213,7 +1425,7 @@ export class EncompassApiService {
               `[Sync] Invalid x-total-count header: "${totalCountHeader}"`,
             );
           }
-        } else if (pageNumber === 1) {
+        } else if (pageNumber === 1 && needsPagination) {
           console.warn(`[Sync] x-total-count header not found in response`);
         }
 
@@ -1336,15 +1548,15 @@ export class EncompassApiService {
 
     let uniqueLoans = Array.from(uniqueLoansMap.values());
 
+    if (duplicateGuids.length > 0) {
+      console.warn(
+        `[Sync] Removed ${duplicateGuids.length} duplicate loan(s) (${allLoans.length} -> ${uniqueLoans.length})`,
+      );
+    }
+
     // Apply limit if specified (slice to exact limit after deduplication)
     if (totalLimit !== undefined && uniqueLoans.length > totalLimit) {
       uniqueLoans = uniqueLoans.slice(0, totalLimit);
-    }
-
-    if (uniqueLoans.length !== allLoans.length) {
-      console.warn(
-        `[Sync] Deduplicated: ${allLoans.length} -> ${uniqueLoans.length} loans`,
-      );
     }
 
     return {

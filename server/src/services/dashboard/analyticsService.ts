@@ -133,6 +133,8 @@ export interface Insight {
   risk_if_ignored?: string;
   recommended_action?: string;
   owner?: string;
+  generation_method?: "pipeline" | "agent";
+  detail_data?: any;
 }
 
 /**
@@ -1181,7 +1183,8 @@ export async function getInsights(
     tenantId?: string;
     forceRefresh?: boolean;
     userAccessFilter?: LoanAccessFilter;
-    channelGroup?: string; // Channel filter (Retail, TPO, or specific channel)
+    channelGroup?: string;
+    generationMethod?: string;
   } = {}
 ): Promise<{
   insights: Insight[];
@@ -1211,12 +1214,13 @@ export async function getInsights(
     tenantId,
     forceRefresh = false,
     channelGroup,
+    generationMethod,
   } = options;
 
   // Try reading persisted insights from the database first (fast path)
   if (useLLM) {
     try {
-      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup);
+      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup, generationMethod);
 
       if (stored && stored.insights.length > 0) {
         console.log(
@@ -1255,6 +1259,8 @@ export async function getInsights(
             risk_if_ignored: ins.risk_if_ignored,
             recommended_action: ins.recommended_action,
             owner: ins.owner,
+            generation_method: ins.generation_method || "pipeline",
+            detail_data: (ins as any).detail_data || null,
           })
         );
 
@@ -2273,6 +2279,7 @@ export async function refreshInsights(
       bucketPriority: ins.priority,
       impact: ins.impact,
       evidence: ins.evidence,
+      generation_method: ins.generation_method || "pipeline",
     })
   );
 
@@ -2312,6 +2319,9 @@ export async function refreshInsights(
  * are populated, then only runs insight generation for those + "All".
  * Returns a summary of how many insights were generated per channel.
  */
+// Per-tenant pipeline generation lock
+const activePipelineGenerations = new Map<string, number>();
+
 export async function refreshAllChannels(
   tenantPool: pg.Pool,
   dateFilter: string = "ytd",
@@ -2321,73 +2331,88 @@ export async function refreshAllChannels(
   results: Record<string, { count: number; generatedAt: string }>;
 }> {
   const { tenantId } = options;
+  const lockKey = tenantId || "__default__";
+
+  // Concurrency guard
+  const existingStart = activePipelineGenerations.get(lockKey);
+  if (existingStart && Date.now() - existingStart < 10 * 60 * 1000) {
+    const elapsed = Math.round((Date.now() - existingStart) / 1000);
+    console.warn(`[Insights] Pipeline refresh already running for tenant ${lockKey} (${elapsed}s) — skipping duplicate`);
+    return { channels: [], results: {} };
+  }
+  activePipelineGenerations.set(lockKey, Date.now());
+
   console.log(
     `[Insights] Batch-refreshing insights for active channels (dateFilter: ${dateFilter}, tenant: ${tenantId || "default"})`
   );
 
-  // Detect which channel groups actually have loans for this tenant
-  const channelGroupExpr = buildChannelGroupCaseExpr();
-  let activeGroups: string[] = [];
   try {
-    const channelResult = await tenantPool.query(`
-      SELECT ${channelGroupExpr} AS channel_group, COUNT(*) AS cnt
-      FROM public.loans
-      GROUP BY 1
-      HAVING COUNT(*) > 0
-    `);
-    activeGroups = channelResult.rows
-      .map((r: any) => r.channel_group as string)
-      .filter((g: string) => g === "Retail" || g === "TPO");
-  } catch (err: any) {
-    console.warn(`[Insights] Failed to detect active channels, falling back to all: ${err.message}`);
-    activeGroups = ["Retail", "TPO"];
-  }
-
-  // Always run "All" (no channel filter). Only add Retail/TPO if both exist.
-  // If the tenant only has one channel group, "All" and that channel would produce
-  // identical insights, so skip the per-channel run.
-  const channelConfigs: Array<{ key: string; channelGroup?: string }> = [
-    { key: "All", channelGroup: undefined },
-  ];
-
-  if (activeGroups.length > 1) {
-    for (const group of activeGroups) {
-      channelConfigs.push({ key: group, channelGroup: group });
+    // Detect which channel groups actually have loans for this tenant
+    const channelGroupExpr = buildChannelGroupCaseExpr();
+    let activeGroups: string[] = [];
+    try {
+      const channelResult = await tenantPool.query(`
+        SELECT ${channelGroupExpr} AS channel_group, COUNT(*) AS cnt
+        FROM public.loans
+        GROUP BY 1
+        HAVING COUNT(*) > 0
+      `);
+      activeGroups = channelResult.rows
+        .map((r: any) => r.channel_group as string)
+        .filter((g: string) => g === "Retail" || g === "TPO");
+    } catch (err: any) {
+      console.warn(`[Insights] Failed to detect active channels, falling back to all: ${err.message}`);
+      activeGroups = ["Retail", "TPO"];
     }
-    console.log(`[Insights] Multiple channel groups detected (${activeGroups.join(", ")}), generating per-channel insights`);
-  } else {
-    console.log(`[Insights] Single channel group detected (${activeGroups[0] || "none"}), skipping per-channel split (All is sufficient)`);
-  }
 
-  const settledResults = await Promise.allSettled(
-    channelConfigs.map(({ channelGroup }) =>
-      refreshInsights(tenantPool, dateFilter, {
-        tenantId,
-        channelGroup,
-      })
-    )
-  );
+    // Always run "All" (no channel filter). Only add Retail/TPO if both exist.
+    // If the tenant only has one channel group, "All" and that channel would produce
+    // identical insights, so skip the per-channel run.
+    const channelConfigs: Array<{ key: string; channelGroup?: string }> = [
+      { key: "All", channelGroup: undefined },
+    ];
 
-  const results: Record<string, { count: number; generatedAt: string }> = {};
-  for (let i = 0; i < channelConfigs.length; i++) {
-    const key = channelConfigs[i].key;
-    const settled = settledResults[i];
-    if (settled.status === "fulfilled") {
-      results[key] = {
-        count: settled.value.insights.length,
-        generatedAt: settled.value.generatedAt,
-      };
-      console.log(`[Insights] Channel "${key}": ${settled.value.insights.length} insights generated`);
+    if (activeGroups.length > 1) {
+      for (const group of activeGroups) {
+        channelConfigs.push({ key: group, channelGroup: group });
+      }
+      console.log(`[Insights] Multiple channel groups detected (${activeGroups.join(", ")}), generating per-channel insights`);
     } else {
-      results[key] = { count: 0, generatedAt: new Date().toISOString() };
-      console.error(`[Insights] Channel "${key}" FAILED:`, settled.reason);
+      console.log(`[Insights] Single channel group detected (${activeGroups[0] || "none"}), skipping per-channel split (All is sufficient)`);
     }
-  }
 
-  return {
-    channels: channelConfigs.map((c) => c.key),
-    results,
-  };
+    const settledResults = await Promise.allSettled(
+      channelConfigs.map(({ channelGroup }) =>
+        refreshInsights(tenantPool, dateFilter, {
+          tenantId,
+          channelGroup,
+        })
+      )
+    );
+
+    const results: Record<string, { count: number; generatedAt: string }> = {};
+    for (let i = 0; i < channelConfigs.length; i++) {
+      const key = channelConfigs[i].key;
+      const settled = settledResults[i];
+      if (settled.status === "fulfilled") {
+        results[key] = {
+          count: settled.value.insights.length,
+          generatedAt: settled.value.generatedAt,
+        };
+        console.log(`[Insights] Channel "${key}": ${settled.value.insights.length} insights generated`);
+      } else {
+        results[key] = { count: 0, generatedAt: new Date().toISOString() };
+        console.error(`[Insights] Channel "${key}" FAILED:`, settled.reason);
+      }
+    }
+
+    return {
+      channels: channelConfigs.map((c) => c.key),
+      results,
+    };
+  } finally {
+    activePipelineGenerations.delete(lockKey);
+  }
 }
 
 /**

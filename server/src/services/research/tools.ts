@@ -162,6 +162,8 @@ export function getMetricDefinitions(): string {
 // Unified LLM Caller
 // ============================================================================
 
+const MAX_LLM_RETRIES = 2;
+
 export async function callLLM(
   messages: LLMMessage[],
   apiKey: string,
@@ -185,27 +187,53 @@ export async function callLLM(
     body.response_format = { type: "json_object" };
   }
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 1; attempt <= MAX_LLM_RETRIES; attempt++) {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (!response.ok) {
-    const error = (await response.json()) as { error?: { message?: string } };
-    throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+    if (!response.ok) {
+      const error = (await response.json()) as { error?: { message?: string } };
+      throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{
+        message?: { content?: string };
+        finish_reason?: string;
+      }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
+
+    const content = data.choices?.[0]?.message?.content;
+    const finishReason = data.choices?.[0]?.finish_reason;
+
+    if (content) return content;
+
+    // Empty response — log details and retry
+    console.warn(
+      `[LLM] Empty response (attempt ${attempt}/${MAX_LLM_RETRIES}):`,
+      {
+        model,
+        finishReason,
+        promptTokens: data.usage?.prompt_tokens,
+        completionTokens: data.usage?.completion_tokens,
+        maxTokens,
+        jsonMode,
+      }
+    );
+
+    if (attempt < MAX_LLM_RETRIES) {
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
   }
 
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Empty response from OpenAI");
-  return content;
+  throw new Error("Empty response from OpenAI after retries");
 }
 
 // ============================================================================

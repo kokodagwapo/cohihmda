@@ -444,7 +444,8 @@ export class ApiClient {
           : isSlowEndpoint
           ? "60 seconds"
           : "30 seconds";
-        if (retries < 1) {
+        // Only retry GET requests on timeout — POST/PUT/DELETE are not idempotent
+        if (isGetRequest && retries < 1) {
           console.warn(
             `Request timeout for ${endpoint} after ${timeoutDuration}. Retrying... (attempt ${
               retries + 1
@@ -481,8 +482,9 @@ export class ApiClient {
         );
       }
 
-      // Handle network errors with retry
+      // Handle network errors with retry (only for GET — POST is not safe to retry)
       if (
+        isGetRequest &&
         (error.message?.includes("Failed to fetch") ||
           error.message?.includes("NetworkError") ||
           error.name === "TypeError" ||
@@ -955,6 +957,71 @@ export class ApiClient {
     });
 
     return ws;
+  }
+
+  // =========================================================================
+  // Tracked Insights (Watchlist)
+  // =========================================================================
+
+  async trackInsight(data: {
+    headline: string;
+    understory?: string;
+    metric_signature: any;
+    source_insight_id?: number;
+    source_type?: string;
+    tags?: string[];
+  }, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked${tenantParam}`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async getTrackedInsights(tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked${tenantParam}`);
+  }
+
+  async getTrackedInsightHistory(id: string, limit = 50, tenantId?: string | null) {
+    const tenantParam = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}/history?limit=${limit}${tenantParam}`);
+  }
+
+  async updateTrackedInsight(
+    id: string,
+    data: { status?: string; alert_threshold?: any; tags?: string[] },
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}${tenantParam}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteTrackedInsight(id: string, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}${tenantParam}`, { method: "DELETE" });
+  }
+
+  async insightChat(
+    insightContext: any,
+    messages: Array<{ role: string; content: string }>,
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
+    return this.request<{ response: string }>(
+      `/api/dashboard/insights/chat${tenantParam}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ insightContext, messages }),
+      }
+    );
+  }
+
+  async triggerAgentInsights(tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
+    return this.request(`/api/dashboard/insights/generate-agent${tenantParam}`, {
+      method: "POST",
+    });
   }
 }
 

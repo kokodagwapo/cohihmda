@@ -30,12 +30,14 @@ import {
   Settings2,
   PlusCircle,
   Database,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
 import { FieldMappingWizardDialog } from '@/components/encompass/FieldMappingWizard';
 import { AdditionalFieldsTab } from './AdditionalFieldsTab';
 import { FieldPopulationStats } from '@/components/admin/FieldPopulationStats';
+import { OnboardingPanel } from '@/components/onboarding/OnboardingPanel';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
 
@@ -54,6 +56,7 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
   );
   const [activeSubTab, setActiveSubTab] = useState<'default' | 'additional' | 'population'>('default');
   const [showWizard, setShowWizard] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Get the selected connection
   const selectedConnection = losConnections.find(c => c.id === selectedConnectionId);
@@ -178,15 +181,39 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                       : 'Never'}
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowWizard(true)}
-                  className="shrink-0"
-                >
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Setup Wizard
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    onClick={() => setShowOnboarding(true)}
+                  >
+                    <Zap className="h-4 w-4 mr-2" />
+                    Run Onboarding Analysis
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowWizard(true)}
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Setup Wizard
+                  </Button>
+                </div>
               </div>
+            )}
+
+            {/* Onboarding Analysis Panel */}
+            {showOnboarding && selectedConnectionId && selectedTenantId && (
+              <OnboardingPanel
+                connectionId={selectedConnectionId}
+                tenantId={selectedTenantId}
+                connectionName={selectedConnection?.name}
+                onComplete={() => {
+                  setShowOnboarding(false);
+                  onRefresh();
+                  toast({
+                    title: 'Onboarding Complete',
+                    description: 'Configuration has been applied. Review your field mappings below.',
+                  });
+                }}
+              />
             )}
 
             {/* Sub-tabs for Default Fields, Additional Fields, and Population Stats */}

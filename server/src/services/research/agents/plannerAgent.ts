@@ -60,9 +60,11 @@ RULES:
 - If a user topic is provided, at least 2-3 questions should focus on that topic; the rest can be broader
 - If no topic is provided, cover a mix of: pipeline health, conversion rates, personnel performance, risk patterns, and time trends
 - Consider multiple time windows: YTD, rolling 90D, rolling 30D, trailing 12M
+- For conversion metrics (pull-through, fallout, funded rate): be aware that mortgage cycle times often exceed 30 days. A 30D application cohort will contain many loans still in-process, making conversion rates unreliable. Prefer 90D or YTD windows for these metrics unless the investigation specifically needs short-window sensitivity. When planning 30D conversion analysis, include a cycle-time check so the analyst can contextualize the results.
 - Focus on questions that can reveal actionable patterns, not just descriptive statistics
 - NEVER suggest queries that modify data
-- Today's date context will be provided separately`;
+- Today's date context will be provided separately
+- DATA QUALITY: "Active Loan" status often includes stale records not properly closed out in the LOS. When planning pipeline-related questions, instruct the analyst to check for and segment stale active loans (application_date > 6 months old). Data quality issues (missing fields, stale statuses, impossible dates) are high-value findings — include them when relevant.`;
 
 // ============================================================================
 // Training Examples
@@ -120,9 +122,9 @@ export async function runPlannerAgent(
   schemaContext: string,
   metricDefinitions: string,
   apiKey: string,
-  options: { topic?: string; knowledgeContext?: string } = {}
+  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string } = {}
 ): Promise<ResearchPlan> {
-  const { topic, knowledgeContext } = options;
+  const { topic, knowledgeContext, priorInvestigationContext } = options;
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -136,6 +138,10 @@ export async function runPlannerAgent(
     userPrompt += `## User's Investigation Request\nThe user wants to investigate: "${topic}"\n\nCreate a research plan that prioritizes this topic while also covering other significant areas if relevant.\n`;
   } else {
     userPrompt += `## Investigation Scope\nNo specific topic was requested. Create a comprehensive research plan covering pipeline health, conversion performance, personnel patterns, risk exposure, and trends.\n`;
+  }
+
+  if (priorInvestigationContext) {
+    userPrompt += `\n## Prior Investigation Context\nThe user is escalating from a dashboard insight. Build on these findings — go deeper, explore related angles, and uncover patterns the initial analysis didn't cover.\n${priorInvestigationContext}\n`;
   }
 
   if (knowledgeContext) {

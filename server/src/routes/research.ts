@@ -90,13 +90,13 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { tenantPool, tenantId } = getTenantContext(req);
-      const { topic } = req.body || {};
+      const { topic, initialContext } = req.body || {};
       const userId = req.userId || "";
       const userEmail = req.userEmail || "";
 
-      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined);
+      const session = await createSession(tenantId, userId, userEmail, tenantPool, topic || undefined, initialContext || undefined);
 
-      console.log(`[Research] Created session ${session.id} for tenant ${tenantId}${topic ? `, topic: "${topic}"` : ""}`);
+      console.log(`[Research] Created session ${session.id} for tenant ${tenantId}${topic ? `, topic: "${topic}"` : ""}${initialContext ? " (from insight)" : ""}`);
 
       res.json({
         sessionId: session.id,

@@ -32,6 +32,8 @@ import shareLinksRoutes from "./shareLinks.js";
 import workbenchRoutes from "./workbench.js";
 import reportRoutes from "./reports.js";
 import researchRoutes from "./research.js";
+import trackedInsightRoutes from "./trackedInsights.js";
+import onboardingRoutes from "./onboarding.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -83,6 +85,8 @@ export function setupRoutes(app: Express) {
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
   app.use("/api/research", researchRoutes); // Research Analyst agentic system
+  app.use("/api/insights/tracked", trackedInsightRoutes); // Tracked insights watchlist
+  app.use("/api/onboarding", onboardingRoutes); // Onboarding analysis agent
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {

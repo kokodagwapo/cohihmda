@@ -55,6 +55,15 @@ export interface FollowUpEntry {
   timestamp: number;
 }
 
+export interface InsightContext {
+  insightId?: number;
+  headline: string;
+  understory: string;
+  keyMetrics?: Record<string, any>;
+  evidenceSummary?: string;
+  chatHistory?: Array<{ role: string; content: string }>;
+}
+
 export interface ResearchSession {
   id: string;
   tenantId: string;
@@ -70,6 +79,7 @@ export interface ResearchSession {
   steeringDirectives: string[];
   createdAt: number;
   error?: string;
+  initialContext?: InsightContext;
   // Pause mechanism
   pauseRequested: boolean;
   paused: boolean;
@@ -258,22 +268,51 @@ export async function createSession(
   userId: string,
   userEmail: string,
   tenantPool: pg.Pool,
-  topic?: string
+  topic?: string,
+  initialContext?: InsightContext
 ): Promise<ResearchSession> {
   pruneExpiredSessions();
+
+  // If no topic provided but we have initial context, derive a topic
+  const derivedTopic = topic || (initialContext
+    ? `Deep dive: ${initialContext.headline}`
+    : undefined);
+
+  // Pre-populate steering directive from insight context so the planner has prior knowledge
+  const steeringDirectives: string[] = [];
+  if (initialContext) {
+    let directive = `PRIOR INVESTIGATION CONTEXT — The user is escalating from a dashboard insight:\n`;
+    directive += `Headline: ${initialContext.headline}\n`;
+    directive += `Summary: ${initialContext.understory}\n`;
+    if (initialContext.keyMetrics && Object.keys(initialContext.keyMetrics).length > 0) {
+      directive += `Key Metrics: ${Object.entries(initialContext.keyMetrics).map(([k, v]) => `${k}=${v}`).join(', ')}\n`;
+    }
+    if (initialContext.evidenceSummary) {
+      directive += `Evidence: ${initialContext.evidenceSummary}\n`;
+    }
+    if (initialContext.chatHistory?.length) {
+      directive += `\nPrior chat Q&A:\n`;
+      for (const msg of initialContext.chatHistory.slice(-6)) {
+        directive += `${msg.role === 'user' ? 'User' : 'Cohi'}: ${msg.content.substring(0, 300)}\n`;
+      }
+    }
+    directive += `\nBuild on these findings. Go deeper, explore related angles, and find new patterns the dashboard insight didn't cover.`;
+    steeringDirectives.push(directive);
+  }
 
   const session: ResearchSession = {
     id: crypto.randomUUID(),
     tenantId,
     userId,
     userEmail,
-    topic,
+    topic: derivedTopic,
     phase: "created",
     findings: [],
     events: [],
     followUpHistory: [],
-    steeringDirectives: [],
+    steeringDirectives,
     createdAt: Date.now(),
+    initialContext,
     pauseRequested: false,
     paused: false,
   };
@@ -332,9 +371,28 @@ export async function runResearchPipeline(
       timestamp: Date.now(),
     });
 
+    // Build prior context string for sessions created from insights
+    let priorInvestigationContext: string | undefined;
+    if (session.initialContext) {
+      const ic = session.initialContext;
+      let ctx = `Headline: ${ic.headline}\nSummary: ${ic.understory}\n`;
+      if (ic.keyMetrics && Object.keys(ic.keyMetrics).length > 0) {
+        ctx += `Key Metrics: ${Object.entries(ic.keyMetrics).map(([k, v]) => `${k}=${v}`).join(', ')}\n`;
+      }
+      if (ic.evidenceSummary) ctx += `Evidence: ${ic.evidenceSummary}\n`;
+      if (ic.chatHistory?.length) {
+        ctx += `\nPrior Q&A:\n`;
+        for (const msg of ic.chatHistory.slice(-6)) {
+          ctx += `${msg.role === 'user' ? 'User' : 'Cohi'}: ${msg.content.substring(0, 300)}\n`;
+        }
+      }
+      priorInvestigationContext = ctx;
+    }
+
     const plan = await runPlannerAgent(schemaContext, metricDefs, apiKey, {
       topic: session.topic,
       knowledgeContext,
+      priorInvestigationContext,
     });
 
     session.plan = plan;

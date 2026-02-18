@@ -9,10 +9,12 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Navigation } from "@/components/layout/Navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantStore } from "@/stores/tenantStore";
 import { useResearchSession } from "@/hooks/useResearchSession";
+import { api } from "@/lib/api";
 import { AgentTimeline } from "@/components/research/AgentTimeline";
 import { ResearchReport } from "@/components/research/ResearchReport";
 import { FindingDrillDown } from "@/components/research/FindingDrillDown";
@@ -249,6 +251,7 @@ export default function ResearchAnalyst() {
     isPaused,
     sessions: sessionList,
     startSession,
+    runSession,
     steer,
     pause,
     resume,
@@ -268,11 +271,27 @@ export default function ResearchAnalyst() {
   const steerInputRef = useRef<HTMLInputElement>(null);
   const lastReportRef = useRef<boolean>(false);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Load sessions on mount
   useEffect(() => {
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTenantId]);
+
+  // Auto-load session from ?session= query param (e.g., from "Move to Research Lab")
+  const sessionParamHandled = useRef(false);
+  useEffect(() => {
+    if (sessionParamHandled.current) return;
+    const sessionParam = searchParams.get("session");
+    if (sessionParam) {
+      sessionParamHandled.current = true;
+      setSearchParams({}, { replace: true });
+      runSession(sessionParam);
+      setActiveTab("timeline");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Refresh session list when a session completes
   useEffect(() => {
@@ -561,10 +580,23 @@ export default function ResearchAnalyst() {
                         report={report}
                         findings={findings}
                         sessionId={sessionId}
+                        selectedTenantId={effectiveTenantId}
                         onSubmitFeedback={submitFeedback}
                         onDrillDown={(f) => {
                           setDrillDownFinding(f);
                           setActiveTab("findings");
+                        }}
+                        onTrackInsight={async (headline, detail) => {
+                          try {
+                            await api.trackInsight({
+                              headline,
+                              understory: detail,
+                              metric_signature: { sql: "", keyFields: [] },
+                              source_type: "research",
+                            }, effectiveTenantId);
+                          } catch (err) {
+                            console.error("Error tracking insight:", err);
+                          }
                         }}
                       />
                     </div>

@@ -202,6 +202,8 @@ export interface CategorizedInsight {
   detail_query?: Record<string, any> | null;
   /** Pre-hydrated detail snapshot — rendered directly by the frontend. */
   detail_data?: InsightDetailSnapshot | null;
+  /** 'pipeline' (old 3-pass) or 'agent' (new agent-driven engine) */
+  generation_method?: "pipeline" | "agent";
 }
 
 /** Full response from a generation run. */
@@ -663,7 +665,8 @@ RULES FOR CONVERSION METRICS:
 1. ALWAYS state the timeframe when citing PT or Fallout (e.g. "PT 56.7% YTD", not just "PT 56.7%")
 2. NEVER mix timeframes (e.g. "PT is 56.7% but Fallout is 43.3%" must come from the SAME row)
 3. Use the "vs Prior" deltas above — do NOT compute your own from rounded numbers
-4. When comparing trends, look at 30D vs 60D vs 90D to identify acceleration/deceleration`;
+4. When comparing trends, look at 30D vs 60D vs 90D to identify acceleration/deceleration
+5. SHORT-WINDOW RELIABILITY: Mortgage cycle times (application to funding) often exceed 30 days. A 30D application cohort will still have many loans in-process, making 30D PT artificially low and 30D fallout artificially high. The 90D and YTD windows are the most reliable for pull-through and fallout analysis. If you cite 30D conversion metrics, acknowledge that they are provisional due to cycle time. Do NOT build an insight headline around 30D PT or fallout unless the 90D/YTD trend corroborates it.`;
 }
 
 function buildProductPipelineSections(metrics: InsightMetricsPayload, _channelGroup?: string): string {
@@ -707,7 +710,11 @@ IMPORTANT: These are the specific risk pockets where performance has worsened mo
 - Pull-Through 90D Rolling: ${promptFmtPct(snaps.rolling90d.pullThroughRate)}
 - Fallout YTD: ${promptFmtPct(snaps.ytd.falloutRate)}
 - Cycle Time YTD: ${snaps.ytd.avgCycleTime} days
-- Active Pipeline Size: ${metrics.pipeline.activeLoans} loans`;
+- Active Pipeline Size: ${metrics.pipeline.activeLoans} loans
+
+DATA QUALITY AWARENESS:
+- The "active pipeline" count above includes ALL loans with status='Active Loan', but many may be stale records not closed out in the LOS. Loans with application dates > 6 months old are likely abandoned. When analyzing active pipeline metrics (lock expirations, missing fields, exposure), consider whether the issue is a genuine pipeline risk or simply stale records. If a large portion of "active" loans have very old application dates, frame the finding as a data hygiene issue rather than a pipeline risk.
+- If you discover that critical fields (lock dates, closing dates, etc.) are missing on a large % of active loans, consider whether those loans were ever truly in process or are just unclosed applications. "88% of active loans lack lock data" may really mean "the lender has hundreds of stale applications that should be withdrawn in Encompass."`;
 }
 
 function buildPersonnelSections(metrics: InsightMetricsPayload, channelGroup?: string): string {
@@ -1050,7 +1057,10 @@ IMPORTANT: Use 36M baselines to determine whether current metrics represent stru
 - Pull-Through 90D Rolling: ${promptFmtPct(snaps.rolling90d.pullThroughRate)}
 - Fallout YTD: ${promptFmtPct(snaps.ytd.falloutRate)}
 - Cycle Time YTD: ${snaps.ytd.avgCycleTime} days
-- Active Pipeline Size: ${metrics.pipeline.activeLoans} loans`;
+- Active Pipeline Size: ${metrics.pipeline.activeLoans} loans
+
+DATA QUALITY AWARENESS:
+- The "active pipeline" count above includes ALL loans with status='Active Loan', but many may be stale records not closed out in the LOS. Loans with application dates > 6 months old are likely abandoned. When analyzing active pipeline metrics, consider whether the issue is a genuine pipeline risk or simply stale records that should be withdrawn in Encompass.`;
 }
 
 /** Build a domain-specific prompt: shared context + domain sections. */
@@ -2905,7 +2915,8 @@ async function persistInsights(
 export async function loadStoredInsights(
   tenantPool: pg.Pool,
   dateFilter: string,
-  channelGroup?: string
+  channelGroup?: string,
+  generationMethod?: string
 ): Promise<CategorizedInsightsResponse | null> {
   try {
     // Check if the table exists first
@@ -2920,20 +2931,38 @@ export async function loadStoredInsights(
       return null;
     }
 
-    const result = await tenantPool.query(
-      `SELECT * FROM generated_insights
+    // Build query with optional generation_method filter
+    let sql = `SELECT * FROM generated_insights
        WHERE date_filter = $1
-         AND COALESCE(channel_group, '') = COALESCE($2, '')
-       ORDER BY
+         AND COALESCE(channel_group, '') = COALESCE($2, '')`;
+    const params: any[] = [dateFilter, channelGroup || null];
+
+    if (generationMethod) {
+      // Check if the column exists (pre-migration guard)
+      try {
+        const colCheck = await tenantPool.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.columns
+            WHERE table_name = 'generated_insights' AND column_name = 'generation_method'
+          ) as exists
+        `);
+        if (colCheck.rows[0]?.exists) {
+          sql += ` AND generation_method = $3`;
+          params.push(generationMethod);
+        }
+      } catch { /* ignore */ }
+    }
+
+    sql += ` ORDER BY
          CASE bucket
            WHEN 'critical' THEN 0
            WHEN 'attention' THEN 1
            WHEN 'working' THEN 2
            WHEN 'context' THEN 3
          END,
-         severity_score DESC`,
-      [dateFilter, channelGroup || null]
-    );
+         severity_score DESC`;
+
+    const result = await tenantPool.query(sql, params);
 
     if (result.rows.length === 0) return null;
 
@@ -2959,6 +2988,8 @@ export async function loadStoredInsights(
         risk_if_ignored: ev.risk_if_ignored,
         recommended_action: ev.recommended_action,
         owner: ev.owner,
+        generation_method: row.generation_method || "pipeline",
+        detail_data: row.detail_data || null,
       };
     });
 

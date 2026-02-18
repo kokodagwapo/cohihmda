@@ -26,6 +26,7 @@ import {
   loadStoredInsights,
 } from "../../services/insights/llmInsightGenerator.js";
 import { collectInsightMetrics } from "../../services/insights/insightMetricsCollector.js";
+import { runInsightGeneration, isGenerationRunning } from "../../services/insights/agents/insightOrchestrator.js";
 
 const router = Router();
 
@@ -162,6 +163,7 @@ router.get(
         useLLM = "true",
         forceRefresh = "false",
         channel_group,
+        generation_method,
       } = req.query;
       const authHeader = req.headers.authorization;
 
@@ -191,6 +193,7 @@ router.get(
           forceRefresh: forceRefresh === "true",
           userAccessFilter: accessCtx.getFilter("l"),
           channelGroup: channel_group as string | undefined,
+          generationMethod: generation_method as string | undefined,
         }
       );
       res.json(result);
@@ -263,6 +266,61 @@ router.post(
         details:
           process.env.NODE_ENV === "development" ? error.message : undefined,
       });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/generate-agent
+ * Triggers the agent-driven insight generation pipeline.
+ * Platform admin only — runs planner → investigators → evaluator → persist.
+ */
+router.post(
+  "/insights/generate-agent",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      // Platform admin gate
+      const userRole = (req as any).userRole || (req as any).role;
+      if (!["super_admin", "platform_admin"].includes(userRole)) {
+        return res.status(403).json({ error: "Platform admin access required" });
+      }
+
+      const tenantContext = getTenantContext(req);
+
+      const result = await runInsightGeneration(
+        tenantContext.tenantId,
+        tenantContext.tenantPool
+      );
+
+      if (!result.success && result.error?.includes("already in progress")) {
+        return res.status(409).json(result);
+      }
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error starting agent insight generation:", error);
+      res.status(500).json({ error: "Failed to start agent insight generation" });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/insights/generation-status
+ * Returns whether agent insight generation is currently running for the tenant.
+ */
+router.get(
+  "/insights/generation-status",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const status = isGenerationRunning(tenantContext.tenantId);
+      res.json(status);
+    } catch (error: any) {
+      res.json({ running: false });
     }
   }
 );

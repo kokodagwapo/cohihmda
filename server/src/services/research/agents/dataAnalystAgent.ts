@@ -34,6 +34,7 @@ export interface Finding {
   confidence: "high" | "medium" | "low";
   evidence: EvidenceItem[];
   keyMetrics: Record<string, string | number>;
+  keyMetricDescriptions?: Record<string, string>;
 }
 
 export interface EvidenceItem {
@@ -147,6 +148,25 @@ RULES:
 - Use multiple time windows for comparison: YTD, rolling 90D, rolling 30D, prior 90D
 - Include NULL handling: COALESCE, NULLIF where appropriate
 
+DATA QUALITY AWARENESS (CRITICAL):
+- "Active Loan" status does NOT always mean genuinely in-process. Many lenders fail to close out loans in their LOS (Encompass), leaving stale records with status='Active Loan' and application dates months or even years old. These are NOT real pipeline — they are LOS housekeeping failures.
+- Before analyzing the "active pipeline," always check the age distribution. A quick sanity check: COUNT loans WHERE current_loan_status = 'Active Loan' AND application_date < CURRENT_DATE - INTERVAL '180 days'. If a significant portion of "active" loans are 6+ months old, the pipeline is polluted with stale records.
+- When reporting on active pipeline (volume, lock expirations, risk exposure, etc.), consider filtering to genuinely active loans (e.g. application_date within the last 120-180 days) or at minimum segment and call out the stale portion. An "active" loan from 14 months ago with no lock date is almost certainly abandoned, not a real lock expiration risk.
+- If you find data quality issues (missing critical fields, stale statuses, impossible dates, etc.), CALL THEM OUT prominently. Data quality findings are often MORE valuable than the metric itself — they tell the lender what to fix in their LOS workflows.
+- Common data quality red flags to watch for:
+  - High % of active loans with no lock_date or lock_expiration_date (may indicate they were never locked, not a "missing data" risk)
+  - Active loans with application_date > 6 months old (likely stale/abandoned, not closed out in LOS)
+  - NULL or zero values in critical fields (loan_amount, interest_rate) on supposedly active loans
+  - Dates that don't make logical sense (funding_date before application_date, closing_date in the future for funded loans)
+- When a finding is primarily driven by a data quality issue, frame it as such. "88% of active loans have no lock expiration" is more likely "the lender doesn't consistently record lock data or close out stale applications" than "88% of the pipeline has unknown lock risk."
+
+CONVERSION METRIC TIME WINDOWS (IMPORTANT):
+- Pull-through, fallout, and conversion rates are cohort-completion metrics — they only make sense when most loans in the cohort have had time to reach a terminal status (funded, withdrawn, denied, etc.)
+- Mortgage cycle times (application to funding) typically range from 30-60+ days. A 30-day application cohort will contain many loans still in-process, making PT artificially low and fallout artificially high.
+- Before citing pull-through or fallout for a short window, first check the tenant's actual average cycle time (AVG(funding_date - application_date) for funded loans). If avg cycle time >= 30 days, 30D PT is unreliable — prefer 90D or YTD.
+- When you DO report short-window conversion metrics, always caveat them with the cycle time context (e.g. "30D PT is 18%, but avg cycle time is 42 days so most recent applications haven't had time to close").
+- For trend comparison of conversion metrics, 90D-vs-prior-90D or YTD-vs-prior-YTD are the most reliable windows.
+
 POSTGRESQL DATE ARITHMETIC (CRITICAL):
 - Date columns (application_date, funding_date, closing_date, lock_date, approval_date, etc.) are stored as DATE type
 - Subtracting two DATE values returns an INTEGER (number of days), NOT an interval
@@ -157,6 +177,8 @@ POSTGRESQL DATE ARITHMETIC (CRITICAL):
 - Cast to ::date if needed to ensure date subtraction, not timestamp subtraction
 - Date comparisons: l.application_date >= CURRENT_DATE - INTERVAL '90 days' is fine (the interval is subtracted from the date)
 - When you have enough evidence (usually 2-3 queries), produce your finding
+- CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If your investigation disproved the hypothesis, the title must reflect the real finding.
+- Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions. Each description should be 1 sentence explaining what the metric measures in plain business language.
 
 Respond in JSON format:
 {
@@ -165,10 +187,11 @@ Respond in JSON format:
   "sql": "SELECT ... (only when action=query)",
   "explanation": "What this query investigates (only when action=query)",
   "finding": {  // only when action=finding
-    "title": "Concise finding title",
+    "title": "Concise finding title — must reflect the actual evidence",
     "summary": "2-4 sentence summary of what you found, with specific numbers",
     "confidence": "high" | "medium" | "low",
-    "keyMetrics": { "metricName": "value", ... }
+    "keyMetrics": { "metricName": "value", ... },
+    "keyMetricDescriptions": { "metricName": "One sentence explaining what this metric measures", ... }
   }
 }`;
 
@@ -279,6 +302,7 @@ export async function runDataAnalystAgent(
         confidence: parsed.finding.confidence || "medium",
         evidence,
         keyMetrics: parsed.finding.keyMetrics || {},
+        keyMetricDescriptions: parsed.finding.keyMetricDescriptions || {},
       };
 
       onStep({
