@@ -2,9 +2,9 @@
  * LLM Insight Generator — 3-Pass Pipeline
  *
  * Generates executive insights via a multi-pass pipeline:
- *   Pass 1: Generator (gpt-4o)     — 25-30 candidates with reasoning chains
+ *   Pass 1: Generator (gpt-5.2)    — 25-30 candidates with reasoning chains
  *   Pass 2: Validator (code+judge) — programmatic fact-check + LLM scoring
- *   Pass 3: Curator (gpt-4o)       — rank, deduplicate, polish final 15-20
+ *   Pass 3: Curator (gpt-5.2)      — rank, deduplicate, polish final 15-20
  *
  * Buckets (working/attention/critical/context) are derived post-hoc from
  * sentiment, not used during generation.
@@ -32,6 +32,10 @@ import { getPromptConfig, buildPrompt } from "../promptConfigService.js";
 import { getSchemaForTenant } from "../ai/schemaContextService.js";
 import { getTenantRevenueExpression } from "../../utils/scorecard-utils.js";
 import { getStandardDateRanges } from "../metrics/canonicalMetrics.js";
+import {
+  insightLog, insightLogWarn, insightLogError,
+  insightLogStart, insightLogEnd, getInsightLogPath,
+} from "./insightLogger.js";
 
 // ============================================================================
 // Types
@@ -491,6 +495,54 @@ function factCheckInsights(
       }
     }
 
+    // Penalize speculative/unverifiable subjective claims not backed by data
+    const speculativePattern = /\b(morale|team culture|uncertainty|confidence|dynamics|sentiment|frustrat|motivat|satisfaction|team spirit|work.?life|burnout|engagement)\b/i;
+    if (speculativePattern.test(combinedTextLower)) {
+      issues.push("SPECULATIVE: headline/understory contains unverifiable subjective claims not backed by data");
+      penalty += 0.3;
+    }
+
+    // Suppress misleading MTD pull-through / fallout / conversion insights.
+    // MTD windows are too short — active loans haven't had time to close,
+    // so PT ≈ 0% and fallout ≈ 100%, which is misleading, not actionable.
+    const isMTD = /\bMTD\b|month.?to.?date/i.test(combinedTextLower);
+    const isPTorFallout = /pull.?through|fallout|conversion.?rate|funded.?rate/i.test(combinedTextLower);
+    if (isMTD && isPTorFallout) {
+      issues.push("MTD_CONVERSION: MTD pull-through/fallout/conversion metrics are misleading — active loans haven't had time to close");
+      penalty += 0.5;
+    }
+
+    // Suppress insights about "unclassified" risk drivers — not actionable.
+    // These come from predictions where no signal dimension scored >= 4, so the
+    // model predicts withdrawal but can't attribute it to a clear driver.
+    const unclassifiedPattern = /\b(other\s*\/?\s*unclassified|unclassified\s*(risk|driver|factor|reason|for|bucket))\b/i;
+    if (unclassifiedPattern.test(combinedTextLower)) {
+      issues.push("UNCLASSIFIED_RISK: Insight cites 'unclassified' risk drivers — not actionable for the user");
+      penalty += 0.35;
+    }
+
+    // Detect volatile single-period comparisons (trailing 30D / last 30 days).
+    // If the insight cites a massive % change (>= 100%) in a short window, cross-check
+    // against 60D/90D aggregate snapshots. If the longer window doesn't corroborate, it's a blip.
+    const trailing30DPattern = /trailing\s*30\s*d|past\s*30\s*days?|last\s*30\s*days?|30.?day/i;
+    const largeChangePattern = /(\d{3,})%/;
+    if (trailing30DPattern.test(combinedTextLower)) {
+      const changeMatch = combinedTextLower.match(largeChangePattern);
+      if (changeMatch) {
+        const snaps = metrics.periodSnapshots;
+        const vol30 = snaps.rolling30d?.fundedVolume ?? 0;
+        const vol60 = snaps.rolling60d?.fundedVolume ?? 0;
+        const volPrior30 = snaps.prior30d?.fundedVolume ?? 0;
+        const volPrior60 = snaps.prior60d?.fundedVolume ?? 0;
+        const delta30 = volPrior30 > 0 ? ((vol30 - volPrior30) / volPrior30) * 100 : 0;
+        const delta60 = volPrior60 > 0 ? ((vol60 - volPrior60) / volPrior60) * 100 : 0;
+        if (Math.abs(delta30) > 200 && Math.abs(delta60) < 50) {
+          issues.push("VOLATILE_BLIP: Extreme short-period change (30D) not corroborated by 60D/90D trends — likely a blip, not a real trend");
+          penalty += 0.25;
+        }
+      }
+    }
+
     const score = Math.max(0, Math.min(1, 1.0 - penalty));
     return { insightIndex: idx, score, issues };
   });
@@ -577,8 +629,8 @@ function buildSharedContext(metrics: InsightMetricsPayload, channelGroup?: strin
   const personnelLabel = channelGroup === "TPO" ? "Account Executives" : "Loan Officers";
 
   return `=== PERIOD ===
-Date Filter: ${metrics.period.dateFilter.toUpperCase()}
-Range: ${metrics.period.start || "N/A"} to ${metrics.period.end || "N/A"}
+All period snapshots below are computed independently. Lead with whichever timeframe reveals the most significant or actionable change.
+Reference Range: ${metrics.period.start || "N/A"} to ${metrics.period.end || "N/A"}
 
 === CHANNEL ===
 Channel: ${channelLabel}
@@ -818,11 +870,11 @@ When prior-period base is small (revenue < $25K, units ≤ 2), report ABSOLUTE c
         if (agg.tierMigration && agg.tierMigration.length > 0) {
           const promoted = agg.tierMigration.filter(m => m.direction === "promoted");
           const demoted = agg.tierMigration.filter(m => m.direction === "demoted");
-          parts.push(`Tier Migration (vs 90D prior): ${promoted.length} promoted, ${demoted.length} demoted`);
+          parts.push(`Tier Migration (rolling 90D vs prior 90D): ${promoted.length} promoted, ${demoted.length} demoted`);
           if (promoted.length > 0) parts.push(`  Promoted: ${promoted.map(m => `${m.name} (${m.fromTier}→${m.toTier})`).join(", ")}`);
           if (demoted.length > 0) parts.push(`  Demoted: ${demoted.map(m => `${m.name} (${m.fromTier}→${m.toTier})`).join(", ")}`);
         } else {
-          parts.push("Tier Migration: No tier changes detected vs 90D prior.");
+          parts.push("Tier Migration: No tier changes detected (rolling 90D vs prior 90D).");
         }
         return parts.join("\n");
       }).join("\n\n")
@@ -1061,7 +1113,7 @@ async function callOpenAI(
   options: { model?: string; temperature?: number; maxTokens?: number } = {}
 ): Promise<string> {
   const {
-    model = "gpt-4o-mini",
+    model = "gpt-5.2",
     temperature = 0.5,
     maxTokens = 4500,
   } = options;
@@ -1079,7 +1131,7 @@ async function callOpenAI(
         { role: "user", content: userPrompt },
       ],
       temperature,
-      max_tokens: maxTokens,
+      max_completion_tokens: maxTokens,
       response_format: { type: "json_object" },
     }),
   });
@@ -1107,6 +1159,30 @@ async function callOpenAI(
 // (Legacy code removed: buildDetailFilters, buildDetailFiltersForRiskCrossTab,
 //  VALID_SOURCES, SOURCE_ALIASES, normalizeSource — ~370 lines)
 // Replaced by LLM-generated evidence_table in Pass 4.
+
+// ============================================================================
+// Topic fingerprint for fuzzy deduplication
+// ============================================================================
+
+/**
+ * Extract a topic fingerprint from a headline for fuzzy dedup.
+ * Returns a set of key tokens: numbers, tier names, metric types, timeframes.
+ * Two headlines with >70% fingerprint overlap are considered near-duplicates.
+ */
+function getTopicFingerprint(headline: string): Set<string> {
+  const tokens = new Set<string>();
+  // Extract all numbers (amounts, percentages, counts)
+  for (const m of headline.matchAll(/\$?[\d,.]+[MKBmkb%]?/g)) tokens.add(m[0]);
+  // Extract key entities (tier names)
+  for (const m of headline.matchAll(/\b(top|second|bottom)\s+tier\b/gi)) tokens.add(m[0].toLowerCase());
+  // Extract metric/topic keywords
+  for (const m of headline.matchAll(
+    /\b(pull-through|fallout|funded|pipeline|migration|demotion|promotion|revenue|volume|active|headcount|composition)\b/gi
+  )) tokens.add(m[0].toLowerCase());
+  // Extract timeframe references
+  for (const m of headline.matchAll(/\b(YTD|MTD|30D|60D|90D|12M|trailing|rolling)\b/gi)) tokens.add(m[0].toLowerCase());
+  return tokens;
+}
 
 // ============================================================================
 // Parse LLM responses for each pipeline stage
@@ -1329,11 +1405,11 @@ function sanitizeEvidenceSQL(sql: string): string {
   return s.trim();
 }
 
-/** Validate that a SQL string is a safe SELECT query. */
+/** Validate that a SQL string is a safe SELECT query (WITH CTEs are allowed). */
 function validateEvidenceSQL(sql: string): void {
   const upper = sql.trim().toUpperCase();
-  if (!upper.startsWith("SELECT")) {
-    throw new Error("Evidence SQL must be a SELECT query");
+  if (!upper.startsWith("SELECT") && !upper.startsWith("WITH")) {
+    throw new Error("Evidence SQL must be a SELECT or WITH...SELECT query");
   }
   const forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT", "REVOKE"];
   for (const kw of forbidden) {
@@ -1480,10 +1556,10 @@ function validateSummaryAgainstRows(
   if (rows.length === 0) return { corrected: summaryDefs, corrections };
 
   // Narrow patterns: only KPIs that unambiguously equal the total row count
-  const genericRowCountPatterns = /^(total.?count|loan.?count|total.?applications|rows|total$)/i;
+  const genericRowCountPatterns = /^(total.?count|loan.?count|total.?applications|total.?loans|total.?high.?risk.?loans|total.?officers|rows|total$)/i;
 
   // Subset-specific patterns: KPIs that count the specific subset the evidence table lists
-  const subsetCountPatterns = /loans?.?fallen.?out|fall.?out.?count|fallen.?out|withdrawn.?count|withdrawn.?loans|denied.?count|denied.?loans|at.?risk.?count|at.?risk.?loans|expiring.?count|expiring.?loans|close.?late.?count|flagged.?count|flagged.?loans/i;
+  const subsetCountPatterns = /loans?.?fallen.?out|fall.?out.?count|fallen.?out|withdrawn.?count|withdrawn.?loans|denied.?count|denied.?loans|at.?risk.?count|at.?risk.?loans|expiring.?count|expiring.?loans|close.?late.?count|flagged.?count|flagged.?loans|trid.?exposure|cd.?not.?sent/i;
 
   const corrected = summaryDefs.map(sd => {
     const matchesGeneric = genericRowCountPatterns.test(sd.key) || genericRowCountPatterns.test(sd.label);
@@ -1638,6 +1714,10 @@ function validateEvidenceCoherence(
 
     // --- Pull-Through Rate ---
     if (ptRatePattern.test(combined) && sd.format === "percent") {
+      // If the evidence table is a subset (only funded or only fallout loans),
+      // the LLM-provided rate is population-level — don't overwrite it from the subset
+      if (isFalloutTable || isFundedTable) return sd;
+
       const completedInRows = fundedCount + falloutCount;
       if (completedInRows > 0) {
         const correctPT = Math.round((fundedCount / completedInRows) * 1000) / 10;
@@ -1645,16 +1725,16 @@ function validateEvidenceCoherence(
           corrections.push({ key: sd.key, label: sd.label, from: numVal, to: correctPT, reason: `PT recomputed: ${fundedCount}/${completedInRows} from row statuses` });
           return { ...sd, value: correctPT };
         }
-      } else if (isFalloutTable && numVal > 0) {
-        // All rows are fallout but PT shows a positive rate — set to 0
-        corrections.push({ key: sd.key, label: sd.label, from: numVal, to: 0, reason: "PT set to 0: table contains only fallout loans" });
-        return { ...sd, value: 0 };
       }
       return sd;
     }
 
     // --- Fallout Rate ---
     if (falloutRatePattern.test(combined) && sd.format === "percent") {
+      // If the evidence table is a subset (only fallout or only funded loans),
+      // the LLM-provided rate is population-level — don't overwrite it from the subset
+      if (isFalloutTable || isFundedTable) return sd;
+
       const completedInRows = fundedCount + falloutCount;
       if (completedInRows > 0) {
         const correctFallout = Math.round((falloutCount / completedInRows) * 1000) / 10;
@@ -1690,7 +1770,7 @@ function validateEvidenceCoherence(
   });
 
   if (corrections.length > 0) {
-    console.log(`[EvidenceCoherence] Fixed ${corrections.length} KPI(s): ${corrections.map(c => `"${c.label}" ${c.from}→${c.to}`).join(", ")}`);
+    insightLog(`[EvidenceCoherence] Fixed ${corrections.length} KPI(s): ${corrections.map(c => `"${c.label}" ${c.from}→${c.to}`).join(", ")}`);
   }
 
   return { corrected, corrections };
@@ -1784,7 +1864,7 @@ function validateEvidenceQuality(
       if (!matchingCol) {
         // No column match — try a format-based fallback for count KPIs
         if (kpi.format === "number" && /count|total|officers?|loans/i.test(kpi.label)) {
-          console.log(`[EvidenceQuality] Fixed null KPI "${kpi.label}": set to row count ${rows.length}`);
+          insightLog(`[EvidenceQuality] Fixed null KPI "${kpi.label}": set to row count ${rows.length}`);
           issues.push(`Fixed null KPI "${kpi.label}": set to row count ${rows.length}`);
           summary[i] = { ...kpi, value: rows.length };
         }
@@ -1815,7 +1895,7 @@ function validateEvidenceQuality(
 
       if (computed !== null && !isNaN(computed)) {
         const rounded = Math.round(computed * 100) / 100;
-        console.log(`[EvidenceQuality] Fixed null KPI "${kpi.label}" (key=${kpi.key}→col=${matchingCol}): ${kpi.value} → ${rounded} (from ${colValues.length} rows)`);
+        insightLog(`[EvidenceQuality] Fixed null KPI "${kpi.label}" (key=${kpi.key}→col=${matchingCol}): ${kpi.value} → ${rounded} (from ${colValues.length} rows)`);
         issues.push(`Fixed null KPI "${kpi.label}": computed ${rounded} from column "${matchingCol}" (${colValues.length} rows)`);
         summary[i] = { ...kpi, value: rounded };
       }
@@ -1829,11 +1909,96 @@ function validateEvidenceQuality(
   if (isPersonnelInsight && rows.length < 2) {
     const msg = `Thin detail: personnel insight "${insight.headline.substring(0, 50)}..." has only ${rows.length} row(s) — expected per-officer breakdown`;
     issues.push(msg);
-    console.warn(`[EvidenceQuality] ${msg}`);
+    insightLogWarn(`[EvidenceQuality] ${msg}`);
   }
 
   if (rows.length === 0) {
     issues.push("Evidence table has 0 rows — SQL may have returned no data");
+  }
+
+  // ── B1b. Detect bogus 100% pull-through for all personnel rows ──
+  // When PT is calculated from funding-cohort only, all values = 100%. Flag this.
+  if (isPersonnelInsight && rows.length >= 2) {
+    const ptColKey = Object.keys(rows[0]).find(k => /pull.?through/i.test(k));
+    if (ptColKey) {
+      const ptVals = rows.map(r => parseFloat(r[ptColKey])).filter(v => !isNaN(v));
+      const allPT100 = ptVals.length > 0 && ptVals.every(v => v >= 99.9);
+      if (allPT100) {
+        const msg = `All ${ptVals.length} officers show ~100% pull-through — likely computed from funding cohort instead of application cohort. PT values are unreliable.`;
+        issues.push(msg);
+        insightLogWarn(`[EvidenceQuality] ${msg}`);
+        // Remove the misleading PT from summary KPIs
+        for (let i = summary.length - 1; i >= 0; i--) {
+          if (/pull.?through/i.test(summary[i].key) || /pull.?through/i.test(summary[i].label)) {
+            insightLog(`[EvidenceQuality] Removing misleading PT summary KPI: "${summary[i].label}"`);
+            summary.splice(i, 1);
+          }
+        }
+      }
+    }
+  }
+
+  // ── B1c. Remove fabricated summary KPIs that have no basis in the evidence columns ──
+  if (rows.length > 0 && summary.length > 0) {
+    const rowKeys = new Set(Object.keys(rows[0]).map(k => k.toLowerCase()));
+    const fabricatedKpiPattern = /\b(revenue.?impact|productivity.?loss|morale.?impact|estimated.?loss|potential.?loss|opportunity.?cost)\b/i;
+    for (let i = summary.length - 1; i >= 0; i--) {
+      const kpi = summary[i];
+      const kpiText = `${kpi.key} ${kpi.label}`;
+      if (fabricatedKpiPattern.test(kpiText)) {
+        // Check if there's a matching column in the evidence rows
+        const hasColumn = rowKeys.has(kpi.key.toLowerCase()) ||
+          [...rowKeys].some(k => k.includes(kpi.key.toLowerCase().replace(/[^a-z0-9]/g, "_")));
+        if (!hasColumn && typeof kpi.value === "number" && !String(kpi.value).startsWith("COMPUTE")) {
+          insightLogWarn(`[EvidenceQuality] Removing fabricated KPI "${kpi.label}" (value=${kpi.value}) — not derivable from evidence columns`);
+          issues.push(`Removed fabricated KPI "${kpi.label}" — not derivable from evidence`);
+          summary.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  // ── B2. Outlier-aware KPI recalculation ──
+  // If any summary KPI is an average of a known field (DTI, FICO, LTV) and the value
+  // is clearly out of valid range, recalculate excluding outlier rows.
+  if (rows.length > 0 && summary.length > 0) {
+    const outlierRanges: Array<{ colPattern: RegExp; kpiPattern: RegExp; min: number; max: number; label: string }> = [
+      { colPattern: /^(dti|dti_ratio|avg_dti|average_dti)$/i, kpiPattern: /dti/i, min: 0, max: 65, label: "DTI" },
+      { colPattern: /^(fico|fico_score|avg_fico|average_fico|credit_score)$/i, kpiPattern: /fico|credit.?score/i, min: 300, max: 850, label: "FICO" },
+      { colPattern: /^(ltv|ltv_ratio|avg_ltv|average_ltv|loan_to_value)$/i, kpiPattern: /ltv|loan.?to.?value/i, min: 0, max: 105, label: "LTV" },
+    ];
+
+    const rowKeys = Object.keys(rows[0]);
+
+    for (const range of outlierRanges) {
+      const matchingCol = rowKeys.find(k => range.colPattern.test(k));
+      if (!matchingCol) continue;
+
+      const allVals = rows.map(r => parseFloat(r[matchingCol])).filter(v => !isNaN(v));
+      const validVals = allVals.filter(v => v >= range.min && v <= range.max);
+      const outlierCount = allVals.length - validVals.length;
+
+      if (outlierCount > 0 && validVals.length > 0) {
+        const cleanAvg = Math.round((validVals.reduce((a, b) => a + b, 0) / validVals.length) * 100) / 100;
+        const dirtyAvg = allVals.length > 0 ? allVals.reduce((a, b) => a + b, 0) / allVals.length : 0;
+
+        // Fix any summary KPI referencing this field
+        for (let i = 0; i < summary.length; i++) {
+          const kpi = summary[i];
+          const kpiCombined = `${kpi.key} ${kpi.label}`;
+          if (!range.kpiPattern.test(kpiCombined)) continue;
+          const kpiVal = typeof kpi.value === "number" ? kpi.value : parseFloat(String(kpi.value));
+          if (isNaN(kpiVal)) continue;
+
+          // If the KPI value looks like it includes outliers (close to dirty avg or obviously out of range)
+          if (kpiVal > range.max || Math.abs(kpiVal - dirtyAvg) < Math.abs(kpiVal - cleanAvg)) {
+            insightLog(`[EvidenceQuality] Outlier correction for "${kpi.label}": ${kpiVal} → ${cleanAvg} (excluded ${outlierCount} rows outside ${range.label} range [${range.min}-${range.max}])`);
+            issues.push(`Outlier correction: "${kpi.label}" ${kpiVal} → ${cleanAvg} (${outlierCount} rows had ${range.label} outside [${range.min}-${range.max}])`);
+            summary[i] = { ...kpi, value: cleanAvg };
+          }
+        }
+      }
+    }
   }
 
   // ── C. Compute quality score (0-100) ──
@@ -1850,12 +2015,23 @@ function validateEvidenceQuality(
 
   if (isPersonnelInsight && rows.length < 2) score -= 20;
 
+  // Penalize 100% PT (computed from funding cohort — always wrong). Heavy penalty to trigger retry.
+  if (isPersonnelInsight && rows.length >= 2) {
+    const ptColKey = Object.keys(rows[0]).find(k => /pull.?through/i.test(k));
+    if (ptColKey) {
+      const ptVals = rows.map(r => parseFloat(r[ptColKey])).filter(v => !isNaN(v));
+      if (ptVals.length > 0 && ptVals.every(v => v >= 99.9)) {
+        score -= 55;
+      }
+    }
+  }
+
   if (summary.length < 3) score -= 10;
 
   score = Math.max(0, Math.min(100, score));
 
   if (issues.length > 0) {
-    console.log(`[EvidenceQuality] Score: ${score}/100 for "${insight.headline.substring(0, 50)}..." — ${issues.length} issue(s)`);
+    insightLog(`[EvidenceQuality] Score: ${score}/100 for "${insight.headline.substring(0, 50)}..." — ${issues.length} issue(s)`);
   }
 
   // Attach quality info to audit
@@ -1877,7 +2053,7 @@ function buildTierContextForInsight(
 ): string {
   if (!metricsPayload) return "";
 
-  const tierPattern = /\b(tier|headcount|composition|revenue.?contribut|production.?gap)\b/i;
+  const tierPattern = /\b(tier|headcount|composition|revenue.?contribut|production.?gap|demot|promot|migrat)\b/i;
   const headline = insight.headline || "";
   const understory = insight.understory || "";
   if (!tierPattern.test(headline) && !tierPattern.test(understory)) return "";
@@ -1895,7 +2071,55 @@ function buildTierContextForInsight(
 
   // Detect which tier the insight is about
   const headlineLower = headline.toLowerCase();
-  if (headlineLower.includes("bottom tier")) {
+  const understoryLower = understory.toLowerCase();
+  const combinedLower = `${headlineLower} ${understoryLower}`;
+
+  if (combinedLower.includes("demot")) {
+    const migrations = loGroup.aggregateTrends?.tierMigration || [];
+    const demoted = migrations.filter(m => m.direction === "demoted");
+    if (demoted.length > 0) {
+      parts.push(`\nThis insight is about DEMOTED officers. ${demoted.length} officer(s) were demoted (rolling 90D vs prior 90D):`);
+      for (const m of demoted) {
+        parts.push(`  - ${m.name}: ${m.fromTier} -> ${m.toTier}`);
+      }
+      const names = demoted.map(m => m.name);
+      parts.push(`Filter to these officers: ${names.join(", ")}`);
+      parts.push(`Use: WHERE officer_name IN (${names.map(n => `'${n.replace(/'/g, "''")}'`).join(", ")})`);
+      parts.push(`Include columns: officer_name, tier (current), prior_tier, funded_units, revenue, volume, pull_through_rate, cycle_time`);
+    }
+  } else if (combinedLower.includes("promot")) {
+    const migrations = loGroup.aggregateTrends?.tierMigration || [];
+    const promoted = migrations.filter(m => m.direction === "promoted");
+    if (promoted.length > 0) {
+      parts.push(`\nThis insight is about PROMOTED officers. ${promoted.length} officer(s) were promoted (rolling 90D vs prior 90D):`);
+      for (const m of promoted) {
+        parts.push(`  - ${m.name}: ${m.fromTier} -> ${m.toTier}`);
+      }
+      const names = promoted.map(m => m.name);
+      parts.push(`Filter to these officers: ${names.join(", ")}`);
+      parts.push(`Use: WHERE officer_name IN (${names.map(n => `'${n.replace(/'/g, "''")}'`).join(", ")})`);
+      parts.push(`Include columns: officer_name, tier (current), prior_tier, funded_units, revenue, volume, pull_through_rate, cycle_time`);
+    }
+  } else if (combinedLower.includes("migrat")) {
+    const migrations = loGroup.aggregateTrends?.tierMigration || [];
+    if (migrations.length > 0) {
+      const promoted = migrations.filter(m => m.direction === "promoted");
+      const demoted = migrations.filter(m => m.direction === "demoted");
+      parts.push(`\nThis insight is about TIER MIGRATION. ${migrations.length} officer(s) changed tiers (rolling 90D vs prior 90D):`);
+      if (promoted.length > 0) {
+        parts.push(`  Promoted (${promoted.length}):`);
+        for (const m of promoted) parts.push(`    - ${m.name}: ${m.fromTier} -> ${m.toTier}`);
+      }
+      if (demoted.length > 0) {
+        parts.push(`  Demoted (${demoted.length}):`);
+        for (const m of demoted) parts.push(`    - ${m.name}: ${m.fromTier} -> ${m.toTier}`);
+      }
+      const names = migrations.map(m => m.name);
+      parts.push(`Filter to these officers: ${names.join(", ")}`);
+      parts.push(`Use: WHERE officer_name IN (${names.map(n => `'${n.replace(/'/g, "''")}'`).join(", ")})`);
+      parts.push(`Include columns: officer_name, tier (current), prior_tier, direction (promoted/demoted), funded_units, revenue, volume, pull_through_rate`);
+    }
+  } else if (headlineLower.includes("bottom tier")) {
     parts.push(`\nThis insight is about the BOTTOM TIER. Filter to these officers: ${bottom.join(", ")}`);
     parts.push(`Use: WHERE officer_name IN (${bottom.map(n => `'${n.replace(/'/g, "''")}'`).join(", ")})`);
   } else if (headlineLower.includes("top tier")) {
@@ -1955,13 +2179,13 @@ async function runEvidenceAgentForInsight(
   try {
     response = await callOpenAI(system, userPrompt, apiKey, { model, temperature, maxTokens });
   } catch (err: any) {
-    console.warn(`[EvidenceAgent] LLM call failed for insight ${insightIndex}: ${err.message}`);
+    insightLogWarn(`[EvidenceAgent] LLM call failed for insight ${insightIndex} ("${insight.headline.substring(0, 60)}"): ${err.message}`);
     return null;
   }
 
   const parsed = parseAgentEvidenceResponse(response);
   if (!parsed) {
-    console.warn(`[EvidenceAgent] Failed to parse response for insight ${insightIndex}`);
+    insightLogWarn(`[EvidenceAgent] Failed to parse response for insight ${insightIndex} ("${insight.headline.substring(0, 60)}")`);
     return null;
   }
 
@@ -1970,7 +2194,7 @@ async function runEvidenceAgentForInsight(
   try {
     validateEvidenceSQL(sql);
   } catch (err: any) {
-    console.warn(`[EvidenceAgent] SQL validation failed for insight ${insightIndex}: ${err.message}`);
+    insightLogWarn(`[EvidenceAgent] SQL validation failed for insight ${insightIndex} ("${insight.headline.substring(0, 60)}"): ${err.message}`);
     return null;
   }
 
@@ -1980,8 +2204,13 @@ async function runEvidenceAgentForInsight(
   try {
     const result = await tenantPool.query(sql);
     rows = result.rows;
+    if (rows.length === 0) {
+      insightLogWarn(`[EvidenceAgent] SQL returned 0 rows for insight ${insightIndex} ("${insight.headline.substring(0, 60)}"). SQL:\n${sql}`);
+    } else {
+      insightLog(`[EvidenceAgent] SQL returned ${rows.length} rows for insight ${insightIndex} ("${insight.headline.substring(0, 60)}")`);
+    }
   } catch (execErr: any) {
-    console.warn(`[EvidenceAgent] SQL execution failed for insight ${insightIndex}, retrying: ${execErr.message}`);
+    insightLogWarn(`[EvidenceAgent] SQL execution FAILED for insight ${insightIndex} ("${insight.headline.substring(0, 60)}"): ${execErr.message}\nSQL:\n${sql}`);
 
     // Retry: send the error back to the LLM for correction
     const retryUserPrompt = JSON.stringify({
@@ -2003,7 +2232,7 @@ async function runEvidenceAgentForInsight(
       const retryResponse = await callOpenAI(system, retryUserPrompt, apiKey, { model, temperature, maxTokens });
       const retryParsed = parseAgentEvidenceResponse(retryResponse);
       if (!retryParsed) {
-        console.warn(`[EvidenceAgent] Retry parse failed for insight ${insightIndex}`);
+        insightLogWarn(`[EvidenceAgent] Retry parse failed for insight ${insightIndex} ("${insight.headline.substring(0, 60)}")`);
         return null;
       }
 
@@ -2021,7 +2250,7 @@ async function runEvidenceAgentForInsight(
       parsed.comparisonLabel = retryParsed.comparisonLabel;
       parsed.currentLabel = retryParsed.currentLabel;
     } catch (retryErr: any) {
-      console.warn(`[EvidenceAgent] Retry also failed for insight ${insightIndex}: ${retryErr.message}`);
+      insightLogWarn(`[EvidenceAgent] Retry also failed for insight ${insightIndex} ("${insight.headline.substring(0, 60)}"): ${retryErr.message}`);
       return null;
     }
   }
@@ -2039,9 +2268,9 @@ async function runEvidenceAgentForInsight(
         rows: compResult.rows.slice(0, 200),
         summary: parsed.comparisonSummary || [],
       };
-      console.log(`[EvidenceAgent] Comparison query returned ${compResult.rows.length} rows for insight ${insightIndex}`);
+      insightLog(`[EvidenceAgent] Comparison query returned ${compResult.rows.length} rows for insight ${insightIndex}`);
     } catch (compErr: any) {
-      console.warn(`[EvidenceAgent] Comparison SQL failed for insight ${insightIndex}: ${compErr.message}`);
+      insightLogWarn(`[EvidenceAgent] Comparison SQL failed for insight ${insightIndex}: ${compErr.message}`);
     }
   }
 
@@ -2113,10 +2342,24 @@ function buildQualityFeedback(prev: EvidenceTable, insight: CategorizedInsight):
 
   const personnelPattern = /\b(tier|officers?|loan.?officers?|account.?executives?|performers?|personnel|workforce)\b/i;
   const tierCompositionPattern = /\b(tier.?composition|headcount|revenue.?contribut|production.?gap|bottom.?tier|top.?tier|second.?tier)\b/i;
+  const tierMigrationPattern = /\b(demot|promot|migrat|tier.?change|tier.?movement)\b/i;
   const isPersonnel = personnelPattern.test(insight.headline) || personnelPattern.test(insight.understory || "");
   const isTierComposition = tierCompositionPattern.test(insight.headline) || tierCompositionPattern.test(insight.understory || "");
+  const isTierMigration = tierMigrationPattern.test(insight.headline) || tierMigrationPattern.test(insight.understory || "");
 
-  if (isTierComposition) {
+  if (isTierMigration) {
+    parts.push(
+      "This is a TIER MIGRATION (demotion/promotion) insight. You MUST:\n" +
+      "1. Use the tier_officers context to get the specific officer names who were demoted/promoted\n" +
+      "2. Filter with WHERE officer_name IN (...) using those exact names\n" +
+      "3. Join public.employees e ON e.id::TEXT = l.loan_officer_id to get officer_name\n" +
+      "4. GROUP BY individual officer — return per-officer rows with their metrics\n" +
+      "5. Include columns: officer_name, current_tier, prior_tier, funded_units, revenue, volume, pull_through_rate, cycle_time\n" +
+      "6. Use the DUAL-CTE pattern: funded_stats (scoped by funding_date) for units/revenue/volume, pt_stats (scoped by application_date) for pull-through rate\n" +
+      "7. Set is_comparison: true with comparison_sql for the prior period\n" +
+      "8. NEVER include speculative KPIs like 'Revenue Impact' or 'Productivity Loss' — use COMPUTE_* directives only"
+    );
+  } else if (isTierComposition) {
     parts.push(
       "This is a TIER COMPOSITION / HEADCOUNT GAP insight. You MUST use the Pareto CTE pattern to assign tiers:\n" +
       "1. Use a CTE that computes per-officer revenue, then calculates cumulative_pct using SUM(...) OVER (ORDER BY total_revenue DESC)\n" +
@@ -2132,6 +2375,24 @@ function buildQualityFeedback(prev: EvidenceTable, insight: CategorizedInsight):
 
   if (prev.columns.length < 8) {
     parts.push(`Only ${prev.columns.length} columns were generated. Include at least 8-12 columns for a comprehensive view.`);
+  }
+
+  // Detect 100% PT issue — all officers showing ~100% pull-through means PT was computed from funding cohort only
+  if (isPersonnel && prev.rows.length >= 2) {
+    const ptColKey = Object.keys(prev.rows[0]).find(k => /pull.?through/i.test(k));
+    if (ptColKey) {
+      const ptVals = prev.rows.map(r => parseFloat(r[ptColKey])).filter(v => !isNaN(v));
+      const allPT100 = ptVals.length > 0 && ptVals.every(v => v >= 99.9);
+      if (allPT100) {
+        parts.push(
+          "CRITICAL BUG: All officers show ~100% pull-through rate. This means PT was calculated from the FUNDING cohort (WHERE funding_date ...) which only contains funded/originated loans — PT is ALWAYS 100% by definition.\n" +
+          "FIX: Use the DUAL-CTE pattern from the instructions:\n" +
+          "  1. funded_stats CTE: scoped by funding_date for units, revenue, volume, cycle_time\n" +
+          "  2. pt_stats CTE: scoped by APPLICATION_DATE for pull_through_rate (originated / completed from the application cohort)\n" +
+          "  3. LEFT JOIN pt_stats ON officer_name to get the correct PT rate per officer"
+        );
+      }
+    }
   }
 
   if (qi.length > 0) {
@@ -2188,13 +2449,13 @@ async function runEvidenceAgentWithFeedback(
   try {
     response = await callOpenAI(system, userPrompt, apiKey, { model, temperature, maxTokens });
   } catch (err: any) {
-    console.warn(`[EvidenceAgent:Retry] LLM call failed for insight ${insightIndex}: ${err.message}`);
+    insightLogWarn(`[EvidenceAgent:Retry] LLM call failed for insight ${insightIndex}: ${err.message}`);
     return null;
   }
 
   const parsed = parseAgentEvidenceResponse(response);
   if (!parsed) {
-    console.warn(`[EvidenceAgent:Retry] Failed to parse retry response for insight ${insightIndex}`);
+    insightLogWarn(`[EvidenceAgent:Retry] Failed to parse retry response for insight ${insightIndex}`);
     return null;
   }
 
@@ -2207,7 +2468,7 @@ async function runEvidenceAgentWithFeedback(
     const result = await tenantPool.query(sql);
     rows = result.rows;
   } catch (err: any) {
-    console.warn(`[EvidenceAgent:Retry] SQL execution failed for insight ${insightIndex}: ${err.message}`);
+    insightLogWarn(`[EvidenceAgent:Retry] SQL execution failed for insight ${insightIndex}: ${err.message}`);
     return null;
   }
 
@@ -2291,7 +2552,7 @@ async function runAllEvidenceAgents(
   try {
     schemaContext = await getSchemaForTenant(tenantId || "default");
   } catch (err: any) {
-    console.error(`[EvidenceAgent] Failed to load schema context: ${err.message}`);
+    insightLogError(`[EvidenceAgent] Failed to load schema context: ${err.message}`);
     return;
   }
 
@@ -2299,14 +2560,14 @@ async function runAllEvidenceAgents(
   let tenantRevenueExpr = "";
   try {
     tenantRevenueExpr = await getTenantRevenueExpression(tenantPool, "l");
-    console.log(`[EvidenceAgent] Revenue expression loaded (${tenantRevenueExpr.length} chars)`);
+    insightLog(`[EvidenceAgent] Revenue expression loaded (${tenantRevenueExpr.length} chars)`);
   } catch (err: any) {
-    console.warn(`[EvidenceAgent] Failed to load tenant revenue expression: ${err.message}`);
+    insightLogWarn(`[EvidenceAgent] Failed to load tenant revenue expression: ${err.message}`);
   }
 
   // Load prompt config once
   let systemPrompt = "";
-  let model = "gpt-4o";
+  let model = "gpt-5.2";
   let temperature = 0.1;
   let maxTokens = 4000;
 
@@ -2395,12 +2656,19 @@ async function runAllEvidenceAgents(
 
   // Build date context string for the LLM
   const now = new Date();
-  const dateContext = `Today: ${now.toISOString().split("T")[0]}. Date filter: ${dateFilter}. Current year: ${now.getFullYear()}.`;
+  const dateContext = `Today: ${now.toISOString().split("T")[0]}. Current year: ${now.getFullYear()}.`;
 
-  console.log(`[EvidenceAgent] Starting ${insights.length} parallel evidence agents (model=${model})`);
+  insightLog(`[EvidenceAgent] Starting ${insights.length} parallel evidence agents (model=${model})`);
 
   // Pre-compute tier context for each insight (only non-empty for tier/headcount insights)
   const tierContexts = insights.map(ins => buildTierContextForInsight(ins, metricsPayload));
+
+  // Log which insights got tier context for debugging
+  for (let i = 0; i < tierContexts.length; i++) {
+    if (tierContexts[i]) {
+      insightLog(`[EvidenceAgent] Insight ${i} ("${insights[i].headline.substring(0, 60)}...") received tier context (${tierContexts[i].length} chars)`);
+    }
+  }
 
   // Fan out: 1 agent per insight, all in parallel
   const results = await Promise.allSettled(
@@ -2421,14 +2689,16 @@ async function runAllEvidenceAgents(
       succeeded++;
     } else {
       if (result.status === "rejected") {
-        console.warn(`[EvidenceAgent] Agent ${i} rejected: ${result.reason}`);
+        insightLogWarn(`[EvidenceAgent] Agent ${i} ("${insights[i].headline.substring(0, 60)}") rejected: ${result.reason}`);
+      } else {
+        insightLogWarn(`[EvidenceAgent] Agent ${i} ("${insights[i].headline.substring(0, 60)}") returned null`);
       }
       failed++;
     }
   }
 
   const elapsed1 = Date.now() - t0;
-  console.log(`[EvidenceAgent] Pass 1 complete: ${succeeded}/${insights.length} succeeded, ${failed} failed (${elapsed1}ms)`);
+  insightLog(`[EvidenceAgent] Pass 1 complete: ${succeeded}/${insights.length} succeeded, ${failed} failed (${elapsed1}ms)`);
 
   // ── Quality retry pass: re-run evidence agents for failed or low-quality insights ──
   const retryIndices: number[] = [];
@@ -2442,7 +2712,7 @@ async function runAllEvidenceAgents(
   }
 
   if (retryIndices.length > 0) {
-    console.log(`[EvidenceAgent] Retrying ${retryIndices.length} insights with quality feedback (threshold=${QUALITY_RETRY_THRESHOLD})`);
+    insightLog(`[EvidenceAgent] Retrying ${retryIndices.length} insights with quality feedback (threshold=${QUALITY_RETRY_THRESHOLD})`);
 
     const retryResults = await Promise.allSettled(
       retryIndices.map(idx => {
@@ -2467,21 +2737,21 @@ async function runAllEvidenceAgents(
         if (newScore > prevScore) {
           insights[idx].evidence_table = validated;
           retrySucceeded++;
-          console.log(`[EvidenceAgent] Retry improved insight ${idx}: score ${prevScore}→${newScore}`);
+          insightLog(`[EvidenceAgent] Retry improved insight ${idx}: score ${prevScore}→${newScore}`);
         } else {
-          console.log(`[EvidenceAgent] Retry did not improve insight ${idx}: score ${prevScore}→${newScore}, keeping original`);
+          insightLog(`[EvidenceAgent] Retry did not improve insight ${idx}: score ${prevScore}→${newScore}, keeping original`);
         }
       } else {
-        console.warn(`[EvidenceAgent] Retry failed for insight ${idx}`);
+        insightLogWarn(`[EvidenceAgent] Retry failed for insight ${idx} ("${insights[idx].headline.substring(0, 60)}")`);
       }
     }
 
-    console.log(`[EvidenceAgent] Retry pass: ${retrySucceeded}/${retryIndices.length} improved`);
+    insightLog(`[EvidenceAgent] Retry pass: ${retrySucceeded}/${retryIndices.length} improved`);
   }
 
   const elapsed = Date.now() - t0;
   const finalSucceeded = insights.filter(i => i.evidence_table != null).length;
-  console.log(`[EvidenceAgent] Complete: ${finalSucceeded}/${insights.length} have evidence (${elapsed}ms wall-clock)`);
+  insightLog(`[EvidenceAgent] Complete: ${finalSucceeded}/${insights.length} have evidence (${elapsed}ms wall-clock)`);
 }
 
 // ============================================================================
@@ -2779,9 +3049,10 @@ export async function generateCategorizedInsights(
   const dateFilter = metricsPayload.period.dateFilter;
   const generationBatch = crypto.randomUUID();
 
-  console.log(
-    `[Pipeline] Starting 4-pass insight pipeline (batch: ${generationBatch}, tenant: ${tenantId || "default"}, dateFilter: ${dateFilter})`
-  );
+  // Start file logger for this generation run
+  insightLogStart(tenantId || "default", dateFilter, channelGroup);
+  insightLog(`[Pipeline] Starting 4-pass insight pipeline (batch: ${generationBatch}, tenant: ${tenantId || "default"}, dateFilter: ${dateFilter})`);
+  insightLog(`[Pipeline] Log file: ${getInsightLogPath()}`);
 
   const apiKey = await getOpenAIKey(tenantId);
   const startTime = Date.now();
@@ -2796,7 +3067,7 @@ export async function generateCategorizedInsights(
   const signals = computeSignals(metricsPayload);
   const signalsText = formatSignalsForPrompt(signals);
   _timings.signals = Date.now() - startTime;
-  console.log(`[Pipeline] Step 0 complete: ${signals.length} signals (${_timings.signals}ms)`);
+  insightLog(`[Pipeline] Step 0 complete: ${signals.length} signals (${_timings.signals}ms)`);
 
   // ── Step 0b: RAG Enrichment (parallel, non-blocking) ──
   let historicalContext = "";
@@ -2816,14 +3087,14 @@ export async function generateCategorizedInsights(
     );
     _timings.rag = Date.now() - ragStart;
   } catch (ragErr: any) {
-    console.warn(`[Pipeline] RAG enrichment failed (non-fatal, continuing): ${ragErr.message}`);
+    insightLogWarn(`[Pipeline] RAG enrichment failed (non-fatal, continuing): ${ragErr.message}`);
     _timings.rag = 0;
   }
 
   // ── Pass 1: Generator ──
   const pass1Start = Date.now();
   let generatorSystem: string;
-  let generatorModel = "gpt-4o";
+  let generatorModel = "gpt-5.2";
   let generatorTemp = 0.7;
   let generatorMaxTokens = 8000;
 
@@ -2866,7 +3137,7 @@ export async function generateCategorizedInsights(
   // ── Pass 1: Parallel domain-split Generator calls ──
   const domainStats: Array<{ id: InsightDomainId; candidateCount: number; promptLength: number }> = [];
 
-  console.log(`[Pipeline] Pass 1 (Generator): model=${generatorModel}, running ${INSIGHT_DOMAINS.length} parallel domain calls`);
+  insightLog(`[Pipeline] Pass 1 (Generator): model=${generatorModel}, running ${INSIGHT_DOMAINS.length} parallel domain calls`);
 
   const domainResults = await Promise.all(
     INSIGHT_DOMAINS.map(async (domain) => {
@@ -2878,7 +3149,7 @@ export async function generateCategorizedInsights(
           ? `${domainPrompt}\n\n${domainSignalsText}\n\n${ragSections}`
           : `${domainPrompt}\n\n${domainSignalsText}`;
 
-        console.log(`[Pipeline] Pass 1 [${domain.id}]: ${userPrompt.length} chars, ${domainSignals.length} signals`);
+        insightLog(`[Pipeline] Pass 1 [${domain.id}]: ${userPrompt.length} chars, ${domainSignals.length} signals`);
 
         const response = await callOpenAI(generatorSystem, userPrompt, apiKey, {
           model: generatorModel, temperature: generatorTemp, maxTokens: generatorMaxTokens,
@@ -2890,10 +3161,10 @@ export async function generateCategorizedInsights(
           c.sourceDomain = domain.id;
         }
         domainStats.push({ id: domain.id, candidateCount: domainCandidates.length, promptLength: userPrompt.length });
-        console.log(`[Pipeline] Pass 1 [${domain.id}]: ${domainCandidates.length} candidates`);
+        insightLog(`[Pipeline] Pass 1 [${domain.id}]: ${domainCandidates.length} candidates`);
         return domainCandidates;
       } catch (domainErr: any) {
-        console.warn(`[Pipeline] Pass 1 [${domain.id}] failed (continuing): ${domainErr.message}`);
+        insightLogWarn(`[Pipeline] Pass 1 [${domain.id}] failed (continuing): ${domainErr.message}`);
         domainStats.push({ id: domain.id, candidateCount: 0, promptLength: 0 });
         return [] as GeneratorCandidate[];
       }
@@ -2903,17 +3174,35 @@ export async function generateCategorizedInsights(
   // Merge all domain candidates and deduplicate by exact headline match
   const allCandidates = domainResults.flat();
   const seenHeadlines = new Set<string>();
-  const candidates: GeneratorCandidate[] = [];
+  const exactDeduped: GeneratorCandidate[] = [];
   for (const c of allCandidates) {
     const key = c.headline.toLowerCase().trim();
     if (!seenHeadlines.has(key)) {
       seenHeadlines.add(key);
+      exactDeduped.push(c);
+    }
+  }
+
+  // Fuzzy dedup: extract a "topic fingerprint" from each headline and reject
+  // candidates whose fingerprint overlaps >70% with an already-seen candidate.
+  // This catches near-duplicates like "Tier migration recorded 10 demotions..."
+  // and "Loan Officer tier migration shows 10 demotions..." that differ in wording.
+  const candidates: GeneratorCandidate[] = [];
+  const fingerprints: Set<string>[] = [];
+  for (const c of exactDeduped) {
+    const fp = getTopicFingerprint(c.headline);
+    const isDupe = fp.size > 0 && fingerprints.some(prev => {
+      const overlap = [...fp].filter(t => prev.has(t)).length;
+      return overlap / Math.max(fp.size, prev.size) > 0.7;
+    });
+    if (!isDupe) {
       candidates.push(c);
+      fingerprints.push(fp);
     }
   }
 
   _timings.generator = Date.now() - pass1Start;
-  console.log(`[Pipeline] Pass 1 complete: ${allCandidates.length} raw → ${candidates.length} deduplicated candidates across ${INSIGHT_DOMAINS.length} domains (${_timings.generator}ms)`);
+  insightLog(`[Pipeline] Pass 1 complete: ${allCandidates.length} raw → ${candidates.length} deduplicated candidates across ${INSIGHT_DOMAINS.length} domains (${_timings.generator}ms)`);
 
   // Audit: seed journey map with generator output
   for (let i = 0; i < candidates.length; i++) {
@@ -2962,15 +3251,15 @@ export async function generateCategorizedInsights(
   }
 
   if (rejectedByFactCheck.length > 0) {
-    console.log(`[Pipeline] Fact-check rejected ${rejectedByFactCheck.length} candidates:\n  ${rejectedByFactCheck.join("\n  ")}`);
+    insightLog(`[Pipeline] Fact-check rejected ${rejectedByFactCheck.length} candidates:\n  ${rejectedByFactCheck.join("\n  ")}`);
   }
   _timings.factCheck = Date.now() - pass2Start;
-  console.log(`[Pipeline] Pass 2a (Fact-Check) complete: ${survivingAfterFactCheck.length} surviving (${_timings.factCheck}ms)`);
+  insightLog(`[Pipeline] Pass 2a (Fact-Check) complete: ${survivingAfterFactCheck.length} surviving (${_timings.factCheck}ms)`);
 
   // ── Pass 2b: Judge LLM ──
   const pass2bStart = Date.now();
   let judgeSystem: string;
-  let judgeModel = "gpt-4o-mini";
+  let judgeModel = "gpt-5.2";
   let judgeTemp = 0.1;
   let judgeMaxTokens = 4000;
 
@@ -3012,7 +3301,7 @@ export async function generateCategorizedInsights(
     };
 
     const judgeUserPrompt = JSON.stringify(judgeInput, null, 2);
-    console.log(`[Pipeline] Pass 2b (Judge): model=${judgeModel}, ${survivingAfterFactCheck.length} candidates to evaluate`);
+    insightLog(`[Pipeline] Pass 2b (Judge): model=${judgeModel}, ${survivingAfterFactCheck.length} candidates to evaluate`);
 
     const judgeResponse = await callOpenAI(judgeSystem, judgeUserPrompt, apiKey, {
       model: judgeModel, temperature: judgeTemp, maxTokens: judgeMaxTokens,
@@ -3044,7 +3333,7 @@ export async function generateCategorizedInsights(
           originalIndex,
         });
       } else {
-        console.log(`[Pipeline] Judge rejected: "${candidate.headline.substring(0, 60)}..." (score: ${judgeScore.toFixed(1)})`);
+        insightLog(`[Pipeline] Judge rejected: "${candidate.headline.substring(0, 60)}..." (score: ${judgeScore.toFixed(1)})`);
       }
     }
   } else {
@@ -3064,12 +3353,12 @@ export async function generateCategorizedInsights(
   }
 
   _timings.judge = Date.now() - pass2bStart;
-  console.log(`[Pipeline] Pass 2b complete: ${scoredCandidates.length} candidates after judging (${_timings.judge}ms)`);
+  insightLog(`[Pipeline] Pass 2b complete: ${scoredCandidates.length} candidates after judging (${_timings.judge}ms)`);
 
   // ── Pass 3: Curator ──
   const pass3Start = Date.now();
   let curatorSystem: string;
-  let curatorModel = "gpt-4o";
+  let curatorModel = "gpt-5.2";
   let curatorTemp = 0.2;
   let curatorMaxTokens = 6000;
 
@@ -3115,7 +3404,7 @@ export async function generateCategorizedInsights(
     };
 
     const curatorUserPrompt = JSON.stringify(curatorInput, null, 2);
-    console.log(`[Pipeline] Pass 3 (Curator): model=${curatorModel}, ${scoredCandidates.length} candidates to curate`);
+    insightLog(`[Pipeline] Pass 3 (Curator): model=${curatorModel}, ${scoredCandidates.length} candidates to curate`);
 
     const curatorResponse = await callOpenAI(curatorSystem, curatorUserPrompt, apiKey, {
       model: curatorModel, temperature: curatorTemp, maxTokens: curatorMaxTokens,
@@ -3151,7 +3440,7 @@ export async function generateCategorizedInsights(
   }
 
   _timings.curator = Date.now() - pass3Start;
-  console.log(`[Pipeline] Pass 3 complete: ${finalInsights.length} final insights (${_timings.curator}ms)`);
+  insightLog(`[Pipeline] Pass 3 complete: ${finalInsights.length} final insights (${_timings.curator}ms)`);
 
   // Audit: attach curator bucket/priority to journey map
   for (const ins of finalInsights) {
@@ -3172,7 +3461,7 @@ export async function generateCategorizedInsights(
   const emptyBuckets = Object.entries(bucketCounts).filter(([, count]) => count === 0).map(([bucket]) => bucket);
 
   if (emptyBuckets.length > 0 && scoredCandidates.length > 0) {
-    console.log(`[Pipeline] Bucket balance: empty buckets detected: ${emptyBuckets.join(", ")}. Promoting from dropped candidates.`);
+    insightLog(`[Pipeline] Bucket balance: empty buckets detected: ${emptyBuckets.join(", ")}. Promoting from dropped candidates.`);
 
     const BUCKET_TO_SENTIMENT: Record<string, string[]> = {
       working: ["positive"],
@@ -3219,9 +3508,9 @@ export async function generateCategorizedInsights(
       }
 
       if (promotable.length > 0) {
-        console.log(`[Pipeline] Promoted ${promotable.length} candidates to "${emptyBucket}" bucket`);
+        insightLog(`[Pipeline] Promoted ${promotable.length} candidates to "${emptyBucket}" bucket`);
       } else {
-        console.log(`[Pipeline] No candidates with matching sentiment for "${emptyBucket}" bucket`);
+        insightLog(`[Pipeline] No candidates with matching sentiment for "${emptyBucket}" bucket`);
       }
     }
   }
@@ -3262,7 +3551,7 @@ export async function generateCategorizedInsights(
     }
 
     if (backfillCandidates.length > 0) {
-      console.log(`[Pipeline] Count enforcement: backfilled ${backfillCandidates.length} insights (${finalInsights.length} total, min ${MIN_INSIGHT_COUNT})`);
+      insightLog(`[Pipeline] Count enforcement: backfilled ${backfillCandidates.length} insights (${finalInsights.length} total, min ${MIN_INSIGHT_COUNT})`);
     }
   }
 
@@ -3322,7 +3611,7 @@ export async function generateCategorizedInsights(
       }
 
       if (domainPromotable.length > 0) {
-        console.log(`[Pipeline] Domain balance: promoted ${domainPromotable.length} insights for "${domain.id}" (had ${domainInsightCounts[domain.id] || 0}, min ${MIN_PER_DOMAIN})`);
+        insightLog(`[Pipeline] Domain balance: promoted ${domainPromotable.length} insights for "${domain.id}" (had ${domainInsightCounts[domain.id] || 0}, min ${MIN_PER_DOMAIN})`);
       }
     }
   }
@@ -3336,7 +3625,7 @@ export async function generateCategorizedInsights(
   }
   _timings.evidence = Date.now() - pass4Start;
   _timings.total = Date.now() - startTime;
-  console.log(`[Pipeline] Pass 4 complete (${_timings.evidence}ms)`);
+  insightLog(`[Pipeline] Pass 4 complete (${_timings.evidence}ms)`);
 
   // ── Audit: Merge pipeline context + journey into each insight's evidence_table.audit ──
   const pipelineCtx: PipelineContext = {
@@ -3390,6 +3679,20 @@ export async function generateCategorizedInsights(
     console.warn("[Pipeline] Detail hydration failed (persisting without snapshots):", hydrateError.message);
   }
 
+  // Diagnostic: log detail_data status for each insight
+  const detailStats = { withDetail: 0, withoutDetail: 0, withEvidence: 0, withoutEvidence: 0 };
+  for (const ins of finalInsights) {
+    if (ins.evidence_table) detailStats.withEvidence++; else detailStats.withoutEvidence++;
+    if (ins.detail_data) detailStats.withDetail++; else detailStats.withoutDetail++;
+    if (!ins.detail_data) {
+      const evStatus = ins.evidence_table
+        ? `evidence exists (${ins.evidence_table.rows.length} rows, ${ins.evidence_table.columns.length} cols)`
+        : "NO evidence_table";
+      insightLogWarn(`[Pipeline] Missing detail_data: "${ins.headline.substring(0, 70)}" (source=${ins.source}) — ${evStatus}`);
+    }
+  }
+  insightLog(`[Pipeline] Detail summary: ${detailStats.withDetail}/${finalInsights.length} have detail_data, ${detailStats.withEvidence}/${finalInsights.length} have evidence_table`);
+
   // Persist to tenant DB (unless caller requested skipPersist for append workflows)
   if (!skipPersist) {
     try {
@@ -3412,7 +3715,8 @@ export async function generateCategorizedInsights(
   const summaryForPodcast = podcastParts.join(" ") || "No notable insights to report.";
 
   const totalElapsed = Date.now() - startTime;
-  console.log(`[Pipeline] Full pipeline complete in ${totalElapsed}ms — ${finalInsights.length} insights (${criticals.length} critical, ${finalInsights.filter(i => i.bucket === "attention").length} attention, ${working.length} working, ${finalInsights.filter(i => i.bucket === "context").length} context)`);
+  const summaryMsg = `[Pipeline] Full pipeline complete in ${totalElapsed}ms — ${finalInsights.length} insights (${criticals.length} critical, ${finalInsights.filter(i => i.bucket === "attention").length} attention, ${working.length} working, ${finalInsights.filter(i => i.bucket === "context").length} context)`;
+  insightLogEnd(summaryMsg);
 
   return {
     insights: finalInsights,
@@ -3508,7 +3812,7 @@ export async function refreshSingleBucket(
   const validBuckets = ["working", "attention", "critical", "context"];
   if (!validBuckets.includes(bucketId)) throw new Error(`Unknown bucket: ${bucketId}`);
 
-  console.log(`[Pipeline] Single-bucket refresh requested for "${bucketId}" — running full pipeline`);
+  insightLog(`[Pipeline] Single-bucket refresh requested for "${bucketId}" — running full pipeline`);
 
   const result = await generateCategorizedInsights(metricsPayload, tenantPool, tenantId, options);
   return result.insights;
@@ -3554,7 +3858,7 @@ export async function generateMoreForBucket(
   );
 
   if (newForBucket.length === 0) {
-    console.log(`[Pipeline] Generate-more: no new unique insights for "${bucketId}" — returning existing`);
+    insightLog(`[Pipeline] Generate-more: no new unique insights for "${bucketId}" — returning existing`);
     return existingInsights;
   }
 
@@ -3657,7 +3961,7 @@ async function appendInsights(
     values
   );
 
-  console.log(`[Pipeline] Appended ${insights.length} insights (batch: ${generationBatch})`);
+  insightLog(`[Pipeline] Appended ${insights.length} insights (batch: ${generationBatch})`);
 }
 
 // ============================================================================

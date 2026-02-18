@@ -441,6 +441,8 @@ async function fetchPredictions(
     // Get most recent prediction per loan — ONLY for currently active loans.
     // Predictions for withdrawn / denied / funded loans are stale and should not
     // be surfaced as fallout risk.
+    // Also exclude stale active loans (application_date > 180 days ago) — these are
+    // likely abandoned or stuck, and inflate prediction counts misleadingly.
     const channelClause = buildChannelWhereClause(channelGroup);
     const result = await tenantPool.query(`
       SELECT DISTINCT ON (p.loan_id)
@@ -454,6 +456,7 @@ async function fetchPredictions(
       FROM public.loan_predictions p
       JOIN public.loans l ON p.loan_id = l.loan_id
       WHERE l.current_loan_status = 'Active Loan'
+        AND l.application_date >= CURRENT_DATE - INTERVAL '180 days'
         ${channelGroup ? channelClause : ""}
       ORDER BY p.loan_id, p.created_at DESC
       LIMIT 5000
@@ -1048,6 +1051,7 @@ async function fetchCloseLateEnhanced(
       FROM public.loan_predictions p
       JOIN public.loans l ON p.loan_id = l.loan_id
       WHERE l.current_loan_status = 'Active Loan'
+        AND l.application_date >= CURRENT_DATE - INTERVAL '180 days'
         AND l.estimated_closing_date IS NOT NULL
         AND p.loan_data->>'closeOnTimeProbability' IS NOT NULL
         ${channelGroup ? channelClause : ""}
@@ -1553,9 +1557,12 @@ async function fetchPersonnelTiering(
           GROUP BY ${cfg.actorColumn}
         `;
 
+        // Use rolling 90D for current tier assignment (not YTD) so that
+        // tier migration comparisons use equal-length windows (90D vs prior 90D).
+        const cur90dStart = new Date(now.getTime() - 90 * DAY).toISOString().split("T")[0];
         const [fundedRes, appRes] = await Promise.all([
-          tenantPool.query(fundedQuery, [startOfYear, today]),
-          tenantPool.query(appQuery, [startOfYear, today]),
+          tenantPool.query(fundedQuery, [cur90dStart, today]),
+          tenantPool.query(appQuery, [cur90dStart, today]),
         ]);
 
         // Build lookup from application cohort query

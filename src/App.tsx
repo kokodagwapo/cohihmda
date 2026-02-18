@@ -44,6 +44,8 @@ import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
+// Research Lab
+import ResearchAnalyst from "./pages/ResearchAnalyst";
 
 const queryClient = new QueryClient();
 
@@ -153,6 +155,13 @@ const App = () => (
               <Route path="/workbench/favorites" element={
                 <ProtectedRoute>
                   <Favorites />
+                </ProtectedRoute>
+              } />
+              
+              {/* Research Lab */}
+              <Route path="/research" element={
+                <ProtectedRoute>
+                  <ResearchAnalyst />
                 </ProtectedRoute>
               } />
               
