@@ -87,6 +87,8 @@ export interface LoanDetailFilters {
   dateRange?: { start: string; end: string };
   branch?: string;
   loanOfficer?: string;
+  /** Additional dimension filters (e.g. loan_purpose, channel) from workbench "ADD FILTER DIMENSION" */
+  dimensionFilters?: Array<{ column: string; value: string }>;
 }
 
 export function useLoanDetailData(
@@ -119,6 +121,11 @@ export function useLoanDetailData(
       }
       if (filters?.branch && filters.branch !== "all") params.set("branch", filters.branch);
       if (filters?.loanOfficer && filters.loanOfficer !== "all") params.set("loan_officer", filters.loanOfficer);
+      if (filters?.dimensionFilters?.length) {
+        for (const df of filters.dimensionFilters) {
+          if (df.column && df.value) params.set(df.column, df.value);
+        }
+      }
       const url = `/api/loans/detail-list?${params.toString()}`;
       const res = await api.request<LoanDetailListResponse>(url);
       setData(res);
@@ -132,7 +139,7 @@ export function useLoanDetailData(
     } finally {
       setLoading(false);
     }
-  }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer]);
+  }, [tenantId, filters?.dateField, filters?.dateRange?.start, filters?.dateRange?.end, filters?.branch, filters?.loanOfficer, filters?.dimensionFilters]);
 
   useEffect(() => {
     // Backend returns 400 when tenant_id is missing (e.g. super_admin with no tenant selected)

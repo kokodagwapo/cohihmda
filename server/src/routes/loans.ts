@@ -708,8 +708,9 @@ router.get(
 /**
  * GET /api/loans/detail-list
  * Returns all loans for the Loan Detail table with a wide set of columns.
- * Optional filters (workbench): date_field, date_from, date_to, branch, loan_officer.
- * Query: limit (default 100), offset (default 0), date_field, date_from, date_to, branch, loan_officer.
+ * Optional filters (workbench): date_field, date_from, date_to, branch, loan_officer,
+ * and dimension filters (loan_purpose, channel, loan_type, property_state, etc.).
+ * Query: limit, offset, date_field, date_from, date_to, branch, loan_officer, plus any whitelisted dimension column.
  */
 const DETAIL_LIST_DATE_COLUMNS: Record<string, string> = {
   application_date: "application_date",
@@ -719,6 +720,19 @@ const DETAIL_LIST_DATE_COLUMNS: Record<string, string> = {
   credit_pull_date: "credit_pull_date",
   investor_lock_date: "investor_lock_date",
   investor_purchase_date: "investor_purchase_date",
+};
+
+/** Whitelist of columns allowed as dimension filters (ADD FILTER DIMENSION). Must exist on public.loans. */
+const DETAIL_LIST_DIMENSION_FILTER_COLUMNS: Record<string, string> = {
+  channel: "channel",
+  loan_type: "loan_type",
+  loan_purpose: "loan_purpose",
+  property_state: "property_state",
+  property_county: "property_county",
+  occupancy_type: "occupancy_type",
+  property_type: "property_type",
+  current_loan_status: "current_loan_status",
+  investor: "investor",
 };
 router.get(
   "/detail-list",
@@ -783,6 +797,18 @@ router.get(
         conditions.push(`loan_officer = $${paramIndex}`);
         params.push(loanOfficer);
         paramIndex += 1;
+      }
+
+      // Apply additional dimension filters (loan_purpose, channel, etc.) from workbench "ADD FILTER DIMENSION"
+      for (const [queryKey, dbColumn] of Object.entries(
+        DETAIL_LIST_DIMENSION_FILTER_COLUMNS,
+      )) {
+        const value = req.query[queryKey] as string | undefined;
+        if (value && value !== "all") {
+          conditions.push(`${dbColumn} = $${paramIndex}`);
+          params.push(value);
+          paramIndex += 1;
+        }
       }
 
       const whereClause =

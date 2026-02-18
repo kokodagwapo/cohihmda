@@ -30,6 +30,12 @@ import { useLeaderboardData } from '@/hooks/useLeaderboardData';
 import { useLoanDetailData } from '@/hooks/useLoanDetailData';
 import type { DataSourceId } from '../registry/types';
 
+/** Build dimension filter array from section dynamicFilters (for APIs that accept them). */
+function toDimensionFilters(filters: SectionFilters | null): Array<{ column: string; value: string }> | undefined {
+  const list = filters?.dynamicFilters?.filter((df) => df.value && df.value !== 'all').map((df) => ({ column: df.column, value: df.value }));
+  return list && list.length > 0 ? list : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -303,6 +309,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
 
   // Loan detail: only apply date filter when user has explicitly selected a period (preset/year/custom).
   // When periodSelection is missing, show all loans so the table isn't empty by default.
+  // Include dynamic filters (loan purpose, channel, etc.) so ADD FILTER DIMENSION filters are applied.
   const loanDetailFilters = useMemo(
     () =>
       ldFilters
@@ -314,6 +321,7 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
                 : (ldFilters.periodSelection?.dateRange ?? ldFilters.dateRange),
             branch: ldFilters.branch,
             loanOfficer: ldFilters.loanOfficer,
+            dimensionFilters: toDimensionFilters(ldFilters),
           }
         : undefined,
     [ldFilters],
