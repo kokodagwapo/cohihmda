@@ -106,7 +106,7 @@ function getPool(): pg.Pool {
       user: dbConfig.user,
       password: dbConfig.password,
       ssl: sslEnabled ? { rejectUnauthorized: false } : false,
-      max: 10, // Reduced from 50 — most queries complete in <50ms; high max wastes DB connections
+      max: 15, // Enough headroom for concurrent audit logging + tenant lookups during job bursts
       min: 0, // Don't hold idle connections unnecessarily
       idleTimeoutMillis: 10000, // 10s idle timeout — release connections faster
       connectionTimeoutMillis: 15000, // 15 seconds connection timeout
