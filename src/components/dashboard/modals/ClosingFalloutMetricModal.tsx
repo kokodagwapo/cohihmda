@@ -147,7 +147,7 @@ export function ClosingFalloutMetricModal({
     ? 'High Risk Loans'
     : (content?.title || label || '');
   const description = isHighRiskMode
-    ? 'Loans predicted to withdraw, decline, or close late with risk score 80 or higher. Sorted by risk score.'
+    ? 'Predicted withdraw or decline with risk score ≥ 80/100. Sorted by risk score.'
     : (content?.description || '');
 
   const alethiaInsights = useMemo(() => {
@@ -336,7 +336,7 @@ export function ClosingFalloutMetricModal({
                                 {loan.borrower}
                               </p>
                               <p className={`text-[10px] font-normal truncate mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                                Loan #{loan.id}{loan.borrower !== loan.officer && loan.officer !== 'Unassigned' ? ` · Loan Officer: ${loan.officer}` : ''}
+                                Loan #{loan.loan_number || loan.id}{loan.borrower !== loan.officer && loan.officer !== 'Unassigned' ? ` · Loan Officer: ${loan.officer}` : ''}
                               </p>
                             </div>
                             <div className="text-right flex-shrink-0">

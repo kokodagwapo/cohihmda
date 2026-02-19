@@ -434,7 +434,7 @@ function buildQuickReference(): string[] {
   return [
     "## Quick Reference - Status Indicators",
     "- Funded: funding_date IS NOT NULL",
-    "- Active: current_loan_status = 'Active Loan'",
+    "- Active: current_loan_status = 'Active Loan' AND application_date IS NOT NULL",
     "- Locked: lock_date IS NOT NULL",
     "- Originated: current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'",
   ];

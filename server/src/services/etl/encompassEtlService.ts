@@ -9,6 +9,7 @@ import {
   LoanRecord,
 } from "../encompassLoanExtractor.js";
 import { coheusAliasToColumnName } from "../encompassFieldMapper.js";
+import { runPostSyncHooks } from "../hooks/postSyncHookService.js";
 
 export interface SyncResult {
   success: boolean;
@@ -222,6 +223,21 @@ export class EncompassEtlService {
       console.log(
         `[Sync] Complete: +${loansAdded} new, ~${loansUpdated} updated, ${recordsFailed} failed in ${Math.round(duration / 1000)}s (${totalLoansAfter} total)`
       );
+
+      // Fire post-sync hooks asynchronously (don't block return)
+      if (recordsFailed === 0 || loansAdded + loansUpdated > 0) {
+        runPostSyncHooks({
+          tenantId,
+          tenantPool: this.tenantPool!,
+          connectionId: losConnectionId,
+          syncType: "encompass",
+          recordsSynced,
+          loansAdded,
+          loansUpdated,
+        }).catch((err) =>
+          console.error("[Sync] Post-sync hooks error:", err.message)
+        );
+      }
 
       return {
         success: recordsFailed === 0,

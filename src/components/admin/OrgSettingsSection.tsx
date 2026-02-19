@@ -94,30 +94,19 @@ interface Subscription {
 /**
  * Usage statistics
  */
+interface UsageBucket {
+  current: number;
+  limit: number;
+  percentage: number;
+}
+
 interface UsageStats {
-  users: {
-    current: number;
-    limit: number;
-    percentage: number;
-  };
-  loans: {
-    current: number;
-    limit: number;
-    percentage: number;
-  };
-  api_calls: {
-    current: number;
-    limit: number;
-    percentage: number;
-  };
-  storage: {
-    current: number;
-    limit: number;
-    percentage: number;
-    unit: string;
-  };
-  last_sync: string;
-  sync_status: "healthy" | "warning" | "error";
+  users?: UsageBucket;
+  loans?: UsageBucket;
+  api_calls?: UsageBucket;
+  storage?: UsageBucket & { unit: string };
+  last_sync?: string;
+  sync_status?: "healthy" | "warning" | "error";
 }
 
 
@@ -770,133 +759,141 @@ export function OrgSettingsSection({ tenantId: propTenantId }: OrgSettingsSectio
           {usage && (
             <>
               {/* Sync Status */}
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Activity
-                        className={`h-5 w-5 ${getSyncStatusColor(usage.sync_status)}`}
-                      />
-                      <div>
-                        <p className="font-medium text-slate-900 dark:text-white">
-                          Data Sync Status
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          Last sync:{" "}
-                          {new Date(usage.last_sync).toLocaleString()}
-                        </p>
+              {usage.sync_status && (
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Activity
+                          className={`h-5 w-5 ${getSyncStatusColor(usage.sync_status)}`}
+                        />
+                        <div>
+                          <p className="font-medium text-slate-900 dark:text-white">
+                            Data Sync Status
+                          </p>
+                          {usage.last_sync && (
+                            <p className="text-sm text-slate-500">
+                              Last sync:{" "}
+                              {new Date(usage.last_sync).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
                       </div>
+                      <Badge
+                        className={
+                          usage.sync_status === "healthy"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                            : usage.sync_status === "warning"
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                              : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
+                        }
+                      >
+                        {usage.sync_status.charAt(0).toUpperCase() +
+                          usage.sync_status.slice(1)}
+                      </Badge>
                     </div>
-                    <Badge
-                      className={
-                        usage.sync_status === "healthy"
-                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                          : usage.sync_status === "warning"
-                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                            : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400"
-                      }
-                    >
-                      {usage.sync_status.charAt(0).toUpperCase() +
-                        usage.sync_status.slice(1)}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Usage Metrics */}
               <div className="grid gap-4 sm:grid-cols-2">
-                {/* Users */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">
-                          Users
+                {usage.users && (
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-slate-400" />
+                          <span className="font-medium text-slate-900 dark:text-white">
+                            Users
+                          </span>
+                        </div>
+                        <span className="text-sm text-slate-500">
+                          {usage.users.current} / {usage.users.limit}
                         </span>
                       </div>
-                      <span className="text-sm text-slate-500">
-                        {usage.users.current} / {usage.users.limit}
-                      </span>
-                    </div>
-                    <Progress value={usage.users.percentage} className="h-2" />
-                    <p className="text-xs text-slate-500 mt-2">
-                      {usage.users.percentage}% of limit used
-                    </p>
-                  </CardContent>
-                </Card>
+                      <Progress value={usage.users.percentage} className="h-2" />
+                      <p className="text-xs text-slate-500 mt-2">
+                        {usage.users.percentage}% of limit used
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
-                {/* Loans */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">
-                          Loans
+                {usage.loans && (
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-slate-400" />
+                          <span className="font-medium text-slate-900 dark:text-white">
+                            Loans
+                          </span>
+                        </div>
+                        <span className="text-sm text-slate-500">
+                          {usage.loans.current.toLocaleString()} /{" "}
+                          {usage.loans.limit.toLocaleString()}
                         </span>
                       </div>
-                      <span className="text-sm text-slate-500">
-                        {usage.loans.current.toLocaleString()} /{" "}
-                        {usage.loans.limit.toLocaleString()}
-                      </span>
-                    </div>
-                    <Progress value={usage.loans.percentage} className="h-2" />
-                    <p className="text-xs text-slate-500 mt-2">
-                      {usage.loans.percentage}% of limit used
-                    </p>
-                  </CardContent>
-                </Card>
+                      <Progress value={usage.loans.percentage} className="h-2" />
+                      <p className="text-xs text-slate-500 mt-2">
+                        {usage.loans.percentage}% of limit used
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
-                {/* API Calls */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <BarChart3 className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">
-                          API Calls (this month)
+                {usage.api_calls && (
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <BarChart3 className="h-4 w-4 text-slate-400" />
+                          <span className="font-medium text-slate-900 dark:text-white">
+                            API Calls (this month)
+                          </span>
+                        </div>
+                        <span className="text-sm text-slate-500">
+                          {usage.api_calls.current.toLocaleString()} /{" "}
+                          {usage.api_calls.limit.toLocaleString()}
                         </span>
                       </div>
-                      <span className="text-sm text-slate-500">
-                        {usage.api_calls.current.toLocaleString()} /{" "}
-                        {usage.api_calls.limit.toLocaleString()}
-                      </span>
-                    </div>
-                    <Progress
-                      value={usage.api_calls.percentage}
-                      className="h-2"
-                    />
-                    <p className="text-xs text-slate-500 mt-2">
-                      {usage.api_calls.percentage}% of limit used
-                    </p>
-                  </CardContent>
-                </Card>
+                      <Progress
+                        value={usage.api_calls.percentage}
+                        className="h-2"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">
+                        {usage.api_calls.percentage}% of limit used
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
-                {/* Storage */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <Database className="h-4 w-4 text-slate-400" />
-                        <span className="font-medium text-slate-900 dark:text-white">
-                          Storage
+                {usage.storage && (
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <Database className="h-4 w-4 text-slate-400" />
+                          <span className="font-medium text-slate-900 dark:text-white">
+                            Storage
+                          </span>
+                        </div>
+                        <span className="text-sm text-slate-500">
+                          {usage.storage.current} / {usage.storage.limit}{" "}
+                          {usage.storage.unit}
                         </span>
                       </div>
-                      <span className="text-sm text-slate-500">
-                        {usage.storage.current} / {usage.storage.limit}{" "}
-                        {usage.storage.unit}
-                      </span>
-                    </div>
-                    <Progress
-                      value={usage.storage.percentage}
-                      className="h-2"
-                    />
-                    <p className="text-xs text-slate-500 mt-2">
-                      {usage.storage.percentage}% of limit used
-                    </p>
-                  </CardContent>
-                </Card>
+                      <Progress
+                        value={usage.storage.percentage}
+                        className="h-2"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">
+                        {usage.storage.percentage}% of limit used
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
             </>
           )}

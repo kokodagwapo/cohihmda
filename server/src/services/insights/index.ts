@@ -3,8 +3,8 @@
  * Exports for the LLM-driven insights system
  */
 
-export { collectInsightMetrics } from './insightMetricsCollector.js';
-export type { InsightMetricsPayload, PredictionData } from './insightMetricsCollector.js';
+export { collectInsightMetrics, computeSignals, formatSignalsForPrompt } from './insightMetricsCollector.js';
+export type { InsightMetricsPayload, PredictionData, Signal } from './insightMetricsCollector.js';
 // PeriodSnapshot is canonical — re-export from the shared module
 export type { PeriodSnapshot } from '../metrics/canonicalMetrics.js';
 export {

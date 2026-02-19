@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { z } from "zod";
-import { getTenantId } from "../../utils/tenantUtils.js";
 import { handleDatabaseError } from "../../config/database.js";
 import {
   attachTenantContext,
@@ -12,6 +11,7 @@ import {
   getLeaderboardData,
   getInsights,
   refreshInsights,
+  refreshAllChannels,
   getClosingFalloutForecast,
   getDashboardOverview,
   getFinancialModelingBaseline,
@@ -25,6 +25,7 @@ import {
   loadStoredInsights,
 } from "../../services/insights/llmInsightGenerator.js";
 import { collectInsightMetrics } from "../../services/insights/insightMetricsCollector.js";
+import { runInsightGeneration, isGenerationRunning } from "../../services/insights/agents/insightOrchestrator.js";
 
 const router = Router();
 
@@ -161,6 +162,7 @@ router.get(
         useLLM = "true",
         forceRefresh = "false",
         channel_group,
+        generation_method,
       } = req.query;
       const authHeader = req.headers.authorization;
 
@@ -190,6 +192,7 @@ router.get(
           forceRefresh: forceRefresh === "true",
           userAccessFilter: accessCtx.getFilter("l"),
           channelGroup: channel_group as string | undefined,
+          generationMethod: generation_method as string | undefined,
         }
       );
       res.json(result);
@@ -267,6 +270,119 @@ router.post(
 );
 
 /**
+ * POST /api/dashboard/insights/generate-agent
+ * Triggers the agent-driven insight generation pipeline.
+ * Platform admin only — runs planner → investigators → evaluator → persist.
+ */
+router.post(
+  "/insights/generate-agent",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      // Platform admin gate
+      const userRole = (req as any).userRole || (req as any).role;
+      if (!["super_admin", "platform_admin"].includes(userRole)) {
+        return res.status(403).json({ error: "Platform admin access required" });
+      }
+
+      const tenantContext = getTenantContext(req);
+
+      const forceFresh = req.query.fresh === "true";
+      const result = await runInsightGeneration(
+        tenantContext.tenantId,
+        tenantContext.tenantPool,
+        undefined,
+        forceFresh ? { forceFresh: true } : undefined
+      );
+
+      if (!result.success && result.error?.includes("already in progress")) {
+        return res.status(409).json(result);
+      }
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error starting agent insight generation:", error);
+      res.status(500).json({ error: "Failed to start agent insight generation" });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/insights/generation-status
+ * Returns whether agent insight generation is currently running for the tenant.
+ */
+router.get(
+  "/insights/generation-status",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const status = isGenerationRunning(tenantContext.tenantId);
+      res.json(status);
+    } catch (error: any) {
+      res.json({ running: false });
+    }
+  }
+);
+
+/**
+ * POST /api/dashboard/insights/refresh-all-channels
+ * Triggers fresh insight generation for ALL channel variants (Retail, TPO, All) in parallel.
+ * This pre-populates insights for every channel so switching channels is instant.
+ * Query params:
+ * - dateFilter: 'today' | 'mtd' | 'ytd' (default: 'ytd')
+ */
+router.post(
+  "/insights/refresh-all-channels",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const tenantContext = getTenantContext(req);
+      const { dateFilter = "ytd" } = req.query;
+
+      const accessCtx = await getLoanAccessContext(
+        req,
+        tenantContext.tenantPool
+      );
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          channels: [],
+          results: {},
+          accessFiltered: true,
+          noAccess: true,
+        });
+      }
+
+      const result = await refreshAllChannels(
+        tenantContext.tenantPool,
+        dateFilter as string,
+        {
+          tenantId: tenantContext.tenantId,
+        }
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error refreshing all-channel insights:", error);
+
+      if (
+        handleDatabaseError(error, res, "Failed to refresh all-channel insights")
+      ) {
+        return;
+      }
+
+      res.status(500).json({
+        error: "Failed to refresh all-channel insights",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
  * POST /api/dashboard/insights/refresh-bucket
  * Regenerates insights for a single bucket (working, attention, critical, context) without touching others.
  * Query params:
@@ -309,28 +425,38 @@ router.post(
       );
 
       // Map to API response format (same mapping as getInsights)
-      const insights = allInsights.map((ins: any) => ({
-        id: ins.id,
-        type: ins.insight_type,
-        message: ins.headline,
-        priority:
-          ins.severity_score >= 0.8
-            ? "critical"
-            : ins.severity_score >= 0.55
-              ? "high"
-              : ins.severity_score >= 0.3
-                ? "medium"
-                : "low",
-        reasoning: ins.understory,
-        source: ins.source,
-        bucket: ins.bucket,
-        headline: ins.headline,
-        understory: ins.understory,
-        severity_score: ins.severity_score,
-        bucketPriority: ins.priority,
-        impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-        evidence: typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : ins.evidence,
-      }));
+      const insights = allInsights.map((ins: any) => {
+        const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
+        return {
+          id: ins.id,
+          type: ins.insight_type,
+          message: ins.headline,
+          priority:
+            ins.severity_score >= 0.8
+              ? "critical"
+              : ins.severity_score >= 0.55
+                ? "high"
+                : ins.severity_score >= 0.3
+                  ? "medium"
+                  : "low",
+          reasoning: ins.understory,
+          source: ins.source,
+          bucket: ins.bucket,
+          headline: ins.headline,
+          understory: ins.understory,
+          severity_score: ins.severity_score,
+          bucketPriority: ins.priority,
+          impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+          evidence: ev,
+          // ETM fields (stored in evidence JSONB)
+          what_changed: ev.what_changed,
+          why: ev.why,
+          business_impact: ev.business_impact,
+          risk_if_ignored: ev.risk_if_ignored,
+          recommended_action: ev.recommended_action,
+          owner: ev.owner,
+        };
+      });
 
       res.json({
         insights,
@@ -389,28 +515,37 @@ router.post(
         { channelGroup: channel_group as string | undefined }
       );
 
-      const insights = allInsights.map((ins: any) => ({
-        id: ins.id,
-        type: ins.insight_type,
-        message: ins.headline,
-        priority:
-          ins.severity_score >= 0.8
-            ? "critical"
-            : ins.severity_score >= 0.55
-              ? "high"
-              : ins.severity_score >= 0.3
-                ? "medium"
-                : "low",
-        reasoning: ins.understory,
-        source: ins.source,
-        bucket: ins.bucket,
-        headline: ins.headline,
-        understory: ins.understory,
-        severity_score: ins.severity_score,
-        bucketPriority: ins.priority,
-        impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-        evidence: typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : ins.evidence,
-      }));
+      const insights = allInsights.map((ins: any) => {
+        const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
+        return {
+          id: ins.id,
+          type: ins.insight_type,
+          message: ins.headline,
+          priority:
+            ins.severity_score >= 0.8
+              ? "critical"
+              : ins.severity_score >= 0.55
+                ? "high"
+                : ins.severity_score >= 0.3
+                  ? "medium"
+                  : "low",
+          reasoning: ins.understory,
+          source: ins.source,
+          bucket: ins.bucket,
+          headline: ins.headline,
+          understory: ins.understory,
+          severity_score: ins.severity_score,
+          bucketPriority: ins.priority,
+          impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+          evidence: ev,
+          what_changed: ev.what_changed,
+          why: ev.why,
+          business_impact: ev.business_impact,
+          risk_if_ignored: ev.risk_if_ignored,
+          recommended_action: ev.recommended_action,
+          owner: ev.owner,
+        };
+      });
 
       res.json({
         insights,

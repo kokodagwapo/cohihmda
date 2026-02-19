@@ -409,7 +409,9 @@ router.get(
           (actorApplicationCount.get(actorName) || 0) + 1
         );
 
-        if (l.funding_date) {
+        // Originated = status-based (Qlik Pull Through Originated Flag)
+        const statusUpper = status;
+        if (statusUpper.includes("ORIGINATED") || statusUpper.includes("PURCHASED")) {
           actorFundedCount.set(
             actorName,
             (actorFundedCount.get(actorName) || 0) + 1

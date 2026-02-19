@@ -2,6 +2,7 @@ import { Router } from 'express';
 import express from 'express';
 import { pool } from '../config/managementDatabase.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
+import { requirePlatformStaff } from '../middleware/rbac.js';
 import { z } from 'zod';
 import Stripe from 'stripe';
 
@@ -71,7 +72,7 @@ router.get('/plans', async (req, res) => {
  * PUT /api/subscriptions/plans/:id
  * Update a subscription plan (admin only)
  */
-router.put('/plans/:id', authenticateToken, async (req: AuthRequest, res) => {
+router.put('/plans/:id', authenticateToken, requirePlatformStaff(), async (req: AuthRequest, res) => {
   try {
     const planId = req.params.id;
     const { display_name, price_monthly, price_yearly, features, deployment_options } = req.body;
@@ -177,7 +178,7 @@ router.get('/current', authenticateToken, async (req: AuthRequest, res) => {
  * GET /api/subscriptions
  * List all tenant subscriptions (admin only)
  */
-router.get('/', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/', authenticateToken, requirePlatformStaff(), async (req: AuthRequest, res) => {
   try {
     // Get all subscriptions with plan and tenant details
     const result = await pool.query(
@@ -489,9 +490,9 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
  * GET /api/subscriptions/provisioning-status/:sessionId
  * Get provisioning status for a checkout session
  */
-router.get('/provisioning-status/:sessionId', async (req, res) => {
+router.get('/provisioning-status/:sessionId', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = req.params.sessionId as string;
 
     if (!stripe) {
       return res.status(503).json({ error: 'Stripe is not configured' });
@@ -548,29 +549,9 @@ router.get('/provisioning-status/:sessionId', async (req, res) => {
     const { getProvisioningStatus } = await import('../services/awsProvisioning.js');
     const status = await getProvisioningStatus(tenantId);
 
-    // Get admin credentials if provisioning is complete
-    let adminCredentials = null;
-    if (status.status === 'active' && status.provisioningStatus === 'completed') {
-      const deploymentResult = await pool.query(
-        `SELECT metadata 
-         FROM public.aws_deployments 
-         WHERE tenant_id = $1`,
-        [tenantId]
-      );
-
-      if (deploymentResult.rows.length > 0 && deploymentResult.rows[0].metadata) {
-        const metadata = deploymentResult.rows[0].metadata;
-        adminCredentials = {
-          username: metadata.admin_username,
-          password: metadata.admin_password,
-        };
-      }
-    }
-
     res.json({
       ...status,
       deploymentType: 'per_lender_aws',
-      adminCredentials,
     });
   } catch (error: any) {
     console.error('Error fetching provisioning status:', error);
@@ -802,7 +783,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
  * DELETE /api/subscriptions/:id
  * Cancel a subscription
  */
-router.delete('/:id', authenticateToken, async (req: AuthRequest, res) => {
+router.delete('/:id', authenticateToken, requirePlatformStaff(), async (req: AuthRequest, res) => {
   try {
     const subscriptionId = req.params.id;
     const { reason } = cancelSubscriptionSchema.parse(req.body);
@@ -850,7 +831,7 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res) => {
  * POST /api/subscriptions/plans
  * Create a custom subscription plan (admin only)
  */
-router.post('/plans', authenticateToken, async (req: AuthRequest, res) => {
+router.post('/plans', authenticateToken, requirePlatformStaff(), async (req: AuthRequest, res) => {
   try {
     const { name, display_name, price_monthly, price_yearly, features, deployment_options } = createPlanSchema.parse(req.body);
 
@@ -883,7 +864,7 @@ router.post('/plans', authenticateToken, async (req: AuthRequest, res) => {
  * DELETE /api/subscriptions/plans/:id
  * Delete (soft delete) a subscription plan
  */
-router.delete('/plans/:id', authenticateToken, async (req: AuthRequest, res) => {
+router.delete('/plans/:id', authenticateToken, requirePlatformStaff(), async (req: AuthRequest, res) => {
   try {
     const planId = req.params.id;
 
@@ -911,7 +892,7 @@ router.delete('/plans/:id', authenticateToken, async (req: AuthRequest, res) => 
  * GET /api/subscriptions/projections
  * Calculate revenue projections for different customer counts
  */
-router.get('/projections', authenticateToken, async (req: AuthRequest, res) => {
+router.get('/projections', authenticateToken, requirePlatformStaff(), async (req: AuthRequest, res) => {
   try {
     // Get all active plans
     const plansResult = await pool.query(

@@ -7,6 +7,7 @@ import { Request, Response, NextFunction } from "express";
 import { AuthRequest } from "./auth.js";
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { tenantDbManager } from "../config/tenantDatabaseManager.js";
+import { auditLog } from "../services/auditLogger.js";
 import pg from "pg";
 
 export interface TenantContext {
@@ -173,10 +174,25 @@ export async function attachTenantContext(
       );
       if (tenantCheck.rows.length > 0) {
         tenantId = queryTenantId;
-        console.log(
-          "[TenantContext] Tenant verified, using query tenant:",
-          tenantId
-        );
+
+        // Audit log: platform staff accessing another tenant's data
+        auditLog({
+          userId: req.userId!,
+          userEmail: req.userEmail,
+          userRole,
+          tenantId: queryTenantId,
+          action: "cross_tenant_access",
+          resource: req.path,
+          status: "success",
+          metadata: {
+            method: req.method,
+            originalTenantId: jwtTenantId,
+            targetTenantId: queryTenantId,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        }).catch(() => {}); // Non-blocking
+
       } else {
         console.warn(
           "[TenantContext] Tenant not found or inactive:",
@@ -287,4 +303,100 @@ export function getTenantContext(req: Request): TenantContext {
  */
 export interface TenantRequest extends AuthRequest {
   tenantContext?: TenantContext;
+}
+
+// Path prefixes that do NOT need tenant context
+const TENANT_EXEMPT_PREFIXES = [
+  "/api/auth",
+  "/api/subscriptions/plans",
+  "/api/subscriptions/checkout/public",
+  "/api/subscriptions/webhook",
+  "/api/news",
+  "/api/version",
+  "/health",
+  "/api/health",
+];
+
+/**
+ * Global middleware: attempts to attach tenant context on every authenticated
+ * request that hasn't already been handled by the explicit per-route middleware.
+ * This is a defence-in-depth layer: if a developer adds a new tenant-scoped route
+ * but forgets `attachTenantContext`, the context will already be there.
+ *
+ * Importantly this middleware never sends an error response — it only silently
+ * skips when it can't resolve a tenant (unauthenticated, exempt path, platform
+ * staff without tenant selection, etc.).
+ */
+export async function globalTenantContext(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  // Skip if already attached (explicit per-route middleware ran first)
+  if (req.tenantContext) {
+    return next();
+  }
+
+  // Skip exempt routes
+  const path = req.originalUrl || req.path;
+  if (TENANT_EXEMPT_PREFIXES.some((p) => path.startsWith(p))) {
+    return next();
+  }
+
+  // Skip if user is not authenticated
+  if (!req.userId) {
+    return next();
+  }
+
+  // Try to resolve tenant context silently
+  try {
+    const userRole = req.userRole || "user";
+    const jwtTenantId = req.tenantId || null;
+    const queryTenantId = req.query.tenant_id as string | undefined;
+    const isPlatformStaff = ["super_admin", "platform_admin", "support"].includes(userRole);
+
+    let tenantId: string | null = null;
+
+    if (queryTenantId && isPlatformStaff) {
+      const tenantCheck = await managementPool.query(
+        `SELECT id FROM coheus_tenants WHERE id = $1 AND status = 'active'`,
+        [queryTenantId]
+      );
+      if (tenantCheck.rows.length > 0) {
+        tenantId = queryTenantId;
+      }
+    }
+
+    if (!tenantId && jwtTenantId) {
+      tenantId = jwtTenantId;
+    }
+
+    // If we still can't resolve a tenant, just continue — the handler can
+    // call getTenantContext(req) and will get a clear error if it needs one.
+    if (!tenantId) {
+      return next();
+    }
+
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+    const tenantConfig = await tenantDbManager.getTenantConfig(tenantId);
+
+    if (isPlatformStaff && req.userId) {
+      await ensurePlatformUserShadow(tenantPool, req.userId, req.userEmail, userRole, tenantId);
+    }
+
+    req.tenantContext = {
+      tenantId,
+      tenantPool,
+      tenantInfo: {
+        id: tenantConfig.id,
+        name: tenantConfig.name,
+        slug: tenantConfig.slug,
+        database_name: tenantConfig.database_name,
+      },
+    };
+  } catch (_err) {
+    // Silently continue — this is defense-in-depth, not primary protection
+  }
+
+  next();
 }

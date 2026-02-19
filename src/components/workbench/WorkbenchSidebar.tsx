@@ -1,6 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutGrid, Library, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search, Plus, Trash2, Heart, FolderOpen } from 'lucide-react';
+import { LayoutGrid, Library, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Search, Plus, Trash2, Heart, FolderOpen, Globe, Users, Lock } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,18 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { DASHBOARD_SECTION_GROUPS } from './workbenchSections';
 
-export type CanvasListItem = { id: string; title: string; content: any; created_at: string; updated_at: string; favorited: boolean };
+export type CanvasListItem = {
+  id: string;
+  title: string;
+  content: any;
+  created_at: string;
+  updated_at: string;
+  favorited: boolean;
+  visibility?: 'private' | 'global' | 'shared';
+  is_owner?: boolean;
+  owner_email?: string;
+  owner_name?: string;
+};
 
 const appNavLinks = [
   { path: '/my-dashboard', label: 'My Workbench', icon: LayoutDashboard, variant: 'violet' as const },
@@ -61,6 +72,59 @@ function SidebarContent({
   const filteredCanvases = canvasSearch?.trim()
     ? (canvasList ?? []).filter((c) => c.title.toLowerCase().includes(canvasSearch.trim().toLowerCase()))
     : (canvasList ?? []);
+
+  // Group canvases by ownership / visibility
+  const { myCanvases, sharedCanvases, globalCanvases } = useMemo(() => {
+    const my: CanvasListItem[] = [];
+    const shared: CanvasListItem[] = [];
+    const global: CanvasListItem[] = [];
+    for (const c of filteredCanvases) {
+      if (c.is_owner !== false) {
+        my.push(c);
+      } else if (c.visibility === 'global') {
+        global.push(c);
+      } else {
+        shared.push(c);
+      }
+    }
+    return { myCanvases: my, sharedCanvases: shared, globalCanvases: global };
+  }, [filteredCanvases]);
+
+  const renderCanvasItem = (c: CanvasListItem, allowDelete: boolean) => (
+    <button
+      key={c.id}
+      type="button"
+      className={cn(
+        'group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+        activeCanvasId === c.id
+          ? 'bg-violet-100/90 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-medium'
+          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
+      )}
+      onClick={() => onSelectCanvas?.(c.id)}
+    >
+      {c.favorited && <Heart className="h-3 w-3 fill-rose-500 text-rose-500 shrink-0" />}
+      {!c.favorited && c.visibility === 'global' && <Globe className="h-3 w-3 text-blue-500 shrink-0" />}
+      {!c.favorited && c.visibility === 'shared' && c.is_owner === false && <Users className="h-3 w-3 text-emerald-500 shrink-0" />}
+      <div className="flex-1 min-w-0">
+        <span className="truncate block">{c.title}</span>
+        {c.is_owner === false && c.owner_name && (
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate block">{c.owner_name}</span>
+        )}
+        {c.is_owner === false && !c.owner_name && c.owner_email && (
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate block">{c.owner_email}</span>
+        )}
+      </div>
+      {allowDelete && onDeleteCanvas && (
+        <Trash2
+          className="h-3 w-3 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteCanvas(c.id, c.title);
+          }}
+        />
+      )}
+    </button>
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -114,7 +178,7 @@ function SidebarContent({
         </nav>
       </div>
 
-      {/* Canvas list */}
+      {/* Canvas list — grouped by My / Shared / Global */}
       {canvasList !== undefined && (
         <div className="p-3 border-b border-slate-200/70 dark:border-slate-700/50">
           <div className="flex items-center justify-between gap-2 px-1 mb-2">
@@ -148,36 +212,49 @@ function SidebarContent({
             </div>
           )}
 
-          <div className="space-y-0.5 max-h-[240px] overflow-y-auto">
-            {filteredCanvases.length > 0 ? filteredCanvases.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={cn(
-                  'group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
-                  activeCanvasId === c.id
-                    ? 'bg-violet-100/90 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-medium'
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
-                )}
-                onClick={() => onSelectCanvas?.(c.id)}
-              >
-                {c.favorited && <Heart className="h-3 w-3 fill-rose-500 text-rose-500 shrink-0" />}
-                <span className="truncate flex-1">{c.title}</span>
-                {onDeleteCanvas && (
-                  <Trash2
-                    className="h-3 w-3 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteCanvas(c.id, c.title);
-                    }}
-                  />
-                )}
-              </button>
-            )) : canvasList.length === 0 ? (
+          <div className="space-y-2 max-h-[360px] overflow-y-auto">
+            {/* My Canvases */}
+            {myCanvases.length > 0 && (
+              <div>
+                <p className="px-1 pb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                  <Lock className="h-2.5 w-2.5" /> My Canvases
+                </p>
+                <div className="space-y-0.5">
+                  {myCanvases.map((c) => renderCanvasItem(c, true))}
+                </div>
+              </div>
+            )}
+
+            {/* Global Canvases */}
+            {globalCanvases.length > 0 && (
+              <div>
+                <p className="px-1 pb-0.5 text-[10px] font-semibold text-blue-500 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                  <Globe className="h-2.5 w-2.5" /> Global
+                </p>
+                <div className="space-y-0.5">
+                  {globalCanvases.map((c) => renderCanvasItem(c, false))}
+                </div>
+              </div>
+            )}
+
+            {/* Shared With Me */}
+            {sharedCanvases.length > 0 && (
+              <div>
+                <p className="px-1 pb-0.5 text-[10px] font-semibold text-emerald-500 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                  <Users className="h-2.5 w-2.5" /> Shared with me
+                </p>
+                <div className="space-y-0.5">
+                  {sharedCanvases.map((c) => renderCanvasItem(c, false))}
+                </div>
+              </div>
+            )}
+
+            {canvasList.length === 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-3">
                 No canvases yet
               </p>
-            ) : (
+            )}
+            {canvasList.length > 0 && filteredCanvases.length === 0 && (
               <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-2">
                 No matches
               </p>

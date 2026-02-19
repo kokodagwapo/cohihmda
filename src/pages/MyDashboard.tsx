@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Navigation } from '@/components/layout/Navigation';
 import { WorkbenchSidebar } from '@/components/workbench/WorkbenchSidebar';
@@ -287,6 +287,15 @@ export default function MyDashboard() {
   // If no tabs are open, show an empty state
   const showEmptyState = openTabs.length === 0;
 
+  // Determine if the current user owns the active canvas
+  const activeCanvasIsOwner = useMemo(() => {
+    if (!activeTabId) return true;
+    if (activeTabId.startsWith('new-')) return true; // New canvases are always owned
+    const canvas = canvasList.find((c) => c.id === activeTabId);
+    if (!canvas) return true; // Not loaded yet — assume owner until data arrives
+    return canvas.is_owner !== false;
+  }, [activeTabId, canvasList]);
+
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-br from-slate-50/90 via-white to-sky-50/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/80">
       <Navigation />
@@ -402,6 +411,7 @@ export default function MyDashboard() {
                 onSaved={handleCanvasSaved}
                 onDirtyChange={handleDirtyChange}
                 tenantId={effectiveTenantId}
+                isOwner={activeCanvasIsOwner}
               />
             )}
           </div>

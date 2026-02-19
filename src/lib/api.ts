@@ -165,9 +165,12 @@ export const getWebSocketUrl = (): string => {
 
 const API_URL = getApiUrl();
 
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
+  private userRole: string | null = null;
   private requestCache: Map<string, { data: any; timestamp: number }> =
     new Map();
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -176,6 +179,10 @@ export class ApiClient {
   constructor(baseUrl: string = API_URL) {
     this.baseUrl = baseUrl;
     this.token = localStorage.getItem("auth_token");
+  }
+
+  setUserRole(role: string | null) {
+    this.userRole = role;
   }
 
   private getHealthUrl(): string {
@@ -252,6 +259,17 @@ export class ApiClient {
     options: RequestInit = {},
     retries = 0
   ): Promise<T> {
+    // Defense-in-depth: strip tenant_id from requests for non-platform users
+    let sanitizedEndpoint = endpoint;
+    if (this.userRole && !PLATFORM_STAFF_ROLES.has(this.userRole)) {
+      const url_ = new URL(endpoint, "http://placeholder");
+      if (url_.searchParams.has("tenant_id")) {
+        url_.searchParams.delete("tenant_id");
+        sanitizedEndpoint = url_.pathname + url_.search;
+      }
+    }
+    endpoint = sanitizedEndpoint;
+
     // If baseUrl is empty string (CloudFront same-origin), use endpoint directly
     // Otherwise, prepend baseUrl
     const url = this.baseUrl ? `${this.baseUrl}${endpoint}` : endpoint;
@@ -332,6 +350,11 @@ export class ApiClient {
     // The frontend should never be the layer that kills a request.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
+    const isSlowEndpoint =
+      endpoint.includes("/loans/funnel") ||
+      endpoint.includes("/dashboard/analytics") ||
+      endpoint.includes("/dashboard/insights") ||
+      (endpoint.includes("/api/predictions") && options.method === "POST");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
@@ -439,7 +462,8 @@ export class ApiClient {
           : isSlowEndpoint
           ? "60 seconds"
           : "30 seconds";
-        if (retries < 1) {
+        // Only retry GET requests on timeout — POST/PUT/DELETE are not idempotent
+        if (isGetRequest && retries < 1) {
           console.warn(
             `Request timeout for ${endpoint} after ${timeoutDuration}. Retrying... (attempt ${
               retries + 1
@@ -476,8 +500,9 @@ export class ApiClient {
         );
       }
 
-      // Handle network errors with retry
+      // Handle network errors with retry (only for GET — POST is not safe to retry)
       if (
+        isGetRequest &&
         (error.message?.includes("Failed to fetch") ||
           error.message?.includes("NetworkError") ||
           error.name === "TypeError" ||
@@ -950,6 +975,74 @@ export class ApiClient {
     });
 
     return ws;
+  }
+
+  // =========================================================================
+  // Tracked Insights (Watchlist)
+  // =========================================================================
+
+  async trackInsight(data: {
+    headline: string;
+    understory?: string;
+    metric_signature: any;
+    source_insight_id?: number;
+    source_type?: string;
+    tags?: string[];
+  }, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked${tenantParam}`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async getTrackedInsights(tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked${tenantParam}`);
+  }
+
+  async getTrackedInsightHistory(id: string, limit = 50, tenantId?: string | null) {
+    const tenantParam = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}/history?limit=${limit}${tenantParam}`);
+  }
+
+  async updateTrackedInsight(
+    id: string,
+    data: { status?: string; alert_threshold?: any; tags?: string[] },
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}${tenantParam}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteTrackedInsight(id: string, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}${tenantParam}`, { method: "DELETE" });
+  }
+
+  async insightChat(
+    insightContext: any,
+    messages: Array<{ role: string; content: string }>,
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
+    return this.request<{ response: string }>(
+      `/api/dashboard/insights/chat${tenantParam}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ insightContext, messages }),
+      }
+    );
+  }
+
+  async triggerAgentInsights(tenantId?: string | null, options?: { forceFresh?: boolean }) {
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenant_id", tenantId);
+    if (options?.forceFresh) params.set("fresh", "true");
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/api/dashboard/insights/generate-agent${qs}`, {
+      method: "POST",
+    });
   }
 }
 

@@ -42,6 +42,10 @@ import {
   Eraser,
   MessageSquare,
   StickyNote,
+  Globe,
+  Lock,
+  Users,
+  Check,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -72,6 +76,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useToast } from '@/hooks/use-toast';
 import { useCanvasHistory } from '@/hooks/useCanvasHistory';
 import { useCanvasPinStore } from '@/stores/canvasPinStore';
+import { useAuth } from '@/contexts/AuthContext';
 import { WidgetRenderer } from '@/components/workbench/canvas/WidgetRenderer';
 import { CanvasWidgetCard } from '@/components/workbench/canvas/CanvasWidgetCard';
 import {
@@ -458,9 +463,11 @@ export interface WorkbenchCanvasProps {
   tenantId?: string | null;
   /** Called when dirty state changes so parent can show indicator on tab */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Whether the current user is the owner of this canvas (undefined = assume owner for new canvases) */
+  isOwner?: boolean;
 }
 
-export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onDirtyChange }: WorkbenchCanvasProps) {
+export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onDirtyChange, isOwner: isOwnerProp }: WorkbenchCanvasProps) {
   const {
     items,
     annotations,
@@ -491,6 +498,14 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
   const [shareEmail, setShareEmail] = useState('');
   const [shareFavorited, setShareFavorited] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
+  // New visibility/sharing state
+  const [canvasVisibility, setCanvasVisibility] = useState<'private' | 'global' | 'shared'>('private');
+  const [sharedWithUserIds, setSharedWithUserIds] = useState<string[]>([]);
+  const [tenantUsers, setTenantUsers] = useState<Array<{ id: string; email: string; full_name?: string; role?: string }>>([]);
+  const [tenantUsersLoaded, setTenantUsersLoaded] = useState(false);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const { user } = useAuth();
+  const isOwner = isOwnerProp ?? true; // Default to true for new/own canvases
   const [activeAddGroup, setActiveAddGroup] = useState(() => DASHBOARD_SECTION_GROUPS[0]?.label ?? 'Insights');
   const [aiBackgroundOpen, setAiBackgroundOpen] = useState(false);
   const [aiBackgroundPrompt, setAiBackgroundPrompt] = useState('');
@@ -521,6 +536,7 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const lastSavedSnapshotRef = useRef<string>('');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualSavingRef = useRef(false);
 
   // Build a snapshot string for comparison
   const currentSnapshot = useMemo(() => {
@@ -557,9 +573,11 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
-    if (!canvasId || !isDirty) return;
+    if (!canvasId || !isDirty || !isOwner) return;
 
     autosaveTimerRef.current = setTimeout(async () => {
+      // Skip if a manual save is already in progress
+      if (manualSavingRef.current) return;
       const title = saveTitle.trim() || 'Untitled canvas';
       const content = {
         layoutVersion: 'freeform-v1',
@@ -1039,21 +1057,27 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
         }
         if (data.title) setSaveTitle(data.title);
         if (typeof data.favorited === 'boolean') setShareFavorited(data.favorited);
+        if (data.visibility) setCanvasVisibility(data.visibility);
+        if (Array.isArray(data.shared_with_user_ids)) setSharedWithUserIds(data.shared_with_user_ids);
         setCanvasId(data.id);
-        // Snapshot baseline for dirty-state tracking (after a tick so state is flushed)
+        // Snapshot baseline for dirty-state tracking.
+        // Use double-RAF to ensure React has flushed all state updates from the
+        // setItems / setAnnotations / etc. calls above before we capture the baseline.
         requestAnimationFrame(() => {
-          const shouldConvert2 = (content.layoutVersion as string | undefined) !== 'freeform-v1' && isLikelyGridLayout(content.layout ?? []);
-          const layoutForSnap = shouldConvert2
-            ? convertLayoutToPixels(content.layout ?? [], Math.max(width - 32, 480))
-            : (content.layout ?? []);
-          lastSavedSnapshotRef.current = JSON.stringify({
-            items: layoutForSnap,
-            annotations: content.annotations ?? [],
-            bg: content.background ?? canvasBackground,
-            uploads: content.uploadsMeta ?? [],
-            title: data.title ?? 'Untitled canvas',
+          requestAnimationFrame(() => {
+            const shouldConvert2 = (content.layoutVersion as string | undefined) !== 'freeform-v1' && isLikelyGridLayout(content.layout ?? []);
+            const layoutForSnap = shouldConvert2
+              ? convertLayoutToPixels(content.layout ?? [], Math.max(width - 32, 480))
+              : (content.layout ?? []);
+            lastSavedSnapshotRef.current = JSON.stringify({
+              items: layoutForSnap,
+              annotations: content.annotations ?? [],
+              bg: content.background ?? canvasBackground,
+              uploads: content.uploadsMeta ?? [],
+              title: data.title ?? 'Untitled canvas',
+            });
+            setSaveStatus('saved');
           });
-          setSaveStatus('saved');
         });
         onLoaded?.();
       } catch (err: any) {
@@ -2276,7 +2300,47 @@ Structure it as a narrative-first executive briefing:
       return;
     }
     setShareDialogOpen(true);
-  }, [canvasId, toast]);
+    // Lazy-load tenant users when dialog opens
+    if (!tenantUsersLoaded) {
+      (async () => {
+        try {
+          const data = await api.request<{ users: Array<{ id: string; email: string; full_name?: string; role?: string }> }>(
+            `/api/workbench/canvases/tenant-users${tenantQs}`,
+          );
+          setTenantUsers((data?.users ?? []).filter((u) => u.id !== user?.id));
+          setTenantUsersLoaded(true);
+        } catch {
+          // Silently fail — user picker will just be empty
+        }
+      })();
+    }
+  }, [canvasId, toast, tenantUsersLoaded, tenantQs, user?.id]);
+
+  const handleSaveVisibility = useCallback(async () => {
+    if (!canvasId) return;
+    setVisibilitySaving(true);
+    try {
+      await api.request(`/api/workbench/canvases/${canvasId}/visibility${tenantQs}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          visibility: canvasVisibility,
+          shared_with_user_ids: canvasVisibility === 'shared' ? sharedWithUserIds : [],
+        }),
+      });
+      toast({ title: 'Sharing updated', description: `Canvas is now ${canvasVisibility}.` });
+      setShareDialogOpen(false);
+    } catch (err) {
+      toast({ title: 'Failed to update sharing', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' });
+    } finally {
+      setVisibilitySaving(false);
+    }
+  }, [canvasId, canvasVisibility, sharedWithUserIds, tenantQs, toast]);
+
+  const toggleSharedUser = useCallback((userId: string) => {
+    setSharedWithUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
+    );
+  }, []);
 
   const handleSaveConfirm = useCallback(async () => {
     const title = saveTitle.trim() || 'Untitled canvas';
@@ -2287,6 +2351,7 @@ Structure it as a narrative-first executive briefing:
       background: canvasBackground,
       uploadsMeta: uploads,
     };
+    manualSavingRef.current = true;
     setIsSaving(true);
     setSaveStatus('saving');
     try {
@@ -2321,6 +2386,7 @@ Structure it as a narrative-first executive briefing:
       setSaveStatus('unsaved');
       toast({ title: 'Save failed', description: err instanceof Error ? err.message : 'Try again', variant: 'destructive' });
     } finally {
+      manualSavingRef.current = false;
       setIsSaving(false);
     }
   }, [canvasId, items, annotations, canvasBackground, uploads, saveTitle, toast, tenantQs, onSaved]);
@@ -2350,13 +2416,20 @@ Structure it as a narrative-first executive briefing:
         className="flex-1 min-w-0 flex flex-col overflow-hidden"
         style={canvasContainerStyle}
       >
+        {/* Read-only banner for non-owner canvases */}
+        {!isOwner && canvasId && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-300 text-xs font-medium">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span>Read-only — this canvas was shared with you by its owner.</span>
+          </div>
+        )}
         {/* Toolbar — sticky at top of canvas, always visible */}
         <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-1 overflow-x-auto py-1.5 px-3 border-b border-slate-200/70 dark:border-slate-700/70 bg-slate-50/80 dark:bg-slate-800/50 shrink-0 min-h-[44px] sticky top-0 z-20">
           <div className="flex items-center gap-1 flex-wrap md:flex-nowrap shrink-0">
             {!showReportBuilder && (<>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={() => undo()} disabled={!canUndo}>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={() => undo()} disabled={!canUndo || !isOwner}>
                   <Undo2 className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -2364,7 +2437,7 @@ Structure it as a narrative-first executive briefing:
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={() => redo()} disabled={!canRedo}>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={() => redo()} disabled={!canRedo || !isOwner}>
                   <Redo2 className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -2375,17 +2448,25 @@ Structure it as a narrative-first executive briefing:
             <input
               type="text"
               value={saveTitle}
-              onChange={(e) => setSaveTitle(e.target.value)}
+              onChange={(e) => isOwner && setSaveTitle(e.target.value)}
+              readOnly={!isOwner}
               onBlur={() => {
                 if (!saveTitle.trim()) setSaveTitle('Untitled canvas');
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
               }}
-              className="h-8 min-w-[120px] max-w-[260px] px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 bg-transparent border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-blue-400 dark:focus:border-blue-500 focus:ring-1 focus:ring-blue-400/30 rounded-md outline-none transition-colors truncate"
+              className={cn(
+                "h-8 min-w-[120px] max-w-[260px] px-2 py-1 text-sm font-medium text-slate-700 dark:text-slate-200 bg-transparent border border-transparent rounded-md outline-none transition-colors truncate",
+                isOwner
+                  ? "hover:border-slate-300 dark:hover:border-slate-600 focus:border-blue-400 dark:focus:border-blue-500 focus:ring-1 focus:ring-blue-400/30"
+                  : "cursor-default"
+              )}
               placeholder="Canvas name…"
-              title="Click to rename this canvas"
+              title={isOwner ? "Click to rename this canvas" : saveTitle}
             />
+            {isOwner && (
+            <>
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 shrink-0 mx-0.5" />
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2395,17 +2476,24 @@ Structure it as a narrative-first executive briefing:
               </TooltipTrigger>
               <TooltipContent side="bottom">Save</TooltipContent>
             </Tooltip>
-            {/* Autosave status indicator */}
-            {saveStatus === 'saving' && (
+            </>
+            )}
+            {/* Autosave status indicator (only for owners) */}
+            {isOwner && saveStatus === 'saving' && (
               <span className="text-[11px] text-amber-600 dark:text-amber-400 whitespace-nowrap animate-pulse">Saving…</span>
             )}
-            {saveStatus === 'saved' && canvasId && !isDirty && (
+            {isOwner && saveStatus === 'saved' && canvasId && !isDirty && (
               <span className="text-[11px] text-emerald-600 dark:text-emerald-400 whitespace-nowrap">Saved</span>
             )}
-            {saveStatus === 'unsaved' && canvasId && isDirty && (
+            {isOwner && saveStatus === 'unsaved' && canvasId && isDirty && (
               <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Unsaved changes</span>
             )}
-            {/* Share button hidden – not ready for release
+            {!isOwner && canvasId && (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex items-center gap-1">
+                <Lock className="h-3 w-3" /> View only
+              </span>
+            )}
+            {isOwner && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-slate-600 dark:text-slate-400" onClick={handleShareClick}>
@@ -2414,7 +2502,7 @@ Structure it as a narrative-first executive briefing:
               </TooltipTrigger>
               <TooltipContent side="bottom">Share</TooltipContent>
             </Tooltip>
-            */}
+            )}
             <input ref={backgroundImageInputRef} type="file" accept="image/*" onChange={handleBackgroundImageChange} className="hidden" aria-hidden />
             <DropdownMenu>
               <Tooltip>
@@ -2668,7 +2756,7 @@ Structure it as a narrative-first executive briefing:
                   size="icon"
                   className="h-8 w-8 shrink-0 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
                   onClick={() => setClearConfirmOpen(true)}
-                  disabled={!hasItems}
+                  disabled={!hasItems || !isOwner}
                 >
                   <Eraser className="h-4 w-4" />
                 </Button>
@@ -3269,54 +3357,135 @@ Structure it as a narrative-first executive briefing:
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Visibility selector */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Share scope
+                Visibility
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['private', 'team', 'public'] as const).map((scope) => (
-                  <Button
-                    key={scope}
-                    type="button"
-                    variant={shareScope === scope ? 'default' : 'outline'}
-                    className="h-8 text-xs capitalize"
-                    onClick={() => setShareScope(scope)}
-                  >
-                    {scope}
-                  </Button>
-                ))}
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                    canvasVisibility === 'private'
+                      ? 'border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800',
+                  )}
+                  onClick={() => setCanvasVisibility('private')}
+                >
+                  <Lock className="h-4 w-4 text-slate-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-slate-700 dark:text-slate-200">Private</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Only you can view and edit</div>
+                  </div>
+                  {canvasVisibility === 'private' && <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />}
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                    canvasVisibility === 'shared'
+                      ? 'border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800',
+                  )}
+                  onClick={() => setCanvasVisibility('shared')}
+                >
+                  <Users className="h-4 w-4 text-slate-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-slate-700 dark:text-slate-200">Specific people</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">Share with selected users (read-only)</div>
+                  </div>
+                  {canvasVisibility === 'shared' && <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />}
+                </button>
+                {/* Global option — only for admins */}
+                {(['super_admin', 'platform_admin', 'tenant_admin', 'admin'] as const).includes(user?.role as any) && (
+                <button
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                    canvasVisibility === 'global'
+                      ? 'border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/30'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800',
+                  )}
+                  onClick={() => setCanvasVisibility('global')}
+                >
+                  <Globe className="h-4 w-4 text-slate-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-slate-700 dark:text-slate-200">Global (entire tenant)</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">All users in this organization can view</div>
+                  </div>
+                  {canvasVisibility === 'global' && <Check className="h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0" />}
+                </button>
+                )}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Scope tags the link for private, team-only, or public sharing.
-              </p>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Optional PIN (added to link)
-              </label>
-              <Input
-                placeholder="e.g. 1234"
-                value={sharePin}
-                onChange={(e) => setSharePin(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Share with someone
-              </label>
-              <Input
-                placeholder="name@company.com"
-                value={shareEmail}
-                onChange={(e) => setShareEmail(e.target.value)}
-              />
-              <Button variant="outline" onClick={handleEmailLink} className="w-full">
-                Send email invite
+
+            {/* User picker — shown when visibility is 'shared' */}
+            {canvasVisibility === 'shared' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Share with
+                </label>
+                {tenantUsers.length > 0 ? (
+                  <div className="max-h-[200px] overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                    {tenantUsers.map((u) => {
+                      const selected = sharedWithUserIds.includes(u.id);
+                      return (
+                        <button
+                          key={u.id}
+                          type="button"
+                          className={cn(
+                            'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors',
+                            selected
+                              ? 'bg-violet-50 dark:bg-violet-900/20'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/50',
+                          )}
+                          onClick={() => toggleSharedUser(u.id)}
+                        >
+                          <div className={cn(
+                            'h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors',
+                            selected
+                              ? 'bg-violet-600 border-violet-600 text-white'
+                              : 'border-slate-300 dark:border-slate-600',
+                          )}>
+                            {selected && <Check className="h-3 w-3" />}
+                          </div>
+                          <div className="flex-1 min-w-0 truncate">
+                            <span className="text-slate-700 dark:text-slate-200">{u.full_name || u.email}</span>
+                            {u.full_name && <span className="ml-1.5 text-xs text-slate-400">{u.email}</span>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 py-2">
+                    {tenantUsersLoaded ? 'No users found in this tenant.' : 'Loading users...'}
+                  </p>
+                )}
+                {sharedWithUserIds.length > 0 && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {sharedWithUserIds.length} user{sharedWithUserIds.length !== 1 ? 's' : ''} selected
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2 pt-1">
+              <Button onClick={handleSaveVisibility} disabled={visibilitySaving} className="w-full">
+                {visibilitySaving ? 'Saving...' : 'Save sharing settings'}
               </Button>
             </div>
+            <div className="h-px bg-slate-200 dark:bg-slate-700" />
             <div className="flex flex-col gap-2">
-              <Button onClick={handleCopyShareLink} className="w-full">
-                Copy share link
+              <Button variant="outline" onClick={handleCopyShareLink} className="w-full gap-2">
+                <LinkIcon className="h-4 w-4" />
+                Copy link
+              </Button>
+              <Button variant="outline" onClick={handleEmailLink} className="w-full gap-2">
+                <Mail className="h-4 w-4" />
+                Email link
               </Button>
               <Button
                 variant={shareFavorited ? 'secondary' : 'outline'}
@@ -3325,17 +3494,6 @@ Structure it as a narrative-first executive briefing:
                 disabled={favoriteLoading}
               >
                 {shareFavorited ? 'Remove from bookmarks' : 'Add to bookmarks'}
-              </Button>
-            </div>
-            <div className="h-px bg-slate-200 dark:bg-slate-700" />
-            <div className="flex flex-col gap-2">
-              <Button variant="secondary" onClick={handleCopyEmbedCode} className="w-full gap-2">
-                <Code className="h-4 w-4" />
-                Copy frame embed
-              </Button>
-              <Button variant="secondary" onClick={handleDownloadHtmlPage} className="w-full gap-2">
-                <FileText className="h-4 w-4" />
-                Create HTML page
               </Button>
             </div>
           </div>

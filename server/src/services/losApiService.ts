@@ -6,6 +6,7 @@
 import { pool } from '../config/database.js';
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { getApiBaseUrl, getCredentials } from './mockLosHelper.js';
+import { runPostSyncHooks } from './hooks/postSyncHookService.js';
 
 export interface LOSConnection {
   id: string;
@@ -439,6 +440,19 @@ export async function syncLoansFromAPI(connectionId: string): Promise<SyncResult
        VALUES ($1, $2, 'api', 'success', $3, $4, $5, NOW())`,
       [connectionId, (connection as any).tenant_id, recordsSynced, recordsFailed, new Date(startTime)]
     );
+
+    // Fire post-sync hooks asynchronously
+    if (recordsSynced > 0) {
+      runPostSyncHooks({
+        tenantId: (connection as any).tenant_id,
+        tenantPool: pool,
+        connectionId,
+        syncType: "api",
+        recordsSynced,
+      }).catch((err) =>
+        console.error("[LOS API Sync] Post-sync hooks error:", err.message)
+      );
+    }
 
     return {
       success: true,

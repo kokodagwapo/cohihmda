@@ -15,6 +15,7 @@
 
 import pg from "pg";
 import { logInfo, logError, logWarn } from "./logger.js";
+import { normalizeEncompassFieldId } from "./encompassFieldMapper.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -546,6 +547,7 @@ async function importFieldSwaps(
         continue;
       }
 
+      const normalizedFieldId = normalizeEncompassFieldId(row.encompass_field_id);
       await client.query(
         `INSERT INTO public.encompass_field_swaps
            (los_connection_id, coheus_alias, encompass_field_id, swap_type, is_active)
@@ -554,7 +556,7 @@ async function importFieldSwaps(
            encompass_field_id = EXCLUDED.encompass_field_id,
            is_active = EXCLUDED.is_active,
            updated_at = NOW()`,
-        [connId, row.coheus_alias, row.encompass_field_id, row.swap_type, row.is_active ?? true],
+        [connId, row.coheus_alias, normalizedFieldId, row.swap_type, row.is_active ?? true],
       );
       result.imported++;
     } catch (error: any) {

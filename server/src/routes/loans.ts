@@ -49,6 +49,7 @@ import {
   isActorMissing,
   filterByChannel,
   buildChannelWhereClause,
+  buildChannelGroupCaseExpr,
   buildActorNotMissingClause,
   calcLoanRevenue,
   calcLoanComplexity,
@@ -348,51 +349,28 @@ router.get(
       const tenantPool = getTenantContext(req).tenantPool;
 
       // Get distinct channels with counts from actual data
-      // Channel grouping uses industry-standard definitions:
-      // - Retail = Direct origination (company's own loan officers)
-      // - TPO = Third Party Origination (brokers, wholesale, correspondent)
+      // Channel grouping: TPO requires BOTH a TPO channel pattern AND populated account_executive.
+      // Loans with a TPO channel but no AE are classified as Retail (brokered-retail).
+      const channelGroupExpr = buildChannelGroupCaseExpr();
       const result = await tenantPool.query(`
       SELECT 
         COALESCE(NULLIF(TRIM(channel), ''), '99-Missing') as channel,
         COUNT(*) as loan_count,
-        -- Consolidated channel group based on industry standards
-        CASE 
-          WHEN channel ILIKE '%retail%' THEN 'Retail'
-          WHEN channel ILIKE '%broker%' OR channel ILIKE '%brokered%' 
-               OR channel ILIKE '%wholesale%' OR channel ILIKE '%corresp%' 
-               OR channel ILIKE '%tpo%' THEN 'TPO'
-          WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
-          ELSE COALESCE(NULLIF(TRIM(channel), ''), 'Other')
-        END as channel_group
+        ${channelGroupExpr} as channel_group
       FROM public.loans 
       GROUP BY 
         COALESCE(NULLIF(TRIM(channel), ''), '99-Missing'),
-        CASE 
-          WHEN channel ILIKE '%retail%' THEN 'Retail'
-          WHEN channel ILIKE '%broker%' OR channel ILIKE '%brokered%' 
-               OR channel ILIKE '%wholesale%' OR channel ILIKE '%corresp%' 
-               OR channel ILIKE '%tpo%' THEN 'TPO'
-          WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
-          ELSE COALESCE(NULLIF(TRIM(channel), ''), 'Other')
-        END
+        ${channelGroupExpr}
       ORDER BY 
         CASE WHEN COALESCE(NULLIF(TRIM(channel), ''), '99-Missing') = '99-Missing' THEN 1 ELSE 0 END,
         COUNT(*) DESC
     `);
 
       // Get consolidated groups with totals
-      // Groups are derived from actual data, not hardcoded
       const groupResult = await tenantPool.query(`
       SELECT * FROM (
         SELECT 
-          CASE 
-            WHEN channel ILIKE '%retail%' THEN 'Retail'
-            WHEN channel ILIKE '%broker%' OR channel ILIKE '%brokered%' 
-                 OR channel ILIKE '%wholesale%' OR channel ILIKE '%corresp%' 
-                 OR channel ILIKE '%tpo%' THEN 'TPO'
-            WHEN channel IS NULL OR TRIM(channel) = '' THEN '99-Missing'
-            ELSE COALESCE(NULLIF(TRIM(channel), ''), 'Other')
-          END as channel_group,
+          ${channelGroupExpr} as channel_group,
           COUNT(*) as loan_count
         FROM public.loans 
         GROUP BY 1
@@ -1206,24 +1184,14 @@ router.get(
       }
 
       // Channel Group filter - consolidated channel (Retail, TPO, etc.)
-      // Fixed grouping: Retail = only retail, TPO = brokers, wholesale, correspondent
+      // TPO requires BOTH a TPO channel pattern AND populated account_executive.
+      // Loans with a TPO channel but no AE are classified as Retail.
       if (channelGroup) {
-        if (channelGroup === "Retail") {
-          conditions.push(`(channel ILIKE '%retail%')`);
-        } else if (channelGroup === "TPO") {
-          conditions.push(
-            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`,
-          );
-        } else if (channelGroup === "99-Missing") {
-          // Qlik convention: 99-Missing represents NULL or empty channel values
-          conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
-        } else if (channelGroup === "Other") {
-          // Other = not Retail, not TPO, and not missing
-          conditions.push(
-            `(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`,
-          );
+        const clause = buildChannelWhereClause(channelGroup);
+        if (clause) {
+          // buildChannelWhereClause returns "AND ..." — strip leading "AND " for conditions array
+          conditions.push(clause.replace(/^AND\s+/i, ""));
         }
-        // If channelGroup is 'All' or not recognized, don't add filter
       }
 
       // Out of Range Exclusion (Qlik default behavior)
@@ -1731,14 +1699,10 @@ router.get(
         return appDate >= effectiveStartDate && appDate <= effectiveEndDate;
       });
 
-      // Funded Loans - loans with funding_date or closing_date in the date range
+      // Funded Loans - loans with funding_date in the date range (Qlik: Funded Flag = funding_date IS NOT NULL)
       const fundedMTD = allLoans.filter((l) => {
-        const fundDate = l.funding_date
-          ? new Date(l.funding_date)
-          : l.closing_date
-            ? new Date(l.closing_date)
-            : null;
-        if (!fundDate) return false;
+        if (!l.funding_date) return false;
+        const fundDate = new Date(l.funding_date);
         return fundDate >= effectiveStartDate && fundDate <= effectiveEndDate;
       });
 
@@ -1890,20 +1854,12 @@ router.get(
       const params: any[] = [];
 
       // Channel Group filter - consolidated channel (Retail, TPO, etc.)
-      // Fixed grouping: Retail = only retail, TPO = brokers, wholesale, correspondent
+      // TPO requires BOTH a TPO channel pattern AND populated account_executive.
+      // Loans with a TPO channel but no AE are classified as Retail.
       if (channelGroup && channelGroup !== "All") {
-        if (channelGroup === "Retail") {
-          conditions.push(`(channel ILIKE '%retail%')`);
-        } else if (channelGroup === "TPO") {
-          conditions.push(
-            `(channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`,
-          );
-        } else if (channelGroup === "99-Missing") {
-          conditions.push(`(channel IS NULL OR TRIM(channel) = '')`);
-        } else if (channelGroup === "Other") {
-          conditions.push(
-            `(channel IS NOT NULL AND TRIM(channel) != '' AND channel NOT ILIKE '%retail%' AND channel NOT ILIKE '%brok%' AND channel NOT ILIKE '%whole%' AND channel NOT ILIKE '%corresp%')`,
-          );
+        const clause = buildChannelWhereClause(channelGroup);
+        if (clause) {
+          conditions.push(clause.replace(/^AND\s+/i, ""));
         }
       }
 
@@ -2202,8 +2158,9 @@ router.get(
           rate_lock_buy_side_base_price_rate
          FROM public.loans 
          WHERE tenant_id = $1
-           AND COALESCE(funding_date, closing_date) >= $2
-           AND COALESCE(funding_date, closing_date) <= $3
+           AND funding_date IS NOT NULL
+           AND funding_date >= $2
+           AND funding_date <= $3
            ${channelClause}`,
             [tenantId, startDateStr, endDateStr],
           ),
@@ -6564,22 +6521,26 @@ router.get(
       });
 
       // Build channel filter condition using corrected grouping
-      // Retail = only retail, TPO = brokers, wholesale, correspondent
-      let channelCondition = "";
+      // TPO requires BOTH a TPO channel pattern AND populated account_executive.
+      // Loans with a TPO channel but no AE are classified as Retail.
       const queryParams: any[] = [
         effectiveStartDate.toISOString().split("T")[0],
         effectiveEndDate.toISOString().split("T")[0],
       ];
 
+      let channelCondition = "";
       if (channelGroup) {
-        if (channelGroup === "Retail") {
-          channelCondition = `AND channel ILIKE '%retail%'`;
-        } else if (channelGroup === "TPO") {
-          channelCondition = `AND (channel ILIKE '%broker%' OR channel ILIKE '%brokered%' OR channel ILIKE '%wholesale%' OR channel ILIKE '%correspondent%' OR channel ILIKE '%corresp%' OR channel ILIKE '%tpo%')`;
-        } else if (channelGroup === "99-Missing") {
-          channelCondition = `AND (channel IS NULL OR TRIM(channel) = '')`;
-        } else if (channelGroup !== "All") {
-          // Individual channel value - exact match
+        channelCondition = buildChannelWhereClause(channelGroup);
+        // Handle individual channel exact-match (uses parameterized query)
+        if (
+          channelGroup !== "All" &&
+          channelGroup !== "Retail" &&
+          channelGroup !== "TPO" &&
+          channelGroup !== "99-Missing" &&
+          channelGroup !== "Other"
+        ) {
+          // buildChannelWhereClause uses string interpolation for the default case;
+          // override with parameterized query for safety
           channelCondition = `AND LOWER(TRIM(channel)) = LOWER($3)`;
           queryParams.push(channelGroup);
         }

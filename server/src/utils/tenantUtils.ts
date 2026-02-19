@@ -1,16 +1,18 @@
 import { pool } from '../config/database.js';
 
+const PLATFORM_ROLES = new Set(["super_admin", "platform_admin", "support"]);
+
 /**
  * Helper function to get tenant ID (supports super admins and auto-creates tenant if needed)
  * 
  * Resolution order:
- * 1. If queryTenantId is provided, use it
+ * 1. If queryTenantId is provided AND user is platform staff, use it
  * 2. Get tenant_id from user profile
  * 3. If user is super_admin, use Default Tenant
  * 4. If no tenant exists, create one automatically
  * 
  * @param userId - The user ID to look up
- * @param queryTenantId - Optional tenant ID from query parameters
+ * @param queryTenantId - Optional tenant ID from query parameters (only honoured for platform staff)
  * @param autoCreate - If true, automatically create a tenant if none exists (default: true)
  * @returns Tenant ID or null if not found and autoCreate is false
  */
@@ -19,9 +21,17 @@ export async function getTenantId(
   queryTenantId?: string,
   autoCreate: boolean = true
 ): Promise<string | null> {
-  // Check if tenant_id was provided in query
+  // Only platform staff may override the tenant via query param
   if (queryTenantId) {
-    return queryTenantId;
+    const roleResult = await pool.query(
+      'SELECT role FROM public.users WHERE id = $1',
+      [userId]
+    );
+    const userRole = roleResult.rows[0]?.role;
+    if (PLATFORM_ROLES.has(userRole)) {
+      return queryTenantId;
+    }
+    // Non-platform users: ignore the override and fall through to profile lookup
   }
 
   // Try to get from user profile

@@ -10,7 +10,10 @@
 import { pool } from '../../config/managementDatabase.js';
 import { logInfo, logError } from '../logger.js';
 
-const getFredApiKey = () => process.env.FRED_API_KEY;
+/** Read at call time so dotenv has already run (index.ts loads .env before first request). */
+function getFredApiKey(): string | undefined {
+  return process.env.FRED_API_KEY;
+}
 const FRED_API_BASE_URL = 'https://api.stlouisfed.org/fred/series/observations';
 const FRED_SERIES_ID = 'OBMMIC30YF'; // 30-Year Fixed Rate Conforming Mortgage Index
 
@@ -68,7 +71,7 @@ export async function fetchMarketRatesFromFRED(
     console.log('[FRED API] Series ID:', FRED_SERIES_ID);
     console.log('[FRED API] Date Range:', observationStart, 'to', observationEnd);
     console.log('[FRED API] API Key configured:', !!apiKey);
-    console.log('[FRED API] Full URL:', url.toString().replace(apiKey || '', '***REDACTED***'));
+    console.log('[FRED API] Full URL:', url.toString().replace(apiKey, '***REDACTED***'));
     logInfo(`Fetching market rates from FRED API (${observationStart} to ${observationEnd})`);
 
     const response = await fetch(url.toString());

@@ -47,13 +47,17 @@ $CONTAINER_MEMORY = 4096
 $DESIRED_COUNT = 2
 
 # Domain Configuration (coheus1.com subdomains)
-# See docs/deployment/HTTPS_AND_CERTIFICATES.md and COHEUS1_DOMAIN_SETUP.md.
 # Dev:  cohi-dev.coheus1.com (frontend), cohi-dev-api.coheus1.com (API/ALB)
 # Prod: cohi.coheus1.com (frontend), cohi-api.coheus1.com (API/ALB)
-$DOMAIN_NAME = "cohi.coheus1.com"
-$CERTIFICATE_ARN = "arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63"  # CloudFront (us-east-1); must cover $DOMAIN_NAME
+if ($ENVIRONMENT -eq "prod") {
+    $DOMAIN_NAME = "cohi.coheus1.com"
+    $BACKEND_ORIGIN_DOMAIN = "cohi-api.coheus1.com"
+} else {
+    $DOMAIN_NAME = "cohi-dev.coheus1.com"
+    $BACKEND_ORIGIN_DOMAIN = "cohi-dev-api.coheus1.com"
+}
+$CERTIFICATE_ARN = "arn:aws:acm:us-east-1:339712788893:certificate/93d8a90f-bf38-4e8b-80b4-4027d6fcaa63"  # CloudFront (us-east-1); covers *.coheus1.com
 $ALB_CERTIFICATE_ARN = "arn:aws:acm:us-east-2:339712788893:certificate/ed3ea4da-effe-47ba-a974-a61964930484"  # ALB (us-east-2); catch-all for *.coheus1.com
-$BACKEND_ORIGIN_DOMAIN = "cohi-api.coheus1.com"  # Custom API domain; CloudFront uses this with HTTPS. Leave empty to use ALB DNS (HTTP only).
 $BACKEND_ORIGIN_PROTOCOL = "https-only"  # Use "https-only" when ALB has cert and BACKEND_ORIGIN_DOMAIN is set.
 
 # Alert Configuration

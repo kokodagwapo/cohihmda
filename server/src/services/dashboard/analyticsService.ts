@@ -24,6 +24,8 @@ import {
   getActorSqlExpression,
   getActorLabelForChannel,
   buildChannelWhereClause,
+  buildChannelGroupCaseExpr,
+  buildFundedFilter,
 } from "../../utils/scorecard-utils.js";
 import { getStaffingUnitTargets, type StaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 
@@ -124,6 +126,15 @@ export interface Insight {
   bucketPriority?: string;
   impact?: { type?: string; estimated_dollars?: number | null; units_affected?: number | null };
   evidence?: { metrics?: string[]; comparisons?: string[] };
+  // ETM Framework fields
+  what_changed?: string;
+  why?: string;
+  business_impact?: string;
+  risk_if_ignored?: string;
+  recommended_action?: string;
+  owner?: string;
+  generation_method?: "pipeline" | "agent";
+  detail_data?: any;
 }
 
 /**
@@ -158,13 +169,13 @@ export async function getFunnelData(
     const locked = parseInt(data.locked) || 0;
     const funded = parseInt(data.funded) || 0;
 
-    // Pull-through Rate: Applications that reached investor purchase (excludes active loans)
+    // Pull-through Rate: originated (status-based) / completed (canonical definition)
     const pullThroughResult = await tenantPool.query(
-      `SELECT 
-        COUNT(CASE WHEN investor_purchase_date IS NOT NULL 
-          AND current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-          / NULLIF(COUNT(CASE WHEN application_date IS NOT NULL 
-          AND current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate
+      `SELECT
+        COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%')
+          THEN 1 END)::float
+          / NULLIF(COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+          THEN 1 END), 0) * 100 as pull_through_rate
        FROM public.loans
        WHERE EXTRACT(YEAR FROM COALESCE(application_date, created_at)) = $1`,
       [parseInt(year)]
@@ -492,6 +503,9 @@ export async function getLeaderboardData(
     const branchFilter =
       conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
 
+    // Channel-aware funded filter: Retail uses rate_lock > 0, TPO/All do not.
+    const fundedFilter = buildFundedFilter(filters?.channelGroup, "l");
+
     // Query performance metrics grouped by the appropriate actor field
     // For TPO: account_executive, For Retail: loan_officer
     // Uses COALESCE to show 'Unassigned' for missing values
@@ -503,23 +517,23 @@ export async function getLeaderboardData(
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
         ) as loans_started,
-        -- Originated/Closed: Pull Through Originated Flag = Yes
+        -- Funded units: channel-aware funded filter
         COUNT(*) FILTER (
-          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
-            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
-            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+          WHERE ${fundedFilter}
+            AND l.funding_date >= $1::date
+            AND l.funding_date <= $2::date
         ) as loans_closed,
-        -- Total volume for period (sum of loan amounts)
+        -- Total volume for period (funded loans only — same filter as units)
         COALESCE(SUM(l.loan_amount) FILTER (
-          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
-            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
-            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+          WHERE ${fundedFilter}
+            AND l.funding_date >= $1::date
+            AND l.funding_date <= $2::date
         ), 0) as total_volume,
-        -- Total revenue: Using tenant-specific revenue expression (or default)
+        -- Total revenue: Using tenant-specific revenue expression (funded loans)
         COALESCE(SUM(${revenueExpression}) FILTER (
-          WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
-            AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
-            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+          WHERE ${fundedFilter}
+            AND l.funding_date >= $1::date
+            AND l.funding_date <= $2::date
         ), 0) as total_revenue,
         -- Cycle time: App date to Closing/Funding date
         AVG(CASE 
@@ -532,24 +546,17 @@ export async function getLeaderboardData(
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
         ) as avg_cycle_time,
-        -- Pull-through rate: Originated / (Originated + Withdrawn + Denied)
+        -- Pull-through rate: originated (status-based) / completed
         COUNT(*) FILTER (
           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
-            AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+            AND (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
         )::float 
         / NULLIF(
           COUNT(*) FILTER (
             WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
               AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
-              AND l.application_date IS NOT NULL
-              AND (
-                LOWER(l.current_loan_status) LIKE '%originated%' 
-                OR LOWER(l.current_loan_status) LIKE '%purchased%'
-                OR LOWER(l.current_loan_status) LIKE '%withdraw%'
-                OR LOWER(l.current_loan_status) LIKE '%denied%'
-                OR LOWER(l.current_loan_status) LIKE '%not accepted%'
-              )
+              AND l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
           ), 0
         ) * 100 as pull_through_rate
        FROM public.loans l
@@ -562,13 +569,14 @@ export async function getLeaderboardData(
        ) > 0
        ORDER BY 
          COUNT(*) FILTER (
-           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
-             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
-             AND (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+           WHERE ${fundedFilter}
+             AND l.funding_date >= $1::date
+             AND l.funding_date <= $2::date
          ) DESC,
          SUM(l.loan_amount) FILTER (
-           WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
-             AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+           WHERE ${fundedFilter}
+             AND l.funding_date >= $1::date
+             AND l.funding_date <= $2::date
          ) DESC
        LIMIT 10`,
       params
@@ -594,11 +602,12 @@ export async function getLeaderboardData(
       `SELECT 
         ${actorExpression} as name,
         COUNT(*) FILTER (
-          WHERE (LOWER(l.current_loan_status) LIKE '%originated%' OR LOWER(l.current_loan_status) LIKE '%purchased%')
+          WHERE ${fundedFilter}
+            AND l.funding_date >= $1::date
+            AND l.funding_date <= $2::date
         ) as loans_closed
        FROM public.loans l
-       WHERE COALESCE(l.started_date, l.application_date, l.created_at) >= $1
-         AND COALESCE(l.started_date, l.application_date, l.created_at) <= $2
+       WHERE 1=1
          ${prevBranchFilter}
          ${prevChannelClause}
        GROUP BY ${actorExpression}`,
@@ -686,11 +695,10 @@ export async function getTopTieringRankings(
         AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
           THEN DATE(l.closing_date) - DATE(l.application_date) 
           ELSE NULL END) as avg_cycle_time,
-        -- Pull-through rate (excludes active loans)
-        COUNT(CASE WHEN l.investor_purchase_date IS NOT NULL 
-          AND l.current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-          / NULLIF(COUNT(CASE WHEN l.application_date IS NOT NULL 
-          AND l.current_loan_status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate,
+        -- Pull-through rate: originated (status-based) / completed
+        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END)::float 
+          / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+          THEN 1 END), 0) * 100 as pull_through_rate,
         -- Profitability metrics
         SUM(l.loan_amount) as total_volume,
         AVG(l.loan_amount) as avg_loan_amount,
@@ -990,37 +998,34 @@ export async function getClosingFalloutForecast(
       startDate ? [startDate] : []
     );
 
-    // Pull-through rate by loan type
-    // Formula: Count(Investor Purchase Date) / Count(Application Date) where Active Loan Flag = 'No' GROUP BY Loan Type
+    // Pull-through rate by loan type: originated (status-based) / completed
     const pullThroughByTypeQuery = startDate
       ? `SELECT 
           loan_type,
-          COUNT(CASE WHEN investor_purchase_date IS NOT NULL 
-            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-            / NULLIF(COUNT(CASE WHEN application_date IS NOT NULL 
-            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate,
-          COUNT(CASE WHEN application_date IS NOT NULL 
-            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) as historical_count
+          COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END)::float 
+            / NULLIF(COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+            THEN 1 END), 0) * 100 as pull_through_rate,
+          COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+            THEN 1 END) as historical_count
          FROM public.loans
          WHERE application_date >= $1
            AND loan_type IS NOT NULL
          GROUP BY loan_type
-         HAVING COUNT(CASE WHEN application_date IS NOT NULL 
-           AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) > 0
+         HAVING COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+           THEN 1 END) > 0
          ORDER BY pull_through_rate DESC`
       : `SELECT 
           loan_type,
-          COUNT(CASE WHEN investor_purchase_date IS NOT NULL 
-            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END)::float 
-            / NULLIF(COUNT(CASE WHEN application_date IS NOT NULL 
-            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END), 0) * 100 as pull_through_rate,
-          COUNT(CASE WHEN application_date IS NOT NULL 
-            AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) as historical_count
+          COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END)::float 
+            / NULLIF(COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+            THEN 1 END), 0) * 100 as pull_through_rate,
+          COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+            THEN 1 END) as historical_count
          FROM public.loans
          WHERE loan_type IS NOT NULL
          GROUP BY loan_type
-         HAVING COUNT(CASE WHEN application_date IS NOT NULL 
-           AND status IN ('withdrawn', 'cancelled', 'denied', 'declined', 'funded', 'closed', 'originated') THEN 1 END) > 0
+         HAVING COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
+           THEN 1 END) > 0
          ORDER BY pull_through_rate DESC`;
 
     const pullThroughResult = await tenantPool.query(
@@ -1178,7 +1183,8 @@ export async function getInsights(
     tenantId?: string;
     forceRefresh?: boolean;
     userAccessFilter?: LoanAccessFilter;
-    channelGroup?: string; // Channel filter (Retail, TPO, or specific channel)
+    channelGroup?: string;
+    generationMethod?: string;
   } = {}
 ): Promise<{
   insights: Insight[];
@@ -1208,12 +1214,13 @@ export async function getInsights(
     tenantId,
     forceRefresh = false,
     channelGroup,
+    generationMethod,
   } = options;
 
   // Try reading persisted insights from the database first (fast path)
   if (useLLM) {
     try {
-      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup);
+      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup, generationMethod);
 
       if (stored && stored.insights.length > 0) {
         console.log(
@@ -1245,6 +1252,15 @@ export async function getInsights(
             bucketPriority: ins.priority,
             impact: ins.impact,
             evidence: ins.evidence,
+            // ETM fields
+            what_changed: ins.what_changed,
+            why: ins.why,
+            business_impact: ins.business_impact,
+            risk_if_ignored: ins.risk_if_ignored,
+            recommended_action: ins.recommended_action,
+            owner: ins.owner,
+            generation_method: ins.generation_method || "pipeline",
+            detail_data: (ins as any).detail_data || null,
           })
         );
 
@@ -1393,8 +1409,7 @@ export async function getInsights(
     `
     SELECT 
       COUNT(CASE 
-        WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
-        AND (l.funding_date IS NOT NULL OR l.closing_date IS NOT NULL OR l.investor_purchase_date IS NOT NULL)
+        WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
         THEN 1 
       END)::float / 
       NULLIF(COUNT(CASE 
@@ -1650,14 +1665,13 @@ export async function getInsights(
           SUM(l.loan_amount) as total_volume,
           AVG(CASE WHEN l.closing_date IS NOT NULL AND l.application_date IS NOT NULL 
             THEN DATE(l.closing_date) - DATE(l.application_date) ELSE NULL END) as avg_cycle_time,
-          -- Pull-through: funded loans / total non-active loans (excludes active from denominator)
+          -- Pull-through: originated (status-based) / completed
           COUNT(CASE 
-            WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
-            AND (l.funding_date IS NOT NULL OR l.current_loan_status IN ('funded', 'closed', 'originated'))
+            WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%')
             THEN 1 
           END)::float / 
           NULLIF(COUNT(CASE 
-            WHEN l.current_loan_status NOT IN ('Active Loan', 'active', 'locked', 'submitted', 'approved')
+            WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
             THEN 1 
           END), 0) * 100 as pull_through_rate
          FROM public.employees e
@@ -1718,8 +1732,8 @@ export async function getInsights(
           SUM(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
           COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN 1 END) as still_active,
           SUM(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN loan_amount ELSE 0 END) as still_active_volume,
-          COUNT(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN 1 END) as originated,
-          SUM(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as originated_volume,
+          COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END) as originated,
+          SUM(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN loan_amount ELSE 0 END) as originated_volume,
           COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
           SUM(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
@@ -1731,8 +1745,8 @@ export async function getInsights(
           SUM(CASE WHEN current_loan_status IN ('inquiry', 'started') THEN loan_amount ELSE 0 END) as loans_started_volume,
           COUNT(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN 1 END) as still_active,
           SUM(CASE WHEN current_loan_status IN ('inquiry', 'started', 'locked', 'submitted', 'approved', 'Active Loan') THEN loan_amount ELSE 0 END) as still_active_volume,
-          COUNT(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN 1 END) as originated,
-          SUM(CASE WHEN current_loan_status IN ('funded', 'closed', 'originated') OR funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as originated_volume,
+          COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END) as originated,
+          SUM(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN loan_amount ELSE 0 END) as originated_volume,
           COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
           SUM(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
@@ -2228,7 +2242,7 @@ export async function refreshInsights(
     channelGroup,
   });
 
-  // Generate categorized insights (4 parallel LLM calls → persist to DB)
+  // Generate categorized insights (3-pass pipeline: Generator → Validator → Curator → persist to DB)
   const result = await generateCategorizedInsights(
     metricsPayload,
     tenantPool,
@@ -2265,6 +2279,7 @@ export async function refreshInsights(
       bucketPriority: ins.priority,
       impact: ins.impact,
       evidence: ins.evidence,
+      generation_method: ins.generation_method || "pipeline",
     })
   );
 
@@ -2296,6 +2311,108 @@ export async function refreshInsights(
       },
     },
   };
+}
+
+/**
+ * Refresh insights for channel variants that actually have data.
+ * Queries the tenant's loans table to detect which channel groups (Retail, TPO)
+ * are populated, then only runs insight generation for those + "All".
+ * Returns a summary of how many insights were generated per channel.
+ */
+// Per-tenant pipeline generation lock
+const activePipelineGenerations = new Map<string, number>();
+
+export async function refreshAllChannels(
+  tenantPool: pg.Pool,
+  dateFilter: string = "ytd",
+  options: { tenantId?: string } = {}
+): Promise<{
+  channels: string[];
+  results: Record<string, { count: number; generatedAt: string }>;
+}> {
+  const { tenantId } = options;
+  const lockKey = tenantId || "__default__";
+
+  // Concurrency guard
+  const existingStart = activePipelineGenerations.get(lockKey);
+  if (existingStart && Date.now() - existingStart < 10 * 60 * 1000) {
+    const elapsed = Math.round((Date.now() - existingStart) / 1000);
+    console.warn(`[Insights] Pipeline refresh already running for tenant ${lockKey} (${elapsed}s) — skipping duplicate`);
+    return { channels: [], results: {} };
+  }
+  activePipelineGenerations.set(lockKey, Date.now());
+
+  console.log(
+    `[Insights] Batch-refreshing insights for active channels (dateFilter: ${dateFilter}, tenant: ${tenantId || "default"})`
+  );
+
+  try {
+    // Detect which channel groups actually have loans for this tenant
+    const channelGroupExpr = buildChannelGroupCaseExpr();
+    let activeGroups: string[] = [];
+    try {
+      const channelResult = await tenantPool.query(`
+        SELECT ${channelGroupExpr} AS channel_group, COUNT(*) AS cnt
+        FROM public.loans
+        GROUP BY 1
+        HAVING COUNT(*) > 0
+      `);
+      activeGroups = channelResult.rows
+        .map((r: any) => r.channel_group as string)
+        .filter((g: string) => g === "Retail" || g === "TPO");
+    } catch (err: any) {
+      console.warn(`[Insights] Failed to detect active channels, falling back to all: ${err.message}`);
+      activeGroups = ["Retail", "TPO"];
+    }
+
+    // Always run "All" (no channel filter). Only add Retail/TPO if both exist.
+    // If the tenant only has one channel group, "All" and that channel would produce
+    // identical insights, so skip the per-channel run.
+    const channelConfigs: Array<{ key: string; channelGroup?: string }> = [
+      { key: "All", channelGroup: undefined },
+    ];
+
+    if (activeGroups.length > 1) {
+      for (const group of activeGroups) {
+        channelConfigs.push({ key: group, channelGroup: group });
+      }
+      console.log(`[Insights] Multiple channel groups detected (${activeGroups.join(", ")}), generating per-channel insights`);
+    } else {
+      console.log(`[Insights] Single channel group detected (${activeGroups[0] || "none"}), skipping per-channel split (All is sufficient)`);
+    }
+
+    const settledResults = await Promise.allSettled(
+      channelConfigs.map(({ channelGroup }) =>
+        refreshInsights(tenantPool, dateFilter, {
+          tenantId,
+          channelGroup,
+        })
+      )
+    );
+
+    const results: Record<string, { count: number; generatedAt: string }> = {};
+    for (let i = 0; i < channelConfigs.length; i++) {
+      const key = channelConfigs[i].key;
+      const settled = settledResults[i];
+      if (settled.status === "fulfilled") {
+        results[key] = {
+          count: settled.value.insights.length,
+          generatedAt: settled.value.generatedAt,
+        };
+        console.log(`[Insights] Channel "${key}": ${settled.value.insights.length} insights generated`);
+      } else {
+        results[key] = { count: 0, generatedAt: new Date().toISOString() };
+        console.error(`[Insights] Channel "${key}" FAILED:`, settled.reason);
+      }
+    }
+
+    return {
+      channels: channelConfigs.map((c) => c.key),
+      results,
+    };
+  } finally {
+    activePipelineGenerations.delete(lockKey);
+  }
 }
 
 /**
@@ -2349,9 +2466,10 @@ export async function getDashboardOverview(
           COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked,
           SUM(CASE WHEN current_loan_status = 'Active Loan' THEN loan_amount ELSE 0 END) as active_volume,
           SUM(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as closed_volume,
-          AVG(CASE WHEN closing_date IS NOT NULL AND application_date IS NOT NULL 
-            THEN DATE(closing_date) - DATE(application_date) ELSE NULL END) as avg_cycle_time,
-          COUNT(CASE WHEN funding_date IS NOT NULL THEN 1 END)::float / NULLIF(COUNT(*), 0) * 100 as pull_through_rate,
+          AVG(CASE WHEN funding_date IS NOT NULL AND application_date IS NOT NULL 
+            THEN DATE(funding_date::date) - DATE(application_date) ELSE NULL END) as avg_cycle_time,
+          COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END)::float
+            / NULLIF(COUNT(CASE WHEN current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0) * 100 as pull_through_rate,
           COUNT(CASE WHEN credit_pull_date IS NOT NULL THEN 1 END) as credit_pulls
         FROM public.loans
         ${startDate ? "WHERE application_date >= $1" : ""}
@@ -2367,8 +2485,8 @@ export async function getDashboardOverview(
           SUM(CASE WHEN application_date IS NOT NULL THEN loan_amount ELSE 0 END) as loans_started_volume,
           COUNT(CASE WHEN current_loan_status = 'Active Loan' THEN 1 END) as still_active,
           SUM(CASE WHEN current_loan_status = 'Active Loan' THEN loan_amount ELSE 0 END) as still_active_volume,
-          COUNT(CASE WHEN funding_date IS NOT NULL OR current_loan_status IN ('funded', 'closed', 'originated') THEN 1 END) as originated,
-          SUM(CASE WHEN funding_date IS NOT NULL OR current_loan_status IN ('funded', 'closed', 'originated') THEN loan_amount ELSE 0 END) as originated_volume,
+          COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END) as originated,
+          SUM(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN loan_amount ELSE 0 END) as originated_volume,
           COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
           SUM(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN loan_amount ELSE 0 END) as fallout_withdrawn_volume,
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as fallout_denied,
@@ -2697,7 +2815,7 @@ export async function getFinancialModelingBaseline(
     const marginBps =
       totalVolume > 0 ? Math.round((totalRevenue / totalVolume) * 10000) : 0;
 
-    // Query 2: Pull-through = % of applications (in period) that funded. Denominator = all applications with application_date in range (not just terminal), so we don't get 100% when only funded loans are synced.
+    // Query 2: Pull-through = funded / completed (canonical definition, excludes active loans)
     const ptParams = startDate && endDate ? [startDate, endDate, ...(accessFilter?.params ?? [])] : [...(accessFilter?.params ?? [])];
     const ptFilterClause = accessFilter?.sql
       ? ` AND (${accessFilter.sql.replace(/\$(\d+)/g, (_, n) => `$${3 + parseInt(n, 10) - accessFilter.paramOffset}`)})`
@@ -2705,8 +2823,8 @@ export async function getFinancialModelingBaseline(
     const pullThroughQuery = startDate && endDate
       ? `
       SELECT
-        COUNT(CASE WHEN l.funding_date IS NOT NULL THEN 1 END)::float
-          / NULLIF(COUNT(*), 0) * 100 as pull_through_rate
+        COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END)::float
+          / NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0) * 100 as pull_through_rate
       FROM public.loans l
       WHERE l.application_date >= $1 AND l.application_date <= $2
         ${ptFilterClause}

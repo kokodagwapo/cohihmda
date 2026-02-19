@@ -1930,18 +1930,47 @@ router.post(
         return res.status(400).json({ error: "SQL expression is required" });
       }
 
-      // Validate the SQL expression by running it against a limited set of loans
-      const testQuery = `
-        SELECT 
-          COUNT(*) as loans_tested,
-          COALESCE(SUM(${sql_expression}), 0) as total_revenue,
-          COALESCE(AVG(${sql_expression}), 0) as avg_revenue
-        FROM public.loans
-        WHERE funding_date IS NOT NULL
-        LIMIT 1000
-      `;
+      // --- SQL injection prevention ---
+      const FORBIDDEN_KEYWORDS = /\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|UNION|EXEC|EXECUTE|INTO|FROM|WHERE|SET|VALUES)\b/i;
+      const FORBIDDEN_CHARS = /[;'"\\]|--/;
+      if (FORBIDDEN_KEYWORDS.test(sql_expression) || FORBIDDEN_CHARS.test(sql_expression)) {
+        return res.status(400).json({
+          error: "Invalid SQL expression: only column references and arithmetic operators (+, -, *, /) are allowed.",
+        });
+      }
+      // Only allow: column names (with optional table prefix), numbers, decimals,
+      // arithmetic operators, parentheses, CASE/WHEN/THEN/ELSE/END, COALESCE/NULLIF,
+      // CAST, AS, and whitespace.
+      const ALLOWED_PATTERN = /^[\w\s.+\-*/(),]+$/;
+      if (!ALLOWED_PATTERN.test(sql_expression)) {
+        return res.status(400).json({
+          error: "Invalid SQL expression: contains disallowed characters.",
+        });
+      }
 
-      const result = await tenantPool.query(testQuery);
+      // Run in a read-only transaction with a statement timeout as defense-in-depth
+      const client = await tenantPool.connect();
+      let result;
+      try {
+        await client.query("BEGIN READ ONLY");
+        await client.query("SET LOCAL statement_timeout = '5s'");
+        const testQuery = `
+          SELECT 
+            COUNT(*) as loans_tested,
+            COALESCE(SUM(${sql_expression}), 0) as total_revenue,
+            COALESCE(AVG(${sql_expression}), 0) as avg_revenue
+          FROM public.loans
+          WHERE funding_date IS NOT NULL
+          LIMIT 1000
+        `;
+        result = await client.query(testQuery);
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
 
       res.json({
         result: {

@@ -31,9 +31,13 @@ import knowledgeCenterRoutes from "./knowledgeCenter.js";
 import shareLinksRoutes from "./shareLinks.js";
 import workbenchRoutes from "./workbench.js";
 import reportRoutes from "./reports.js";
+import researchRoutes from "./research.js";
+import trackedInsightRoutes from "./trackedInsights.js";
+import onboardingRoutes from "./onboarding.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
+import { globalTenantContext } from "../middleware/tenantContext.js";
 import crypto from "crypto";
 
 export function setupRoutes(app: Express) {
@@ -46,6 +50,11 @@ export function setupRoutes(app: Express) {
     setupMockLosApi(app, "/mock-los");
     console.log("✅ Mock LOS API enabled - use mock API endpoints for testing");
   }
+
+  // Global tenant context middleware — defense-in-depth layer that silently
+  // attaches tenant context to authenticated requests so new routes get it
+  // by default even if the developer forgets attachTenantContext.
+  app.use("/api", globalTenantContext);
 
   app.use("/api/auth", authRoutes);
   app.use("/api/auth/cognito", cognitoAuth);
@@ -81,6 +90,9 @@ export function setupRoutes(app: Express) {
   app.use("/api/share-links", shareLinksRoutes);
   app.use("/api/workbench/canvases", workbenchRoutes); // Workbench canvas CRUD (tenant DB)
   app.use("/api/workbench/reports", reportRoutes); // Report generation (PPTX/PDF)
+  app.use("/api/research", researchRoutes); // Research Analyst agentic system
+  app.use("/api/insights/tracked", trackedInsightRoutes); // Tracked insights watchlist
+  app.use("/api/onboarding", onboardingRoutes); // Onboarding analysis agent
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {
@@ -117,11 +129,12 @@ export function setupRoutes(app: Express) {
     // Check database connection with timeout (non-blocking)
     if (process.env.SKIP_DB !== "true") {
       try {
-        // Use Promise.race to timeout database check after 2 seconds
+        // Use Promise.race to timeout database check after 5 seconds
+        // (2s was too tight — page load fires 20+ concurrent queries that can saturate the pool)
         const dbCheck = Promise.race([
           pool.query("SELECT NOW(), current_database(), version()"),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Database query timeout")), 2000)
+            setTimeout(() => reject(new Error("Database query timeout")), 5000)
           ),
         ]);
 

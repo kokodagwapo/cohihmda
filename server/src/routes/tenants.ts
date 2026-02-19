@@ -5,7 +5,7 @@
 
 import { Router } from "express";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requireRole, requirePlatformStaff } from "../middleware/rbac.js";
 import { apiLimiter } from "../middleware/rateLimiter.js";
 import {
   createTenant,
@@ -29,7 +29,7 @@ const router = Router();
 router.post(
   "/",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
@@ -104,7 +104,7 @@ router.post(
 router.get(
   "/",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
@@ -124,7 +124,7 @@ router.get(
 router.get(
   "/:id",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
@@ -148,7 +148,7 @@ router.get(
 router.get(
   "/slug/:slug",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
