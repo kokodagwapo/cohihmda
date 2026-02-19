@@ -18,6 +18,7 @@ export function LoanDetailTableWidget({
   config,
 }: WidgetRenderProps<LoanDetailListResponse | null>) {
   const periodLabel = config?.periodLabel as string | undefined;
+  const filterSummary = config?.filterSummary as string | undefined;
   const columns = config?.customColumns as ColumnDef[] | undefined;
   return (
     <div className="h-full w-full flex flex-col min-h-0 overflow-hidden">
@@ -28,6 +29,7 @@ export function LoanDetailTableWidget({
           error={error}
           fillHeight
           periodLabel={periodLabel}
+          filterSummary={filterSummary}
           columns={columns}
         />
       </div>

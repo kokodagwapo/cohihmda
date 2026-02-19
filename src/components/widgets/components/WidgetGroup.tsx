@@ -597,6 +597,19 @@ function getLoanDetailPeriodLabel(periodSelection: PeriodSelection | undefined):
   return undefined;
 }
 
+/** Build comma-separated filter summary for Loan Detail subtitle (e.g. "Branch: X, Loan Purpose: Y"). */
+function getLoanDetailFilterSummary(filters: SectionFilters): string | undefined {
+  const parts: string[] = [];
+  if (filters.branch && filters.branch !== 'all') parts.push(`Branch: ${filters.branch}`);
+  if (filters.loanOfficer && filters.loanOfficer !== 'all') parts.push(`Loan Officer: ${filters.loanOfficer}`);
+  if (filters.dynamicFilters?.length) {
+    for (const df of filters.dynamicFilters) {
+      if (df.value && df.value !== 'all') parts.push(`${df.label}: ${df.value}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(', ') : undefined;
+}
+
 function GridCellRegistryWidget({
   defId,
   canvasItemId,
@@ -650,9 +663,11 @@ function GridCellRegistryWidget({
     isLoanDetail
       ? getLoanDetailPeriodLabel(filters.periodSelection)
       : undefined;
+  const filterSummary = isLoanDetail ? getLoanDetailFilterSummary(filters) : undefined;
   const config = {
     ...definition.config,
     ...(periodLabel != null && { periodLabel }),
+    ...(filterSummary != null && { filterSummary }),
     ...(customColumns != null && { customColumns }),
   };
 

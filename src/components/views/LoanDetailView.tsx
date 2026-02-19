@@ -37,6 +37,8 @@ export interface LoanDetailViewProps {
   fillHeight?: boolean;
   /** When set (workbench only), subtitle shows "Loans from {periodLabel}." instead of default. */
   periodLabel?: string | null;
+  /** When set (workbench only), comma-separated filter labels for subtitle: "filtered by _____, _____". */
+  filterSummary?: string | null;
   /** When set (workbench only), use these columns instead of default. Enables per-widget column editor. */
   columns?: ColumnDef[] | null;
 }
@@ -152,6 +154,51 @@ function formatCellValue(value: unknown): string {
     return value;
   }
   return String(value);
+}
+
+/** True when cell should be shown bold+red: LTV > 110 or DTI > 70. */
+function shouldHighlightCellAsAlert(col: ColumnDef, row: LoanDetailRow): boolean {
+  if (col.field === "ltv_ratio") {
+    const v = (row as unknown as Record<string, unknown>).ltv_ratio;
+    const n = v != null ? Number(v) : NaN;
+    return !Number.isNaN(n) && n > 110;
+  }
+  if (col.field === "be_dti_ratio") {
+    const v = (row as unknown as Record<string, unknown>).be_dti_ratio;
+    const n = v != null ? Number(v) : NaN;
+    return !Number.isNaN(n) && n > 70;
+  }
+  return false;
+}
+
+/** True when cell should be shown red only (no bold): FICO < 580 and not 0. */
+function shouldHighlightFicoLow(col: ColumnDef, row: LoanDetailRow): boolean {
+  if (col.field === "fico_score") {
+    const v = (row as unknown as Record<string, unknown>).fico_score;
+    const n = v != null ? Number(v) : NaN;
+    return !Number.isNaN(n) && n > 0 && n < 580;
+  }
+  return false;
+}
+
+/** True when cell should be shown red only (no bold): LTV > 97 and ≤ 110. (LTV > 110 uses alert style.) */
+function shouldHighlightLtvWarning(col: ColumnDef, row: LoanDetailRow): boolean {
+  if (col.field === "ltv_ratio") {
+    const v = (row as unknown as Record<string, unknown>).ltv_ratio;
+    const n = v != null ? Number(v) : NaN;
+    return !Number.isNaN(n) && n > 97 && n <= 110;
+  }
+  return false;
+}
+
+/** True when cell should be shown red only (no bold): DTI >= 50 and ≤ 70. (DTI > 70 uses alert style.) */
+function shouldHighlightDtiWarning(col: ColumnDef, row: LoanDetailRow): boolean {
+  if (col.field === "be_dti_ratio") {
+    const v = (row as unknown as Record<string, unknown>).be_dti_ratio;
+    const n = v != null ? Number(v) : NaN;
+    return !Number.isNaN(n) && n >= 50 && n <= 70;
+  }
+  return false;
 }
 
 /** Locked Flag = Yes when lock date exists and lock expiration date is after today; No when before today. */
@@ -356,6 +403,7 @@ export function LoanDetailView({
   error: errorProp,
   fillHeight = false,
   periodLabel,
+  filterSummary,
   columns: columnsProp,
 }: LoanDetailViewProps) {
   const { theme } = useTheme();
@@ -473,9 +521,11 @@ export function LoanDetailView({
               Loan Detail
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {periodLabel
-                ? `Loans from ${periodLabel}. Click on a column header to sort by that column.`
-                : 'All loans. Click on a column header to sort by that column.'}
+              {(() => {
+                const base = periodLabel ? `Loans from ${periodLabel}` : 'All loans';
+                const withFilters = filterSummary ? `${base}, filtered by ${filterSummary}` : base;
+                return `${withFilters}. Click on a column header to sort by that column.`;
+              })()}
             </p>
           </div>
           {!isControlled && (
@@ -607,10 +657,20 @@ export function LoanDetailView({
                     >
                       {columnsToUse.map((col) => {
                         const display = getCellDisplay(col, row, wacFormatted);
+                        const isAlert = shouldHighlightCellAsAlert(col, row);
+                        const isFicoLow = shouldHighlightFicoLow(col, row);
+                        const isLtvWarning = shouldHighlightLtvWarning(col, row);
+                        const isDtiWarning = shouldHighlightDtiWarning(col, row);
+                        const cellClass =
+                          isAlert
+                            ? "font-bold text-red-600 dark:text-red-400"
+                            : isFicoLow || isLtvWarning || isDtiWarning
+                              ? "text-red-600 dark:text-red-400"
+                              : textTd;
                         return (
                           <div
                             key={col.id}
-                            className={`whitespace-nowrap py-3 px-4 text-sm ${textTd}`}
+                            className={`whitespace-nowrap py-3 px-4 text-sm ${cellClass}`}
                             role="cell"
                           >
                             {display}
