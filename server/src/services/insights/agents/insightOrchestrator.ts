@@ -85,7 +85,8 @@ export function isGenerationRunning(tenantId: string): { running: boolean; start
 export async function runInsightGeneration(
   tenantId: string,
   tenantPool: pg.Pool,
-  onProgress?: OnProgress
+  onProgress?: OnProgress,
+  options?: { forceFresh?: boolean }
 ): Promise<InsightGenerationResult> {
   // Concurrency guard — reject if already running for this tenant
   const existing = isGenerationRunning(tenantId);
@@ -113,7 +114,7 @@ export async function runInsightGeneration(
   };
 
   try {
-    emit("init", `Starting agent-driven insight generation for tenant ${tenantId}`);
+    emit("init", `Starting agent-driven insight generation for tenant ${tenantId}${options?.forceFresh ? " (force-fresh — ignoring previous headlines)" : ""}`);
 
     // Resolve API key
     const apiKey = await getOpenAIKey(tenantId);
@@ -129,8 +130,10 @@ export async function runInsightGeneration(
       emit("context", `Knowledge base context loaded (${knowledgeContext.length} chars)`);
     }
 
-    // Fetch previous insight headlines (to avoid repetition)
-    const previousHeadlines = await fetchPreviousHeadlines(tenantPool);
+    // Fetch previous insight headlines (to avoid repetition) — skip when force-fresh
+    const previousHeadlines = options?.forceFresh
+      ? []
+      : await fetchPreviousHeadlines(tenantPool);
 
     // Fetch tracked insights (so planner knows what users care about)
     const trackedInsights = await fetchTrackedInsights(tenantPool);

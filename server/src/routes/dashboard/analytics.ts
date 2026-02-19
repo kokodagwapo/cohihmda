@@ -288,9 +288,12 @@ router.post(
 
       const tenantContext = getTenantContext(req);
 
+      const forceFresh = req.query.fresh === "true";
       const result = await runInsightGeneration(
         tenantContext.tenantId,
-        tenantContext.tenantPool
+        tenantContext.tenantPool,
+        undefined,
+        forceFresh ? { forceFresh: true } : undefined
       );
 
       if (!result.success && result.error?.includes("already in progress")) {

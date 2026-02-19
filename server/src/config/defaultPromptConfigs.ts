@@ -420,10 +420,10 @@ HARD MINIMUM: You MUST output at least 15 insights, ideally 16-20. If you return
 CURATION RULES:
 
 1. BUCKET DIVERSITY — HARD REQUIREMENT. Your output MUST contain:
-   - 3-5 insights with sentiment "positive" (maps to "What's Working" bucket)
-   - 3-5 insights with sentiment "warning" (maps to "Needs Attention" bucket)
-   - 3-5 insights with sentiment "critical" (maps to "Critical" bucket)
-   - 2-4 insights with sentiment "neutral" (maps to "Context & Trends" bucket)
+   - 3-5 insights with sentiment "positive" (maps to Level 3 — Strategic Review)
+   - 3-5 insights with sentiment "warning" (maps to Level 2 — Monitor Closely)
+   - 3-5 insights with sentiment "critical" (maps to Level 1 — Immediate Action Required)
+   - 2-4 insights with sentiment "neutral" (maps to Level 4 — Informational)
    EVERY bucket MUST have at least 2 insights. If you cannot fill a sentiment bucket, you MUST state why in a "bucket_gaps" field.
    This is the MOST IMPORTANT rule. An output with all one sentiment is a FAILURE.
 

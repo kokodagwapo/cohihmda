@@ -713,8 +713,9 @@ IMPORTANT: These are the specific risk pockets where performance has worsened mo
 - Active Pipeline Size: ${metrics.pipeline.activeLoans} loans
 
 DATA QUALITY AWARENESS:
-- The "active pipeline" count above includes ALL loans with status='Active Loan', but many may be stale records not closed out in the LOS. Loans with application dates > 6 months old are likely abandoned. When analyzing active pipeline metrics (lock expirations, missing fields, exposure), consider whether the issue is a genuine pipeline risk or simply stale records. If a large portion of "active" loans have very old application dates, frame the finding as a data hygiene issue rather than a pipeline risk.
-- If you discover that critical fields (lock dates, closing dates, etc.) are missing on a large % of active loans, consider whether those loans were ever truly in process or are just unclosed applications. "88% of active loans lack lock data" may really mean "the lender has hundreds of stale applications that should be withdrawn in Encompass."`;
+- Active pipeline metrics above are based on current_loan_status = 'Active Loan' AND application_date IS NOT NULL. Loans without application_date are pre-excluded data artifacts — do not investigate or report on them.
+- Even within this filtered set, many loans may be stale (application_date > 6 months old). When analyzing pipeline metrics (lock expirations, missing fields, exposure), consider whether the issue is a genuine pipeline risk or stale records that should be closed out in Encompass.
+- If critical fields (lock dates, closing dates) are missing on a large % of genuinely active loans, consider whether those loans were ever truly locked or are early-stage applications that never progressed.`;
 }
 
 function buildPersonnelSections(metrics: InsightMetricsPayload, channelGroup?: string): string {
@@ -1060,7 +1061,8 @@ IMPORTANT: Use 36M baselines to determine whether current metrics represent stru
 - Active Pipeline Size: ${metrics.pipeline.activeLoans} loans
 
 DATA QUALITY AWARENESS:
-- The "active pipeline" count above includes ALL loans with status='Active Loan', but many may be stale records not closed out in the LOS. Loans with application dates > 6 months old are likely abandoned. When analyzing active pipeline metrics, consider whether the issue is a genuine pipeline risk or simply stale records that should be withdrawn in Encompass.`;
+- Active pipeline metrics above are based on current_loan_status = 'Active Loan' AND application_date IS NOT NULL. Loans without application_date are pre-excluded data artifacts — do not investigate or report on them.
+- Even within this filtered set, many loans may be stale (application_date > 6 months old). Consider whether pipeline risk findings are driven by genuinely active loans or by stale records that should be withdrawn in Encompass.`;
 }
 
 /** Build a domain-specific prompt: shared context + domain sections. */

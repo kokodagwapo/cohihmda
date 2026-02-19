@@ -139,7 +139,7 @@ RULES:
 - Query the public.loans table (alias as l)
 - Use CURRENT_DATE for date references, not hardcoded dates
 - Be precise with status filters:
-  - Active: current_loan_status = 'Active Loan'
+  - Active: current_loan_status = 'Active Loan' AND application_date IS NOT NULL (loans without application_date are data artifacts, not real pipeline)
   - Funded/Originated: current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%'
   - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
   - Denied: current_loan_status ILIKE '%Denied%'
@@ -151,17 +151,18 @@ RULES:
 - Include NULL handling: COALESCE, NULLIF where appropriate
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
 
-DATA QUALITY AWARENESS (CRITICAL):
-- "Active Loan" status does NOT always mean genuinely in-process. Many lenders fail to close out loans in their LOS (Encompass), leaving stale records with status='Active Loan' and application dates months or even years old. These are NOT real pipeline — they are LOS housekeeping failures.
-- Before analyzing the "active pipeline," always check the age distribution. A quick sanity check: COUNT loans WHERE current_loan_status = 'Active Loan' AND application_date < CURRENT_DATE - INTERVAL '180 days'. If a significant portion of "active" loans are 6+ months old, the pipeline is polluted with stale records.
-- When reporting on active pipeline (volume, lock expirations, risk exposure, etc.), consider filtering to genuinely active loans (e.g. application_date within the last 120-180 days) or at minimum segment and call out the stale portion. An "active" loan from 14 months ago with no lock date is almost certainly abandoned, not a real lock expiration risk.
-- If you find data quality issues (missing critical fields, stale statuses, impossible dates, etc.), CALL THEM OUT prominently. Data quality findings are often MORE valuable than the metric itself — they tell the lender what to fix in their LOS workflows.
-- Common data quality red flags to watch for:
-  - High % of active loans with no lock_date or lock_expiration_date (may indicate they were never locked, not a "missing data" risk)
-  - Active loans with application_date > 6 months old (likely stale/abandoned, not closed out in LOS)
-  - NULL or zero values in critical fields (loan_amount, interest_rate) on supposedly active loans
-  - Dates that don't make logical sense (funding_date before application_date, closing_date in the future for funded loans)
-- When a finding is primarily driven by a data quality issue, frame it as such. "88% of active loans have no lock expiration" is more likely "the lender doesn't consistently record lock data or close out stale applications" than "88% of the pipeline has unknown lock risk."
+ACTIVE PIPELINE DEFINITION (CRITICAL — READ BEFORE EVERY QUERY):
+- The active pipeline filter is: current_loan_status = 'Active Loan' AND application_date IS NOT NULL. This is non-negotiable. EVERY query touching active loans MUST include both conditions.
+- Loans with NULL application_date are pre-excluded artifacts (bulk imports, test files, incomplete records). They do not exist for analysis purposes. Do NOT query them, count them, report on them, or mention them in findings. Do NOT write insights about "X% of active loans missing application_date" — that is a known data artifact, not a discovery.
+- Even among loans that pass this filter, many may be stale (application_date > 6 months old). Consider segmenting by recency when relevant — an "active" loan from 14 months ago is likely abandoned.
+
+DATA QUALITY AWARENESS:
+- Focus data quality analysis on loans that PASS the active filter (have application_date IS NOT NULL). Within that set, look for:
+  - Stale loans: application_date > 6 months old (likely abandoned, not closed out in LOS)
+  - Missing lock dates on loans that should be locked by their milestone stage
+  - Impossible date sequences (funding_date before application_date, closing_date in the future)
+  - NULL or zero values in critical fields (loan_amount, interest_rate) on genuinely active loans
+- When a finding is driven by a data quality issue within the real pipeline, frame it as such and be specific about the business impact.
 
 CONVERSION METRIC TIME WINDOWS (IMPORTANT):
 - Pull-through, fallout, and conversion rates are cohort-completion metrics — they only make sense when most loans in the cohort have had time to reach a terminal status (funded, withdrawn, denied, etc.)

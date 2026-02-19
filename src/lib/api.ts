@@ -1035,9 +1035,12 @@ export class ApiClient {
     );
   }
 
-  async triggerAgentInsights(tenantId?: string | null) {
-    const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
-    return this.request(`/api/dashboard/insights/generate-agent${tenantParam}`, {
+  async triggerAgentInsights(tenantId?: string | null, options?: { forceFresh?: boolean }) {
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenant_id", tenantId);
+    if (options?.forceFresh) params.set("fresh", "true");
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/api/dashboard/insights/generate-agent${qs}`, {
       method: "POST",
     });
   }

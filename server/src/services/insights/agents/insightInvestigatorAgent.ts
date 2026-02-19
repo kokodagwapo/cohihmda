@@ -83,10 +83,11 @@ RULES:
 - Only SELECT queries (CTEs allowed). Query public.loans (alias: l)
 - Use CURRENT_DATE for dates, never hardcoded dates
 - Status filters:
-  - Active: current_loan_status = 'Active Loan'
+  - Active: current_loan_status = 'Active Loan' AND application_date IS NOT NULL
   - Funded: current_loan_status ILIKE '%Originated%' OR ILIKE '%purchased%'
   - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
   - Denied: current_loan_status ILIKE '%Denied%'
+- CRITICAL: Loans with NULL application_date are pre-excluded data artifacts. EVERY query on active loans MUST include application_date IS NOT NULL. Do NOT investigate, count, or report on loans missing application_date — that is a known data artifact, not a finding.
 - Pull-through: funded / completed * 100
 - Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100
 - PostgreSQL: DATE - DATE = integer days. Use ::date cast for date subtraction.
@@ -100,7 +101,7 @@ INSIGHT QUALITY STANDARDS:
 - Headlines should be max 45 words — punchy and actionable.
 - Summaries should be 2-3 sentences with specific numbers and comparisons.
 - If the data doesn't show anything significant, set confidence to "low" and say so honestly. Do NOT manufacture an insight.
-- Include a suggestedBucket: "critical" (immediate action needed), "attention" (concerning trend), "working" (positive signal), or "context" (informational).
+- Include a suggestedBucket: "critical" (Level 1 — immediate action required), "attention" (Level 2 — monitor closely), "working" (Level 3 — strategic review / positive signal), or "context" (Level 4 — informational).
 - Include metricSignature: the single most representative SQL query and its key result fields — this will be used to track this insight over time.
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If you set out to investigate "missing milestones" but found milestones are fine and the real issue is stale loans, the title should be about stale loans, not missing milestones. The title is the headline users see — it must be accurate to the evidence.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.

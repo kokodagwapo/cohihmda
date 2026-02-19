@@ -119,11 +119,11 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 const BUCKET_OPTIONS = [
-  { value: "all", label: "All Buckets" },
-  { value: "working", label: "What's Working" },
-  { value: "attention", label: "Needs Attention" },
-  { value: "critical", label: "Critical" },
-  { value: "context", label: "Context & Trends" },
+  { value: "all", label: "All Levels" },
+  { value: "critical", label: "Immediate Action Required" },
+  { value: "attention", label: "Monitor Closely" },
+  { value: "working", label: "Strategic Review" },
+  { value: "context", label: "Informational" },
 ];
 
 const PROMPT_OPTIONS = [

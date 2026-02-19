@@ -21,6 +21,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   RotateCw,
+  RotateCcw,
   Plus,
   X,
   ThumbsUp,
@@ -69,7 +70,7 @@ interface BucketConfig {
 const BUCKET_ORDER: BucketConfig[] = [
   {
     id: "critical",
-    label: "Critical",
+    label: "Immediate Action Required",
     icon: AlertCircle,
     gradient: "from-rose-500 to-red-600",
     borderColor: "border-rose-200/70 dark:border-rose-800/50",
@@ -80,11 +81,11 @@ const BUCKET_ORDER: BucketConfig[] = [
     badgeText: "text-rose-700 dark:text-rose-300",
     dotColor: "bg-rose-500",
     stripColor: "border-l-rose-500",
-    emptyMessage: "No critical issues detected",
+    emptyMessage: "No immediate action items detected",
   },
   {
     id: "attention",
-    label: "Needs Attention",
+    label: "Monitor Closely",
     icon: AlertTriangle,
     gradient: "from-amber-400 to-orange-500",
     borderColor: "border-amber-200/70 dark:border-amber-800/50",
@@ -95,11 +96,11 @@ const BUCKET_ORDER: BucketConfig[] = [
     badgeText: "text-amber-700 dark:text-amber-300",
     dotColor: "bg-amber-400",
     stripColor: "border-l-amber-400",
-    emptyMessage: "Nothing flagged for attention",
+    emptyMessage: "Nothing flagged for close monitoring",
   },
   {
     id: "working",
-    label: "What's Working",
+    label: "Strategic Review",
     icon: CheckCircle2,
     gradient: "from-blue-500 to-indigo-600",
     borderColor: "border-blue-200/70 dark:border-blue-800/50",
@@ -110,11 +111,11 @@ const BUCKET_ORDER: BucketConfig[] = [
     badgeText: "text-blue-700 dark:text-blue-300",
     dotColor: "bg-blue-500",
     stripColor: "border-l-blue-500",
-    emptyMessage: "No standout performance flagged",
+    emptyMessage: "No strategic review items flagged",
   },
   {
     id: "context",
-    label: "Context & Trends",
+    label: "Informational",
     icon: TrendingUp,
     gradient: "from-slate-400 to-slate-500",
     borderColor: "border-slate-200/70 dark:border-slate-700/50",
@@ -125,7 +126,7 @@ const BUCKET_ORDER: BucketConfig[] = [
     badgeText: "text-slate-600 dark:text-slate-400",
     dotColor: "bg-slate-400",
     stripColor: "border-l-slate-300 dark:border-l-slate-600",
-    emptyMessage: "No contextual trends available",
+    emptyMessage: "No informational insights available",
   },
 ];
 
@@ -771,11 +772,11 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     [loadInsightsByMethod]
   );
 
-  const handleAgentGenerate = useCallback(async () => {
+  const handleAgentGenerate = useCallback(async (forceFresh = false) => {
     if (isAgentGenerating) return;
     setIsAgentGenerating(true);
     try {
-      await api.triggerAgentInsights(selectedTenantId);
+      await api.triggerAgentInsights(selectedTenantId, forceFresh ? { forceFresh: true } : undefined);
       await loadInsightsByMethod("agent");
     } catch (err: any) {
       if (err.message?.includes("409") || err.message?.includes("already in progress")) {
@@ -783,7 +784,6 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
       } else {
         console.error("Agent generation failed:", err);
       }
-      // Even on error/conflict, try loading whatever is in the DB
       try { await loadInsightsByMethod("agent"); } catch {}
     } finally {
       setIsAgentGenerating(false);
@@ -1093,20 +1093,31 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
             </button>
           ))}
 
-          {/* Agent tab: generate button */}
+          {/* Agent tab: generate buttons */}
           {activeTab === "agent" && isAdmin && (
-            <button
-              onClick={handleAgentGenerate}
-              disabled={isAgentGenerating || insightsLoading}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
-            >
-              {isAgentGenerating ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="w-3.5 h-3.5" />
-              )}
-              {isAgentGenerating ? "Generating..." : "Generate Insights"}
-            </button>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                onClick={() => handleAgentGenerate(false)}
+                disabled={isAgentGenerating || insightsLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
+              >
+                {isAgentGenerating ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                {isAgentGenerating ? "Generating..." : "Generate"}
+              </button>
+              <button
+                onClick={() => handleAgentGenerate(true)}
+                disabled={isAgentGenerating || insightsLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50"
+                title="Regenerate from scratch, ignoring all previous insight context"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Fresh
+              </button>
+            </div>
           )}
         </div>
 

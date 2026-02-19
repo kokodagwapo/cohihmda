@@ -129,11 +129,12 @@ export function setupRoutes(app: Express) {
     // Check database connection with timeout (non-blocking)
     if (process.env.SKIP_DB !== "true") {
       try {
-        // Use Promise.race to timeout database check after 2 seconds
+        // Use Promise.race to timeout database check after 5 seconds
+        // (2s was too tight — page load fires 20+ concurrent queries that can saturate the pool)
         const dbCheck = Promise.race([
           pool.query("SELECT NOW(), current_database(), version()"),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Database query timeout")), 2000)
+            setTimeout(() => reject(new Error("Database query timeout")), 5000)
           ),
         ]);
 

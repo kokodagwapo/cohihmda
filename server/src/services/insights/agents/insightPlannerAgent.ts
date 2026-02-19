@@ -45,7 +45,7 @@ Your output is a JSON object:
 }
 
 RULES:
-- Generate 8-15 questions, prioritized by likely business impact. More is better — the evaluator will filter.
+- Generate 12-18 questions, prioritized by likely business impact. More is better — the evaluator will filter. Include a mix: 4-5 risk/problem questions, 2-3 positive/performance questions, 2-3 trend/benchmark questions, and 2-3 informational/context questions (portfolio composition, product mix, geographic distribution).
 - Each question must be independently investigable with SQL queries against the loans table (alias: l)
 - Approaches MUST be specific: column names, CURRENT_DATE-based date ranges, GROUP BY strategies
 - DO NOT repeat topics from the previous insight batch unless the data has likely changed
@@ -56,23 +56,22 @@ RULES:
 - If a field has very low population (<20%), don't base questions on it — mention it as a data quality note instead
 - Categories should be descriptive (e.g., "pipeline_velocity", "officer_performance", "lock_expiration_risk"), NOT generic ("general", "other")
 - PostgreSQL syntax: DATE - DATE returns integer days. Use CURRENT_DATE for today.
-- Active loan status: current_loan_status = 'Active Loan'
+- Active loan status: current_loan_status = 'Active Loan' AND application_date IS NOT NULL (loans without application_date are data artifacts, not real pipeline)
 - Funded: current_loan_status ILIKE '%Originated%' OR ILIKE '%purchased%'
 - Withdrawn: current_loan_status ILIKE '%Withdrawn%'
 - Denied: current_loan_status ILIKE '%Denied%'
 - NEVER suggest queries that modify data
 
-BALANCED COVERAGE — INCLUDE "WHAT'S WORKING":
+BALANCED COVERAGE — INCLUDE STRATEGIC REVIEW (POSITIVE SIGNALS):
 - A good insight batch is not all problems. Always include 2-3 questions that look for POSITIVE signals: personnel improving, pull-through trending up, cycle times shortening, strong branch performance, successful loan products, officers exceeding targets.
 - Compare current-period performance against prior periods (90D vs prior 90D, YTD vs prior YTD) to find improvements, not just declines.
-- Examples of "what's working" questions: "Which loan officers improved their pull-through rate most vs prior quarter?", "Are any branches showing faster cycle times YTD vs prior year?", "Which product types have the strongest funded volume growth?"
-- The evaluator has a "working" bucket for positive insights — you need to feed it questions that can discover good news.
+- Examples: "Which loan officers improved their pull-through rate most vs prior quarter?", "Are any branches showing faster cycle times YTD vs prior year?", "Which product types have the strongest funded volume growth?"
+- The evaluator has a Level 3 (Strategic Review) bucket for positive insights — you need to feed it questions that can discover good news.
 
-DATA QUALITY — ALWAYS PLAN FOR IT:
-- Include at least 1-2 data quality investigation questions in every batch. Data quality findings are often the most actionable insights.
-- "Active Loan" status is often polluted with stale records — loans that were never closed out in the LOS. An "active" loan with an application date 12 months ago is almost certainly abandoned. When planning pipeline investigations, instruct the analyst to check the age distribution of active loans and separate genuinely active pipeline (recent application dates) from stale records.
-- Common data quality topics worth investigating: stale active loans (application_date > 6 months), missing critical fields on active pipeline (lock dates, closing dates), impossible date sequences, loans stuck in an early milestone for an abnormal duration.
-- When data quality issues are found, they should be surfaced AS the insight — not buried as a caveat. "37% of your active pipeline has application dates older than 6 months — these are likely abandoned loans not closed out in Encompass" is a high-value finding.`;
+DATA QUALITY — FOCUS ON REAL PIPELINE:
+- The active pipeline filter (current_loan_status = 'Active Loan' AND application_date IS NOT NULL) is already applied. Loans without application_date are pre-excluded data artifacts — do NOT plan questions about missing application_date or count those records. That is a known data artifact, not a discovery.
+- Within the real active pipeline (loans WITH application_date), look for genuine data quality issues: stale loans (application_date > 6 months old — likely abandoned), missing lock dates on loans that should be locked, impossible date sequences, loans stuck in early milestones for abnormally long periods.
+- Data quality findings about the REAL pipeline are valuable. "40% of your active pipeline is 6+ months old and likely abandoned" is actionable. But "X% of Active Loan records have no application_date" is NOT — those are just import artifacts.`;
 
 // ============================================================================
 // Training Examples

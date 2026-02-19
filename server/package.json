@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --ignore ./logs --ignore ./node_modules src/index.ts",
     "prebuild": "node scripts/generate-version.js",
     "build": "tsc",
     "postbuild": "node scripts/generate-version.js",

@@ -676,6 +676,7 @@ async function fetchCreditRiskLoans(
       SELECT loan_id, COALESCE(loan_amount, 0) as loan_amount
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND (
           (fico_score IS NOT NULL AND CAST(fico_score AS DECIMAL) < 620)
           OR (ltv_ratio IS NOT NULL AND CAST(ltv_ratio AS DECIMAL) > 95)
@@ -859,7 +860,7 @@ async function fetchProductBreakdown(
       `
       SELECT
         COALESCE(NULLIF(TRIM(loan_type), ''), 'Other') AS product_type,
-        COUNT(*) FILTER (WHERE current_loan_status = 'Active Loan') AS active,
+        COUNT(*) FILTER (WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL) AS active,
         COUNT(*) FILTER (
           WHERE current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
             AND application_date >= $1 AND application_date <= $2
@@ -887,6 +888,7 @@ async function fetchProductBreakdown(
         ), 0) AS funded_volume,
         COUNT(*) FILTER (
           WHERE current_loan_status = 'Active Loan'
+            AND application_date IS NOT NULL
             AND (
               (fico_score IS NOT NULL AND CAST(fico_score AS DECIMAL) < 620)
               OR (ltv_ratio IS NOT NULL AND CAST(ltv_ratio AS DECIMAL) > 95)
@@ -895,7 +897,7 @@ async function fetchProductBreakdown(
         ) AS high_risk_credit
       FROM public.loans
       WHERE (
-        current_loan_status = 'Active Loan'
+        (current_loan_status = 'Active Loan' AND application_date IS NOT NULL)
         OR (application_date >= $1 AND application_date <= $2)
       )
         ${channelClause}
@@ -958,6 +960,7 @@ async function fetchClosingLateRisk(
              (estimated_closing_date - CURRENT_DATE) as days_to_close
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND estimated_closing_date IS NOT NULL
         AND estimated_closing_date <= CURRENT_DATE + INTERVAL '10 days'
         AND estimated_closing_date >= CURRENT_DATE
@@ -1154,6 +1157,7 @@ async function fetchLockExpirationExposure(
              (lock_expiration_date - CURRENT_DATE) as days_to_expiry
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND lock_date IS NOT NULL
         AND lock_expiration_date IS NOT NULL
         AND lock_expiration_date <= CURRENT_DATE + INTERVAL '7 days'
@@ -1212,6 +1216,7 @@ async function fetchTridExposure(
              (estimated_closing_date - CURRENT_DATE) as days_to_close
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND estimated_closing_date IS NOT NULL
         AND estimated_closing_date <= CURRENT_DATE + INTERVAL '5 days'
         AND estimated_closing_date >= CURRENT_DATE
@@ -1315,6 +1320,7 @@ async function fetchConditionBacklog(
       SELECT loan_id, COALESCE(number_of_conditions, 0) as conditions
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND number_of_conditions IS NOT NULL
         AND number_of_conditions > 0
         ${channelClause}

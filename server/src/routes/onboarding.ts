@@ -59,7 +59,7 @@ router.post(
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res: Response) => {
-    const { connectionId } = req.params;
+    const connectionId = req.params.connectionId as string;
     const { tenantPool, tenantId } = getTenantContext(req);
 
     const strategy: SamplingStrategy =
@@ -89,7 +89,7 @@ router.post(
         connectionId,
         tenantPool,
         emit,
-        strategy
+        strategy,
       );
 
       // Cache for chat phase
@@ -105,7 +105,7 @@ router.post(
     }
 
     if (!clientDisconnected) res.end();
-  }
+  },
 );
 
 // ============================================================================
@@ -117,7 +117,7 @@ router.post(
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res: Response) => {
-    const { connectionId } = req.params;
+    const connectionId = req.params.connectionId as string;
     const { tenantPool, tenantId } = getTenantContext(req);
     const { message, chatHistory } = req.body || {};
 
@@ -143,7 +143,8 @@ router.post(
     });
 
     // Retrieve cached analysis (or empty)
-    const cachedAnalysis = analysisCache.get(`${tenantId}:${connectionId}`) || null;
+    const cachedAnalysis =
+      analysisCache.get(`${tenantId}:${connectionId}`) || null;
 
     try {
       await runOnboardingChat({
@@ -166,7 +167,7 @@ router.post(
     }
 
     if (!clientDisconnected) res.end();
-  }
+  },
 );
 
 export default router;
