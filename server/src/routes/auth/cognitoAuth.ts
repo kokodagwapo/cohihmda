@@ -507,17 +507,17 @@ async function findOrCreateSsoUser(
     if (PLATFORM_JIT_DOMAINS.includes(emailDomain)) {
       logInfo("[CognitoAuth] JIT provisioning new platform user as super_admin", { email, domain: emailDomain });
       
-      // Create new platform user with 'super_admin' role - full access to all tenants and features
       const newPlatformUser = await mgmtPool.query(
-        `INSERT INTO coheus_users (email, full_name, role, is_active, encrypted_password, last_login_at)
-         VALUES ($1, $2, 'super_admin', true, $3, NOW())
+        `INSERT INTO coheus_users (email, full_name, role, is_active, encrypted_password, cognito_sub, last_login_at)
+         VALUES ($1, $2, 'super_admin', true, $3, $4, NOW())
          RETURNING id, email, full_name, role, is_active`,
         [
           email,
           userInfo.fullName ||
             `${userInfo.firstName || ""} ${userInfo.lastName || ""}`.trim() ||
             email.split("@")[0],
-          crypto.randomBytes(32).toString("hex"), // Random password (not usable - SSO only)
+          crypto.randomBytes(32).toString("hex"),
+          userInfo.sub || null,
         ],
       );
 
@@ -562,10 +562,9 @@ async function findOrCreateSsoUser(
         return { user: null, tenantSlug: null, isSuperAdmin: false };
       }
 
-      // Update last login and SSO info
       await tenantPool.query(
-        `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
-        [user.id],
+        `UPDATE users SET last_login_at = NOW(), cognito_sub = COALESCE(cognito_sub, $2) WHERE id = $1`,
+        [user.id, userInfo.sub || null],
       );
 
       await tenantPool.end();
@@ -584,8 +583,8 @@ async function findOrCreateSsoUser(
     // JIT provisioning - create new user
     const newUserResult = await tenantPool.query(
       `
-      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id)
-      VALUES ($1, $2, $3, $4, true, $5)
+      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id, cognito_sub)
+      VALUES ($1, $2, $3, $4, true, $5, $6)
       RETURNING id, email, full_name, role, is_active, encompass_user_id
     `,
       [
@@ -593,9 +592,10 @@ async function findOrCreateSsoUser(
         userInfo.fullName ||
           `${userInfo.firstName || ""} ${userInfo.lastName || ""}`.trim() ||
           null,
-        userInfo.role || "user", // Default role from IdP or 'user'
-        crypto.randomBytes(32).toString("hex"), // Random password (not usable)
+        userInfo.role || "user",
+        crypto.randomBytes(32).toString("hex"),
         userInfo.encompassUserId || null,
+        userInfo.sub || null,
       ],
     );
 

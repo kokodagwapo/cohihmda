@@ -18,6 +18,7 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
+import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
 
 const router = Router();
 
@@ -422,22 +423,40 @@ router.post(
     }
 
     const hashedPassword = await bcrypt.hash(validated.password, 10);
-    
+
+    // Create user in Cognito first if enabled
+    let cognitoSub: string | null = null;
+    if (cognitoAuth.isCognitoAuthEnabled()) {
+      try {
+        const cognitoResult = await cognitoAuth.createUser(
+          validated.email,
+          validated.password,
+          validated.full_name,
+        );
+        cognitoSub = cognitoResult.cognitoSub;
+      } catch (cognitoError: any) {
+        logError("Failed to create Cognito user", cognitoError, { email: validated.email });
+        return res.status(cognitoError.statusCode || 500).json({
+          error: cognitoError.message || "Failed to create user in identity provider",
+        });
+      }
+    }
+
     const result = await managementPool.query(
-      `INSERT INTO coheus_users (email, encrypted_password, full_name, role, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
+      `INSERT INTO coheus_users (email, encrypted_password, full_name, role, cognito_sub, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        RETURNING id, email, full_name, role, created_at`,
         [
           validated.email,
           hashedPassword,
           validated.full_name || null,
           validated.role,
+          cognitoSub,
         ],
     );
     
     const newUser = result.rows[0];
     
-    // If tenant_id provided, create tenant mapping
     if (validated.tenant_id) {
       await managementPool.query(
         `INSERT INTO user_tenant_mappings (user_id, tenant_id, role, created_at, updated_at)
@@ -592,12 +611,19 @@ router.delete(
     }
     
     const result = await managementPool.query(
-        "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email",
+        "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email, cognito_sub",
         [id],
     );
     
     if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
+    }
+
+    // Remove from Cognito if linked
+    if (cognitoAuth.isCognitoAuthEnabled() && result.rows[0].email) {
+      await cognitoAuth.deleteUser(result.rows[0].email).catch((err: any) => {
+        logWarn("Failed to delete user from Cognito", { email: result.rows[0].email, error: err.message });
+      });
     }
     
     auditLog({
@@ -963,14 +989,31 @@ router.post(
     
     const validated = schema.parse(req.body);
     const hashedPassword = await bcrypt.hash(validated.password, 10);
-    
-    // Get tenant pool
+
+    // Create user in Cognito first if enabled
+    let cognitoSub: string | null = null;
+    if (cognitoAuth.isCognitoAuthEnabled()) {
+      try {
+        const cognitoResult = await cognitoAuth.createUser(
+          validated.email,
+          validated.password,
+          validated.full_name,
+        );
+        cognitoSub = cognitoResult.cognitoSub;
+      } catch (cognitoError: any) {
+        logError("Failed to create Cognito user for tenant", cognitoError, { email: validated.email });
+        return res.status(cognitoError.statusCode || 500).json({
+          error: cognitoError.message || "Failed to create user in identity provider",
+        });
+      }
+    }
+
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     
       const result = await tenantPool.query(
         `
-      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode)
-      VALUES ($1, $2, $3, $4, true, 'full_access')
+      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode, cognito_sub)
+      VALUES ($1, $2, $3, $4, true, 'full_access', $5)
       RETURNING id, email, full_name, role, is_active, created_at
     `,
         [
@@ -978,10 +1021,10 @@ router.post(
           hashedPassword,
           validated.full_name || null,
           validated.role,
+          cognitoSub,
         ],
       );
     
-    // Get tenant info for logging
     const tenantInfo = await managementPool.query(
         "SELECT name FROM coheus_tenants WHERE id = $1",
         [tenantId],
@@ -1156,12 +1199,19 @@ router.delete(
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     
     const result = await tenantPool.query(
-        "DELETE FROM users WHERE id = $1 RETURNING id, email",
+        "DELETE FROM users WHERE id = $1 RETURNING id, email, cognito_sub",
         [userId],
     );
     
     if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
+      }
+
+      // Remove from Cognito if linked
+      if (cognitoAuth.isCognitoAuthEnabled() && result.rows[0].email) {
+        await cognitoAuth.deleteUser(result.rows[0].email).catch((err: any) => {
+          logWarn("Failed to delete tenant user from Cognito", { email: result.rows[0].email, error: err.message });
+        });
       }
 
       logInfo("Tenant user deleted", {

@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { getApiUrl } from '@/lib/api';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
-import { Loader2, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react';
+import { Loader2, ArrowLeft, Mail, CheckCircle2, KeyRound } from 'lucide-react';
 
 export default function ForgotPassword() {
   const { toast } = useToast();
@@ -40,6 +40,12 @@ export default function ForgotPassword() {
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || 'Request failed');
+      }
+
+      const data = await response.json().catch(() => ({}));
+      // If Cognito-based, redirect to reset page with email param (code-based flow)
+      if (data.useCognito) {
+        sessionStorage.setItem('reset_email', email.trim());
       }
 
       setSubmitted(true);
@@ -76,12 +82,18 @@ export default function ForgotPassword() {
               </div>
               <div className="text-center space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  We sent a reset link to <span className="font-medium text-foreground">{email}</span>.
-                  The link will expire in 1 hour.
+                  We sent a verification code to <span className="font-medium text-foreground">{email}</span>.
+                  The code will expire in 1 hour.
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Didn't receive an email? Check your spam folder or try again.
                 </p>
+                <Link to={`/reset-password?email=${encodeURIComponent(email)}`} className="w-full">
+                  <Button className="w-full">
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    Enter Reset Code
+                  </Button>
+                </Link>
               </div>
               <div className="flex flex-col gap-2 w-full">
                 <Button
