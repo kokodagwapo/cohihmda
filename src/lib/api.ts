@@ -346,22 +346,20 @@ export class ApiClient {
     } else {
     }
 
-    // Request timeouts — must exceed CloudFront OriginReadTimeout (180s max).
-    // The frontend should never be the layer that kills a request.
+    // Request timeouts — async job endpoints return 202 in <1s,
+    // so only file uploads and chat streams need extended timeouts.
     const isFileUpload = options.body instanceof FormData;
     const isImportEndpoint = endpoint.includes("/import/");
     const isSlowEndpoint =
       endpoint.includes("/loans/funnel") ||
-      endpoint.includes("/dashboard/analytics") ||
-      endpoint.includes("/dashboard/insights") ||
-      (endpoint.includes("/api/predictions") && options.method === "POST");
+      endpoint.includes("/dashboard/analytics");
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
         ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
         ? 300000   // 5 minutes for AI chat (streaming)
-        : 200000;  // 3 min 20s — above CloudFront's 180s max
+        : 60000;   // 60s default — async job endpoints return 202 immediately
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();

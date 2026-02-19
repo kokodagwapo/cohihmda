@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { pool } from "../config/database.js";
+import { registerSendToUser } from "./jobManager.js";
 
 // Ensure environment variables are loaded even when this module is imported before index.ts runs dotenv.config
 const __filename = fileURLToPath(import.meta.url);
@@ -87,7 +88,21 @@ When answering questions about Qlik migration:
 - Use function calling to fetch real-time analytics data when needed
 `;
 
+const jobConnections = new Map<string, Set<WebSocket>>();
+
+export function sendToUser(userId: string, message: object): void {
+  const sockets = jobConnections.get(userId);
+  if (!sockets) return;
+  const payload = JSON.stringify(message);
+  for (const ws of sockets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
+  }
+}
+
 export function setupWebSocket(wss: WebSocketServer) {
+  registerSendToUser(sendToUser);
   wss.on("connection", (ws: WebSocket, req) => {
     console.log("New WebSocket connection attempt");
 
@@ -344,7 +359,7 @@ export function setupWebSocket(wss: WebSocketServer) {
           url.searchParams.get("context") === "qlik" ||
           url.searchParams.get("qlik") === "true";
 
-        const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKeyToUse}`;
+        const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKeyToUse}`;
 
         try {
           geminiSocket = new WebSocket(geminiUrl);
@@ -476,7 +491,7 @@ When answering questions about the backend architecture, be specific, reference 
               setup: {
                 model:
                   ragSettings.voice_model ||
-                  "models/gemini-2.5-flash-native-audio-preview-12-2025",
+                  "models/gemini-2.0-flash-exp",
                 generation_config: {
                   response_modalities: ["AUDIO"],
                   speech_config: {
@@ -551,35 +566,38 @@ Remember: You are Cohi${isQlikContext ? " (also known as Cohi)" : ""}—the exec
             }
           });
 
+          let geminiAudioChunks = 0;
           geminiSocket.on("message", async (data) => {
             try {
               const messageData = JSON.parse(data.toString());
-
-              // Skip thought/reasoning messages — they contain no audio
               const parts =
                 messageData.serverContent?.modelTurn?.parts ||
                 messageData.server_content?.model_turn?.parts ||
                 [];
-              const isThoughtOnly =
-                parts.length > 0 &&
-                parts.every(
-                  (p: any) =>
-                    p.thought === true && !p.inlineData && !p.inline_data,
-                );
-              if (isThoughtOnly) return;
-
               const hasAudio = parts.some(
                 (p: any) => p.inlineData || p.inline_data,
+              );
+              const hasThought = parts.some(
+                (p: any) => p.thought === true,
               );
               const hasTurnComplete =
                 messageData.serverContent?.turnComplete ||
                 messageData.server_content?.turn_complete;
-              if (hasAudio) {
-                console.log("Gemini: streaming audio chunk");
-              } else if (hasTurnComplete) {
-                console.log("Gemini: turn complete");
-              } else if (messageData.setupComplete) {
+
+              if (messageData.setupComplete) {
                 console.log("Gemini: setup complete");
+              } else if (hasAudio) {
+                geminiAudioChunks++;
+                if (geminiAudioChunks === 1)
+                  console.log("Gemini: audio streaming started");
+              } else if (hasTurnComplete) {
+                console.log(
+                  `Gemini: turn complete (${geminiAudioChunks} audio chunks)`,
+                );
+                geminiAudioChunks = 0;
+              } else if (hasThought) {
+                // Don't forward thought messages to client, but log count
+                return;
               }
 
               if (ws.readyState === WebSocket.OPEN) {
@@ -737,6 +755,26 @@ Remember: You are Cohi${isQlikContext ? " (also known as Cohi)" : ""}—the exec
           ws.close(1011, "Failed to connect to Gemini");
         }
       })();
+    } else if (path.includes("jobs")) {
+      if (!userId) {
+        ws.close(1008, "Unauthorized");
+        return;
+      }
+      if (!jobConnections.has(userId)) {
+        jobConnections.set(userId, new Set());
+      }
+      jobConnections.get(userId)!.add(ws);
+      console.log(`Job WebSocket connected for user: ${userId}`);
+
+      ws.on("close", () => {
+        const set = jobConnections.get(userId!);
+        if (set) {
+          set.delete(ws);
+          if (set.size === 0) jobConnections.delete(userId!);
+        }
+        console.log(`Job WebSocket closed for user: ${userId}`);
+      });
+      return;
     } else {
       ws.close(1008, "Unknown WebSocket path");
       return;

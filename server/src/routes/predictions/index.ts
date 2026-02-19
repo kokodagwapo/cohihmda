@@ -15,6 +15,7 @@ import {
 } from "../../middleware/tenantContext.js";
 import { apiLimiter } from "../../middleware/rateLimiter.js";
 import { logError, logWarn, logInfo, logDebug } from "../../services/logger.js";
+import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 import {
   getHistoricalFalloutRates,
   runFalloutSequencer,
@@ -48,9 +49,13 @@ router.post(
   attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    const startMs = Date.now();
     const tenantContext = getTenantContext(req);
     const tenantId = tenantContext.tenantId;
+    const job = createJob("predictions", req.userId!, tenantId);
+    res.status(202).json({ jobId: job.id, status: "processing" });
+
+    setImmediate(async () => {
+    const startMs = Date.now();
     logInfo("[Predict] POST /api/predictions started", { tenantId });
     try {
       const tenantPool = tenantContext.tenantPool;
@@ -109,8 +114,10 @@ router.post(
         activeLoans = activeLoans.filter((l: any) => loanIdSet.has(l.loan_id));
       }
 
+      updateProgress(job.id, 20, "Loading active loans...");
+
       if (activeLoans.length === 0) {
-        return res.json({
+        return completeJob(job.id, {
           predictions: [],
           bucketedLoans: [],
           bucketSummary: { high: 0, medium: 0, low: 0 },
@@ -129,8 +136,7 @@ router.post(
         });
       }
 
-      // Numeric outcome profiles: ensure current and prior year are computed (reuses 2023/2024 if present).
-      // TODO: Job scheduling for numeric outcome profile derivation still needs to be done (e.g. nightly refresh).
+      updateProgress(job.id, 30, "Computing outcome profiles...");
       await runNumericOutcomeProfileDerivation(tenantPool).catch((e) => {
         logError("Numeric outcome profile derivation failed in Predict", e, {});
       });
@@ -243,13 +249,13 @@ router.post(
 
       const rates = await getHistoricalFalloutRates(tenantPool);
 
-      // Job D: Sequential scoring (blended numeric similarity) and persist to loan_predictions
+      updateProgress(job.id, 60, "Running fallout sequencer...");
       const seq = await runFalloutSequencer(tenantPool, activeLoans, {
         historicalDeniedRate: rates.deniedRate,
         historicalWithdrawnRate: rates.withdrawnRate,
       });
 
-      // Read back from loan_predictions to build API response (include reason_codes for risk score)
+      updateProgress(job.id, 80, "Building prediction results...");
       const loanIdsArr = activeLoans.map((l: any) => l.loan_id);
       const predResult = await tenantPool.query(
         `SELECT loan_id, predicted_outcome, confidence, projected_status, reason_codes
@@ -596,19 +602,12 @@ router.post(
         },
       };
 
-      res.setHeader("Content-Type", "application/json");
-      res.json(slimResult);
+      completeJob(job.id, slimResult);
     } catch (error: any) {
       logError("Error running prediction pipeline", error, { userId: req.userId });
-
-      if (handleDatabaseError(error, res, "Failed to predict loan outcomes")) {
-        return;
-      }
-
-      res
-        .status(500)
-        .json({ error: error.message || "Failed to predict loan outcomes" });
+      failJob(job.id, error.message || "Failed to predict loan outcomes");
     }
+    }); // end setImmediate
   }
 );
 
