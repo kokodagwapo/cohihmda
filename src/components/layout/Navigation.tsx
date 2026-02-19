@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3 } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3, FlaskConical } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -547,6 +547,25 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
           </button>
         </div>
 
+        {/* Research Lab */}
+        <div>
+          <button
+            onClick={() => {
+              navigate('/research');
+              setMobileMenuOpen(false);
+            }}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              isActive('/research')
+                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            )}
+          >
+            <FlaskConical className="w-4 h-4 flex-shrink-0" />
+            <span>Research Lab</span>
+          </button>
+        </div>
+
       </div>
     </div>
   );
@@ -979,6 +998,24 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                 <span>My Workbench</span>
               </button>
 
+              {/* Research Lab - Direct Navigation */}
+              <button
+                onClick={() => navigate('/research')}
+                className={cn(
+                  topNavPillBase,
+                  isActive('/research') ? topNavPillActive : topNavPillDefault
+                )}
+                aria-label="Research Lab"
+              >
+                <FlaskConical className={cn(
+                  "w-4 h-4 transition-colors duration-200",
+                  isActive('/research')
+                    ? "text-slate-900 dark:text-slate-100"
+                    : "text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200"
+                )} />
+                <span>Research Lab</span>
+              </button>
+
             </div>
           )}
 
@@ -1012,15 +1049,19 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
             )}
 
-            {/* Tenant + Channel selectors - nav-style pill (visible for admins) */}
+            {/* Tenant + Channel selectors - nav-style pill */}
             {isAuthenticated && !isAdminPage && (
               <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/50 px-2 py-1.5">
-                <TenantSelector
-                  selectedTenantId={selectedTenantId}
-                  onTenantChange={setSelectedTenantId}
-                  compact={true}
-                />
-                <div className="h-6 w-px bg-slate-200 dark:bg-slate-600" aria-hidden />
+                {isPlatformAdmin && (
+                  <>
+                    <TenantSelector
+                      selectedTenantId={selectedTenantId}
+                      onTenantChange={setSelectedTenantId}
+                      compact={true}
+                    />
+                    <div className="h-6 w-px bg-slate-200 dark:bg-slate-600" aria-hidden />
+                  </>
+                )}
                 <ChannelSelector
                   selectedChannel={selectedChannel}
                   onChannelChange={setSelectedChannel}

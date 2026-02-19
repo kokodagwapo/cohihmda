@@ -8,6 +8,7 @@ import { pool } from '../config/database.js';
 import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { parse } from 'csv-parse/sync';
+import { runPostSyncHooks } from './hooks/postSyncHookService.js';
 import { getTenantFieldMappings, applyFieldMapping, suggestFieldMappings } from './fieldMapper.js';
 
 export interface LoanData {
@@ -265,11 +266,24 @@ export async function processCSVFile(
       ]
     );
 
+    // Fire post-sync hooks asynchronously
+    if (recordsProcessed > 0) {
+      runPostSyncHooks({
+        tenantId: connection.tenant_id,
+        tenantPool: pool,
+        connectionId,
+        syncType: "csv",
+        recordsSynced: recordsProcessed,
+      }).catch((err) =>
+        console.error("[CSV Sync] Post-sync hooks error:", err.message)
+      );
+    }
+
     return {
       success: recordsFailed === 0,
       records_processed: recordsProcessed,
       records_failed: recordsFailed,
-      errors: errors.slice(0, 10), // Return first 10 errors
+      errors: errors.slice(0, 10),
       duration: Date.now() - startTime,
     };
   } catch (error: any) {

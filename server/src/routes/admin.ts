@@ -8,7 +8,7 @@ import pg from "pg";
 import { pool } from "../config/database.js";
 import { pool as managementPool } from "../config/managementDatabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
-import { requireRole, requirePermission } from "../middleware/rbac.js";
+import { requireRole, requirePermission, requirePlatformStaff } from "../middleware/rbac.js";
 import { auditLog } from "../services/auditLogger.js";
 import { logError, logWarn, logInfo, logDebug } from "../services/logger.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -126,7 +126,7 @@ const updateTenantSchema = z.object({
 router.get(
   "/stats",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   async (req: AuthRequest, res) => {
   try {
     // Use auth token values instead of querying legacy public.users
@@ -286,7 +286,7 @@ router.get(
 router.get(
   "/tenants",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   async (req: AuthRequest, res) => {
   try {
     // Get tenants from management database
@@ -353,7 +353,7 @@ router.get(
 router.get(
   "/users",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   async (req: AuthRequest, res) => {
   try {
     // Use auth token values instead of querying legacy public.users
@@ -405,10 +405,22 @@ router.get(
 router.post(
   "/users",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   async (req: AuthRequest, res) => {
   try {
     const validated = createUserSchema.parse(req.body);
+
+    // Prevent privilege escalation: non-platform staff cannot assign elevated roles
+    const PLATFORM_ONLY_ROLES = new Set(["super_admin", "platform_admin", "support", "tenant_admin"]);
+    const callerRole = req.userRole || "user";
+    const isPlatformStaff = ["super_admin", "platform_admin", "support", "admin"].includes(callerRole);
+    if (!isPlatformStaff && PLATFORM_ONLY_ROLES.has(validated.role)) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: `Your role (${callerRole}) cannot assign the '${validated.role}' role.`,
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(validated.password, 10);
     
     const result = await managementPool.query(
@@ -469,7 +481,7 @@ router.post(
 router.put(
   "/users/:id",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
@@ -567,7 +579,7 @@ router.put(
 router.delete(
   "/users/:id",
   authenticateToken,
-  requireRole("super_admin", "tenant_admin"),
+  requirePlatformStaff(),
   async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;

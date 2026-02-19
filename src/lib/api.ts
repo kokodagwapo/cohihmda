@@ -28,7 +28,7 @@ export const getApiUrl = (): string => {
       if (customBackendUrl && customBackendUrl.trim() !== "") {
         console.log(
           "Using custom backend URL from localStorage:",
-          customBackendUrl,
+          customBackendUrl
         );
         return customBackendUrl;
       }
@@ -46,7 +46,7 @@ export const getApiUrl = (): string => {
     // For GitHub Pages (github.io), backend is typically on a different domain
     if (hostname.includes("github.io") || hostname.includes("github.com")) {
       console.warn(
-        "Backend API URL not configured. Please set VITE_API_URL in GitHub Secrets.",
+        "Backend API URL not configured. Please set VITE_API_URL in GitHub Secrets."
       );
       return "";
     }
@@ -56,7 +56,7 @@ export const getApiUrl = (): string => {
     if (customBackendUrl && customBackendUrl.trim() !== "") {
       console.log(
         "Using custom backend URL from localStorage:",
-        customBackendUrl,
+        customBackendUrl
       );
       return customBackendUrl;
     }
@@ -118,7 +118,7 @@ export const getWebSocketUrl = (): string => {
     if (customBackendUrl && customBackendUrl.trim() !== "") {
       console.log(
         "Using direct backend URL for WebSocket from localStorage:",
-        customBackendUrl,
+        customBackendUrl
       );
       return customBackendUrl;
     }
@@ -148,7 +148,7 @@ export const getWebSocketUrl = (): string => {
       console.error(errorMsg);
       // Throw error instead of returning placeholder to prevent mixed content issues
       throw new Error(
-        "WebSocket backend URL not configured. Please set BACKEND_API_URL in localStorage or VITE_WEBSOCKET_URL environment variable.",
+        "WebSocket backend URL not configured. Please set BACKEND_API_URL in localStorage or VITE_WEBSOCKET_URL environment variable."
       );
     }
   }
@@ -165,9 +165,12 @@ export const getWebSocketUrl = (): string => {
 
 const API_URL = getApiUrl();
 
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
+  private userRole: string | null = null;
   private requestCache: Map<string, { data: any; timestamp: number }> =
     new Map();
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -176,6 +179,10 @@ export class ApiClient {
   constructor(baseUrl: string = API_URL) {
     this.baseUrl = baseUrl;
     this.token = localStorage.getItem("auth_token");
+  }
+
+  setUserRole(role: string | null) {
+    this.userRole = role;
   }
 
   private getHealthUrl(): string {
@@ -220,7 +227,7 @@ export class ApiClient {
     const apiGatewayUrl = this.getApiGatewayRestUrl();
     if (!apiGatewayUrl) {
       throw new Error(
-        "API Gateway REST URL not configured. Set VITE_API_GATEWAY_REST_URL",
+        "API Gateway REST URL not configured. Set VITE_API_GATEWAY_REST_URL"
       );
     }
 
@@ -239,7 +246,7 @@ export class ApiClient {
     const apiGatewayWsUrl = this.getApiGatewayWebSocketUrl();
     if (!apiGatewayWsUrl) {
       throw new Error(
-        "API Gateway WebSocket URL not configured. Set VITE_API_GATEWAY_WEBSOCKET_URL",
+        "API Gateway WebSocket URL not configured. Set VITE_API_GATEWAY_WEBSOCKET_URL"
       );
     }
 
@@ -250,8 +257,19 @@ export class ApiClient {
   async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    retries = 0,
+    retries = 0
   ): Promise<T> {
+    // Defense-in-depth: strip tenant_id from requests for non-platform users
+    let sanitizedEndpoint = endpoint;
+    if (this.userRole && !PLATFORM_STAFF_ROLES.has(this.userRole)) {
+      const url_ = new URL(endpoint, "http://placeholder");
+      if (url_.searchParams.has("tenant_id")) {
+        url_.searchParams.delete("tenant_id");
+        sanitizedEndpoint = url_.pathname + url_.search;
+      }
+    }
+    endpoint = sanitizedEndpoint;
+
     // If baseUrl is empty string (CloudFront same-origin), use endpoint directly
     // Otherwise, prepend baseUrl
     const url = this.baseUrl ? `${this.baseUrl}${endpoint}` : endpoint;
@@ -261,7 +279,7 @@ export class ApiClient {
       console.log(
         `[API Request] ${
           options.method || "GET"
-        } ${endpoint} -> ${url} (retry ${retries})`,
+        } ${endpoint} -> ${url} (retry ${retries})`
       );
     }
 
@@ -294,7 +312,7 @@ export class ApiClient {
       retries,
       cacheKey,
       isGetRequest,
-      skipCache,
+      skipCache
     );
 
     // Store pending request for deduplication
@@ -312,7 +330,7 @@ export class ApiClient {
     retries: number,
     cacheKey: string,
     isGetRequest: boolean,
-    skipCache: boolean,
+    skipCache: boolean
   ): Promise<T> {
     const headers: HeadersInit = {
       ...options.headers,
@@ -340,10 +358,10 @@ export class ApiClient {
     const isChatEndpoint = endpoint.includes("/cohi-chat/");
     const timeoutMs =
       isFileUpload || isImportEndpoint
-        ? 600000 // 10 minutes for file uploads/imports
+        ? 600000   // 10 minutes for file uploads/imports
         : isChatEndpoint
-          ? 300000 // 5 minutes for AI chat (streaming)
-          : 200000; // 3 min 20s — above CloudFront's 180s max
+        ? 300000   // 5 minutes for AI chat (streaming)
+        : 200000;  // 3 min 20s — above CloudFront's 180s max
 
     // Create abort controller for timeout (more compatible than AbortSignal.timeout)
     const controller = new AbortController();
@@ -381,7 +399,7 @@ export class ApiClient {
         if (response.status === 503) {
           throw new Error(
             errorData.error ||
-              "Service temporarily unavailable. Please try again.",
+              "Service temporarily unavailable. Please try again."
           );
         }
 
@@ -395,7 +413,7 @@ export class ApiClient {
           return {} as T;
         }
         throw new Error(
-          `Server returned empty response (status ${response.status}). This may indicate a server error.`,
+          `Server returned empty response (status ${response.status}). This may indicate a server error.`
         );
       }
 
@@ -409,13 +427,13 @@ export class ApiClient {
           throw new Error(
             `Server returned empty or incomplete JSON response. This may indicate the server crashed or encountered an error while processing your request. Status: ${
               response.status
-            }. Response preview: ${responseText.substring(0, 100)}`,
+            }. Response preview: ${responseText.substring(0, 100)}`
           );
         }
         throw new Error(
           `Failed to parse server response as JSON: ${
             parseError.message
-          }. Response preview: ${responseText.substring(0, 100)}`,
+          }. Response preview: ${responseText.substring(0, 100)}`
         );
       }
 
@@ -442,13 +460,14 @@ export class ApiClient {
         const timeoutDuration = isChatEndpoint
           ? "2 minutes"
           : isSlowEndpoint
-            ? "60 seconds"
-            : "30 seconds";
-        if (retries < 1) {
+          ? "60 seconds"
+          : "30 seconds";
+        // Only retry GET requests on timeout — POST/PUT/DELETE are not idempotent
+        if (isGetRequest && retries < 1) {
           console.warn(
             `Request timeout for ${endpoint} after ${timeoutDuration}. Retrying... (attempt ${
               retries + 1
-            }/1)`,
+            }/1)`
           );
           await new Promise((resolve) => setTimeout(resolve, 2000));
           return this.executeRequest(
@@ -458,31 +477,32 @@ export class ApiClient {
             retries + 1,
             cacheKey,
             isGetRequest,
-            skipCache,
+            skipCache
           );
         }
         // Provide more helpful error message for slow endpoints
         const baseUrlInfo = this.baseUrl || "CloudFront proxy";
         if (isChatEndpoint) {
           throw new Error(
-            `Request timed out after ${timeoutDuration}. The AI is taking longer than expected to process your question. Please try again.`,
+            `Request timed out after ${timeoutDuration}. The AI is taking longer than expected to process your question. Please try again.`
           );
         }
         if (isSlowEndpoint) {
           throw new Error(
-            `Request timed out after ${timeoutDuration}. This endpoint may be processing a large dataset. The backend may be slow or unavailable. Please try again in a moment.`,
+            `Request timed out after ${timeoutDuration}. This endpoint may be processing a large dataset. The backend may be slow or unavailable. Please try again in a moment.`
           );
         }
         console.error(
-          `Request timed out after retries. Endpoint: ${endpoint}, Base URL: ${baseUrlInfo}, Timeout: ${timeoutDuration}`,
+          `Request timed out after retries. Endpoint: ${endpoint}, Base URL: ${baseUrlInfo}, Timeout: ${timeoutDuration}`
         );
         throw new Error(
-          `Request timed out after ${timeoutDuration}. The server at ${baseUrlInfo} may be slow or unavailable. Please check your connection and try again.`,
+          `Request timed out after ${timeoutDuration}. The server at ${baseUrlInfo} may be slow or unavailable. Please check your connection and try again.`
         );
       }
 
-      // Handle network errors with retry
+      // Handle network errors with retry (only for GET — POST is not safe to retry)
       if (
+        isGetRequest &&
         (error.message?.includes("Failed to fetch") ||
           error.message?.includes("NetworkError") ||
           error.name === "TypeError" ||
@@ -492,7 +512,7 @@ export class ApiClient {
         console.warn(
           `Connection error to ${url}. Retrying in 2 seconds... (attempt ${
             retries + 1
-          }/2)`,
+          }/2)`
         );
         await new Promise((resolve) => setTimeout(resolve, 2000));
         return this.executeRequest(
@@ -502,7 +522,7 @@ export class ApiClient {
           retries + 1,
           cacheKey,
           isGetRequest,
-          skipCache,
+          skipCache
         );
       }
 
@@ -530,7 +550,7 @@ export class ApiClient {
             // Increased health check timeout to 5 seconds to account for slow responses
             const healthTimeout = setTimeout(
               () => healthController.abort(),
-              5000,
+              5000
             );
             // Use /api/health for same-origin (CloudFront proxy), or baseUrl/health for direct backend
             const healthUrl = this.baseUrl
@@ -548,7 +568,7 @@ export class ApiClient {
               // If health check succeeds, the original error was NOT a CORS issue
               // It's likely an authentication error, rate limiting, or endpoint-specific issue
               throw new Error(
-                `Unable to complete request to ${endpoint}. The server is running. Please check your authentication or try again.`,
+                `Unable to complete request to ${endpoint}. The server is running. Please check your authentication or try again.`
               );
             }
           } catch (healthError: any) {
@@ -564,12 +584,12 @@ export class ApiClient {
                 healthError.message?.includes("blocked by CORS policy")
               ) {
                 throw new Error(
-                  `CORS Error: Unable to verify server connection. The backend may not be configured to allow requests from ${window.location.origin}. Please update the backend FRONTEND_URL environment variable.`,
+                  `CORS Error: Unable to verify server connection. The backend may not be configured to allow requests from ${window.location.origin}. Please update the backend FRONTEND_URL environment variable.`
                 );
               }
               const serverLocation = this.baseUrl || "the backend server";
               throw new Error(
-                `Unable to connect to ${serverLocation}. The server did not respond. Please ensure the backend server is running.`,
+                `Unable to connect to ${serverLocation}. The server did not respond. Please ensure the backend server is running.`
               );
             }
             // If health check threw a different error, re-throw the original error
@@ -581,13 +601,13 @@ export class ApiClient {
           const serverLocation =
             this.baseUrl || "the backend server (via CloudFront proxy)";
           throw new Error(
-            `CORS Error: ${serverLocation} is not configured to allow requests from ${window.location.origin}. Please update the backend FRONTEND_URL environment variable to include this origin.`,
+            `CORS Error: ${serverLocation} is not configured to allow requests from ${window.location.origin}. Please update the backend FRONTEND_URL environment variable to include this origin.`
           );
         }
 
         const serverLocation = this.baseUrl || "the backend server";
         throw new Error(
-          `Unable to connect to ${serverLocation}. Please ensure the backend server is running.`,
+          `Unable to connect to ${serverLocation}. Please ensure the backend server is running.`
         );
       }
 
@@ -602,7 +622,7 @@ export class ApiClient {
       {
         method: "POST",
         body: JSON.stringify({ email, password, full_name: fullName }),
-      },
+      }
     );
     this.setToken(data.token);
     return data;
@@ -640,7 +660,7 @@ export class ApiClient {
     if (!serverReachable) {
       throw new Error(
         serverError ||
-          "Unable to connect to server. Please ensure the backend server is running on port 3001.",
+          "Unable to connect to server. Please ensure the backend server is running on port 3001."
       );
     }
 
@@ -650,7 +670,7 @@ export class ApiClient {
         {
           method: "POST",
           body: JSON.stringify({ email, password }),
-        },
+        }
       );
       this.setToken(data.token);
       return data;
@@ -669,7 +689,7 @@ export class ApiClient {
             {
               method: "POST",
               body: JSON.stringify({ email, password }),
-            },
+            }
           );
           this.setToken(data.token);
           return data;
@@ -680,11 +700,11 @@ export class ApiClient {
             retryError.message?.includes("Service temporarily unavailable")
           ) {
             throw new Error(
-              "Service temporarily unavailable. The database connection is down. Please try again in a moment.",
+              "Service temporarily unavailable. The database connection is down. Please try again in a moment."
             );
           }
           throw new Error(
-            "Unable to connect to server. Please check your connection and try again.",
+            "Unable to connect to server. Please check your connection and try again."
           );
         }
       }
@@ -711,14 +731,14 @@ export class ApiClient {
 
           if (checkResponse.ok || checkResponse.status === 503) {
             throw new Error(
-              "Server is running but the request failed. Please try again.",
+              "Server is running but the request failed. Please try again."
             );
           }
         } catch (checkError) {
           // Server is not reachable
         }
         throw new Error(
-          "Unable to connect to server. Please ensure the backend server is running on port 3001.",
+          "Unable to connect to server. Please ensure the backend server is running on port 3001."
         );
       }
 
@@ -809,7 +829,7 @@ export class ApiClient {
     if (!storedToken || storedToken.trim() === "") {
       if (import.meta.env.PROD) {
         throw new Error(
-          "Authentication required: please sign in before starting a live voice session.",
+          "Authentication required: please sign in before starting a live voice session."
         );
       }
     }
@@ -827,7 +847,7 @@ export class ApiClient {
 
     if (isHttpsPage && backendIsHttp && wsProtocol === "wss://") {
       console.warn(
-        "⚠️ Attempting wss:// connection to HTTP backend. If this fails, configure HTTPS listener on ALB.",
+        "⚠️ Attempting wss:// connection to HTTP backend. If this fails, configure HTTPS listener on ALB."
       );
     }
 
@@ -955,6 +975,74 @@ export class ApiClient {
     });
 
     return ws;
+  }
+
+  // =========================================================================
+  // Tracked Insights (Watchlist)
+  // =========================================================================
+
+  async trackInsight(data: {
+    headline: string;
+    understory?: string;
+    metric_signature: any;
+    source_insight_id?: number;
+    source_type?: string;
+    tags?: string[];
+  }, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked${tenantParam}`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async getTrackedInsights(tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked${tenantParam}`);
+  }
+
+  async getTrackedInsightHistory(id: string, limit = 50, tenantId?: string | null) {
+    const tenantParam = tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}/history?limit=${limit}${tenantParam}`);
+  }
+
+  async updateTrackedInsight(
+    id: string,
+    data: { status?: string; alert_threshold?: any; tags?: string[] },
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}${tenantParam}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteTrackedInsight(id: string, tenantId?: string | null) {
+    const tenantParam = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+    return this.request(`/api/insights/tracked/${id}${tenantParam}`, { method: "DELETE" });
+  }
+
+  async insightChat(
+    insightContext: any,
+    messages: Array<{ role: string; content: string }>,
+    tenantId?: string | null
+  ) {
+    const tenantParam = tenantId ? `?tenant_id=${tenantId}` : "";
+    return this.request<{ response: string }>(
+      `/api/dashboard/insights/chat${tenantParam}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ insightContext, messages }),
+      }
+    );
+  }
+
+  async triggerAgentInsights(tenantId?: string | null, options?: { forceFresh?: boolean }) {
+    const params = new URLSearchParams();
+    if (tenantId) params.set("tenant_id", tenantId);
+    if (options?.forceFresh) params.set("fresh", "true");
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return this.request(`/api/dashboard/insights/generate-agent${qs}`, {
+      method: "POST",
+    });
   }
 }
 

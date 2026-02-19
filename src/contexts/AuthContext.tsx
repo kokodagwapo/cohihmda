@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { api } from '@/lib/api';
+import { enforcePlatformOnly } from '@/stores/tenantStore';
 
 /**
  * User role types
@@ -119,12 +120,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const response = await api.getCurrentUser();
         if (response.user) {
           setUser(response.user as AuthUser);
+          api.setUserRole(response.user.role);
+          enforcePlatformOnly(response.user.role);
         }
       } catch (err) {
         // Token is invalid or expired
         api.clearToken();
         localStorage.removeItem(AUTH_TOKEN_KEY);
         setUser(null);
+        api.setUserRole(null);
+        enforcePlatformOnly(undefined);
       } finally {
         setIsLoading(false);
       }
@@ -165,6 +170,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       
       setUser(response.user);
+      api.setUserRole(response.user?.role || null);
+      enforcePlatformOnly(response.user?.role);
     } catch (err: any) {
       const message = err.message || 'Login failed';
       setError(message);
@@ -192,6 +199,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       // Clear API client state (token and cache)
       api.clearToken();
+      api.setUserRole(null);
       
       // Clear React state
       setUser(null);
@@ -212,6 +220,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await api.getCurrentUser();
       if (response.user) {
         setUser(response.user as AuthUser);
+        api.setUserRole(response.user.role);
       }
     } catch (err) {
       // If refresh fails, log out
@@ -292,6 +301,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const setAuthFromToken = useCallback((token: string, userData: AuthUser) => {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
     api.setToken(token);
+    api.setUserRole(userData?.role || null);
     setUser(userData);
     setError(null);
     setIsLoading(false);

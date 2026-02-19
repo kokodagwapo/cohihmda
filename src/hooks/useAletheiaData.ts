@@ -30,6 +30,8 @@ export interface AletheiaInsight {
   risk_if_ignored?: string;
   recommended_action?: string;
   owner?: string;
+  generation_method?: "pipeline" | "agent";
+  detail_data?: any;
 }
 
 export interface InsightsMetadata {
@@ -102,6 +104,8 @@ export const useAletheiaData = (
       risk_if_ignored: insight.risk_if_ignored,
       recommended_action: insight.recommended_action,
       owner: insight.owner,
+      generation_method: insight.generation_method,
+      detail_data: insight.detail_data || null,
     }));
   };
 
@@ -130,7 +134,7 @@ export const useAletheiaData = (
           : "";
 
       const data = await api.request<any>(
-        `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}`
+        `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=pipeline`
       );
 
       setMetadata({
@@ -308,7 +312,7 @@ export const useAletheiaData = (
             : "";
 
         const data = await api.request<any>(
-          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}`
+          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=agent`
         );
 
         setMetadata({
@@ -389,6 +393,44 @@ export const useAletheiaData = (
     }
   }, [allInsights.length, insightsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadInsightsByMethod = useCallback(
+    async (method: "pipeline" | "agent") => {
+      setAllInsights([]);
+      setInsightsLoading(true);
+      setInsightsError(null);
+      try {
+        const tenantParam = selectedTenantId
+          ? `&tenant_id=${selectedTenantId}`
+          : "";
+        const channelParam =
+          selectedChannel && selectedChannel !== "All"
+            ? `&channel_group=${encodeURIComponent(selectedChannel)}`
+            : "";
+
+        const data = await api.request<any>(
+          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=${method}`
+        );
+
+        const mapped = mapInsights(data);
+        setAllInsights(mapped);
+        setNeedsGeneration(false);
+        setMetadata({
+          usedLLM: data.usedLLM ?? true,
+          generatedAt: data.generatedAt || new Date().toISOString(),
+          summaryForPodcast: data.summaryForPodcast,
+          needsGeneration: false,
+        });
+      } catch (error: any) {
+        console.error(`Error loading ${method} insights:`, error);
+        setAllInsights([]);
+        setInsightsError(error.message || `Failed to load ${method} insights`);
+      } finally {
+        setInsightsLoading(false);
+      }
+    },
+    [dateFilter, selectedTenantId, selectedChannel]
+  );
+
   return {
     allInsights,
     insightsLoading,
@@ -402,5 +444,6 @@ export const useAletheiaData = (
     deleteInsight,
     submitFeedback,
     getFeedback,
+    loadInsightsByMethod,
   };
 };

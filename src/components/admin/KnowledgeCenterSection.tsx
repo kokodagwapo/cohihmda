@@ -68,13 +68,13 @@ import {
   KnowledgeUpdate,
   SearchResult,
 } from "@/hooks/useKnowledgeCenter";
-import { useTenantStore } from "@/stores/tenantStore";
+import { useAdminTenant } from "@/contexts/AdminTenantContext";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 
 export function KnowledgeCenterSection() {
-  const { selectedTenantId } = useTenantStore();
+  const { selectedTenantId } = useAdminTenant();
   const {
     documents,
     updates,

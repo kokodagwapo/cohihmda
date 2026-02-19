@@ -1,35 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+const PLATFORM_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+
 type TenantState = {
-  /** 
-   * Selected tenant ID for super_admin users viewing another tenant's data.
-   * null means "use default/own tenant" 
-   */
   selectedTenantId: string | null;
-  
-  /** 
-   * Set the selected tenant ID.
-   * Pass null to reset to default (own tenant).
-   */
   setSelectedTenantId: (tenantId: string | null) => void;
-  
-  /**
-   * Clear tenant selection (reset to default)
-   */
   clearTenantSelection: () => void;
 };
 
 /**
- * Global tenant selection store
- * 
- * Used by super_admin and platform_admin users to view other tenants' data.
- * Persists selection in localStorage so it survives page refreshes.
- * 
- * Components that use this:
- * - Dashboard (TenantSelector)
- * - Navigation (ChannelSelector - needs tenant context for channels API)
- * - Various dashboard components that fetch tenant-specific data
+ * Global tenant selection store.
+ *
+ * Only platform staff (super_admin, platform_admin, support) should set a
+ * non-null value. The setter is intentionally a simple state update — callers
+ * that are NOT platform staff must not invoke it with another tenant's ID.
+ *
+ * {@link enforcePlatformOnly} can be called at app startup to wipe any stale
+ * selection that a non-platform user might have in localStorage.
  */
 export const useTenantStore = create<TenantState>()(
   persist(
@@ -43,3 +31,13 @@ export const useTenantStore = create<TenantState>()(
     }
   )
 );
+
+/**
+ * Call once after login/auth to ensure a non-platform user never has a stale
+ * tenant override sitting in localStorage.
+ */
+export function enforcePlatformOnly(userRole: string | undefined) {
+  if (!PLATFORM_ROLES.has(userRole || "")) {
+    useTenantStore.getState().clearTenantSelection();
+  }
+}

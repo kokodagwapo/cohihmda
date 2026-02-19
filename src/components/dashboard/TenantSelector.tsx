@@ -46,13 +46,11 @@ export const TenantSelector = ({
         setAuthError(null);
         console.log("[TenantSelector] Current user:", userData.user);
 
-        // Load tenants if user is admin
-        const isAdmin =
+        const isPlatform =
           userData.user?.role === "super_admin" ||
-          userData.user?.role === "tenant_admin" ||
+          userData.user?.role === "platform_admin" ||
           userData.user?.role === "admin";
-        if (isAdmin) {
-          console.log("[TenantSelector] User is admin, loading tenants...");
+        if (isPlatform) {
           loadTenants();
         }
       } catch (error: any) {
@@ -64,15 +62,14 @@ export const TenantSelector = ({
     checkUserRole();
   }, [loadTenants]);
 
-  const isAdmin =
+  const isPlatform =
     currentUserRole === "super_admin" ||
-    currentUserRole === "tenant_admin" ||
-    currentUserRole === "admin" || // 'admin' maps to 'super_admin' in RBAC
+    currentUserRole === "platform_admin" ||
+    currentUserRole === "admin" ||
     userRole === "super_admin" ||
-    userRole === "tenant_admin";
+    userRole === "platform_admin";
 
-  // Non-admin users don't see the selector
-  if (!isAdmin) {
+  if (!isPlatform) {
     // In compact mode, just return null
     if (compact) return null;
 

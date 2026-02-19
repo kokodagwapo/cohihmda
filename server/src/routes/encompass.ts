@@ -223,48 +223,17 @@ router.get(
  */
 router.get(
   "/fields/:connectionId",
-  (req, res, next) => {
-    console.log("[Fields GET] ====== MIDDLEWARE BEFORE AUTH ======");
-    console.log("[Fields GET] Method:", req.method);
-    console.log("[Fields GET] URL:", req.url);
-    console.log("[Fields GET] Path:", req.path);
-    console.log("[Fields GET] Params:", req.params);
-    console.log("[Fields GET] Query:", req.query);
-    next();
-  },
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Fields GET] ====== ROUTE HANDLER HIT ======");
-    console.log("[Fields GET] URL:", req.url);
-    console.log("[Fields GET] Params:", req.params);
-    console.log("[Fields GET] Query:", req.query);
-
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantId, tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
-
-      console.log("[Fields GET] Request received:", {
-        tenantId,
-        losConnectionId,
-        userId: req.userId,
-      });
-
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
 
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get API server URL from connection
       const connectionResult = await tenantPool.query(
@@ -360,34 +329,16 @@ router.get(
 router.get(
   "/folders/:connectionId",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Folders GET] Request received");
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantId, tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
-
-      console.log("[Folders GET] Request received:", {
-        tenantId,
-        losConnectionId,
-        userId: req.userId,
-      });
-
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
 
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get API server URL from connection
       const connectionResult = await tenantPool.query(
@@ -468,52 +419,17 @@ router.get(
  */
 router.get(
   "/field-swaps/:connectionId",
-  (req, res, next) => {
-    console.log("[Field Swaps GET] ====== MIDDLEWARE BEFORE AUTH ======");
-    console.log("[Field Swaps GET] Method:", req.method);
-    console.log("[Field Swaps GET] URL:", req.url);
-    console.log("[Field Swaps GET] Path:", req.path);
-    console.log("[Field Swaps GET] Params:", req.params);
-    console.log("[Field Swaps GET] Query:", req.query);
-    next();
-  },
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Field Swaps GET] ====== ROUTE HANDLER HIT ======");
-    console.log("[Field Swaps GET] URL:", req.url);
-    console.log("[Field Swaps GET] Params:", req.params);
-    console.log("[Field Swaps GET] Query:", req.query);
-
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
 
-      console.log("[Field Swaps GET] Request received:", {
-        tenantId,
-        losConnectionId,
-        userId: req.userId,
-      });
-
-      if (!tenantId) {
-        console.error("[Field Swaps GET] Missing tenant_id");
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
-
       if (!losConnectionId) {
-        console.error("[Field Swaps GET] Missing connection ID");
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-
-      console.log("[Field Swaps GET] Got tenant pool, fetching swaps...");
       const swaps = await getFieldSwaps(tenantPool, losConnectionId);
       const swapsArray = Array.from(swaps.entries()).map(
         ([alias, fieldId]) => ({
@@ -522,7 +438,6 @@ router.get(
         })
       );
 
-      console.log("[Field Swaps GET] Returning swaps:", swapsArray.length);
       res.json({ swaps: swapsArray });
     } catch (error: any) {
       console.error("[Field Swaps GET] Error getting field swaps:", error);
@@ -540,11 +455,11 @@ router.get(
 router.post(
   "/field-swaps",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
       const schema = z.object({
-        tenantId: z.string().uuid().optional(),
         losConnectionId: z.string().uuid(),
         coheusAlias: z.string(),
         encompassFieldId: z.string(),
@@ -555,21 +470,7 @@ router.post(
       });
 
       const body = schema.parse(req.body);
-      const tenantId = (req.query.tenant_id as string) || body.tenantId;
-
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({
-            error: "tenant_id query parameter or body field is required",
-          });
-      }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
+      const { tenantPool } = getTenantContext(req);
 
       await saveFieldSwap(
         tenantPool,
@@ -601,6 +502,7 @@ router.post(
 router.delete(
   "/field-swaps/:connectionId",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
     try {
@@ -610,24 +512,12 @@ router.delete(
       });
 
       const body = schema.parse(req.body);
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
-
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
 
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       await deleteFieldSwap(
         tenantPool,
@@ -716,29 +606,17 @@ router.get(
 router.get(
   "/discovery/fields/:connectionId",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Discovery Fields] Request received");
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantId, tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
       const useCache = req.query.use_cache !== "false";
-
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
 
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get API server URL from connection
       const connectionResult = await tenantPool.query(
@@ -782,11 +660,11 @@ router.get(
 router.post(
   "/discovery/analyze/:connectionId",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Discovery Analyze] Request received");
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantId, tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
 
       const schema = z.object({
@@ -796,21 +674,9 @@ router.post(
 
       const body = schema.parse(req.body || {});
 
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
-
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get API server URL from connection
       const connectionResult = await tenantPool.query(
@@ -864,30 +730,18 @@ router.post(
 router.get(
   "/discovery/suggestions/:connectionId",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Discovery Suggestions] Request received");
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantId, tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
       const runAnalysis = req.query.run_analysis !== "false";
       const sampleSize = parseInt(req.query.sample_size as string) || 50;
 
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
-
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get API server URL from connection
       const connectionResult = await tenantPool.query(
@@ -934,11 +788,11 @@ router.get(
 router.post(
   "/discovery/apply/:connectionId",
   authenticateToken,
+  attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    console.log("[Discovery Apply] Request received");
     try {
-      const tenantId = req.query.tenant_id as string | undefined;
+      const { tenantId, tenantPool } = getTenantContext(req);
       const losConnectionId = req.params.connectionId as string;
 
       const schema = z.object({
@@ -954,21 +808,9 @@ router.post(
 
       const body = schema.parse(req.body);
 
-      if (!tenantId) {
-        return res
-          .status(400)
-          .json({ error: "tenant_id query parameter is required" });
-      }
-
       if (!losConnectionId) {
         return res.status(400).json({ error: "Connection ID is required" });
       }
-
-      // Get tenant database pool
-      const { tenantDbManager } = await import(
-        "../config/tenantDatabaseManager.js"
-      );
-      const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get API server URL from connection
       const connectionResult = await tenantPool.query(

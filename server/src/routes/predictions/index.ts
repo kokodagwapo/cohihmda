@@ -1272,18 +1272,6 @@ router.get(
             mergedLoanData.current_loan_status ??
             mergedLoanData.currentLoanStatus,
           activeDays: mergedLoanData.activeDays ?? null,
-          market_rate: mergedLoanData.market_rate ?? undefined,
-          market_rate_at_lock: mergedLoanData.market_rate_at_lock ?? undefined,
-          lockMarketRate:
-            mergedLoanData.market_rate_at_lock != null && !isNaN(Number(mergedLoanData.market_rate_at_lock))
-              ? Number(mergedLoanData.market_rate_at_lock)
-              : mergedLoanData.interest_rate != null ? Number(mergedLoanData.interest_rate) : undefined,
-          marketChangeDelta:
-            mergedLoanData.market_change_delta != null && !isNaN(Number(mergedLoanData.market_change_delta))
-              ? Number(mergedLoanData.market_change_delta)
-              : mergedLoanData.marketChangeDelta != null && !isNaN(Number(mergedLoanData.marketChangeDelta))
-                ? Number(mergedLoanData.marketChangeDelta)
-                : null,
           loPullthroughPercentage: loPullthroughPercentage ?? null,
           uwPullthroughPercentage:
             mergedLoanData.uwPullthroughPercentage ?? null,

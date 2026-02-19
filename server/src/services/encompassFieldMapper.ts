@@ -220,6 +220,30 @@ export async function getFieldSwaps(
 }
 
 /**
+ * Normalize an Encompass field ID to canonical form with the "Fields." prefix.
+ * The Encompass RDB API returns bare numeric IDs (e.g. "1994") but our defaults
+ * and internal representation use "Fields.1994". CX.*, Loan.*, ULDD.*, etc. are
+ * left as-is.
+ */
+export function normalizeEncompassFieldId(fieldId: string): string {
+  if (!fieldId) return fieldId;
+  if (
+    fieldId.startsWith("Fields.") ||
+    fieldId.startsWith("Loan.") ||
+    fieldId.startsWith("CX.") ||
+    fieldId.startsWith("ULDD.") ||
+    fieldId.startsWith("VASUMM.") ||
+    fieldId.startsWith("Document.")
+  ) {
+    return fieldId;
+  }
+  if (/^\d/.test(fieldId)) {
+    return `Fields.${fieldId}`;
+  }
+  return fieldId;
+}
+
+/**
  * Save field swap mapping
  * @param tenantPool - The tenant-specific database pool (no tenant_id needed in query)
  * @param losConnectionId - The LOS connection ID
@@ -234,6 +258,7 @@ export async function saveFieldSwap(
   encompassFieldId: string,
   swapType: 'Standard' | 'Profitability' = 'Standard'
 ): Promise<void> {
+  const normalizedFieldId = normalizeEncompassFieldId(encompassFieldId);
   try {
     await tenantPool.query(
       `INSERT INTO public.encompass_field_swaps 
@@ -244,7 +269,7 @@ export async function saveFieldSwap(
          encompass_field_id = EXCLUDED.encompass_field_id,
          is_active = TRUE,
          updated_at = NOW()`,
-      [losConnectionId, coheusAlias, encompassFieldId, swapType]
+      [losConnectionId, coheusAlias, normalizedFieldId, swapType]
     );
   } catch (error: any) {
     console.error('[EncompassFieldMapper] Error saving field swap:', error.message);
