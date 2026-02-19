@@ -26,6 +26,7 @@ import {
 } from "../../services/insights/llmInsightGenerator.js";
 import { collectInsightMetrics } from "../../services/insights/insightMetricsCollector.js";
 import { runInsightGeneration, isGenerationRunning } from "../../services/insights/agents/insightOrchestrator.js";
+import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 
 const router = Router();
 
@@ -229,7 +230,6 @@ router.post(
       const tenantContext = getTenantContext(req);
       const { dateFilter = "ytd", channel_group } = req.query;
 
-      // Get user's loan access context
       const accessCtx = await getLoanAccessContext(
         req,
         tenantContext.tenantPool
@@ -244,15 +244,26 @@ router.post(
         });
       }
 
-      const result = await refreshInsights(
-        tenantContext.tenantPool,
-        dateFilter as string,
-        {
-          tenantId: tenantContext.tenantId,
-          channelGroup: channel_group as string | undefined,
+      const job = createJob("insight-refresh", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 10, "Collecting metrics...");
+          const result = await refreshInsights(
+            tenantContext.tenantPool,
+            dateFilter as string,
+            {
+              tenantId: tenantContext.tenantId,
+              channelGroup: channel_group as string | undefined,
+            }
+          );
+          completeJob(job.id, result);
+        } catch (error: any) {
+          console.error("Error refreshing insights:", error);
+          failJob(job.id, error.message || "Failed to refresh insights");
         }
-      );
-      res.json(result);
+      });
     } catch (error: any) {
       console.error("Error refreshing insights:", error);
 
@@ -280,27 +291,50 @@ router.post(
   attachTenantContext,
   async (req: AuthRequest, res) => {
     try {
-      // Platform admin gate
       const userRole = (req as any).userRole || (req as any).role;
       if (!["super_admin", "platform_admin"].includes(userRole)) {
         return res.status(403).json({ error: "Platform admin access required" });
       }
 
       const tenantContext = getTenantContext(req);
-
       const forceFresh = req.query.fresh === "true";
-      const result = await runInsightGeneration(
-        tenantContext.tenantId,
-        tenantContext.tenantPool,
-        undefined,
-        forceFresh ? { forceFresh: true } : undefined
-      );
 
-      if (!result.success && result.error?.includes("already in progress")) {
-        return res.status(409).json(result);
+      const running = isGenerationRunning(tenantContext.tenantId);
+      if (running.running) {
+        return res.status(409).json({
+          success: false,
+          error: `Generation already in progress`,
+          generationBatch: running.batch,
+        });
       }
 
-      res.json(result);
+      const job = createJob("insight-generate-agent", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          const result = await runInsightGeneration(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            (event) => {
+              const phaseProgress: Record<string, number> = {
+                init: 5, context: 10, planning: 20,
+                investigating: 50, evaluating: 80, persisting: 90, complete: 100,
+              };
+              updateProgress(job.id, phaseProgress[event.phase] ?? 50, event.detail);
+            },
+            forceFresh ? { forceFresh: true } : undefined
+          );
+          if (result.success) {
+            completeJob(job.id, result);
+          } else {
+            failJob(job.id, result.error || "Generation failed");
+          }
+        } catch (error: any) {
+          console.error("Error in agent insight generation:", error);
+          failJob(job.id, error.message || "Failed to generate insights");
+        }
+      });
     } catch (error: any) {
       console.error("Error starting agent insight generation:", error);
       res.status(500).json({ error: "Failed to start agent insight generation" });
@@ -356,14 +390,25 @@ router.post(
         });
       }
 
-      const result = await refreshAllChannels(
-        tenantContext.tenantPool,
-        dateFilter as string,
-        {
-          tenantId: tenantContext.tenantId,
+      const job = createJob("insight-refresh-all-channels", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
+
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 10, "Detecting active channels...");
+          const result = await refreshAllChannels(
+            tenantContext.tenantPool,
+            dateFilter as string,
+            {
+              tenantId: tenantContext.tenantId,
+            }
+          );
+          completeJob(job.id, result);
+        } catch (error: any) {
+          console.error("Error refreshing all-channel insights:", error);
+          failJob(job.id, error.message || "Failed to refresh all-channel insights");
         }
-      );
-      res.json(result);
+      });
     } catch (error: any) {
       console.error("Error refreshing all-channel insights:", error);
 
@@ -408,61 +453,69 @@ router.post(
         return res.json({ insights: [], accessFiltered: true, noAccess: true });
       }
 
-      // Collect metrics (same as full refresh)
-      const metricsPayload = await collectInsightMetrics(
-        tenantContext.tenantPool,
-        dateFilter as string,
-        { channelGroup: channel_group as string | undefined }
-      );
+      const job = createJob("insight-refresh-bucket", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
 
-      // Regenerate just the requested bucket
-      const allInsights = await refreshSingleBucket(
-        bucket as string,
-        metricsPayload,
-        tenantContext.tenantPool,
-        tenantContext.tenantId,
-        { channelGroup: channel_group as string | undefined }
-      );
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 20, "Collecting metrics...");
+          const metricsPayload = await collectInsightMetrics(
+            tenantContext.tenantPool,
+            dateFilter as string,
+            { channelGroup: channel_group as string | undefined }
+          );
 
-      // Map to API response format (same mapping as getInsights)
-      const insights = allInsights.map((ins: any) => {
-        const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
-        return {
-          id: ins.id,
-          type: ins.insight_type,
-          message: ins.headline,
-          priority:
-            ins.severity_score >= 0.8
-              ? "critical"
-              : ins.severity_score >= 0.55
-                ? "high"
-                : ins.severity_score >= 0.3
-                  ? "medium"
-                  : "low",
-          reasoning: ins.understory,
-          source: ins.source,
-          bucket: ins.bucket,
-          headline: ins.headline,
-          understory: ins.understory,
-          severity_score: ins.severity_score,
-          bucketPriority: ins.priority,
-          impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-          evidence: ev,
-          // ETM fields (stored in evidence JSONB)
-          what_changed: ev.what_changed,
-          why: ev.why,
-          business_impact: ev.business_impact,
-          risk_if_ignored: ev.risk_if_ignored,
-          recommended_action: ev.recommended_action,
-          owner: ev.owner,
-        };
-      });
+          updateProgress(job.id, 50, `Regenerating ${bucket} bucket...`);
+          const allInsights = await refreshSingleBucket(
+            bucket as string,
+            metricsPayload,
+            tenantContext.tenantPool,
+            tenantContext.tenantId,
+            { channelGroup: channel_group as string | undefined }
+          );
 
-      res.json({
-        insights,
-        refreshedBucket: bucket,
-        generatedAt: new Date().toISOString(),
-        usedLLM: true,
+          const insights = allInsights.map((ins: any) => {
+            const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
+            return {
+              id: ins.id,
+              type: ins.insight_type,
+              message: ins.headline,
+              priority:
+                ins.severity_score >= 0.8
+                  ? "critical"
+                  : ins.severity_score >= 0.55
+                    ? "high"
+                    : ins.severity_score >= 0.3
+                      ? "medium"
+                      : "low",
+              reasoning: ins.understory,
+              source: ins.source,
+              bucket: ins.bucket,
+              headline: ins.headline,
+              understory: ins.understory,
+              severity_score: ins.severity_score,
+              bucketPriority: ins.priority,
+              impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+              evidence: ev,
+              what_changed: ev.what_changed,
+              why: ev.why,
+              business_impact: ev.business_impact,
+              risk_if_ignored: ev.risk_if_ignored,
+              recommended_action: ev.recommended_action,
+              owner: ev.owner,
+            };
+          });
+
+          completeJob(job.id, {
+            insights,
+            refreshedBucket: bucket,
+            generatedAt: new Date().toISOString(),
+            usedLLM: true,
+          });
+        } catch (error: any) {
+          console.error("Error refreshing bucket:", error);
+          failJob(job.id, error.message || "Failed to refresh bucket");
+        }
       });
     } catch (error: any) {
       console.error("Error refreshing bucket:", error);
@@ -501,57 +554,69 @@ router.post(
         return res.json({ insights: [], accessFiltered: true, noAccess: true });
       }
 
-      const metricsPayload = await collectInsightMetrics(
-        tenantContext.tenantPool,
-        dateFilter as string,
-        { channelGroup: channel_group as string | undefined }
-      );
+      const job = createJob("insight-generate-more", req.userId!, tenantContext.tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
 
-      const allInsights = await generateMoreForBucket(
-        bucket as string,
-        metricsPayload,
-        tenantContext.tenantPool,
-        tenantContext.tenantId,
-        { channelGroup: channel_group as string | undefined }
-      );
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 20, "Collecting metrics...");
+          const metricsPayload = await collectInsightMetrics(
+            tenantContext.tenantPool,
+            dateFilter as string,
+            { channelGroup: channel_group as string | undefined }
+          );
 
-      const insights = allInsights.map((ins: any) => {
-        const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
-        return {
-          id: ins.id,
-          type: ins.insight_type,
-          message: ins.headline,
-          priority:
-            ins.severity_score >= 0.8
-              ? "critical"
-              : ins.severity_score >= 0.55
-                ? "high"
-                : ins.severity_score >= 0.3
-                  ? "medium"
-                  : "low",
-          reasoning: ins.understory,
-          source: ins.source,
-          bucket: ins.bucket,
-          headline: ins.headline,
-          understory: ins.understory,
-          severity_score: ins.severity_score,
-          bucketPriority: ins.priority,
-          impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-          evidence: ev,
-          what_changed: ev.what_changed,
-          why: ev.why,
-          business_impact: ev.business_impact,
-          risk_if_ignored: ev.risk_if_ignored,
-          recommended_action: ev.recommended_action,
-          owner: ev.owner,
-        };
-      });
+          updateProgress(job.id, 50, `Generating more ${bucket} insights...`);
+          const allInsights = await generateMoreForBucket(
+            bucket as string,
+            metricsPayload,
+            tenantContext.tenantPool,
+            tenantContext.tenantId,
+            { channelGroup: channel_group as string | undefined }
+          );
 
-      res.json({
-        insights,
-        appendedBucket: bucket,
-        generatedAt: new Date().toISOString(),
-        usedLLM: true,
+          const insights = allInsights.map((ins: any) => {
+            const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
+            return {
+              id: ins.id,
+              type: ins.insight_type,
+              message: ins.headline,
+              priority:
+                ins.severity_score >= 0.8
+                  ? "critical"
+                  : ins.severity_score >= 0.55
+                    ? "high"
+                    : ins.severity_score >= 0.3
+                      ? "medium"
+                      : "low",
+              reasoning: ins.understory,
+              source: ins.source,
+              bucket: ins.bucket,
+              headline: ins.headline,
+              understory: ins.understory,
+              severity_score: ins.severity_score,
+              bucketPriority: ins.priority,
+              impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
+              evidence: ev,
+              what_changed: ev.what_changed,
+              why: ev.why,
+              business_impact: ev.business_impact,
+              risk_if_ignored: ev.risk_if_ignored,
+              recommended_action: ev.recommended_action,
+              owner: ev.owner,
+            };
+          });
+
+          completeJob(job.id, {
+            insights,
+            appendedBucket: bucket,
+            generatedAt: new Date().toISOString(),
+            usedLLM: true,
+          });
+        } catch (error: any) {
+          console.error("Error generating more insights:", error);
+          failJob(job.id, error.message || "Failed to generate more insights");
+        }
       });
     } catch (error: any) {
       console.error("Error generating more insights:", error);

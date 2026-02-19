@@ -7,6 +7,7 @@ import {
   memo,
   useDeferredValue,
 } from "react";
+import { useJobStatus } from "@/hooks/useJobStatus";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BarChart3,
@@ -1030,6 +1031,8 @@ export const ClosingFalloutForecast = ({
     likelyCloseLateCount?: number;
   } | null>(null);
   const [predictionsLoading, setPredictionsLoading] = useState(false);
+  const [predictionJobId, setPredictionJobId] = useState<string | null>(null);
+  const predictionJob = useJobStatus(predictionJobId);
   const [bucketedLoans, setBucketedLoans] = useState<any[]>([]);
   // Store individual predictions to identify which loans are predicted to fallout
   const [loanPredictions, setLoanPredictions] = useState<
@@ -1888,31 +1891,38 @@ export const ClosingFalloutForecast = ({
     }
     setPredictionsLoading(true);
     try {
-      // Don't send loanIds - let the backend query the full database with proper filters
-      // The frontend's 5000-loan sample may not match the backend's "Active Loan" criteria
       const predictUrl = selectedTenantId
         ? `/api/predictions?tenant_id=${selectedTenantId}`
         : "/api/predictions";
-      const response = await api.request<{
-        predictions: Array<{ predictedOutcome: string; loanId: string }>;
-        bucketedLoans?: any[];
-        summary: {
-          predictedWithdraw: number;
-          predictedDeny: number;
-          predictedOriginate: number;
-          likelyCloseLateCount?: number;
-        };
-      }>(predictUrl, {
+      const resp = await api.request<{ jobId: string }>(predictUrl, {
         method: "POST",
         body: JSON.stringify({}),
       });
 
+      if (resp.jobId) {
+        setPredictionJobId(resp.jobId);
+      }
+    } catch (error) {
+      console.error("[Predict] Failed to start prediction:", error);
+      setPredictions(null);
+      setLoanPredictions({});
+      setBucketedLoans([]);
+      setPredictionsLoading(false);
+      predictionInFlightRef.current = false;
+      predictionInFlightGlobal = false;
+    }
+  }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle prediction job completion
+  useEffect(() => {
+    if (predictionJob.status === "complete" && predictionJob.result) {
+      const response = predictionJob.result;
       setPredictions({
-        likelyWithdraw: response.summary.predictedWithdraw,
-        likelyDecline: response.summary.predictedDeny,
+        likelyWithdraw: response.summary?.predictedWithdraw ?? 0,
+        likelyDecline: response.summary?.predictedDeny ?? 0,
         predictedFalloutTotal:
-          response.summary.predictedWithdraw + response.summary.predictedDeny,
-        likelyCloseLateCount: response.summary.likelyCloseLateCount,
+          (response.summary?.predictedWithdraw ?? 0) + (response.summary?.predictedDeny ?? 0),
+        likelyCloseLateCount: response.summary?.likelyCloseLateCount,
       });
 
       if (response.predictions && Array.isArray(response.predictions)) {
@@ -1936,20 +1946,21 @@ export const ClosingFalloutForecast = ({
         setBucketedLoans([]);
       }
 
-      // Simplified: predictions are instant now (no background processing)
-      // No need to poll for status - just set loading to false
       setPredictionsLoading(false);
-    } catch (error) {
-      console.error("[Predict] Failed to run prediction:", error);
+      setPredictionJobId(null);
+      predictionInFlightRef.current = false;
+      predictionInFlightGlobal = false;
+    } else if (predictionJob.status === "failed") {
+      console.error("[Predict] Prediction job failed:", predictionJob.error);
       setPredictions(null);
       setLoanPredictions({});
       setBucketedLoans([]);
       setPredictionsLoading(false);
-    } finally {
+      setPredictionJobId(null);
       predictionInFlightRef.current = false;
       predictionInFlightGlobal = false;
     }
-  }, [selectedTenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [predictionJob.status, predictionJob.result, predictionJob.error]);
 
   // Fetch stored predictions from database when activeLoansPeriod or tenant changes
   // Race condition protection: cancel stale requests when period changes rapidly

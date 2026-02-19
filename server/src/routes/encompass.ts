@@ -29,6 +29,7 @@ import {
 } from "../config/defaultEncompassFieldMappings.js";
 import { EncompassFieldDiscoveryService } from "../services/encompassFieldDiscoveryService.js";
 import { z } from "zod";
+import { createJob, updateProgress, completeJob, failJob } from "../services/jobManager.js";
 
 const router = Router();
 // apiService and etlService will be created per-request with tenant pool
@@ -83,13 +84,12 @@ router.post(
         limit: z.number().int().positive().optional(),
         fields: z.array(z.string()).optional(),
         folderName: z.string().optional(),
-        testMode: z.boolean().optional().default(false), // Test mode flag
+        testMode: z.boolean().optional().default(false),
       });
 
       const body = schema.parse(req.body);
       const { tenantId, losConnectionId, tenantPool } = getConnectionInfo(req);
 
-      // Verify connection exists in tenant database
       const connectionResult = await tenantPool.query(
         "SELECT id FROM public.los_connections WHERE id = $1 AND is_active = true",
         [losConnectionId]
@@ -99,35 +99,42 @@ router.post(
         return res.status(404).json({ error: "LOS connection not found" });
       }
 
-      // Verify losConnectionId matches
       if (body.losConnectionId !== losConnectionId) {
         return res.status(400).json({ error: "Connection ID mismatch" });
       }
 
-      // Create services with tenant pool
-      const apiService = new EncompassApiService(tenantPool);
-      const etlService = new EncompassEtlService(tenantPool);
+      const job = createJob("encompass-sync", req.userId!, tenantId);
+      res.status(202).json({ jobId: job.id, status: "processing" });
 
-      // Apply test mode: use default test limit if testMode is true and no limit specified
-      let syncLimit = body.limit;
-      if (body.testMode && !syncLimit) {
-        syncLimit = parseInt(process.env.ENCOMPASS_TEST_MODE_LIMIT || "50", 10);
-        console.log(
-          `[Encompass Sync] Test mode enabled: using limit of ${syncLimit} records`
-        );
-      }
+      setImmediate(async () => {
+        try {
+          updateProgress(job.id, 10, "Initializing Encompass sync...");
 
-      const result = await etlService.syncLoans(tenantId, losConnectionId, {
-        fullSync: body.fullSync,
-        modifiedFrom: body.modifiedFrom
-          ? new Date(body.modifiedFrom)
-          : undefined,
-        limit: syncLimit,
-        fields: body.fields,
-        folderName: body.folderName,
+          const apiService = new EncompassApiService(tenantPool);
+          const etlService = new EncompassEtlService(tenantPool);
+
+          let syncLimit = body.limit;
+          if (body.testMode && !syncLimit) {
+            syncLimit = parseInt(process.env.ENCOMPASS_TEST_MODE_LIMIT || "50", 10);
+          }
+
+          updateProgress(job.id, 20, "Syncing loans from Encompass...");
+          const result = await etlService.syncLoans(tenantId, losConnectionId, {
+            fullSync: body.fullSync,
+            modifiedFrom: body.modifiedFrom
+              ? new Date(body.modifiedFrom)
+              : undefined,
+            limit: syncLimit,
+            fields: body.fields,
+            folderName: body.folderName,
+          });
+
+          completeJob(job.id, result);
+        } catch (error: any) {
+          console.error("Error syncing Encompass loans:", error);
+          failJob(job.id, error.message || "Failed to sync loans");
+        }
       });
-
-      res.json(result);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res

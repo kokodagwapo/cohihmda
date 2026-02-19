@@ -36,8 +36,10 @@ import {
   FlaskConical,
 } from "lucide-react";
 import { useAletheiaData, AletheiaInsight } from "@/hooks/useAletheiaData";
+import { useJobStatus } from "@/hooks/useJobStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
+import { JobProgress } from "@/components/ui/JobProgress";
 import { CohiBriefingControl } from "@/components/aletheia/CohiBriefingControl";
 import { InsightDetailModal } from "./InsightDetailModal";
 import { TrackedInsightsWatchlist } from "./TrackedInsightsWatchlist";
@@ -736,6 +738,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     refreshInsights,
     refreshBucket,
     generateMoreInsights,
+    reloadInsightsFromDb,
     deleteInsight,
     submitFeedback,
     loadInsightsByMethod,
@@ -746,20 +749,37 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
     selectedChannel
   );
 
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("agent");
-  const [isAgentGenerating, setIsAgentGenerating] = useState(false);
   const [agentFinding, setAgentFinding] = useState<Finding | null>(null);
   const [agentFindingInsight, setAgentFindingInsight] = useState<AletheiaInsight | null>(null);
 
+  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
+  const refreshJob = useJobStatus(refreshJobId);
+
+  const [agentJobId, setAgentJobId] = useState<string | null>(null);
+  const agentJob = useJobStatus(agentJobId);
+
+  const isRefreshing = refreshJob.status === "processing";
+  const isAgentGenerating = agentJob.status === "processing";
+
+  useEffect(() => {
+    if (refreshJob.status === "complete") {
+      reloadInsightsFromDb().catch(() => {});
+      setRefreshJobId(null);
+    }
+  }, [refreshJob.status, reloadInsightsFromDb]);
+
+  useEffect(() => {
+    if (agentJob.status === "complete") {
+      loadInsightsByMethod("agent").catch(() => {});
+      setAgentJobId(null);
+    }
+  }, [agentJob.status, loadInsightsByMethod]);
+
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
-    setIsRefreshing(true);
-    try {
-      await refreshInsights();
-    } finally {
-      setIsRefreshing(false);
-    }
+    const jobId = await refreshInsights();
+    if (jobId) setRefreshJobId(jobId);
   }, [refreshInsights, isRefreshing]);
 
   const handleTabSwitch = useCallback(
@@ -774,19 +794,20 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
 
   const handleAgentGenerate = useCallback(async (forceFresh = false) => {
     if (isAgentGenerating) return;
-    setIsAgentGenerating(true);
     try {
-      await api.triggerAgentInsights(selectedTenantId, forceFresh ? { forceFresh: true } : undefined);
-      await loadInsightsByMethod("agent");
+      const resp: any = await api.triggerAgentInsights(selectedTenantId, forceFresh ? { forceFresh: true } : undefined);
+      if (resp?.jobId) {
+        setAgentJobId(resp.jobId);
+      } else {
+        await loadInsightsByMethod("agent");
+      }
     } catch (err: any) {
       if (err.message?.includes("409") || err.message?.includes("already in progress")) {
-        console.warn("Agent generation already in progress, will poll for results");
+        console.warn("Agent generation already in progress");
       } else {
         console.error("Agent generation failed:", err);
       }
       try { await loadInsightsByMethod("agent"); } catch {}
-    } finally {
-      setIsAgentGenerating(false);
     }
   }, [loadInsightsByMethod, selectedTenantId, isAgentGenerating]);
 
@@ -1126,8 +1147,30 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           <TrackedInsightsWatchlist selectedTenantId={selectedTenantId} />
         )}
 
+        {/* ===== Job Progress ===== */}
+        {(refreshJob.status === "processing" || refreshJob.status === "failed") && (
+          <JobProgress
+            status={refreshJob.status}
+            progress={refreshJob.progress}
+            message={refreshJob.message}
+            error={refreshJob.error}
+            onRetry={handleRefresh}
+            className="px-1"
+          />
+        )}
+        {(agentJob.status === "processing" || agentJob.status === "failed") && (
+          <JobProgress
+            status={agentJob.status}
+            progress={agentJob.progress}
+            message={agentJob.message}
+            error={agentJob.error}
+            onRetry={() => handleAgentGenerate(false)}
+            className="px-1"
+          />
+        )}
+
         {/* ===== Loading shimmer ===== */}
-        {activeTab !== "watchlist" && insightsLoading && !hasInsights && (
+        {activeTab !== "watchlist" && insightsLoading && !hasInsights && !(refreshJob.status === "processing") && (
           <div className="flex flex-col gap-4">
             {[0, 1, 2].map((i) => (
               <div
