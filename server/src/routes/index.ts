@@ -37,6 +37,7 @@ import onboardingRoutes from "./onboarding.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
+import { globalTenantContext } from "../middleware/tenantContext.js";
 import crypto from "crypto";
 
 export function setupRoutes(app: Express) {
@@ -49,6 +50,11 @@ export function setupRoutes(app: Express) {
     setupMockLosApi(app, "/mock-los");
     console.log("✅ Mock LOS API enabled - use mock API endpoints for testing");
   }
+
+  // Global tenant context middleware — defense-in-depth layer that silently
+  // attaches tenant context to authenticated requests so new routes get it
+  // by default even if the developer forgets attachTenantContext.
+  app.use("/api", globalTenantContext);
 
   app.use("/api/auth", authRoutes);
   app.use("/api/auth/cognito", cognitoAuth);

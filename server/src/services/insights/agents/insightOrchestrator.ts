@@ -355,6 +355,7 @@ function buildDetailDataFromFinding(
     confidence: finding.confidence,
     keyMetrics: finding.keyMetrics || {},
     keyMetricDescriptions: finding.keyMetricDescriptions || {},
+    keyMetricFormats: finding.keyMetricFormats || {},
     suggestedBucket: finding.suggestedBucket,
     impactEstimate: finding.impactEstimate,
     metricSignature: finding.metricSignature,
@@ -364,6 +365,7 @@ function buildDetailDataFromFinding(
       rows: (e.rows || []).slice(0, 200),
       rowCount: e.rowCount,
       fields: e.fields,
+      columnFormats: e.columnFormats || undefined,
     })),
   };
 }

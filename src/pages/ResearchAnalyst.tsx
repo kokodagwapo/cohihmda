@@ -397,7 +397,7 @@ export default function ResearchAnalyst() {
   const showBottomInput = isRunning || phase === "complete";
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pt-14 sm:pt-16">
+    <div className="h-screen overflow-hidden bg-background flex flex-col pt-14 sm:pt-16">
       <Navigation />
 
       {/* Body: Sidebar + Content */}

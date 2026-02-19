@@ -1049,15 +1049,19 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
               </div>
             )}
 
-            {/* Tenant + Channel selectors - nav-style pill (visible for admins) */}
+            {/* Tenant + Channel selectors - nav-style pill */}
             {isAuthenticated && !isAdminPage && (
               <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-200/50 dark:border-slate-700/50 bg-slate-50/80 dark:bg-slate-800/50 px-2 py-1.5">
-                <TenantSelector
-                  selectedTenantId={selectedTenantId}
-                  onTenantChange={setSelectedTenantId}
-                  compact={true}
-                />
-                <div className="h-6 w-px bg-slate-200 dark:bg-slate-600" aria-hidden />
+                {isPlatformAdmin && (
+                  <>
+                    <TenantSelector
+                      selectedTenantId={selectedTenantId}
+                      onTenantChange={setSelectedTenantId}
+                      compact={true}
+                    />
+                    <div className="h-6 w-px bg-slate-200 dark:bg-slate-600" aria-hidden />
+                  </>
+                )}
                 <ChannelSelector
                   selectedChannel={selectedChannel}
                   onChannelChange={setSelectedChannel}

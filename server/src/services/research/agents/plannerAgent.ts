@@ -122,9 +122,9 @@ export async function runPlannerAgent(
   schemaContext: string,
   metricDefinitions: string,
   apiKey: string,
-  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string } = {}
+  options: { topic?: string; knowledgeContext?: string; priorInvestigationContext?: string; priorSessionSummaries?: string } = {}
 ): Promise<ResearchPlan> {
-  const { topic, knowledgeContext, priorInvestigationContext } = options;
+  const { topic, knowledgeContext, priorInvestigationContext, priorSessionSummaries } = options;
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -142,6 +142,10 @@ export async function runPlannerAgent(
 
   if (priorInvestigationContext) {
     userPrompt += `\n## Prior Investigation Context\nThe user is escalating from a dashboard insight. Build on these findings — go deeper, explore related angles, and uncover patterns the initial analysis didn't cover.\n${priorInvestigationContext}\n`;
+  }
+
+  if (priorSessionSummaries) {
+    userPrompt += `\n${priorSessionSummaries}\nAvoid duplicating these prior investigations unless the user specifically asks to revisit a topic. Instead, explore new angles, dig deeper on areas not yet covered, or check whether previously identified issues have changed.\n`;
   }
 
   if (knowledgeContext) {

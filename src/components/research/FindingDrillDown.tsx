@@ -93,31 +93,33 @@ function humanizeKey(key: string): string {
 }
 
 /**
- * Looks up FIELD_REGISTRY to determine the format for a column.
- * Falls back to heuristic detection from the column name.
+ * Maps an agent-provided format string to a FieldFormat.
+ */
+const VALID_AGENT_FORMATS = new Set(["number", "currency", "percent", "days", "date", "text", "rate", "bps", "mono", "boolean", "badge"]);
+function agentFormatToFieldFormat(agentFmt: string | undefined): FieldFormat | null {
+  if (!agentFmt) return null;
+  const lower = agentFmt.toLowerCase().trim();
+  if (VALID_AGENT_FORMATS.has(lower)) return lower as FieldFormat;
+  return null;
+}
+
+/**
+ * Looks up FIELD_REGISTRY for known DB column names (used by evidence tables).
+ * Returns "text" for anything not in the registry — no heuristic guessing.
  */
 function inferFormat(key: string): FieldFormat {
   if (FIELD_REGISTRY[key]?.format) return FIELD_REGISTRY[key].format;
   if (SUMMARY_REGISTRY[key]?.format) return SUMMARY_REGISTRY[key].format as FieldFormat;
-
-  const lower = key.toLowerCase();
-  // Percent/rate checked first -- suffixes like _pct, _rate are strong signals
-  // even when the key also contains "amount" or "volume"
-  if (/pct|percent|_rate|ratio|pull_through|fallout|ltv|dti|share/i.test(lower)) return "percent";
-  if (/bps|basis_points/i.test(lower)) return "bps";
-  if (/days|cycle_time|age|duration|time_in/i.test(lower)) return "days";
-  if (/date|_at$|timestamp|created|updated|expir/i.test(lower)) return "date";
-  if (/amount|volume|revenue|price|cost|balance|value|loan_amount|total_amount|lost_revenue/i.test(lower)) return "currency";
-  if (/loan_number|loan_id|id$/i.test(lower)) return "mono";
-  if (/count|total|num_|number_of/i.test(lower)) return "number";
   return "text";
 }
 
 /**
- * Heuristic: look at a value to detect if it's already formatted with $ or %,
- * or if the raw number needs format wrapping.
+ * Resolves format for a KPI metric. Agent-provided format is the source of truth.
+ * Falls back to value-based detection ($ prefix, % suffix) then registry lookup.
  */
-function inferFormatFromValue(key: string, value: string | number): FieldFormat {
+function inferFormatFromValue(key: string, value: string | number, agentFormat?: string): FieldFormat {
+  const fromAgent = agentFormatToFieldFormat(agentFormat);
+  if (fromAgent) return fromAgent;
   const strVal = String(value);
   if (strVal.startsWith("$")) return "currency";
   if (strVal.endsWith("%")) return "percent";
@@ -214,9 +216,9 @@ const CHART_COLORS = [
   "#818cf8", "#7c3aed", "#6d28d9", "#5b21b6",
 ];
 
-function KPICard({ metricKey, value, description }: { metricKey: string; value: string | number; description?: string }) {
+function KPICard({ metricKey, value, description, agentFormat }: { metricKey: string; value: string | number; description?: string; agentFormat?: string }) {
   const label = humanizeKey(metricKey);
-  const format = inferFormatFromValue(metricKey, value);
+  const format = inferFormatFromValue(metricKey, value, agentFormat);
   const formatted = formatValue(value, format);
   const tip = description || SUMMARY_REGISTRY[metricKey]?.description;
 
@@ -256,29 +258,35 @@ function EvidenceTable({ evidence, index }: { evidence: EvidenceItem; index: num
 
   const columnFormats = useMemo(() => {
     const formats: Record<string, FieldFormat> = {};
+    const agentFmts = evidence.columnFormats || {};
     for (const f of evidence.fields) {
+      const fromAgent = agentFormatToFieldFormat(agentFmts[f]);
+      if (fromAgent) {
+        formats[f] = fromAgent;
+        continue;
+      }
       const registryFormat = inferFormat(f);
       if (registryFormat !== "text") {
         formats[f] = registryFormat;
-      } else {
-        const sample = evidence.rows.find((r) => r[f] != null)?.[f];
-        if (sample != null) {
-          if (typeof sample === "number") formats[f] = "number";
-          else if (typeof sample === "boolean") formats[f] = "boolean";
-          else {
-            const s = String(sample);
-            if (s.startsWith("$")) formats[f] = "currency";
-            else if (s.endsWith("%")) formats[f] = "percent";
-            else if (/^\d{4}-\d{2}-\d{2}/.test(s)) formats[f] = "date";
-            else formats[f] = "text";
-          }
-        } else {
-          formats[f] = "text";
+        continue;
+      }
+      const sample = evidence.rows.find((r) => r[f] != null)?.[f];
+      if (sample != null) {
+        if (typeof sample === "number") formats[f] = "number";
+        else if (typeof sample === "boolean") formats[f] = "boolean";
+        else {
+          const s = String(sample);
+          if (s.startsWith("$")) formats[f] = "currency";
+          else if (s.endsWith("%")) formats[f] = "percent";
+          else if (/^\d{4}-\d{2}-\d{2}/.test(s)) formats[f] = "date";
+          else formats[f] = "text";
         }
+      } else {
+        formats[f] = "text";
       }
     }
     return formats;
-  }, [evidence.fields, evidence.rows]);
+  }, [evidence.fields, evidence.rows, evidence.columnFormats]);
 
   const filteredAndSorted = useMemo(() => {
     let rows = [...evidence.rows];
@@ -498,7 +506,8 @@ function AutoChart({ evidence }: { evidence: EvidenceItem }) {
     /rate|count|total|amount|revenue|avg|sum|percent|volume/i.test(f)
   ) || numericFields[0];
 
-  const bestFormat = inferFormat(bestField);
+  const agentFmts = evidence.columnFormats || {};
+  const bestFormat = agentFormatToFieldFormat(agentFmts[bestField]) || inferFormat(bestField);
 
   const chartData = rows.slice(0, 20).map((row) => ({
     name: truncateLabel(String(row[labelField] || "N/A")),
@@ -600,7 +609,7 @@ export function FindingDrillDown({ finding, onClose }: FindingDrillDownProps) {
           </h4>
           <div className="flex flex-wrap gap-2">
             {Object.entries(finding.keyMetrics).map(([k, v]) => (
-              <KPICard key={k} metricKey={k} value={v} description={finding.keyMetricDescriptions?.[k]} />
+              <KPICard key={k} metricKey={k} value={v} description={finding.keyMetricDescriptions?.[k]} agentFormat={finding.keyMetricFormats?.[k]} />
             ))}
           </div>
         </div>

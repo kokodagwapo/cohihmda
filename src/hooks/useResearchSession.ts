@@ -42,6 +42,7 @@ export interface EvidenceItem {
   rows: Record<string, any>[];
   rowCount: number;
   fields: string[];
+  columnFormats?: Record<string, string>;
 }
 
 export interface Finding {
@@ -52,6 +53,7 @@ export interface Finding {
   evidence: EvidenceItem[];
   keyMetrics: Record<string, string | number>;
   keyMetricDescriptions?: Record<string, string>;
+  keyMetricFormats?: Record<string, string>;
 }
 
 export interface ResearchTheme {

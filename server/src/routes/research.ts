@@ -18,6 +18,7 @@
 import { Router, type Response } from "express";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 import { attachTenantContext, getTenantContext } from "../middleware/tenantContext.js";
+import { requirePlatformStaff } from "../middleware/rbac.js";
 import { pool as managementPool } from "../config/managementDatabase.js";
 import {
   createSession,
@@ -171,6 +172,7 @@ router.get(
 router.post(
   "/sessions/:id/steer",
   authenticateToken,
+  attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const { message } = req.body || {};
@@ -203,6 +205,7 @@ router.post(
 router.post(
   "/sessions/:id/pause",
   authenticateToken,
+  attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const success = pauseSession(id);
@@ -221,6 +224,7 @@ router.post(
 router.post(
   "/sessions/:id/resume",
   authenticateToken,
+  attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const success = resumeSession(id);
@@ -324,6 +328,7 @@ router.post(
 router.post(
   "/sessions/:id/feedback/:feedbackId/curate",
   authenticateToken,
+  requirePlatformStaff(),
   attachTenantContext,
   async (req: AuthRequest, res: Response) => {
     const { feedbackId } = req.params;
@@ -389,6 +394,7 @@ router.get(
       plan: session.plan,
       findings: session.findings,
       report: session.report,
+      events: session.events,
       followUpHistory: session.followUpHistory,
       error: session.error,
       createdAt: session.createdAt,

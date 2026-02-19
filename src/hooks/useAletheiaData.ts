@@ -312,7 +312,7 @@ export const useAletheiaData = (
             : "";
 
         const data = await api.request<any>(
-          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=pipeline`
+          `/api/dashboard/insights?dateFilter=${dateFilter}&useLLM=true${tenantParam}${channelParam}&generation_method=agent`
         );
 
         setMetadata({

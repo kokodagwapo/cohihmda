@@ -165,9 +165,12 @@ export const getWebSocketUrl = (): string => {
 
 const API_URL = getApiUrl();
 
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
+  private userRole: string | null = null;
   private requestCache: Map<string, { data: any; timestamp: number }> =
     new Map();
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -176,6 +179,10 @@ export class ApiClient {
   constructor(baseUrl: string = API_URL) {
     this.baseUrl = baseUrl;
     this.token = localStorage.getItem("auth_token");
+  }
+
+  setUserRole(role: string | null) {
+    this.userRole = role;
   }
 
   private getHealthUrl(): string {
@@ -252,6 +259,17 @@ export class ApiClient {
     options: RequestInit = {},
     retries = 0
   ): Promise<T> {
+    // Defense-in-depth: strip tenant_id from requests for non-platform users
+    let sanitizedEndpoint = endpoint;
+    if (this.userRole && !PLATFORM_STAFF_ROLES.has(this.userRole)) {
+      const url_ = new URL(endpoint, "http://placeholder");
+      if (url_.searchParams.has("tenant_id")) {
+        url_.searchParams.delete("tenant_id");
+        sanitizedEndpoint = url_.pathname + url_.search;
+      }
+    }
+    endpoint = sanitizedEndpoint;
+
     // If baseUrl is empty string (CloudFront same-origin), use endpoint directly
     // Otherwise, prepend baseUrl
     const url = this.baseUrl ? `${this.baseUrl}${endpoint}` : endpoint;

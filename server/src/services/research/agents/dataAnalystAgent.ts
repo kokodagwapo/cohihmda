@@ -35,6 +35,7 @@ export interface Finding {
   evidence: EvidenceItem[];
   keyMetrics: Record<string, string | number>;
   keyMetricDescriptions?: Record<string, string>;
+  keyMetricFormats?: Record<string, string>;
 }
 
 export interface EvidenceItem {
@@ -43,6 +44,7 @@ export interface EvidenceItem {
   rows: Record<string, any>[];
   rowCount: number;
   fields: string[];
+  columnFormats?: Record<string, string>;
 }
 
 export type AgentStepType =
@@ -147,6 +149,7 @@ RULES:
 - Limit results to 100 rows max
 - Use multiple time windows for comparison: YTD, rolling 90D, rolling 30D, prior 90D
 - Include NULL handling: COALESCE, NULLIF where appropriate
+- When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
 
 DATA QUALITY AWARENESS (CRITICAL):
 - "Active Loan" status does NOT always mean genuinely in-process. Many lenders fail to close out loans in their LOS (Encompass), leaving stale records with status='Active Loan' and application dates months or even years old. These are NOT real pipeline — they are LOS housekeeping failures.
@@ -178,7 +181,9 @@ POSTGRESQL DATE ARITHMETIC (CRITICAL):
 - Date comparisons: l.application_date >= CURRENT_DATE - INTERVAL '90 days' is fine (the interval is subtracted from the date)
 - When you have enough evidence (usually 2-3 queries), produce your finding
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If your investigation disproved the hypothesis, the title must reflect the real finding.
-- Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions. Each description should be 1 sentence explaining what the metric measures in plain business language.
+- Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
+- keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
+- keyMetricFormats: the display format for each metric. Must be one of: "number" (plain count), "currency" (dollar amount), "percent" (percentage), "days" (day count), "date" (calendar date), "text" (freeform string).
 
 Respond in JSON format:
 {
@@ -186,12 +191,14 @@ Respond in JSON format:
   "action": "query" | "finding",
   "sql": "SELECT ... (only when action=query)",
   "explanation": "What this query investigates (only when action=query)",
+  "columnFormats": { "column_alias": "number|currency|percent|days|date|text", ... },
   "finding": {  // only when action=finding
     "title": "Concise finding title — must reflect the actual evidence",
     "summary": "2-4 sentence summary of what you found, with specific numbers",
     "confidence": "high" | "medium" | "low",
     "keyMetrics": { "metricName": "value", ... },
-    "keyMetricDescriptions": { "metricName": "One sentence explaining what this metric measures", ... }
+    "keyMetricDescriptions": { "metricName": "One sentence explaining what this metric measures", ... },
+    "keyMetricFormats": { "metricName": "number|currency|percent|days|date|text", ... }
   }
 }`;
 
@@ -303,6 +310,7 @@ export async function runDataAnalystAgent(
         evidence,
         keyMetrics: parsed.finding.keyMetrics || {},
         keyMetricDescriptions: parsed.finding.keyMetricDescriptions || {},
+        keyMetricFormats: parsed.finding.keyMetricFormats || {},
       };
 
       onStep({
@@ -360,6 +368,7 @@ export async function runDataAnalystAgent(
         rows: queryResult.rows,
         rowCount: queryResult.rowCount,
         fields: queryResult.fields,
+        columnFormats: parsed.columnFormats || undefined,
       });
 
       const formattedResults = formatResultsForLLM(queryResult);

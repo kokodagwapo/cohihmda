@@ -328,11 +328,6 @@ function BucketLane({
             <p className="text-[13px] sm:text-sm text-slate-900 dark:text-white font-medium leading-snug">
               {insight.headline || insight.message}
             </p>
-            {isAdmin && insight.generation_method === "agent" && (
-              <span className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                <Sparkles className="w-2.5 h-2.5" /> Agent
-              </span>
-            )}
           </div>
           {/* Admin feedback + delete + investigate buttons */}
           {isAdmin && insight.insightId && (
@@ -751,7 +746,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
   );
 
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "agent" | "watchlist">("agent");
   const [isAgentGenerating, setIsAgentGenerating] = useState(false);
   const [agentFinding, setAgentFinding] = useState<Finding | null>(null);
   const [agentFindingInsight, setAgentFindingInsight] = useState<AletheiaInsight | null>(null);
@@ -820,12 +815,14 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
           confidence: dd.confidence || "medium",
           keyMetrics: dd.keyMetrics || {},
           keyMetricDescriptions: dd.keyMetricDescriptions || {},
+          keyMetricFormats: dd.keyMetricFormats || {},
           evidence: (dd.evidence || []).map((e: any) => ({
             sql: e.sql || "",
             explanation: e.explanation || "",
             rows: e.rows || [],
             rowCount: e.rowCount || 0,
             fields: e.fields || [],
+            columnFormats: e.columnFormats || undefined,
           })),
         };
         setAgentFinding(finding);
@@ -1079,8 +1076,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
         {/* ===== Tab Bar ===== */}
         <div className="flex items-center gap-1 mb-5 border-b border-slate-200/60 dark:border-slate-700/60 -mx-1 px-1">
           {([
-            { id: "pipeline" as const, label: "Pipeline", icon: Zap },
-            { id: "agent" as const, label: "Agent", icon: Bot },
+            { id: "agent" as const, label: "Insights", icon: Sparkles },
             { id: "watchlist" as const, label: "Watchlist", icon: Bookmark },
           ]).map((tab) => (
             <button
@@ -1109,7 +1105,7 @@ export const AletheiaPromptsCard = React.memo(function AletheiaPromptsCard({
               ) : (
                 <Sparkles className="w-3.5 h-3.5" />
               )}
-              {isAgentGenerating ? "Generating..." : "Generate Agent Insights"}
+              {isAgentGenerating ? "Generating..." : "Generate Insights"}
             </button>
           )}
         </div>

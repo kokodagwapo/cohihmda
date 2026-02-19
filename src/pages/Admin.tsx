@@ -20,7 +20,7 @@ import { TenantConfigSection } from "@/components/admin/tenant-config";
 import { SOC2ComplianceSection } from "@/components/admin/SOC2ComplianceSection";
 import { StripeSection } from "@/components/admin/StripeSection";
 import { DemoDataSection } from "@/components/admin/DemoDataSection";
-import { MetricsCatalogSection } from "@/components/admin/MetricsCatalogSection";
+// import { MetricsCatalogSection } from "@/components/admin/MetricsCatalogSection";
 import { TenantSelectorCard } from "@/components/admin/TenantSelectorCard";
 import { GlobalKnowledgeLibrary } from "@/components/admin/GlobalKnowledgeLibrary";
 import { KnowledgeCenterSection } from "@/components/admin/KnowledgeCenterSection";
@@ -30,7 +30,7 @@ import { PlatformSettingsSection } from "@/components/admin/PlatformSettingsSect
 import { SyncManagementSection } from "@/components/admin/SyncManagementSection";
 import { AdminModeSelector } from "@/components/admin/AdminModeSelector";
 import { Button } from "@/components/ui/button";
-import { Menu, Settings, Crown, Briefcase, Building2 } from "lucide-react";
+import { Menu, Settings } from "lucide-react";
 import {
   useAdminState,
   AdminSection,
@@ -215,7 +215,6 @@ export const Admin = () => {
           case "rag-voice":
             await loadRagVoiceData(false);
             break;
-          case "metrics-catalog":
           case "dev-tools":
             // These load on demand, no pre-loading needed
             break;
@@ -262,7 +261,6 @@ export const Admin = () => {
       { id: "infrastructure", label: "Infrastructure" },
       { id: "security-compliance", label: "Security & Compliance" },
       { id: "stripe", label: "Stripe Payments" },
-      { id: "metrics-catalog", label: "Metrics Catalog" },
       { id: "dev-tools", label: "Developer Tools" },
       { id: "ai-prompts", label: "AI Prompts" },
       { id: "insight-feedback", label: "Insight Feedback" },
@@ -271,44 +269,10 @@ export const Admin = () => {
     return sections.find((s) => s.id === activeSection)?.label || "Overview";
   };
 
-  // Get page title and description based on role and mode
-  const getPageInfo = () => {
-    if (!isPlatform) {
-      return {
-        title: "Organization Settings",
-        description:
-          "Manage your organization's users, settings, and integrations",
-        Icon: Briefcase,
-        accentColor: "from-blue-500 to-purple-500",
-      };
-    }
-    if (adminMode === "platform") {
-      return {
-        title: "Platform Admin",
-        description:
-          "Manage tenants, platform settings, and monitor system health",
-        Icon: Crown,
-        accentColor: "from-amber-500 to-orange-500",
-      };
-    }
-    return {
-      title: "Tenant Management",
-      description: "View and manage a specific tenant's data and settings",
-      Icon: Building2,
-      accentColor: "from-emerald-500 to-teal-500",
-    };
-  };
-  const {
-    title: pageTitle,
-    description: pageDescription,
-    Icon: HeaderIcon,
-    accentColor,
-  } = getPageInfo();
-
   return (
     <AdminTenantProvider>
       <AdminContainer isAdmin={isAdmin}>
-        <div className="min-h-screen bg-gradient-to-br from-blue-50/30 via-white to-blue-50/20 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/50">
+        <div className="h-screen overflow-hidden flex flex-col bg-gradient-to-br from-blue-50/30 via-white to-blue-50/20 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950/50">
           {/* Preloader */}
           <AdminPreloader show={initialLoad} />
 
@@ -317,43 +281,9 @@ export const Admin = () => {
           {/* Background pattern */}
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.03),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(168,85,247,0.02),transparent_50%)] pointer-events-none" />
 
-          <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-20 sm:pt-24 pb-8 sm:pb-12 relative z-10">
-            {/* Header */}
-            <div className="mb-6 sm:mb-10">
-              <div className="flex items-center gap-3 sm:gap-4 mb-3">
-                <div
-                  className={`h-10 sm:h-12 w-1 rounded-full shadow-lg flex-shrink-0 bg-gradient-to-b ${accentColor}`}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3">
-                    <HeaderIcon
-                      className={`h-8 w-8 sm:h-10 sm:w-10 ${
-                        !isPlatform
-                          ? "text-blue-500"
-                          : adminMode === "platform"
-                          ? "text-amber-500"
-                          : "text-emerald-500"
-                      }`}
-                      strokeWidth={1.5}
-                    />
-                    <h1 className="text-3xl sm:text-5xl lg:text-6xl font-thin text-slate-900 dark:text-white tracking-tight">
-                      {pageTitle}
-                    </h1>
-                  </div>
-                  <p className="text-sm sm:text-base lg:text-lg text-slate-600 dark:text-slate-400 font-extralight tracking-wide mt-2 sm:mt-2.5">
-                    {pageDescription}
-                  </p>
-                  {tenantName && !isPlatform && (
-                    <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">
-                      {tenantName}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
+          <div className="flex-1 overflow-hidden flex flex-col container mx-auto px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20 relative z-10">
             {/* Mobile Hamburger Menu Button */}
-            <div className="lg:hidden mb-4 sm:mb-6 flex items-center justify-between">
+            <div className="lg:hidden mb-4 sm:mb-6 flex items-center justify-between flex-shrink-0">
               <Button
                 variant="outline"
                 size="lg"
@@ -389,6 +319,7 @@ export const Admin = () => {
               />
             )}
 
+            <div className="flex-1 overflow-hidden">
             <AdminLayoutWithContext
               activeSection={activeSection}
               mobileMenuOpen={mobileMenuOpen}
@@ -404,7 +335,7 @@ export const Admin = () => {
               )}
 
               {/* Tenants Section */}
-              {activeSection === "tenants" && (
+              {activeSection === "tenants" && isPlatform && (
                 <TenantsSection
                   tenants={tenants}
                   searchQuery={searchQuery}
@@ -420,7 +351,7 @@ export const Admin = () => {
               )}
 
               {/* Platform Team Section (Super Admin only) */}
-              {activeSection === "platform-team" && <PlatformTeamSection />}
+              {activeSection === "platform-team" && isPlatform && <PlatformTeamSection />}
 
               {/* Users Section */}
               {activeSection === "users" && <UserManagementSection />}
@@ -441,7 +372,7 @@ export const Admin = () => {
               {activeSection === "data-config" && <TenantConfigSection />}
 
               {/* Infrastructure Section (formerly System) */}
-              {activeSection === "infrastructure" && (
+              {activeSection === "infrastructure" && isPlatform && (
                 <SystemSection
                   systemInfo={systemInfo}
                   loading={systemLoading}
@@ -449,7 +380,7 @@ export const Admin = () => {
               )}
 
               {/* Security & Compliance Section (combined Security + SOC 2) */}
-              {activeSection === "security-compliance" && (
+              {activeSection === "security-compliance" && isPlatform && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -530,7 +461,7 @@ export const Admin = () => {
               )}
 
               {/* Developer Tools Section (includes Demo Data) */}
-              {activeSection === "dev-tools" && (
+              {activeSection === "dev-tools" && isPlatform && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -555,7 +486,7 @@ export const Admin = () => {
               )}
 
               {/* Stripe Payments Section */}
-              {activeSection === "stripe" && (
+              {activeSection === "stripe" && isPlatform && (
                 <StripeSection
                   subscriptionPlans={subscriptionPlans}
                   subscriptions={subscriptions}
@@ -565,7 +496,7 @@ export const Admin = () => {
               )}
 
               {/* RAG & Voice Section */}
-              {activeSection === "rag-voice" && (
+              {activeSection === "rag-voice" && isPlatform && (
                 <RAGVoiceSection
                   ragVoiceSettings={ragVoiceSettings}
                   ragVoiceCosts={ragVoiceCosts}
@@ -576,11 +507,8 @@ export const Admin = () => {
                 />
               )}
 
-              {/* Metrics Catalog Section */}
-              {activeSection === "metrics-catalog" && <MetricsCatalogSection />}
-
               {/* Global Knowledge Library Section (Platform Admin) */}
-              {activeSection === "knowledge-library" && (
+              {activeSection === "knowledge-library" && isPlatform && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -602,7 +530,7 @@ export const Admin = () => {
               )}
 
               {/* AI Prompts Section (Platform Admin) */}
-              {activeSection === "ai-prompts" && (
+              {activeSection === "ai-prompts" && isPlatform && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -613,7 +541,7 @@ export const Admin = () => {
               )}
 
               {/* Insight Feedback Section (Platform Admin) */}
-              {activeSection === "insight-feedback" && (
+              {activeSection === "insight-feedback" && isPlatform && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -624,7 +552,7 @@ export const Admin = () => {
               )}
 
               {/* Platform Settings Section (Platform Admin) */}
-              {activeSection === "platform-settings" && (
+              {activeSection === "platform-settings" && isPlatform && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -635,10 +563,11 @@ export const Admin = () => {
               )}
 
               {/* Sync Management Section (Platform Admin) */}
-              {activeSection === "sync-management" && (
+              {activeSection === "sync-management" && isPlatform && (
                 <SyncManagementSection />
               )}
             </AdminLayoutWithContext>
+            </div>
           </div>
         </div>
       </AdminContainer>
@@ -660,7 +589,7 @@ function AdminModeAndTenantSelector({
   const { currentTenantName } = useAdminTenant();
 
   return (
-    <div className="space-y-4 mb-6">
+    <div className="space-y-4 mb-6 flex-shrink-0">
       {/* Mode Selector Tabs */}
       <AdminModeSelector
         mode={adminMode}

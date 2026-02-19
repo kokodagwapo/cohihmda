@@ -35,6 +35,7 @@ export interface InsightFinding {
   evidence: EvidenceItem[];
   keyMetrics: Record<string, string | number>;
   keyMetricDescriptions?: Record<string, string>;
+  keyMetricFormats?: Record<string, string>;
   suggestedBucket?: "critical" | "attention" | "working" | "context";
   impactEstimate?: {
     type: string;
@@ -92,6 +93,7 @@ RULES:
 - Limit to 100 rows max
 - Use COALESCE / NULLIF for NULL handling
 - 2-3 queries is usually enough. Don't over-investigate.
+- When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
 
 INSIGHT QUALITY STANDARDS:
 - Be specific with numbers. EVERY finding must cite concrete metrics.
@@ -101,7 +103,9 @@ INSIGHT QUALITY STANDARDS:
 - Include a suggestedBucket: "critical" (immediate action needed), "attention" (concerning trend), "working" (positive signal), or "context" (informational).
 - Include metricSignature: the single most representative SQL query and its key result fields — this will be used to track this insight over time.
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If you set out to investigate "missing milestones" but found milestones are fine and the real issue is stale loans, the title should be about stale loans, not missing milestones. The title is the headline users see — it must be accurate to the evidence.
-- Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions. Each description should be 1 sentence explaining what the metric measures in plain business language (e.g. "Number of active loans with no update in 30+ days").
+- Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
+- keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
+- keyMetricFormats: the display format for each metric. Must be one of: "number" (plain count), "currency" (dollar amount), "percent" (percentage), "days" (day count), "date" (calendar date), "text" (freeform string). Choose the format that matches the metric's meaning — e.g. loan counts are "number", dollar volumes are "currency", rates are "percent".
 
 Respond in JSON:
 {
@@ -109,12 +113,14 @@ Respond in JSON:
   "action": "query" | "finding",
   "sql": "SELECT ... (when action=query)",
   "explanation": "What this queries (when action=query)",
+  "columnFormats": { "column_alias": "number|currency|percent|days|date|text", ... },
   "finding": {
     "title": "Concise headline (max 45 words) — must reflect the actual evidence, not the initial hypothesis",
     "summary": "2-3 sentences with specific numbers",
     "confidence": "high" | "medium" | "low",
     "keyMetrics": { "metric_name": "value", ... },
     "keyMetricDescriptions": { "metric_name": "One sentence explaining what this metric measures", ... },
+    "keyMetricFormats": { "metric_name": "number|currency|percent|days|date|text", ... },
     "suggestedBucket": "critical" | "attention" | "working" | "context",
     "impactEstimate": { "type": "revenue_at_risk|operational|compliance", "estimated_dollars": 0, "units_affected": 0 },
     "metricSignature": { "sql": "the best single query to track this insight", "keyFields": ["field1", "field2"] }
@@ -193,6 +199,7 @@ export async function runInsightInvestigator(
         evidence,
         keyMetrics: parsed.finding.keyMetrics || {},
         keyMetricDescriptions: parsed.finding.keyMetricDescriptions || {},
+        keyMetricFormats: parsed.finding.keyMetricFormats || {},
         suggestedBucket: parsed.finding.suggestedBucket,
         impactEstimate: parsed.finding.impactEstimate,
         metricSignature: parsed.finding.metricSignature,
@@ -246,6 +253,7 @@ export async function runInsightInvestigator(
         rows: result.rows,
         rowCount: result.rowCount,
         fields: result.fields,
+        columnFormats: parsed.columnFormats || undefined,
       });
 
       const formatted = formatResultsForLLM(result);

@@ -260,6 +260,71 @@ export async function deleteSession(sessionId: string, tenantPool: pg.Pool): Pro
 }
 
 // ============================================================================
+// Cross-Session Context
+// ============================================================================
+
+const PRIOR_SESSION_SUMMARY_MAX_CHARS = 2000;
+
+export async function getPriorSessionSummaries(
+  tenantPool: pg.Pool,
+  tenantId: string,
+  excludeSessionId?: string
+): Promise<string | undefined> {
+  try {
+    const result = await tenantPool.query(
+      `SELECT id, topic, findings, created_at
+       FROM research_sessions
+       WHERE tenant_id = $1
+         AND phase = 'complete'
+         ${excludeSessionId ? "AND id != $2" : ""}
+       ORDER BY updated_at DESC
+       LIMIT 5`,
+      excludeSessionId ? [tenantId, excludeSessionId] : [tenantId]
+    );
+
+    if (result.rows.length === 0) return undefined;
+
+    let summary = "## Prior Research Sessions (for context — avoid re-investigating the same questions)\n";
+    let totalChars = summary.length;
+
+    for (const row of result.rows) {
+      const dateStr = new Date(row.created_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+      const topicLabel = row.topic || "General analysis";
+      const findings: Finding[] = row.findings || [];
+
+      let entry = `\nSession (${dateStr}): "${topicLabel}"\n`;
+
+      if (findings.length > 0) {
+        entry += "  Findings:\n";
+        for (const f of findings.slice(0, 4)) {
+          entry += `  - ${f.title} [${f.confidence}]\n`;
+          const topMetrics = Object.entries(f.keyMetrics || {}).slice(0, 3);
+          if (topMetrics.length > 0) {
+            entry += `    Metrics: ${topMetrics.map(([k, v]) => `${k}=${v}`).join(", ")}\n`;
+          }
+        }
+        if (findings.length > 4) {
+          entry += `  ... and ${findings.length - 4} more findings\n`;
+        }
+      }
+
+      if (totalChars + entry.length > PRIOR_SESSION_SUMMARY_MAX_CHARS) break;
+      summary += entry;
+      totalChars += entry.length;
+    }
+
+    return summary;
+  } catch (err: any) {
+    console.error("[Research] Failed to fetch prior session summaries:", err.message);
+    return undefined;
+  }
+}
+
+// ============================================================================
 // Session Management
 // ============================================================================
 
@@ -353,14 +418,18 @@ export async function runResearchPipeline(
 
   try {
     const apiKey = await getOpenAIKey(session.tenantId);
-    const [schemaContext, metricDefs, knowledgeContext] = await Promise.all([
+    const [schemaContext, metricDefs, knowledgeContext, priorSessionSummaries] = await Promise.all([
       getSchemaContext(session.tenantId),
       Promise.resolve(getMetricDefinitions()),
       getKnowledgeContext(tenantPool, session.tenantId, session.topic),
+      getPriorSessionSummaries(tenantPool, session.tenantId, session.id),
     ]);
 
     if (knowledgeContext) {
       console.log(`[Research] Session ${sessionId}: Knowledge base context loaded (${knowledgeContext.length} chars)`);
+    }
+    if (priorSessionSummaries) {
+      console.log(`[Research] Session ${sessionId}: Prior session context loaded (${priorSessionSummaries.length} chars)`);
     }
 
     // ── Phase 1: Planning ──
@@ -393,6 +462,7 @@ export async function runResearchPipeline(
       topic: session.topic,
       knowledgeContext,
       priorInvestigationContext,
+      priorSessionSummaries,
     });
 
     session.plan = plan;
@@ -408,6 +478,10 @@ export async function runResearchPipeline(
       data: { phase: "investigating", message: `Launching ${plan.questions.length} data analyst agents...` },
       timestamp: Date.now(),
     });
+
+    const enrichedKnowledgeContext = [knowledgeContext, priorSessionSummaries]
+      .filter(Boolean)
+      .join("\n\n") || undefined;
 
     const MAX_CONCURRENT = 3;
     const questions = plan.questions;
@@ -441,7 +515,7 @@ export async function runResearchPipeline(
 
           return runDataAnalystAgent(
             question, schemaContext, metricDefs, tenantPool, apiKey,
-            onStep, getSteeringDirective, checkPause, knowledgeContext
+            onStep, getSteeringDirective, checkPause, enrichedKnowledgeContext
           );
         })
       );

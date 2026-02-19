@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { authenticateToken, AuthRequest } from "../../middleware/auth.js";
 import { z } from "zod";
-import { getTenantId } from "../../utils/tenantUtils.js";
 import { handleDatabaseError } from "../../config/database.js";
 import {
   attachTenantContext,
