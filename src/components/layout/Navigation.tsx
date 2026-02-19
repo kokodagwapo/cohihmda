@@ -43,6 +43,7 @@ const topTieringMenuGroups = {
       { id: 'topTieringComparison', label: 'TopTiering Comparison', icon: ArrowLeftRight, iconColor: 'blue' as const },
       { id: 'creditRiskManagement', label: 'Credit Risk Management', icon: Shield, iconColor: 'emerald' as const },
       { id: 'companyScorecard', label: 'Company Scorecard', icon: ClipboardList, iconColor: 'indigo' as const },
+      { id: 'workflowConversion', label: 'Workflow Conversion', icon: BarChart3, iconColor: 'blue' as const },
       { id: 'loanDetail', label: 'Loan Detail', icon: FileText, iconColor: 'blue' as const },
     ]
   },
@@ -94,6 +95,7 @@ const routeMap: Record<string, string> = {
   'creditRiskManagement': '/credit-risk-management',
   'companyScorecard': '/company-scorecard',
   'topTieringComparison': '/performance/toptiering-comparison',
+  'workflowConversion': '/workflow-conversion',
   'loanDetail': '/loan-detail',
   'salesScorecard': '/sales-scorecard',
   'salesTrends': '/sales-trends',
@@ -305,6 +307,7 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
       '/credit-risk-management',
       '/company-scorecard',
       '/performance/toptiering-comparison',
+      '/workflow-conversion',
       '/loan-detail',
       '/sales-scorecard',
       '/sales-trends',

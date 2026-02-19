@@ -18,6 +18,10 @@ import {
   getFinancialModelingBaseline,
   type FinancialModelingPeriod,
 } from "../../services/dashboard/analyticsService.js";
+import {
+  getWorkflowConversionData,
+  type WorkflowSegmentInput,
+} from "../../services/dashboard/workflowConversionService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
 import {
   refreshSingleBucket,
@@ -845,6 +849,71 @@ router.get(
         error: "Failed to fetch financial modeling baseline",
         details:
           process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/workflow-conversion
+ * Cohort = loans where started_date is in [startDate, endDate]. All segments use this cohort.
+ * Query: startDate, endDate, segments (JSON array of {from, to} milestone ids), metric (conversion|turn_time), channel_group, tenant_id
+ */
+const workflowSegmentSchema = z.object({ from: z.string(), to: z.string() });
+router.get(
+  "/workflow-conversion",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        segments: z.string().transform((s) => {
+          const arr = JSON.parse(s) as unknown;
+          return z.array(workflowSegmentSchema).parse(arr);
+        }),
+        metric: z.enum(["conversion", "turn_time"]).optional(),
+        grouping: z.enum(["workflow", "individual"]).optional(),
+        channel_group: z.string().optional(),
+        tenant_id: z.string().uuid().optional(),
+      });
+      const { startDate, endDate, segments, metric = "conversion", grouping = "workflow", channel_group } = querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          segments: segments.map((s: { from: string; to: string }) => ({
+            ...s,
+            leftCount: 0,
+            rightCount: 0,
+            conversionPercent: null,
+            avgTurnTimeDays: null,
+            series: [],
+          })),
+        });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const result = await getWorkflowConversionData(tenantContext.tenantPool, {
+        startDate,
+        endDate,
+        segments: segments as WorkflowSegmentInput[],
+        metric: metric as "conversion" | "turn_time",
+        grouping: grouping as "workflow" | "individual",
+        channelGroup: channel_group || undefined,
+        accessClause: accessClause ? " " + accessClause.trim() : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching workflow conversion:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch workflow conversion")) return;
+      res.status(500).json({
+        error: "Failed to fetch workflow conversion",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
   }
