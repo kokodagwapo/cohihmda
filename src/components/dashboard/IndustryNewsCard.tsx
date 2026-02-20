@@ -34,14 +34,42 @@ const OBMMI_WIDGET_URL = "https://www2.optimalblue.com/OBMMI/widgetConfig.php";
 
 function MarketIntelligenceTicker() {
   const [obModalOpen, setObModalOpen] = useState(false);
-  const RATE_INDICES = [
-    { label: "30-Yr. Conforming", rate: 6.092, delta: 0.026, trend: "up" as const },
-    { label: "30-Yr. Jumbo", rate: 6.263, delta: 0.017, trend: "up" as const },
-    { label: "30-Yr. FHA", rate: 5.88, delta: -0.107, trend: "down" as const },
-    { label: "30-Yr. VA", rate: 5.692, delta: 0.054, trend: "up" as const },
-    { label: "30-Yr. USDA", rate: 6.035, delta: -0.027, trend: "down" as const },
-    { label: "15-Yr. Conforming", rate: 5.378, delta: -0.034, trend: "down" as const },
+
+  const FALLBACK_INDICES: Array<{ label: string; rate: number; delta: number; trend: "up" | "down" }> = [
+    { label: "30-Yr. Conforming", rate: 6.092, delta: 0.026, trend: "up" },
+    { label: "30-Yr. Jumbo", rate: 6.263, delta: 0.017, trend: "up" },
+    { label: "30-Yr. FHA", rate: 5.88, delta: -0.107, trend: "down" },
+    { label: "30-Yr. VA", rate: 5.692, delta: 0.054, trend: "up" },
+    { label: "30-Yr. USDA", rate: 6.035, delta: -0.027, trend: "down" },
+    { label: "15-Yr. Conforming", rate: 5.378, delta: -0.034, trend: "down" },
   ];
+
+  const [rateIndices, setRateIndices] = useState(FALLBACK_INDICES);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get("/api/loans/market-rates/current");
+        const data = res.data;
+        if (!cancelled && data?.available && data.conforming30yr) {
+          const live = data.conforming30yr;
+          setRateIndices((prev) =>
+            prev.map((item) =>
+              item.label === "30-Yr. Conforming"
+                ? { ...item, rate: live.rate, delta: live.delta, trend: live.trend === "down" ? "down" as const : "up" as const }
+                : item
+            )
+          );
+        }
+      } catch {
+        // Fall back to hardcoded values silently
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const RATE_INDICES = rateIndices;
 
   const renderSparkline = (trend: "up" | "down") => {
     const stroke = trend === "up" ? "#16a34a" : "#ef4444";

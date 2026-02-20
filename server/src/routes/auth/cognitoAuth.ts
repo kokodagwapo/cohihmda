@@ -341,67 +341,75 @@ router.get("/lookup-tenant", authLimiter, async (req, res) => {
       return res.status(400).json({ error: "Invalid email format" });
     }
 
-    const mgmtPool = getManagementPool();
-
-    // Check tenant identity providers for matching email domain
-    const result = await mgmtPool.query(
-      `
-      SELECT 
-        t.id as tenant_id,
-        t.slug as tenant_slug,
-        t.name as tenant_name,
-        t.auth_config,
-        tip.provider_type,
-        tip.cognito_idp_name,
-        tip.idp_type
-      FROM coheus_tenants t
-      JOIN tenant_identity_providers tip ON tip.tenant_id = t.id
-      WHERE t.status = 'active'
-        AND tip.is_enabled = true
-        AND $1 = ANY(tip.email_domains)
-      ORDER BY tip.is_primary DESC
-      LIMIT 1
-    `,
-      [domain],
-    );
-
-    if (result.rows.length === 0) {
-      // No tenant-level SSO — check if this is a platform SSO domain
-      if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
-        const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
-        logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
-        return res.json({
-          sso_available: true,
-          tenant_slug: null,
-          tenant_name: "Cohi Platform",
-          idp_name: platformIdpName || undefined, // If not set, Cognito shows hosted UI with all IdPs
-          allow_password: true, // Platform users can also use password
-          auth_mode: "hybrid",
-        });
-      }
-
-      // No SSO configured for this domain, allow email/password
-      return res.json({
-        sso_available: false,
-        allow_password: true,
+    // Try DB lookup, but fall back gracefully if DB is unreachable
+    let dbResult: any = null;
+    try {
+      const mgmtPool = getManagementPool();
+      dbResult = await mgmtPool.query(
+        `
+        SELECT 
+          t.id as tenant_id,
+          t.slug as tenant_slug,
+          t.name as tenant_name,
+          t.auth_config,
+          tip.provider_type,
+          tip.cognito_idp_name,
+          tip.idp_type
+        FROM coheus_tenants t
+        JOIN tenant_identity_providers tip ON tip.tenant_id = t.id
+        WHERE t.status = 'active'
+          AND tip.is_enabled = true
+          AND $1 = ANY(tip.email_domains)
+        ORDER BY tip.is_primary DESC
+        LIMIT 1
+      `,
+        [domain],
+      );
+    } catch (dbError: any) {
+      logWarn("[CognitoAuth] DB unavailable during lookup-tenant, falling back to domain check", {
+        domain,
+        error: dbError.message,
       });
     }
 
-    const row = result.rows[0];
-    const authConfig = row.auth_config || { mode: "hybrid" };
+    // If DB returned a tenant match, use it
+    if (dbResult && dbResult.rows.length > 0) {
+      const row = dbResult.rows[0];
+      const authConfig = row.auth_config || { mode: "hybrid" };
 
+      return res.json({
+        tenant_id: row.tenant_id,
+        tenant_slug: row.tenant_slug,
+        tenant_name: row.tenant_name,
+        sso_available: true,
+        sso_method: row.provider_type,
+        idp_name: row.cognito_idp_name,
+        idp_type: row.idp_type,
+        allow_password:
+          authConfig.mode !== "sso_only" &&
+          authConfig.allow_email_password !== false,
+        auth_mode: authConfig.mode,
+      });
+    }
+
+    // No tenant-level SSO (or DB unavailable) — check platform JIT domains
+    if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
+      const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
+      logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
+      return res.json({
+        sso_available: true,
+        tenant_slug: null,
+        tenant_name: "Cohi Platform",
+        idp_name: platformIdpName || undefined,
+        allow_password: true,
+        auth_mode: "hybrid",
+      });
+    }
+
+    // No SSO configured for this domain
     return res.json({
-      tenant_id: row.tenant_id,
-      tenant_slug: row.tenant_slug,
-      tenant_name: row.tenant_name,
-      sso_available: true,
-      sso_method: row.provider_type,
-      idp_name: row.cognito_idp_name,
-      idp_type: row.idp_type,
-      allow_password:
-        authConfig.mode !== "sso_only" &&
-        authConfig.allow_email_password !== false,
-      auth_mode: authConfig.mode,
+      sso_available: false,
+      allow_password: true,
     });
   } catch (error: any) {
     logError("[CognitoAuth] Lookup tenant error", error, {});

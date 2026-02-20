@@ -2240,7 +2240,7 @@ router.get(
           const connectionsResult = await tenantPool.query(
             `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
-                    is_active, created_at, updated_at
+                    is_active, insights_auto_enabled, created_at, updated_at
              FROM public.los_connections
              ORDER BY name`
           );
@@ -2312,7 +2312,7 @@ router.put(
   async (req: AuthRequest, res) => {
     try {
       const connectionId = req.params.connectionId as string;
-      const { tenant_id, sync_enabled, sync_frequency } = req.body;
+      const { tenant_id, sync_enabled, sync_frequency, insights_auto_enabled } = req.body;
 
       if (!tenant_id) {
         return res.status(400).json({ error: "tenant_id is required" });
@@ -2343,6 +2343,11 @@ router.put(
         values.push(sync_frequency);
       }
 
+      if (typeof insights_auto_enabled === "boolean") {
+        updates.push(`insights_auto_enabled = $${paramIndex++}`);
+        values.push(insights_auto_enabled);
+      }
+
       if (updates.length === 0) {
         return res.status(400).json({ error: "No valid fields to update" });
       }
@@ -2354,7 +2359,7 @@ router.put(
         `UPDATE public.los_connections 
          SET ${updates.join(", ")} 
          WHERE id = $${paramIndex} 
-         RETURNING id, name, sync_enabled, sync_frequency, last_synced_at, last_sync_status`,
+         RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, last_synced_at, last_sync_status`,
         values
       );
 
@@ -2372,6 +2377,7 @@ router.put(
           tenant_id,
           sync_enabled,
           sync_frequency,
+          insights_auto_enabled,
         },
       }).catch(() => {});
 
@@ -2381,6 +2387,7 @@ router.put(
         tenant_id,
         sync_enabled,
         sync_frequency,
+        insights_auto_enabled,
       });
 
       return res.json({ connection: result.rows[0] });

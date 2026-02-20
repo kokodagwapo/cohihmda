@@ -623,6 +623,11 @@ function promptFmtSnap(label: string, cur: PeriodSnapshot, prior?: PeriodSnapsho
 
 // --- Domain-specific section builders ---
 
+let _cachedMarketContext = "";
+export function setMarketContextForLegacyPipeline(ctx: string) {
+  _cachedMarketContext = ctx;
+}
+
 function buildSharedContext(metrics: InsightMetricsPayload, channelGroup?: string): string {
   const snaps = metrics.periodSnapshots;
   const channelLabel = channelGroup
@@ -666,7 +671,11 @@ RULES FOR CONVERSION METRICS:
 2. NEVER mix timeframes (e.g. "PT is 56.7% but Fallout is 43.3%" must come from the SAME row)
 3. Use the "vs Prior" deltas above — do NOT compute your own from rounded numbers
 4. When comparing trends, look at 30D vs 60D vs 90D to identify acceleration/deceleration
-5. SHORT-WINDOW RELIABILITY: Mortgage cycle times (application to funding) often exceed 30 days. A 30D application cohort will still have many loans in-process, making 30D PT artificially low and 30D fallout artificially high. The 90D and YTD windows are the most reliable for pull-through and fallout analysis. If you cite 30D conversion metrics, acknowledge that they are provisional due to cycle time. Do NOT build an insight headline around 30D PT or fallout unless the 90D/YTD trend corroborates it.`;
+5. SHORT-WINDOW RELIABILITY: Mortgage cycle times (application to funding) often exceed 30 days. A 30D application cohort will still have many loans in-process, making 30D PT artificially low and 30D fallout artificially high. The 90D and YTD windows are the most reliable for pull-through and fallout analysis. If you cite 30D conversion metrics, acknowledge that they are provisional due to cycle time. Do NOT build an insight headline around 30D PT or fallout unless the 90D/YTD trend corroborates it.${_cachedMarketContext ? `
+
+=== MARKET RATE CONTEXT (OBMMIC30YF — 30-Year Fixed Conforming) ===
+${_cachedMarketContext}
+IMPORTANT: Use this market rate data to contextualize pipeline insights. Rising rates increase withdrawal risk and reduce refinance demand. Falling rates may boost refi activity. Generate at least 1 insight that connects market rate trends to pipeline behavior (e.g., lock expiration risk, withdrawal patterns, refi vs purchase mix shifts).` : ""}`;
 }
 
 function buildProductPipelineSections(metrics: InsightMetricsPayload, _channelGroup?: string): string {

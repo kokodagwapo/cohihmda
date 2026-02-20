@@ -336,6 +336,17 @@ if (SKIP_DB) {
           console.warn("⚠️ Failed to start LOS sync scheduler:", error);
         }
 
+        if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
+          try {
+            const { startEncompassWebhookScheduler } = await import(
+              "./services/encompassWebhookScheduler.js"
+            );
+            startEncompassWebhookScheduler();
+          } catch (error) {
+            console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
+          }
+        }
+
         // Register post-sync hooks (insight generation + tracked insight evaluation)
         try {
           const { registerInsightHooks } =

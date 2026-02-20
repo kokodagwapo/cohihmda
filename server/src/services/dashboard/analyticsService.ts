@@ -1214,13 +1214,19 @@ export async function getInsights(
     tenantId,
     forceRefresh = false,
     channelGroup,
-    generationMethod,
   } = options;
+  // Legacy generation methods are archived: always read agent outputs.
+  const effectiveGenerationMethod = "agent";
 
   // Try reading persisted insights from the database first (fast path)
   if (useLLM) {
     try {
-      const stored = await loadStoredInsights(tenantPool, dateFilter, channelGroup, generationMethod);
+      const stored = await loadStoredInsights(
+        tenantPool,
+        dateFilter,
+        channelGroup,
+        effectiveGenerationMethod
+      );
 
       if (stored && stored.insights.length > 0) {
         console.log(

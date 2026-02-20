@@ -7,7 +7,6 @@
 import pg from 'pg';
 import { EncompassApiService, EncompassField, EncompassCustomFieldFromApi, EncompassLoan, LoanSchemaField } from './encompassApiService.js';
 import { getAllCoheusAliases, getDefaultFieldId, coheusAliasToColumnName, saveFieldSwap } from './encompassFieldMapper.js';
-import { DEFAULT_ENCOMPASS_FIELD_MAPPINGS } from '../config/defaultEncompassFieldMappings.js';
 
 // ============================================================================
 // Types
@@ -274,7 +273,7 @@ export class EncompassFieldDiscoveryService {
 
   /**
    * Alternative field population analysis that fetches complete loans via
-   * GET /v1/loans/{id} and reverse-engineers which fields are populated.
+   * GET /v3/loans/{id} and reverse-engineers which fields are populated.
    * No batching or field-list limits — every field that exists on the loan
    * is returned in a single call.
    */
@@ -289,79 +288,29 @@ export class EncompassFieldDiscoveryService {
     const sampleSize = options.sampleSize || 30;
     const emit = options.emit || (() => {});
 
-    // Step 1: Fetch the full loan schema (field IDs + JSON paths)
-    emit("progress", "sampling", "Fetching loan schema...");
+    // Step 1: Fetch the full loan schema (standard + custom + virtual fields) for fieldId→jsonPath bridging.
+    emit("progress", "sampling", "Fetching loan schema and field metadata...");
     let schemaFields: LoanSchemaField[] = [];
+    const fieldIdToJsonPath = new Map<string, string>();
     try {
       const schemaResp = await this.apiService.getLoanSchema(tenantId, connectionId);
       schemaFields = schemaResp.data;
-      console.log(`[FieldDiscovery:FullLoan] Schema loaded: ${schemaFields.length} fields`);
-    } catch (err: any) {
-      console.warn(`[FieldDiscovery:FullLoan] Schema fetch failed (non-fatal): ${err.message}`);
-    }
-
-    // The bulk schema provides JSON property names + descriptions but NOT
-    // Encompass field IDs. We ALWAYS need to probe the per-field endpoint
-    // (GET /v1/schema/loan/{fieldId}) for default mapping fields to get the
-    // critical fieldId ↔ jsonPath bridge.
-    emit("progress", "sampling", "Resolving field ID → JSON path mappings...");
-    const fieldIdToJsonPath = new Map<string, string>();
-    const defaultFieldIds = [...new Set(Object.values(DEFAULT_ENCOMPASS_FIELD_MAPPINGS))];
-
-    // Probe a small set first to verify the endpoint works
-    const testFieldIds = ["Fields.2", "353", "Fields.GUID"];
-    let probeSucceeded = false;
-    for (const testId of testFieldIds) {
-      try {
-        const resp = await this.apiService.getFieldSchema(tenantId, connectionId, testId);
-        if (resp.data) {
-          console.log(`[FieldDiscovery:FullLoan] Probe ${testId} → jsonPath="${resp.data.jsonPath}", desc="${resp.data.description}"`);
-          if (resp.data.jsonPath) {
-            fieldIdToJsonPath.set(resp.data.fieldId, resp.data.jsonPath);
-            probeSucceeded = true;
+      for (const field of schemaFields) {
+        if (field.jsonPath) {
+          fieldIdToJsonPath.set(field.fieldId, field.jsonPath);
+          if (!field.fieldId.startsWith("Fields.") && !field.fieldId.startsWith("Loan.")) {
+            fieldIdToJsonPath.set(`Fields.${field.fieldId}`, field.jsonPath);
           }
-        }
-      } catch (err: any) {
-        console.log(`[FieldDiscovery:FullLoan] Probe ${testId} failed: ${err.message}`);
-      }
-    }
-
-    if (probeSucceeded) {
-      const remaining = defaultFieldIds.filter(
-        (id) => !fieldIdToJsonPath.has(id) && !testFieldIds.includes(id)
-      );
-      console.log(`[FieldDiscovery:FullLoan] Probing ${remaining.length} remaining default field IDs...`);
-
-      const BATCH_SIZE = 10;
-      let probed = 0;
-      let resolved = 0;
-
-      for (let i = 0; i < remaining.length; i += BATCH_SIZE) {
-        const batch = remaining.slice(i, i + BATCH_SIZE);
-        const results = await Promise.allSettled(
-          batch.map((fid) =>
-            this.apiService.getFieldSchema(tenantId, connectionId, fid).then((r) => ({
-              fieldId: fid,
-              data: r.data,
-            }))
-          )
-        );
-        for (const result of results) {
-          if (result.status === "fulfilled" && result.value.data?.jsonPath) {
-            fieldIdToJsonPath.set(result.value.data.fieldId, result.value.data.jsonPath);
-            resolved++;
+          if (field.fieldId.startsWith("Fields.")) {
+            fieldIdToJsonPath.set(field.fieldId.substring(7), field.jsonPath);
           }
-        }
-        probed += batch.length;
-        if (i + BATCH_SIZE < remaining.length) {
-          await new Promise((r) => setTimeout(r, 200));
         }
       }
       console.log(
-        `[FieldDiscovery:FullLoan] Probed ${probed + testFieldIds.length} fields, resolved ${resolved + fieldIdToJsonPath.size - resolved} fieldId→jsonPath mappings`
+        `[FieldDiscovery:FullLoan] Schema loaded: ${schemaFields.length} fields, ${fieldIdToJsonPath.size} fieldId→jsonPath mappings`,
       );
-    } else {
-      console.warn(`[FieldDiscovery:FullLoan] Per-field schema endpoint not returning jsonPath — field ID bridging unavailable`);
+    } catch (err: any) {
+      console.warn(`[FieldDiscovery:FullLoan] Metadata fetch failed (non-fatal): ${err.message}`);
     }
 
     // Build a bidirectional lookup: jsonPath → fieldId AND fieldId → jsonPath
@@ -521,6 +470,114 @@ export class EncompassFieldDiscoveryService {
       schemaFields,
       fieldIdToJsonPath,
     };
+  }
+
+  /**
+   * Get recent loan GUIDs (e.g. for Field Reader gap-fill). Uses pipeline with minimal fields.
+   */
+  async getRecentLoanGuids(
+    tenantId: string,
+    connectionId: string,
+    limit: number = 5,
+  ): Promise<string[]> {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    sixMonthsAgo.setDate(1);
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+    const resp = await this.apiService.getLoans(tenantId, connectionId, {
+      limit,
+      fields: ["Fields.GUID", "Loan.LoanNumber"],
+      loanStartDate: sixMonthsAgo,
+    });
+    return (resp.data as any[])
+      .map((l) => l["Fields.GUID"] ?? l.loanGuid ?? l.GUID)
+      .filter(Boolean)
+      .map((g: string) => String(g).replace(/[{}]/g, ""));
+  }
+
+  /**
+   * Return the set of canonical field names configured in the tenant's Reporting Database.
+   * Delegates to EncompassApiService.getCanonicalFields (GET /v3/loanPipeline/canonicalFields).
+   */
+  async getCanonicalFields(
+    tenantId: string,
+    connectionId: string,
+  ): Promise<{ canonicalName: string; displayName: string; dataType?: string }[]> {
+    const resp = await this.apiService.getCanonicalFields(tenantId, connectionId);
+    return resp.data;
+  }
+
+  /**
+   * Get population stats for specific field IDs by reading values via V3 Field Reader API.
+   * Used by hybrid onboarding strategy to fill gaps for default fields not resolved by pipeline or full-loan bridging.
+   */
+  async getFieldPopulationViaFieldReader(
+    tenantId: string,
+    connectionId: string,
+    loanGuids: string[],
+    fieldIds: string[],
+  ): Promise<FieldPopulationStats[]> {
+    if (loanGuids.length === 0 || fieldIds.length === 0) return [];
+
+    const fieldValues = new Map<string, string[]>();
+    for (const fid of fieldIds) {
+      fieldValues.set(fid, []);
+    }
+
+    for (const guid of loanGuids) {
+      try {
+        const resp = await this.apiService.readLoanFields(
+          tenantId,
+          connectionId,
+          guid,
+          fieldIds,
+        );
+        for (const { fieldId, value } of resp.data) {
+          if (value !== "" && value != null) {
+            const arr = fieldValues.get(fieldId);
+            if (arr) arr.push(value);
+          }
+        }
+      } catch (err: any) {
+        console.warn(
+          `[FieldDiscovery:FieldReader] Failed to read loan ${guid}: ${err.message}`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    const sampleSize = loanGuids.length;
+    const stats: FieldPopulationStats[] = [];
+    for (const [fieldId, values] of fieldValues) {
+      const populatedCount = values.length;
+      const populationRate = Math.round((populatedCount / sampleSize) * 100);
+      const uniqueValues = new Set(values);
+      const sampleValues = this.getAnonymizedSampleValues(values.slice(0, 10));
+      const detectedFormat = this.detectValueFormat(values);
+      let minValue: string | undefined;
+      let maxValue: string | undefined;
+      if (detectedFormat === "DECIMAL" || detectedFormat === "INTEGER") {
+        const numericValues = values
+          .map((v) => parseFloat(v))
+          .filter((v) => !isNaN(v));
+        if (numericValues.length > 0) {
+          minValue = String(Math.min(...numericValues));
+          maxValue = String(Math.max(...numericValues));
+        }
+      }
+      stats.push({
+        fieldId,
+        sampleSize,
+        populatedCount,
+        populationRate,
+        sampleValues,
+        detectedFormat,
+        minValue,
+        maxValue,
+        uniqueValueCount: uniqueValues.size,
+      });
+    }
+    return stats;
   }
 
   /**

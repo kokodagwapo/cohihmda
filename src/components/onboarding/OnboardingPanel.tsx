@@ -174,6 +174,7 @@ export function OnboardingPanel({
   const [showSwapTable, setShowSwapTable] = useState(true);
   const [showRevenueFields, setShowRevenueFields] = useState(false);
   const [showAdditionalFields, setShowAdditionalFields] = useState(false);
+  const [showRdbMissing, setShowRdbMissing] = useState(true);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -217,6 +218,7 @@ export function OnboardingPanel({
       additional: analysis.suggestedAdditionalFields.length,
       qualityFlags: analysis.dataQualityFlags.length,
       criticalFlags,
+      rdbMissing: analysis.rdbMissingFields?.length ?? 0,
     };
   }, [analysis]);
 
@@ -335,15 +337,19 @@ export function OnboardingPanel({
             mappings, revenue formulas, and data quality issues.
           </p>
           <div className="flex items-center gap-3 justify-center">
-            <Button onClick={() => startAnalysis()} size="lg">
+            <Button
+              onClick={() => startAnalysis()}
+              size="lg"
+              title="Default: pipeline for default fields + full-loan discovery + Field Reader for gaps (recommended)"
+            >
               <Zap className="h-4 w-4 mr-2" />
-              Run Onboarding Analysis
+              Run Onboarding Analysis <span className="opacity-70 font-normal">(Hybrid)</span>
             </Button>
             <Button
               onClick={() => startAnalysis("fullLoan")}
               size="lg"
               variant="outline"
-              title="Experimental: fetch full loans via GET /v1/loans/{id} instead of batched Pipeline calls"
+              title="Discovery-only: fetch full loans via GET /v3/loans/{id} and infer fields from JSON (no pipeline)"
             >
               <Zap className="h-4 w-4 mr-2" />
               Full-Loan Mode
@@ -416,7 +422,7 @@ export function OnboardingPanel({
     <div className="space-y-4">
       {/* Summary Cards */}
       {analysis && stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Card className="border-slate-200 dark:border-slate-700">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -494,6 +500,25 @@ export function OnboardingPanel({
               </div>
             </CardContent>
           </Card>
+
+          {stats.rdbMissing > 0 && (
+            <Card className="border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                    RDB Missing
+                  </span>
+                </div>
+                <div className="text-2xl font-semibold text-amber-800 dark:text-amber-300">
+                  {stats.rdbMissing}
+                </div>
+                <div className="text-xs text-amber-600 dark:text-amber-500 font-light mt-1">
+                  Fields need RDB config
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -857,6 +882,82 @@ export function OnboardingPanel({
         </Card>
       )}
 
+      {/* RDB Action Required */}
+      {analysis && (analysis.rdbMissingFields?.length ?? 0) > 0 && (
+        <Card className="border-amber-300 dark:border-amber-700">
+          <CardHeader className="pb-3 cursor-pointer" onClick={() => setShowRdbMissing((v) => !v)}>
+            <CardTitle className="text-sm font-medium text-amber-800 dark:text-amber-300 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              RDB Action Required ({analysis.rdbMissingFields.length})
+              {showRdbMissing ? (
+                <ChevronUp className="h-4 w-4 ml-auto" />
+              ) : (
+                <ChevronDown className="h-4 w-4 ml-auto" />
+              )}
+            </CardTitle>
+          </CardHeader>
+          {showRdbMissing && (
+            <CardContent className="pt-0">
+              <p className="text-xs text-amber-700 dark:text-amber-400 font-light mb-3">
+                These fields have data on your loans but are not in your Encompass Reporting Database (RDB).
+                Add them to your RDB in Encompass settings so Coheus can access them via the Pipeline API.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-amber-200 dark:border-amber-800">
+                      <th className="text-left py-2 px-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        Field ID
+                      </th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        Coheus Alias
+                      </th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        Description
+                      </th>
+                      <th className="text-left py-2 px-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        Verified
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysis.rdbMissingFields.map((field, i) => (
+                      <tr
+                        key={i}
+                        className="border-b border-amber-100 dark:border-amber-900/30 last:border-0"
+                      >
+                        <td className="py-2 px-2 text-xs font-mono text-slate-900 dark:text-slate-200">
+                          {field.fieldId}
+                        </td>
+                        <td className="py-2 px-2 text-xs text-slate-600 dark:text-slate-400">
+                          {field.coheusAlias || "—"}
+                        </td>
+                        <td className="py-2 px-2 text-xs text-slate-600 dark:text-slate-400 font-light">
+                          {field.description}
+                        </td>
+                        <td className="py-2 px-2">
+                          {field.fieldReaderPopulation != null && field.fieldReaderPopulation > 0 ? (
+                            <Badge variant="outline" className="text-[10px] border-emerald-400 text-emerald-700 dark:text-emerald-400">
+                              {field.fieldReaderPopulation}% pop
+                            </Badge>
+                          ) : field.fieldReaderPopulation != null ? (
+                            <Badge variant="outline" className="text-[10px] border-slate-300 text-slate-500">
+                              0%
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-slate-400">unverified</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
       {/* Chat Interface */}
       <Card className="border-slate-200 dark:border-slate-700">
         <CardHeader className="pb-3">
@@ -878,8 +979,11 @@ export function OnboardingPanel({
                   <div className="text-sm text-slate-600 dark:text-slate-400 font-light">
                     Analysis complete! I found {analysis.fieldSwapRecommendations.length} field
                     matches, {analysis.revenueFieldCandidates.length} revenue field candidates,
-                    and {analysis.dataQualityFlags.length} quality flags. You can review the
-                    recommendations above or ask me questions about your configuration. Try:
+                    and {analysis.dataQualityFlags.length} quality flags.
+                    {(analysis.rdbMissingFields?.length ?? 0) > 0 && (
+                      <>{" "}<span className="text-amber-600 font-medium">{analysis.rdbMissingFields.length} field(s) need to be added to your Reporting Database.</span></>
+                    )}
+                    {" "}You can review the recommendations above or ask me questions about your configuration. Try:
                     <ul className="mt-2 space-y-1 text-xs text-indigo-600 dark:text-indigo-400">
                       <li>&bull; "Apply all high-confidence field swaps"</li>
                       <li>&bull; "What should my revenue formula be?"</li>
