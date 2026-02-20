@@ -349,6 +349,16 @@ if (SKIP_DB) {
         // When vendor outbound integrations (accounting, capital markets, servicing) are needed,
         // re-enable and fix to use tenant-specific database pools instead of management pool.
         // See: server/src/services/vendorSyncScheduler.ts
+
+        // Refresh industry news cache daily at 5:00 AM
+        try {
+          const { startNewsRefreshScheduler } = await import(
+            "./services/newsRefreshScheduler.js"
+          );
+          startNewsRefreshScheduler();
+        } catch (error) {
+          console.warn("⚠️ Failed to start news refresh scheduler:", error);
+        }
       }
     })
     .catch((error) => {

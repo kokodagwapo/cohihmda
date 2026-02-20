@@ -250,6 +250,25 @@ export const Login = () => {
     setSsoInfo({ available: false, allowPassword: true });
   };
 
+  // Dev bypass: log in as superadmin without entering credentials
+  const handleBypassSuperadmin = async () => {
+    if (!isBackendConfigured) {
+      toast({ title: 'Backend not configured', variant: 'destructive' });
+      return;
+    }
+    setLoading(true);
+    try {
+      await login('superadmin', 'super123');
+      toast({ title: 'Welcome!', description: 'Signed in as superadmin' });
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      navigate(returnTo);
+    } catch (err: any) {
+      toast({ title: 'Bypass failed', description: err.message || 'Check backend and seed (superadmin / super123)', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
       <Card className="w-full max-w-md shadow-xl border-0">
@@ -436,10 +455,21 @@ export const Login = () => {
             </div>
           </div>
 
-          {/* Dev Mode Hint */}
+          {/* Dev Mode Hint + Bypass */}
           {process.env.NODE_ENV === 'development' && (
-            <div className="mt-4 p-3 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs text-muted-foreground">
-              <p className="font-medium mb-1">Local Dev Accounts:</p>
+            <div className="mt-4 p-3 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs text-muted-foreground space-y-3">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full"
+                onClick={handleBypassSuperadmin}
+                disabled={loading}
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Login as superadmin (bypass)
+              </Button>
+              <p className="font-medium mb-1">Or use:</p>
               <ul className="space-y-1">
                 <li><code>superadmin / super123</code> - Super Admin</li>
                 <li><code>admin@acme.local / admin123</code> - Tenant Admin</li>

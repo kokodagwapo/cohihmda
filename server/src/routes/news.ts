@@ -5,6 +5,8 @@ import {
   clearNewsCache,
   generateNewsInsights,
   NewsInsightRequest,
+  generateNewsDetails,
+  NewsDetailRequest,
 } from "../services/newsService.js";
 
 const router = Router();
@@ -81,6 +83,32 @@ router.post("/insights", authenticateToken, async (req: AuthRequest, res) => {
     res.status(500).json({
       error: "Failed to generate insights",
       insights: [],
+    });
+  }
+});
+
+/**
+ * POST /api/news/details
+ * Generate a 3-paragraph Cohi brief for a selected headline.
+ */
+router.post("/details", authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    const article = req.body as NewsDetailRequest;
+    if (!article?.title || !article?.source || !article?.link) {
+      return res.status(400).json({
+        error: "Article title, source, and link are required",
+      });
+    }
+
+    const result = await generateNewsDetails(article);
+    res.json(result);
+  } catch (error: any) {
+    console.error("[News Route] Error generating details:", error);
+    res.status(500).json({
+      error: "Failed to generate article details",
+      articleParagraphs: [],
+      fullArticleUrl: req.body?.link || "",
+      fetchedAt: new Date().toISOString(),
     });
   }
 });

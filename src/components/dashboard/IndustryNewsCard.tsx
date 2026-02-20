@@ -1,5 +1,18 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
+import { format } from "date-fns";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 import {
   Newspaper,
   Building2,
@@ -29,6 +42,87 @@ import {
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+
+// Sample data for Daily Morning Brief charts (from Markets & Economy brief)
+const FIXED_RATE_DATA = [
+  { week: "Jan 6", rate: 5.6 },
+  { week: "Jan 13", rate: 6.3 },
+  { week: "Jan 20", rate: 6.0 },
+  { week: "Jan 27", rate: 5.9 },
+  { week: "Feb 3", rate: 5.35 },
+  { week: "Feb 10", rate: 5.03 },
+  { week: "Feb 16", rate: 6.0 },
+];
+const TREASURY_DATA = [
+  { date: "Feb 6", yield: 4.15 },
+  { date: "Feb 9", yield: 4.0 },
+  { date: "Feb 10", yield: 4.0 },
+  { date: "Feb 12", yield: 4.05 },
+  { date: "Feb 14", yield: 4.09 },
+  { date: "Feb 16", yield: 4.0 },
+  { date: "Feb 17", yield: 4.0 },
+];
+const MBA_INDEX_DATA = [
+  { week: "Jan 10", purchase: 135, refi: 111 },
+  { week: "Jan 17", purchase: 130, refi: 122 },
+  { week: "Jan 24", purchase: 123, refi: 125 },
+  { week: "Jan 31", purchase: 127, refi: 126 },
+  { week: "Feb 7", purchase: 123, refi: 123 },
+];
+const NAHB_DATA = [
+  { month: "Feb", value: 40 },
+  { month: "Apr", value: 42 },
+  { month: "Jun", value: 33 },
+  { month: "Aug", value: 39 },
+  { month: "Dec", value: 37 },
+  { month: "Jan", value: 38 },
+];
+const RATE_SNAPSHOT_DATA = [
+  { product: "30-Yr Fixed", prior: 5.38, today: 5.39 },
+  { product: "15-Yr Fixed", prior: 5.73, today: 5.28 },
+  { product: "30-Yr FHA", prior: 5.55, today: 5.99 },
+  { product: "30-Yr Jumbo", prior: 6.39, today: 5.5 },
+];
+const EXISTING_HOME_SALES_DATA = [
+  { month: "Aug '25", value: 4.02 },
+  { month: "Sep '25", value: 4.14 },
+  { month: "Oct '25", value: 4.15 },
+  { month: "Nov '25", value: 4.0 },
+  { month: "Dec '25", value: 3.31 },
+  { month: "Jan '26", value: 3.91 },
+];
+
+const HEADLINES_PER_PAGE = 6;
+const HEADLINES_ROTATE_MS = 15_000;
+const MAX_HEADLINE_AGE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+const isValidDate = (value: Date) => !Number.isNaN(value.getTime());
+
+const parseNewsReleaseDate = (item: any): Date | null => {
+  const directCandidates = [
+    item?.publishedAt,
+    item?.published_at,
+    item?.pubDate,
+    item?.published,
+    item?.dateTime,
+    item?.datetime,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      const parsed = new Date(candidate);
+      if (isValidDate(parsed)) return parsed;
+    }
+  }
+
+  if (typeof item?.date === "string" && item.date.trim()) {
+    const combined = `${item.date}${item.time ? ` ${item.time}` : ""}`;
+    const parsed = new Date(combined);
+    if (isValidDate(parsed)) return parsed;
+  }
+
+  return null;
+};
 
 const OBMMI_WIDGET_URL = "https://www2.optimalblue.com/OBMMI/widgetConfig.php";
 
@@ -186,6 +280,7 @@ function MarketIntelligenceTicker() {
  */
 export const IndustryNewsCard = () => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const warmedArticleLinksRef = useRef<Set<string>>(new Set());
   const [newsFeed, setNewsFeed] = useState<any[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError, setNewsError] = useState<string | null>(null);
@@ -208,12 +303,35 @@ export const IndustryNewsCard = () => {
     clientDataSummary?: string;
     error?: string;
   } | null>(null);
+  const [articleBriefLoading, setArticleBriefLoading] = useState(false);
+  const [articleBrief, setArticleBrief] = useState<{
+    articleParagraphs: string[];
+    fullArticleUrl: string;
+    fetchedAt: string;
+    error?: string;
+  } | null>(null);
+  const [showFullArticleModal, setShowFullArticleModal] = useState(false);
+  const [articleFrameLoading, setArticleFrameLoading] = useState(false);
+  const [articleFrameError, setArticleFrameError] = useState(false);
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
-  const defaultSources = ["MBA", "Fannie Mae", "Freddie Mac", "CFPB", "FHFA"];
+  const defaultSources = [
+    "MBA",
+    "Fannie Mae",
+    "Freddie Mac",
+    "CFPB",
+    "FHFA",
+    "Federal Reserve",
+    "Reuters",
+    "National Mortgage News",
+    "Mortgage News Daily",
+    "MND Rate Watch",
+  ];
   const [selectedSources, setSelectedSources] =
     useState<string[]>(defaultSources);
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
+  const [headlinePage, setHeadlinePage] = useState(0);
+  const [headlinesPaused, setHeadlinesPaused] = useState(false);
 
   // Load user preferences from database
   const loadUserPreferences = async () => {
@@ -349,6 +467,24 @@ export const IndustryNewsCard = () => {
         "The Federal Housing Finance Agency (FHFA) regulates Fannie Mae, Freddie Mac, and the Federal Home Loan Banks. Their policy updates affect mortgage lending standards.",
       items: [],
     },
+    {
+      source: "Federal Reserve",
+      icon: Activity,
+      color: "text-amber-600 dark:text-amber-400",
+      bg: "bg-amber-50 dark:bg-amber-950/20",
+      summary:
+        "Federal Reserve press releases and policy communications affecting rates, liquidity, and mortgage market conditions.",
+      items: [],
+    },
+    {
+      source: "Reuters",
+      icon: Newspaper,
+      color: "text-slate-700 dark:text-slate-300",
+      bg: "bg-slate-100 dark:bg-slate-800/40",
+      summary:
+        "National business news coverage with updates on lending, rate markets, and Federal Reserve developments.",
+      items: [],
+    },
     // RSS feed sources - disabled by default
     {
       source: "National Mortgage News",
@@ -472,12 +608,12 @@ export const IndustryNewsCard = () => {
     }
   };
 
-  // Fetch news on mount, when selected sources change, and every 30 minutes
+  // Fetch news on mount, when selected sources change, and every 5 minutes
   useEffect(() => {
     fetchNews();
     const interval = setInterval(() => {
       fetchNews();
-    }, 30 * 60 * 1000);
+    }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [selectedSources]);
 
@@ -500,6 +636,81 @@ export const IndustryNewsCard = () => {
     // If no matches, show all available news (user may have old preferences)
     return filtered.length > 0 ? filtered : newsFeed;
   }, [newsFeed, selectedSources]);
+
+  const recentHeadlines = useMemo(() => {
+    const reputableHeadlineSources = [
+      "National Mortgage News",
+      "Mortgage News Daily",
+      "MND Rate Watch",
+      "MBA",
+      "Federal Reserve",
+      "Reuters",
+      "Fannie Mae",
+      "Freddie Mac",
+      "CFPB",
+      "FHFA",
+    ];
+
+    const sourcePool = newsFeed.length > 0 ? newsFeed : filteredNewsFeed;
+    const reputableFeed = sourcePool.filter((source: any) =>
+      reputableHeadlineSources.includes(source.source)
+    );
+    const feedForHeadlines =
+      reputableFeed.length > 0 ? reputableFeed : filteredNewsFeed;
+
+    const flattened = feedForHeadlines.flatMap((source: any) =>
+      (source.items || []).map((item: any) => {
+        const releaseDate = parseNewsReleaseDate(item);
+        return {
+          item,
+          source,
+          releaseDate,
+          relevanceScore: Number(item?.relevanceScore || 0),
+          releaseLabel: releaseDate
+            ? format(releaseDate, "MMM d, yyyy, h:mm a")
+            : `${item?.date || "Unknown date"}${item?.time ? `, ${item.time}` : ""}`,
+        };
+      })
+    );
+
+    return flattened
+      .filter(
+        (headline: any) =>
+          !!headline.item?.title &&
+          !headline.item.title.toLowerCase().startsWith("visit ") &&
+          !!headline.releaseDate &&
+          Date.now() - headline.releaseDate.getTime() <= MAX_HEADLINE_AGE_MS
+      )
+      .sort(
+        (a: any, b: any) =>
+          b.relevanceScore - a.relevanceScore ||
+          (b.releaseDate?.getTime() || 0) - (a.releaseDate?.getTime() || 0)
+      );
+  }, [newsFeed, filteredNewsFeed]);
+
+  const headlinePageCount = Math.max(
+    1,
+    Math.ceil(recentHeadlines.length / HEADLINES_PER_PAGE)
+  );
+
+  const visibleHeadlines = useMemo(() => {
+    const start = (headlinePage % headlinePageCount) * HEADLINES_PER_PAGE;
+    return recentHeadlines.slice(start, start + HEADLINES_PER_PAGE);
+  }, [recentHeadlines, headlinePage, headlinePageCount]);
+
+  useEffect(() => {
+    if (headlinePage >= headlinePageCount) {
+      setHeadlinePage(0);
+    }
+  }, [headlinePage, headlinePageCount]);
+
+  useEffect(() => {
+    if (headlinesPaused || headlinePageCount <= 1) return;
+    const interval = setInterval(() => {
+      setHeadlinePage((prev) => (prev + 1) % headlinePageCount);
+    }, HEADLINES_ROTATE_MS);
+    return () => clearInterval(interval);
+  }, [headlinesPaused, headlinePageCount]);
 
   // Handle source selection - Allow all sources to be selected
   const handleSourceToggle = (sourceName: string) => {
@@ -552,6 +763,33 @@ export const IndustryNewsCard = () => {
       });
     } finally {
       setInsightsLoading(false);
+    }
+  }, []);
+
+  const fetchArticleBrief = useCallback(async (item: any, source: any) => {
+    setArticleBriefLoading(true);
+    setArticleBrief(null);
+    try {
+      const result = await api.getNewsDetails({
+        title: item.title,
+        source: source.source,
+        link: item.link,
+      });
+      setArticleBrief(result);
+    } catch (error: any) {
+      console.error("[News] Failed to fetch article brief:", error);
+      setArticleBrief({
+        articleParagraphs: [
+          `We could not extract article body text for "${item.title}".`,
+          "Use the full-article view below to read the complete source content directly from the publisher.",
+          "Cohi insights are still shown below for quick executive context.",
+        ],
+        fullArticleUrl: item.link,
+        fetchedAt: new Date().toISOString(),
+        error: "Could not generate article brief",
+      });
+    } finally {
+      setArticleBriefLoading(false);
     }
   }, []);
 
@@ -640,8 +878,61 @@ export const IndustryNewsCard = () => {
   // Handle news item click - open dialog and fetch insights
   const handleNewsItemClick = (item: any, source: any) => {
     setSelectedNewsItem({ item, source });
+    setShowFullArticleModal(false);
+    setArticleFrameLoading(false);
+    setArticleFrameError(false);
     fetchInsights(item, source);
+    fetchArticleBrief(item, source);
   };
+
+  const prewarmArticleLink = useCallback((link?: string) => {
+    if (!link || typeof document === "undefined") return;
+    if (warmedArticleLinksRef.current.has(link)) return;
+
+    try {
+      const url = new URL(link);
+      const head = document.head;
+
+      const dnsPrefetch = document.createElement("link");
+      dnsPrefetch.rel = "dns-prefetch";
+      dnsPrefetch.href = url.origin;
+      head.appendChild(dnsPrefetch);
+
+      const preconnect = document.createElement("link");
+      preconnect.rel = "preconnect";
+      preconnect.href = url.origin;
+      preconnect.crossOrigin = "anonymous";
+      head.appendChild(preconnect);
+
+      const prefetch = document.createElement("link");
+      prefetch.rel = "prefetch";
+      prefetch.as = "document";
+      prefetch.href = link;
+      head.appendChild(prefetch);
+
+      warmedArticleLinksRef.current.add(link);
+
+      // Remove hint elements later to avoid unbounded head growth.
+      window.setTimeout(() => {
+        dnsPrefetch.remove();
+        preconnect.remove();
+        prefetch.remove();
+      }, 60_000);
+    } catch {
+      // Ignore invalid/malformed URLs; full article can still open normally.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showFullArticleModal && selectedNewsItem?.item?.link) {
+      setArticleFrameLoading(true);
+      setArticleFrameError(false);
+    }
+  }, [showFullArticleModal, selectedNewsItem]);
+
+  useEffect(() => {
+    prewarmArticleLink(selectedNewsItem?.item?.link);
+  }, [selectedNewsItem, prewarmArticleLink]);
 
   // Get color class for insight
   const getInsightColor = (color: string) => {
@@ -665,27 +956,21 @@ export const IndustryNewsCard = () => {
         transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         className="relative overflow-hidden rounded-xl sm:rounded-2xl md:rounded-3xl bg-white dark:bg-slate-900/95 p-4 sm:p-5 md:p-7 lg:p-9 shadow-[0_1px_3px_0_rgba(0,0,0,0.08),0_4px_12px_0_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.3),0_4px_12px_0_rgba(0,0,0,0.2)] border border-slate-200/60 dark:border-slate-700/50"
       >
-        {/* Enhanced Header - Mobile First */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 md:gap-4 lg:gap-5 mb-4 sm:mb-5 md:mb-6 lg:mb-7">
-          <div className="flex items-center gap-2.5 sm:gap-3 md:gap-4 lg:gap-5 flex-1 min-w-0">
-            <div className="relative flex-shrink-0">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.25)] dark:shadow-[0_4px_12px_rgba(59,130,246,0.15)]">
-                <Newspaper
-                  className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 lg:w-8 lg:h-8 text-white"
-                  strokeWidth={1.5}
-                />
-              </div>
+        {/* Daily Morning Brief Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5 md:mb-6">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg flex-shrink-0">
+              <Newspaper className="w-5 h-5 sm:w-6 sm:h-6 text-white" strokeWidth={1.5} />
             </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-lg sm:text-xl md:text-2xl lg:text-3xl xl:text-4xl font-extralight text-slate-900 dark:text-white mb-0.5 sm:mb-1 tracking-[-0.02em] leading-[1.05] truncate">
-                Industry News
+            <div>
+              <h3 className="text-xl sm:text-2xl md:text-3xl font-extralight text-slate-900 dark:text-white tracking-tight">
+                Cohi Daily Morning Brief
               </h3>
-              <p className="text-[10px] sm:text-xs md:text-sm lg:text-base text-slate-600 dark:text-slate-400 font-light tracking-tight truncate">
-                Market Intelligence Updates
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light mt-0.5">
+                {format(new Date(), "EEEE, MMMM d, yyyy")} | Markets & Economy Update
               </p>
             </div>
           </div>
-          {/* Source Selector Button - Mobile First */}
           <div className="flex items-center gap-2">
             <ExportShareMenu
               title="Industry News"
@@ -694,78 +979,191 @@ export const IndustryNewsCard = () => {
             />
             <button
               onClick={() => setShowSourceSelector(true)}
-              className="flex items-center justify-center p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
-              aria-label={`Select news sources (${selectedSources.length}/${availableSources.length})`}
-              title={`Sources (${selectedSources.length}/${availableSources.length})`}
+              className="flex items-center justify-center p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700"
+              aria-label="Select news sources"
             >
-              <Settings
-                className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700 dark:text-slate-300"
-                strokeWidth={1.5}
-              />
+              <Settings className="w-5 h-5 text-slate-700 dark:text-slate-300" strokeWidth={1.5} />
             </button>
           </div>
         </div>
 
-        {/* Market Intelligence Ticker - Optimal Blue style */}
-        <MarketIntelligenceTicker />
+        {/* Market Intelligence Ticker - rate strip */}
+        <div className="mb-5 md:mb-6">
+          <MarketIntelligenceTicker />
+        </div>
 
-        {/* Enhanced Multi-column Layout - Display All Sources - Mobile First with Perfect Alignment */}
+        {/* Charts Grid - 2 rows x 3 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8">
+          {/* 30-Yr Fixed Rate */}
+          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">30-YR FIXED RATE</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Lowest in several years — now sub-6%</p>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={FIXED_RATE_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-slate-500" />
+                  <YAxis domain={["dataMin - 0.2", "dataMax + 0.2"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}%`, "Rate"]} contentStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* 10-Yr Treasury */}
+          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">10-YR TREASURY YIELD</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">~65bps of Fed cuts priced for 2026</p>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={TREASURY_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[3.9, 4.2]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} contentStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* MBA Application Index */}
+          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">MBA APPLICATION INDEX</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Refi share of total apps</p>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={MBA_INDEX_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barCategoryGap="20%">
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="week" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} width={28} />
+                  <RechartsTooltip contentStyle={{ fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="purchase" fill="rgb(59, 130, 246)" name="Purchase" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="refi" fill="rgb(249, 115, 22)" name="Refi" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* NAHB Builder Confidence */}
+          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">NAHB BUILDER CONFIDENCE</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Feb forecast releasing 10am ET</p>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={NAHB_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 50]} tick={{ fontSize: 10 }} width={28} />
+                  <RechartsTooltip contentStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* Rate Snapshot by Product */}
+          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">RATE SNAPSHOT BY PRODUCT</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Prior week vs today</p>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={RATE_SNAPSHOT_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis type="number" domain={[4.5, 7]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
+                  <YAxis type="category" dataKey="product" tick={{ fontSize: 10 }} width={70} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} contentStyle={{ fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 2, 2, 0]} />
+                  <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 2, 2, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* Existing Home Sales */}
+          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">EXISTING HOME SALES (SAAR)</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Jan drops — weather impact muted</p>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={EXISTING_HOME_SALES_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 5]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} contentStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* TOP HEADLINES */}
         <div
-          className={`${
-            selectedSources.length >= 4
-              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-          } gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 xl:gap-8 items-start mt-[8.7mm]`}
+          className="border-t border-slate-200/60 dark:border-slate-700/50 pt-5 md:pt-6"
+          onMouseEnter={() => setHeadlinesPaused(true)}
+          onMouseLeave={() => setHeadlinesPaused(false)}
         >
-          {filteredNewsFeed.map((source: any, sourceIdx: number) => {
-            const SourceIcon = source.icon;
-            return (
-              <div
-                key={source.source}
-                className="min-w-0 w-full flex flex-col h-full"
-              >
-                {/* Header - Fixed height for alignment */}
-                <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3 mb-3 sm:mb-4 md:mb-5 h-8 sm:h-9 md:h-10 mt-[2mm]">
-                  <div
-                    className={`w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 lg:w-9 lg:h-9 rounded-lg sm:rounded-xl ${source.bg} flex items-center justify-center flex-shrink-0 shadow-sm border border-slate-200/40 dark:border-slate-700/40`}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-4">
+            <h4 className="text-lg font-medium text-slate-900 dark:text-white">TOP HEADLINES</h4>
+            <div className="flex flex-col sm:items-end text-xs text-slate-500 dark:text-slate-400">
+              <span>Click through for full articles</span>
+              <span className="mt-0.5">
+                {newsLoading
+                  ? "Refreshing..."
+                  : `Last fetched: ${
+                      lastNewsUpdate
+                        ? lastNewsUpdate.toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "N/A"
+                    }`}
+              </span>
+            </div>
+          </div>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {visibleHeadlines.map((headline: any, idx: number) => (
+                <li key={`${headline.source.source}-${headline.item.link || idx}`} className="h-full">
+                  <button
+                    type="button"
+                    onClick={() => handleNewsItemClick(headline.item, headline.source)}
+                    className="w-full h-full text-left group p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-800/35 hover:bg-slate-100 dark:hover:bg-slate-800/55 border border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 transition-all shadow-sm hover:shadow-md"
                   >
-                    <SourceIcon
-                      className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5 lg:w-5 lg:h-5 ${source.color}`}
-                      strokeWidth={1.5}
-                    />
-                  </div>
-                  <h4 className="text-xs sm:text-sm md:text-base lg:text-lg font-light text-slate-800 dark:text-slate-200 tracking-tight truncate flex-1 min-w-0 leading-tight">
-                    {source.source}
-                  </h4>
-                </div>
-                {/* News Items - Consistent spacing */}
-                <div className="space-y-2.5 sm:space-y-3 md:space-y-3.5 lg:space-y-4 xl:space-y-5 flex-1">
-                  {source.items?.slice(0, 2).map((item: any, idx: number) => (
-                    <div
-                      key={idx}
-                      onClick={() => handleNewsItemClick(item, source)}
-                      className="group cursor-pointer p-2.5 sm:p-3 md:p-4 lg:p-5 xl:p-6 rounded-md sm:rounded-lg md:rounded-xl lg:rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800/50 transition-all duration-300 active:scale-[0.98] border border-slate-200/60 dark:border-slate-700/40 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md dark:hover:shadow-lg touch-manipulation w-full flex flex-col"
-                    >
-                      <p className="text-[11px] sm:text-xs md:text-sm lg:text-base xl:text-lg text-slate-900 dark:text-slate-100 leading-[1.4] sm:leading-[1.5] mb-1.5 sm:mb-2 md:mb-2.5 lg:mb-3 group-hover:text-slate-950 dark:group-hover:text-white transition-colors font-light tracking-tight line-clamp-2 break-words min-h-[2.8em] sm:min-h-[3em] md:min-h-[3.2em]">
-                        {item.title}
-                      </p>
-                      <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light flex-wrap mt-auto">
-                        <span className="truncate">{item.date}</span>
-                        <span className="text-slate-300 dark:text-slate-600 flex-shrink-0">
-                          •
-                        </span>
-                        <span className="whitespace-nowrap">{item.time}</span>
-                      </div>
-                    </div>
-                  )) || (
-                    <p className="text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light">
-                      Loading news...
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2">
+                      {headline.item.title}
                     </p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-3">
+                      {headline.item.excerpt ||
+                        headline.item.description ||
+                        headline.item.summary ||
+                        "Read more"}
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
+                      [{headline.source.source}] • {headline.releaseLabel}
+                    </p>
+                  </button>
+                </li>
+              ))}
+          </ul>
+          {headlinePageCount > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-1.5">
+              {Array.from({ length: headlinePageCount }).map((_, idx) => (
+                <span
+                  key={`headline-page-${idx}`}
+                  className={`h-1.5 rounded-full transition-all ${
+                    idx === headlinePage ? "w-5 bg-blue-500" : "w-1.5 bg-slate-300 dark:bg-slate-600"
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+          {recentHeadlines.length === 0 && !newsLoading && (
+            <p className="text-sm text-slate-500 dark:text-slate-400 py-4">
+              No recent lending headlines are available right now. Try refreshing in a moment.
+            </p>
+          )}
         </div>
       </motion.div>
 
@@ -864,7 +1262,12 @@ export const IndustryNewsCard = () => {
 
       <Dialog
         open={!!selectedNewsItem}
-        onOpenChange={(open) => !open && setSelectedNewsItem(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedNewsItem(null);
+            setShowFullArticleModal(false);
+          }
+        }}
       >
         <DialogContent
           className="
@@ -941,7 +1344,10 @@ export const IndustryNewsCard = () => {
                   </div>
                 </div>
                 <button
-                  onClick={() => setSelectedNewsItem(null)}
+                  onClick={() => {
+                    setSelectedNewsItem(null);
+                    setShowFullArticleModal(false);
+                  }}
                   className="
                     min-w-[44px] min-h-[44px] w-11 h-11 sm:w-9 sm:h-9
                     rounded-full 
@@ -994,19 +1400,30 @@ export const IndustryNewsCard = () => {
                   {selectedNewsItem.item.title}
                 </h1>
 
-                {/* Brief Summary */}
-                <p
-                  className="
-                    text-[0.9375rem] leading-[1.6] sm:text-base sm:leading-[1.6] md:text-base md:leading-[1.6] 
-                    text-slate-700 dark:text-slate-300 
-                    mb-5 sm:mb-5 md:mb-6 
-                    font-light 
-                    tracking-tight
-                    break-words
-                  "
-                >
-                  {selectedNewsItem.source.summary}
-                </p>
+                {/* Article Content (3-5 paragraphs) */}
+                <div className="mb-5 sm:mb-5 md:mb-6">
+                  <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                    Article Excerpt
+                  </p>
+                  {articleBriefLoading ? (
+                    <div className="space-y-2.5">
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-11/12" />
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-10/12" />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(articleBrief?.articleParagraphs || []).slice(0, 5).map((paragraph, idx) => (
+                        <p
+                          key={`brief-${idx}`}
+                          className="text-[0.9375rem] leading-[1.7] sm:text-base sm:leading-[1.7] text-slate-700 dark:text-slate-300 font-light tracking-tight break-words"
+                        >
+                          {paragraph}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 {/* Enhanced Cohi Executive Insights - AI Powered */}
                 <div
@@ -1154,17 +1571,15 @@ export const IndustryNewsCard = () => {
                   </div>
                 </div>
 
-                {/* Enhanced Read Full Article CTA */}
-                <a
-                  href={selectedNewsItem.item.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                {/* In-app full article modal CTA */}
+                <button
+                  type="button"
+                  onMouseEnter={() => prewarmArticleLink(selectedNewsItem?.item?.link)}
                   onClick={() => {
-                    sessionStorage.setItem("returnToAdmin", "true");
-                    sessionStorage.setItem(
-                      "dashboardUrl",
-                      window.location.href
-                    );
+                    setArticleFrameLoading(true);
+                    setArticleFrameError(false);
+                    prewarmArticleLink(selectedNewsItem?.item?.link);
+                    setShowFullArticleModal(true);
                   }}
                   className="
                     flex items-center justify-center gap-2.5 
@@ -1194,11 +1609,93 @@ export const IndustryNewsCard = () => {
                     className="w-5 h-5 sm:w-5 sm:h-5"
                     strokeWidth={2}
                   />
-                  <span>Read Full Article</span>
-                </a>
+                  <span>View Full Article</span>
+                </button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showFullArticleModal}
+        onOpenChange={(open) => {
+          setShowFullArticleModal(open);
+          if (!open) {
+            setArticleFrameLoading(false);
+            setArticleFrameError(false);
+          }
+        }}
+      >
+        <DialogContent className="left-0 top-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 border-0 shadow-none [&>button]:hidden">
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/60 dark:border-slate-700/50">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate pr-3">
+                {selectedNewsItem?.item?.title || "Full Article"}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFullArticleModal(false);
+                  setArticleFrameLoading(false);
+                  setArticleFrameError(false);
+                }}
+                className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Close full article"
+              >
+                <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
+              </button>
+            </div>
+            <div className="relative flex-1 bg-slate-50 dark:bg-slate-900">
+              {articleFrameLoading && !articleFrameError && (
+                <div className="absolute inset-0 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm flex items-center justify-center px-6">
+                  <div className="w-full max-w-2xl space-y-3">
+                    <div className="h-5 w-2/3 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+                    <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+                    <div className="h-4 w-11/12 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+                    <div className="h-4 w-5/6 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">Loading full article...</p>
+                  </div>
+                </div>
+              )}
+              {articleFrameError && (
+                <div className="absolute inset-0 z-10 bg-white dark:bg-slate-900 flex items-center justify-center p-6">
+                  <div className="max-w-xl text-center">
+                    <p className="text-base text-slate-800 dark:text-slate-200 font-medium">Could not display this site in embedded view.</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Some publishers block iframe embedding. Use Open source below to read the article.</p>
+                  </div>
+                </div>
+              )}
+              {selectedNewsItem?.item?.link ? (
+                <iframe
+                  title="Full article"
+                  src={selectedNewsItem.item.link}
+                  loading="eager"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  onLoad={() => setArticleFrameLoading(false)}
+                  onError={() => {
+                    setArticleFrameLoading(false);
+                    setArticleFrameError(true);
+                  }}
+                  className={`w-full h-full border-0 transition-opacity duration-200 ${
+                    articleFrameLoading ? "opacity-0" : "opacity-100"
+                  }`}
+                />
+              ) : null}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900 flex justify-end">
+              {selectedNewsItem?.item?.link ? (
+                <a
+                  href={selectedNewsItem.item.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Open source
+                </a>
+              ) : null}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

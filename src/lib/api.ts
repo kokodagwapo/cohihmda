@@ -807,6 +807,22 @@ export class ApiClient {
     });
   }
 
+  async getNewsDetails(article: {
+    title: string;
+    source: string;
+    link: string;
+  }) {
+    return this.request<{
+      articleParagraphs: string[];
+      fullArticleUrl: string;
+      fetchedAt: string;
+      error?: string;
+    }>("/api/news/details", {
+      method: "POST",
+      body: JSON.stringify(article),
+    });
+  }
+
   // WebSocket connection helper (for Express backend WebSocket)
   // Always uses direct backend URL (bypasses CloudFront which doesn't support WebSocket)
   createBackendWebSocket(path: string): WebSocket {
