@@ -5,13 +5,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getApiUrl } from '@/lib/api';
+import { getApiUrl, api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Loader2, LogIn, CheckCircle2, XCircle, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Loader2, LogIn, CheckCircle2, XCircle, KeyRound, ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
 import { MFAChallenge } from '@/components/auth/MFAChallenge';
 
-type LoginStep = 'email' | 'password' | 'mfa' | 'sso-redirect';
+type LoginStep = 'email' | 'password' | 'new-password' | 'mfa' | 'mfa-setup' | 'sso-redirect';
 
 export const Login = () => {
   const navigate = useNavigate();
@@ -23,6 +23,9 @@ export const Login = () => {
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline' | 'not-configured'>('checking');
   const [mfaSession, setMfaSession] = useState<string | null>(null);
+  const [challengeSession, setChallengeSession] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   
   // Two-step login flow
   const [step, setStep] = useState<LoginStep>('email');
@@ -225,6 +228,14 @@ export const Login = () => {
         return;
       }
 
+      // Handle forced password change (first login with temp password)
+      if (error.newPasswordRequired) {
+        setServerStatus('online');
+        setChallengeSession(error.session);
+        setStep('new-password');
+        return;
+      }
+
       const errorMsg = error.message?.toLowerCase() || '';
 
       if (errorMsg.includes('connection') || errorMsg.includes('failed to fetch') || errorMsg.includes('networkerror')) {
@@ -256,8 +267,73 @@ export const Login = () => {
   const handleBack = () => {
     setStep('email');
     setPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
     setMfaSession(null);
+    setChallengeSession(null);
     setSsoInfo({ available: false, allowPassword: true });
+  };
+
+  const handleNewPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challengeSession || newPassword.length < 10 || newPassword !== confirmNewPassword) return;
+
+    setLoading(true);
+    try {
+      const response = await api.request<{
+        user?: any;
+        token?: string;
+        refreshToken?: string;
+        mfaRequired?: boolean;
+        mfaSetupRequired?: boolean;
+        challengeName?: string;
+        session?: string;
+      }>('/api/auth/new-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: email.trim(),
+          session: challengeSession,
+          newPassword,
+        }),
+      });
+
+      // After password change, Cognito may require MFA setup
+      if (response.mfaSetupRequired || response.challengeName === 'MFA_SETUP') {
+        setChallengeSession(response.session || null);
+        setStep('mfa-setup');
+        toast({ title: 'Password Updated', description: 'Now set up two-factor authentication.' });
+        return;
+      }
+
+      // Or MFA verification if already enrolled
+      if (response.mfaRequired) {
+        setMfaSession(response.session || null);
+        setStep('mfa');
+        toast({ title: 'Password Updated', description: 'Enter your MFA code to continue.' });
+        return;
+      }
+
+      // Fully authenticated
+      if (response.token) {
+        localStorage.setItem('auth_token', response.token);
+        api.setToken(response.token);
+        if (response.refreshToken) {
+          localStorage.setItem('refresh_token', response.refreshToken);
+        }
+      }
+
+      toast({ title: 'Welcome!', description: 'Password set successfully. You are now signed in.' });
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      navigate(returnTo);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to set new password',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMfaVerify = useCallback(async (code: string) => {
@@ -286,7 +362,9 @@ export const Login = () => {
           <CardDescription className="text-base">
             {step === 'email' && 'Sign in to access your dashboard'}
             {step === 'password' && 'Enter your password to continue'}
+            {step === 'new-password' && 'Please set a new password to continue'}
             {step === 'mfa' && 'Verify your identity'}
+            {step === 'mfa-setup' && 'Set up two-factor authentication'}
             {step === 'sso-redirect' && 'Redirecting to your organization\'s login...'}
           </CardDescription>
         </CardHeader>
@@ -411,6 +489,105 @@ export const Login = () => {
                 </>
               )}
             </form>
+          )}
+
+          {/* ── New Password (first login with temp password) ──── */}
+          {step === 'new-password' && (
+            <form onSubmit={handleNewPasswordSubmit} className="space-y-4">
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                <KeyRound className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  Welcome! You need to set a permanent password before continuing.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="new-password">New Password</Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  placeholder="Minimum 10 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  autoFocus
+                  disabled={loading}
+                  autoComplete="new-password"
+                  minLength={10}
+                />
+                {newPassword && newPassword.length < 10 && (
+                  <p className="text-xs text-muted-foreground">At least 10 characters with uppercase, lowercase, numbers, and symbols</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="confirm-new-password">Confirm Password</Label>
+                <Input
+                  id="confirm-new-password"
+                  type="password"
+                  placeholder="Confirm your password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  required
+                  disabled={loading}
+                  autoComplete="new-password"
+                  minLength={10}
+                />
+                {confirmNewPassword && newPassword !== confirmNewPassword && (
+                  <p className="text-xs text-rose-500">Passwords do not match</p>
+                )}
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading || newPassword.length < 10 || newPassword !== confirmNewPassword}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Setting password...
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    Set Password & Continue
+                  </>
+                )}
+              </Button>
+
+              <Button variant="ghost" className="w-full" onClick={handleBack} disabled={loading}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to login
+              </Button>
+            </form>
+          )}
+
+          {/* ── MFA Setup (after first password change, if MFA required) */}
+          {step === 'mfa-setup' && (
+            <div className="space-y-6">
+              <div className="flex flex-col items-center space-y-3">
+                <div className="h-12 w-12 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+                  <ShieldCheck className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div className="text-center space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Your account requires two-factor authentication.
+                    Please complete this setup in your account settings after signing in.
+                  </p>
+                </div>
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => {
+                  const returnTo = '/settings?tab=account&setup-mfa=true';
+                  navigate(returnTo);
+                }}
+              >
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                Continue to MFA Setup
+              </Button>
+            </div>
           )}
 
           {/* ── Step 3: MFA Challenge ────────────────────────────── */}
