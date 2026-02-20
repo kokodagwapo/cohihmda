@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import { Loader2, KeyRound, ShieldAlert, User, Mail, Building2, UserCog } from 'lucide-react';
+import { MFASetup } from './MFASetup';
 
 /** Decode JWT payload without verification (client-side only) */
 function decodeJwtPayload(token: string): Record<string, any> | null {
@@ -189,6 +190,9 @@ export function AccountSection() {
           )}
         </CardContent>
       </Card>
+
+      {/* MFA Setup */}
+      {!isSso && <MFASetup />}
 
       {/* Password Change */}
       {!isSso && (

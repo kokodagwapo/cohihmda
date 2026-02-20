@@ -9,18 +9,20 @@ import { getApiUrl } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, LogIn, CheckCircle2, XCircle, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
 import { CoheusLogo } from '@/components/ui/CoheusLogo';
+import { MFAChallenge } from '@/components/auth/MFAChallenge';
 
-type LoginStep = 'email' | 'password' | 'sso-redirect';
+type LoginStep = 'email' | 'password' | 'mfa' | 'sso-redirect';
 
 export const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { login, loadTenants, isAuthenticated, user } = useAuth();
+  const { login, completeMfaLogin, loadTenants, isAuthenticated, user } = useAuth();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline' | 'not-configured'>('checking');
+  const [mfaSession, setMfaSession] = useState<string | null>(null);
   
   // Two-step login flow
   const [step, setStep] = useState<LoginStep>('email');
@@ -215,6 +217,14 @@ export const Login = () => {
       const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
       navigate(returnTo);
     } catch (error: any) {
+      // Handle MFA challenge
+      if (error.mfaRequired) {
+        setServerStatus('online');
+        setMfaSession(error.session);
+        setStep('mfa');
+        return;
+      }
+
       const errorMsg = error.message?.toLowerCase() || '';
 
       if (errorMsg.includes('connection') || errorMsg.includes('failed to fetch') || errorMsg.includes('networkerror')) {
@@ -243,12 +253,27 @@ export const Login = () => {
     }
   };
 
-  // Go back to email step
   const handleBack = () => {
     setStep('email');
     setPassword('');
+    setMfaSession(null);
     setSsoInfo({ available: false, allowPassword: true });
   };
+
+  const handleMfaVerify = useCallback(async (code: string) => {
+    if (!mfaSession) return;
+    setLoading(true);
+    try {
+      await completeMfaLogin(email.trim(), mfaSession, code);
+      toast({ title: 'Welcome!', description: 'Successfully signed in' });
+      const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+      navigate(returnTo);
+    } catch (err: any) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [mfaSession, email, completeMfaLogin, navigate, toast]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4">
@@ -261,6 +286,7 @@ export const Login = () => {
           <CardDescription className="text-base">
             {step === 'email' && 'Sign in to access your dashboard'}
             {step === 'password' && 'Enter your password to continue'}
+            {step === 'mfa' && 'Verify your identity'}
             {step === 'sso-redirect' && 'Redirecting to your organization\'s login...'}
           </CardDescription>
         </CardHeader>
@@ -385,6 +411,17 @@ export const Login = () => {
                 </>
               )}
             </form>
+          )}
+
+          {/* ── Step 3: MFA Challenge ────────────────────────────── */}
+          {step === 'mfa' && mfaSession && (
+            <MFAChallenge
+              email={email}
+              session={mfaSession}
+              onVerify={handleMfaVerify}
+              onBack={handleBack}
+              loading={loading}
+            />
           )}
 
           {/* ── SSO Redirect (loading state) ──────────────────────── */}

@@ -33,6 +33,7 @@ export interface OnboardingAnalysis {
   revenueFieldCandidates: RevenueFieldCandidate[];
   suggestedAdditionalFields: SuggestedAdditionalField[];
   dataQualityFlags: DataQualityFlag[];
+  rdbMissingFields: RdbMissingField[];
   summary: string;
 }
 
@@ -64,6 +65,14 @@ export interface DataQualityFlag {
   issue: string;
   severity: "critical" | "warning" | "info";
   recommendation: string;
+}
+
+export interface RdbMissingField {
+  fieldId: string;
+  coheusAlias?: string;
+  description: string;
+  fieldReaderPopulation?: number;
+  canonicalName?: string;
 }
 
 export type AnalysisPhase =
@@ -155,14 +164,14 @@ Respond with valid JSON matching this schema:
 // Main Analysis Function
 // ============================================================================
 
-export type SamplingStrategy = "pipeline" | "fullLoan";
+export type SamplingStrategy = "pipeline" | "fullLoan" | "hybrid";
 
 export async function runOnboardingAnalysis(
   tenantId: string,
   connectionId: string,
   tenantPool: pg.Pool,
   onEvent: OnAnalysisEvent,
-  samplingStrategy: SamplingStrategy = "pipeline"
+  samplingStrategy: SamplingStrategy = "hybrid"
 ): Promise<OnboardingAnalysis> {
   const emit = (
     type: AnalysisEvent["type"],
@@ -199,13 +208,229 @@ export async function runOnboardingAnalysis(
       analyzedAt: Date;
       fieldsWithData: number;
       fieldsWithoutData: number;
+      rdbMissingFields: RdbMissingField[];
     };
 
-    if (samplingStrategy === "fullLoan") {
+    if (samplingStrategy === "hybrid") {
       // -------------------------------------------------------------------
-      // Full-Loan strategy: GET /v1/loans/{id} for complete loan objects
+      // Hybrid: Phase 1 pipeline (default field population) + Phase 2 full loan (discovery) + Phase 3 Field Reader (gap fill)
       // -------------------------------------------------------------------
-      emit("progress", "sampling", "Using full-loan sampling (GET /v1/loans)...");
+      emit("progress", "sampling", "Hybrid: Phase 1 — pipeline for default fields...");
+
+      const defaultFieldIds = [...new Set(Object.values(DEFAULT_ENCOMPASS_FIELD_MAPPINGS))].filter(
+        (id) => !isBorrowerPiiField(id.startsWith("Fields.") ? id.substring(7) : id)
+      );
+      const pipelineBatchSize = 300;
+      const pipelineStats: any[] = [];
+      let pipelineSampleSize = 0;
+      for (let i = 0; i < defaultFieldIds.length; i += pipelineBatchSize) {
+        const batch = defaultFieldIds.slice(i, i + pipelineBatchSize);
+        emit("progress", "sampling", `Pipeline batch ${Math.floor(i / pipelineBatchSize) + 1} (${batch.length} default fields)...`);
+        try {
+          const batchResult = await discoveryService.analyzeFieldPopulation(
+            tenantId,
+            connectionId,
+            { sampleSize: 200, fieldsToAnalyze: batch },
+          );
+          pipelineStats.push(...batchResult.populationStats);
+          pipelineSampleSize = batchResult.sampleSize;
+        } catch (err: any) {
+          console.warn(`[OnboardingAnalysis:Hybrid] Pipeline batch failed: ${err.message}`);
+        }
+        if (i + pipelineBatchSize < defaultFieldIds.length) {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
+
+      emit("progress", "sampling", "Hybrid: Phase 2 — full-loan discovery...");
+      const fullLoanResult = await discoveryService.analyzeFieldPopulationViaFullLoans(
+        tenantId,
+        connectionId,
+        {
+          sampleSize: 30,
+          emit: (type, phase, message) => emit(type as any, phase as any, message),
+        },
+      );
+
+      const { fieldIdToJsonPath } = fullLoanResult;
+      const pathPopMap = new Map<string, any>();
+      for (const stat of fullLoanResult.populationStats) {
+        pathPopMap.set(stat.fieldId, stat);
+        pathPopMap.set(stat.fieldId.toLowerCase(), stat);
+      }
+      const enrichedStats: any[] = [...fullLoanResult.populationStats];
+      const seenIds = new Set(fullLoanResult.populationStats.map((s: any) => s.fieldId));
+
+      const addStat = (id: string, stat: any) => {
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          enrichedStats.push({ ...stat, fieldId: id });
+        }
+      };
+
+      for (const [responseFieldId, jsonPath] of fieldIdToJsonPath) {
+        const normalized = jsonPath
+          .replace(/^\$\.?/, "")
+          .replace(/\[(\d+)\]/g, ".$1");
+        const stat = pathPopMap.get(normalized) || pathPopMap.get(normalized.toLowerCase());
+        if (stat) {
+          addStat(responseFieldId, stat);
+          if (!responseFieldId.startsWith("Fields.") && !responseFieldId.startsWith("Loan.")) {
+            addStat(`Fields.${responseFieldId}`, stat);
+          }
+          if (responseFieldId.startsWith("Fields.")) {
+            addStat(responseFieldId.substring(7), stat);
+          }
+        }
+      }
+
+      const defaultToResponseId = new Map<string, string>();
+      for (const defaultId of Object.values(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
+        if (fieldIdToJsonPath.has(defaultId)) defaultToResponseId.set(defaultId, defaultId);
+        else {
+          const bare = defaultId.startsWith("Fields.") ? defaultId.substring(7) : null;
+          if (bare && fieldIdToJsonPath.has(bare)) defaultToResponseId.set(defaultId, bare);
+        }
+      }
+      for (const [, defaultId] of Object.entries(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
+        const responseId = defaultToResponseId.get(defaultId);
+        if (!responseId) continue;
+        const jsonPath = fieldIdToJsonPath.get(responseId);
+        if (!jsonPath) continue;
+        const normalized = jsonPath.replace(/^\$\.?/, "").replace(/\[(\d+)\]/g, ".$1");
+        const stat = pathPopMap.get(normalized) || pathPopMap.get(normalized.toLowerCase());
+        if (stat) addStat(defaultId, stat);
+      }
+
+      const pipelineFieldIds = new Set(
+        pipelineStats.map((s: any) => s.fieldId).concat(
+          pipelineStats
+            .filter((s: any) => s.fieldId.startsWith("Fields."))
+            .map((s: any) => s.fieldId.substring(7)),
+        ),
+      );
+      const missingDefaultIds = defaultFieldIds.filter((id) => {
+        const bare = id.startsWith("Fields.") ? id.substring(7) : id;
+        return !pipelineFieldIds.has(id) && !pipelineFieldIds.has(bare);
+      });
+
+      let fieldReaderStats: any[] = [];
+      if (missingDefaultIds.length > 0) {
+        emit("progress", "sampling", `Hybrid: Phase 3 — Field Reader for ${missingDefaultIds.length} missing default fields...`);
+        try {
+          const loanGuids = await discoveryService.getRecentLoanGuids(
+            tenantId,
+            connectionId,
+            5,
+          );
+          if (loanGuids.length > 0) {
+            fieldReaderStats = await discoveryService.getFieldPopulationViaFieldReader(
+              tenantId,
+              connectionId,
+              loanGuids,
+              missingDefaultIds,
+            );
+            for (const s of fieldReaderStats) {
+              addStat(s.fieldId, s);
+              if (s.fieldId.startsWith("Fields.")) addStat(s.fieldId.substring(7), s);
+              else if (!["Loan.", "Borrower.", "CoBorrower.", "Property.", "CX.", "SubjectProperty."].some((p) => s.fieldId.startsWith(p))) {
+                addStat(`Fields.${s.fieldId}`, s);
+              }
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[OnboardingAnalysis:Hybrid] Field Reader phase failed: ${err.message}`);
+        }
+      }
+
+      // --- RDB detection via canonicalFields ---
+      emit("progress", "sampling", "Checking Reporting Database field configuration...");
+      const rdbMissing: RdbMissingField[] = [];
+      try {
+        const canonicalFields = await discoveryService.getCanonicalFields(tenantId, connectionId);
+        const canonicalSet = new Set<string>();
+        for (const cf of canonicalFields) {
+          const cn = cf.canonicalName;
+          canonicalSet.add(cn);
+          canonicalSet.add(cn.toLowerCase());
+          if (cn.startsWith("Fields.")) canonicalSet.add(cn.substring(7));
+          else if (!cn.includes(".")) canonicalSet.add(`Fields.${cn}`);
+        }
+
+        const reverseAlias = new Map<string, string>();
+        for (const [alias, fid] of Object.entries(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
+          reverseAlias.set(fid, alias);
+          if (fid.startsWith("Fields.")) reverseAlias.set(fid.substring(7), alias);
+        }
+
+        const fieldReaderMap = new Map<string, number>();
+        for (const s of fieldReaderStats) {
+          fieldReaderMap.set(s.fieldId, s.populationRate ?? 0);
+          if (s.fieldId.startsWith("Fields.")) fieldReaderMap.set(s.fieldId.substring(7), s.populationRate ?? 0);
+        }
+
+        const enrichedMap = new Map<string, number>();
+        for (const s of enrichedStats) {
+          enrichedMap.set(s.fieldId, s.populationRate ?? 0);
+        }
+
+        for (const defaultId of defaultFieldIds) {
+          const bare = defaultId.startsWith("Fields.") ? defaultId.substring(7) : defaultId;
+          const inRdb = canonicalSet.has(defaultId) || canonicalSet.has(bare) || canonicalSet.has(defaultId.toLowerCase());
+          if (inRdb) continue;
+
+          const pStat = pipelineStats.find((s: any) => s.fieldId === defaultId || s.fieldId === bare);
+          if (pStat && pStat.populationRate > 0) continue;
+
+          const frPop = fieldReaderMap.get(defaultId) ?? fieldReaderMap.get(bare);
+          const flPop = enrichedMap.get(defaultId) ?? enrichedMap.get(bare);
+          const verifiedPop = frPop ?? flPop;
+
+          const alias = reverseAlias.get(defaultId) ?? reverseAlias.get(bare);
+          const desc = discoveryResult.discoveredFields.find(
+            (f: any) => f.fieldId === defaultId || f.fieldId === bare,
+          )?.description ?? defaultId;
+
+          rdbMissing.push({
+            fieldId: defaultId,
+            coheusAlias: alias,
+            description: desc,
+            fieldReaderPopulation: verifiedPop,
+            canonicalName: `Fields.${bare}`,
+          });
+        }
+
+        if (rdbMissing.length > 0) {
+          console.log(`[OnboardingAnalysis:Hybrid] ${rdbMissing.length} default fields NOT in RDB: ${rdbMissing.map((f) => f.fieldId).join(", ")}`);
+        } else {
+          console.log(`[OnboardingAnalysis:Hybrid] All default fields found in RDB canonical set (${canonicalSet.size} entries)`);
+        }
+      } catch (err: any) {
+        console.warn(`[OnboardingAnalysis:Hybrid] Canonical fields check failed (non-fatal): ${err.message}`);
+      }
+
+      const mergedStats = [...enrichedStats, ...pipelineStats];
+      const sampleSize = pipelineSampleSize || fullLoanResult.sampleSize;
+      const fieldsWithData = mergedStats.filter((s: any) => s.populationRate > 0).length;
+      analysisResult = {
+        populationStats: mergedStats,
+        sampleSize,
+        analyzedAt: new Date(),
+        fieldsWithData,
+        fieldsWithoutData: mergedStats.length - fieldsWithData,
+        rdbMissingFields: rdbMissing,
+      };
+
+      emit(
+        "progress",
+        "sampling",
+        `Hybrid complete: ${pipelineStats.length} pipeline, ${enrichedStats.length} discovery, ${fieldReaderStats.length} Field Reader, ${rdbMissing.length} RDB-missing; ${sampleSize} loans`,
+      );
+    } else if (samplingStrategy === "fullLoan") {
+      // -------------------------------------------------------------------
+      // Full-Loan strategy: GET /v3/loans/{id} for complete loan objects
+      // -------------------------------------------------------------------
+      emit("progress", "sampling", "Using full-loan sampling (GET /v3/loans)...");
 
       const fullLoanResult = await discoveryService.analyzeFieldPopulationViaFullLoans(
         tenantId,
@@ -216,8 +441,8 @@ export async function runOnboardingAnalysis(
         }
       );
 
-      // The per-field schema endpoint (GET /v1/schema/loan/{fieldId}) returns
-      // the jsonPath for each field ID, allowing us to bridge between:
+      // The v3 standard field schema endpoint provides jsonPath for each field ID,
+      // allowing us to bridge between:
       //   - Default mapping field IDs (e.g., "Fields.2", "Fields.353")
       //   - JSON paths in the loan objects (e.g., "baseLoanAmount", "ltv")
       // Use the fieldIdToJsonPath map from the discovery result to enrich
@@ -310,6 +535,7 @@ export async function runOnboardingAnalysis(
         analyzedAt: fullLoanResult.analyzedAt,
         fieldsWithData: fullLoanResult.fieldsWithData,
         fieldsWithoutData: fullLoanResult.fieldsWithoutData,
+        rdbMissingFields: [],
       };
 
       emit(
@@ -319,7 +545,7 @@ export async function runOnboardingAnalysis(
       );
     } else {
       // -------------------------------------------------------------------
-      // Pipeline strategy (default): batched POST /v1/loanPipeline calls
+      // Pipeline strategy (default): batched POST /v3/loanPipeline calls
       // -------------------------------------------------------------------
 
       // Collect bare IDs for all default mappings FIRST so they land in batch 1
@@ -408,6 +634,7 @@ export async function runOnboardingAnalysis(
         analyzedAt: new Date(),
         fieldsWithData,
         fieldsWithoutData: allStats.length - fieldsWithData,
+        rdbMissingFields: [],
       };
 
       emit(
@@ -488,7 +715,8 @@ export async function runOnboardingAnalysis(
     );
 
     // Cross-reference default mappings against sample population to flag problems
-    const defaultFieldHealthContext = buildDefaultFieldHealthContext(popMap);
+    const rdbMissingSet = new Set(analysisResult.rdbMissingFields.map((f) => f.fieldId));
+    const defaultFieldHealthContext = buildDefaultFieldHealthContext(popMap, rdbMissingSet);
 
     // Phase 4: Matching — split into two parallel LLM calls so neither hits
     // token limits. Pass 1 handles field matching + quality flags; Pass 2
@@ -514,6 +742,7 @@ export async function runOnboardingAnalysis(
           sharedContext,
           `\nFocus on FIELD SWAP RECOMMENDATIONS and DATA QUALITY FLAGS only.`,
           `- For every field in the health check marked "NEEDS SWAP" or "NOT in sample", recommend a swap if a better alternative exists.`,
+          `- Do NOT recommend swapping fields marked "NOT IN RDB" — these need to be added to the Encompass Reporting Database by the admin, not swapped to a different field.`,
           `- Do NOT recommend swapping fields that are already well-populated and correctly mapped.`,
           `- Each Encompass field ID should only map to one Coheus alias.`,
           `- Flag data quality concerns (low population on critical fields, suspicious distributions, etc.)`,
@@ -592,6 +821,7 @@ export async function runOnboardingAnalysis(
             : "info",
           recommendation: r.recommendation || "",
         })),
+        rdbMissingFields: analysisResult.rdbMissingFields,
         summary: p1.summary || "Analysis complete.",
       };
     } catch (parseErr: any) {
@@ -687,16 +917,24 @@ function buildFieldContext(
  * Explicitly tells the LLM which defaults are healthy vs. need a swap.
  */
 function buildDefaultFieldHealthContext(
-  popMap: Map<string, { populationRate: number; sampleValues: string[] }>
+  popMap: Map<string, { populationRate: number; sampleValues: string[] }>,
+  rdbMissingFieldIds?: Set<string>,
 ): string {
   const bare = (id: string) => id.startsWith("Fields.") ? id.substring(7) : id;
   const healthy: string[] = [];
   const needsSwap: string[] = [];
   const notSampled: string[] = [];
+  const notInRdb: string[] = [];
 
   for (const [alias, defaultId] of Object.entries(DEFAULT_ENCOMPASS_FIELD_MAPPINGS)) {
     const pop = popMap.get(defaultId);
     const displayId = bare(defaultId);
+
+    if (rdbMissingFieldIds?.has(defaultId)) {
+      notInRdb.push(`- "${alias}" → ${displayId} — NOT IN RDB (field exists on loans but is not in the Reporting Database; needs RDB config, not a swap)`);
+      continue;
+    }
+
     if (!pop) {
       console.warn(`[HealthCheck] "${alias}" (${defaultId}) NOT in popMap — keys checked: "${defaultId}", "${bare(defaultId)}". popMap size=${popMap.size}`);
       notSampled.push(`- "${alias}" → ${displayId} — NOT in sample (field may not exist in this instance)`);
@@ -711,8 +949,12 @@ function buildDefaultFieldHealthContext(
   }
 
   const lines: string[] = [];
+  if (notInRdb.length > 0) {
+    lines.push(`### Fields NOT IN RDB (${notInRdb.length} — need to be added to Encompass Reporting Database, do NOT recommend a swap for these):`);
+    lines.push(...notInRdb);
+  }
   if (needsSwap.length > 0) {
-    lines.push(`### Fields that NEED a swap (${needsSwap.length} — low or zero population):`);
+    lines.push(`\n### Fields that NEED a swap (${needsSwap.length} — low or zero population):`);
     lines.push(...needsSwap);
   }
   if (notSampled.length > 0) {

@@ -53,6 +53,7 @@ interface SyncConnection {
   last_sync_error: string | null;
   last_loan_modified_at: string | null;
   is_active: boolean;
+  insights_auto_enabled: boolean;
   created_at: string;
   updated_at: string;
   tenant_id: string;
@@ -275,6 +276,45 @@ export const SyncManagementSection = () => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to update sync setting',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleToggleInsights = async (connection: SyncConnection) => {
+    const newEnabled = !connection.insights_auto_enabled;
+    const key = connKey(connection);
+    setUpdatingIds(prev => new Set(prev).add(key));
+
+    try {
+      await api.request(`/api/admin/sync-management/${connection.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: connection.tenant_id,
+          insights_auto_enabled: newEnabled,
+        }),
+      });
+
+      setConnections(prev =>
+        prev.map(c =>
+          connKey(c) === key ? { ...c, insights_auto_enabled: newEnabled } : c
+        )
+      );
+
+      toast({
+        title: newEnabled ? 'Auto-insights enabled' : 'Auto-insights disabled',
+        description: `${connection.name} (${connection.tenant_name})`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update insights setting',
         variant: 'destructive',
       });
     } finally {
@@ -593,6 +633,7 @@ export const SyncManagementSection = () => {
                     <TableHead className="font-light text-xs">Status</TableHead>
                     <TableHead className="font-light text-xs">Schedule</TableHead>
                     <TableHead className="font-light text-xs text-center">Auto-Sync</TableHead>
+                    <TableHead className="font-light text-xs text-center">Auto-Insights</TableHead>
                     <TableHead className="font-light text-xs text-center">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -667,6 +708,14 @@ export const SyncManagementSection = () => {
                         />
                       </TableCell>
                       <TableCell className="text-center">
+                        <Switch
+                          checked={connection.insights_auto_enabled ?? true}
+                          onCheckedChange={() => handleToggleInsights(connection)}
+                          disabled={updatingIds.has(connKey(connection)) || !connection.is_active}
+                          className="data-[state=checked]:bg-violet-500"
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
                           <Button
                             variant="ghost"
@@ -704,7 +753,7 @@ export const SyncManagementSection = () => {
                     </TableRow>
                     {isExpanded && (
                       <TableRow key={`${key}-history`}>
-                        <TableCell colSpan={9} className="p-0 bg-slate-50/50 dark:bg-slate-900/30">
+                        <TableCell colSpan={10} className="p-0 bg-slate-50/50 dark:bg-slate-900/30">
                           <div className="px-6 py-4">
                             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
                               Sync History

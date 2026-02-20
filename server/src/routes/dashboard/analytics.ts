@@ -10,21 +10,13 @@ import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
   getLeaderboardData,
   getInsights,
-  refreshInsights,
-  refreshAllChannels,
   getClosingFalloutForecast,
   getDashboardOverview,
   getFinancialModelingBaseline,
   type FinancialModelingPeriod,
 } from "../../services/dashboard/analyticsService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
-import {
-  refreshSingleBucket,
-  generateMoreForBucket,
-  deleteInsightById,
-  loadStoredInsights,
-} from "../../services/insights/llmInsightGenerator.js";
-import { collectInsightMetrics } from "../../services/insights/insightMetricsCollector.js";
+import { deleteInsightById } from "../../services/insights/llmInsightGenerator.js";
 import { runInsightGeneration, isGenerationRunning } from "../../services/insights/agents/insightOrchestrator.js";
 import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 
@@ -163,7 +155,6 @@ router.get(
         useLLM = "true",
         forceRefresh = "false",
         channel_group,
-        generation_method,
       } = req.query;
       const authHeader = req.headers.authorization;
 
@@ -193,7 +184,8 @@ router.get(
           forceRefresh: forceRefresh === "true",
           userAccessFilter: accessCtx.getFilter("l"),
           channelGroup: channel_group as string | undefined,
-          generationMethod: generation_method as string | undefined,
+          // Legacy generation methods are archived; insights always read from agent runs.
+          generationMethod: "agent",
         }
       );
       res.json(result);
@@ -249,16 +241,40 @@ router.post(
 
       setImmediate(async () => {
         try {
-          updateProgress(job.id, 10, "Collecting metrics...");
-          const result = await refreshInsights(
+          updateProgress(job.id, 10, "Starting agentic insight generation...");
+          const generation = await runInsightGeneration(
+            tenantContext.tenantId,
+            tenantContext.tenantPool,
+            (event) => {
+              const phaseProgress: Record<string, number> = {
+                init: 5, context: 10, planning: 20,
+                investigating: 50, evaluating: 80, persisting: 90, complete: 100,
+              };
+              updateProgress(job.id, phaseProgress[event.phase] ?? 50, event.detail);
+            },
+            req.query.fresh === "true" ? { forceFresh: true } : undefined
+          );
+
+          if (!generation.success) {
+            failJob(job.id, generation.error || "Agent generation failed");
+            return;
+          }
+
+          // Re-hydrate API response using the default agent generation method.
+          const refreshed = await getInsights(
             tenantContext.tenantPool,
             dateFilter as string,
+            undefined,
             {
+              useLLM: true,
               tenantId: tenantContext.tenantId,
+              userAccessFilter: accessCtx.getFilter("l"),
               channelGroup: channel_group as string | undefined,
+              generationMethod: "agent",
             }
           );
-          completeJob(job.id, result);
+
+          completeJob(job.id, refreshed);
         } catch (error: any) {
           console.error("Error refreshing insights:", error);
           failJob(job.id, error.message || "Failed to refresh insights");
@@ -373,57 +389,10 @@ router.post(
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res) => {
-    try {
-      const tenantContext = getTenantContext(req);
-      const { dateFilter = "ytd" } = req.query;
-
-      const accessCtx = await getLoanAccessContext(
-        req,
-        tenantContext.tenantPool
-      );
-      if (accessCtx.hasNoAccess) {
-        return res.json({
-          channels: [],
-          results: {},
-          accessFiltered: true,
-          noAccess: true,
-        });
-      }
-
-      const job = createJob("insight-refresh-all-channels", req.userId!, tenantContext.tenantId);
-      res.status(202).json({ jobId: job.id, status: "processing" });
-
-      setImmediate(async () => {
-        try {
-          updateProgress(job.id, 10, "Detecting active channels...");
-          const result = await refreshAllChannels(
-            tenantContext.tenantPool,
-            dateFilter as string,
-            {
-              tenantId: tenantContext.tenantId,
-            }
-          );
-          completeJob(job.id, result);
-        } catch (error: any) {
-          console.error("Error refreshing all-channel insights:", error);
-          failJob(job.id, error.message || "Failed to refresh all-channel insights");
-        }
-      });
-    } catch (error: any) {
-      console.error("Error refreshing all-channel insights:", error);
-
-      if (
-        handleDatabaseError(error, res, "Failed to refresh all-channel insights")
-      ) {
-        return;
-      }
-
-      res.status(500).json({
-        error: "Failed to refresh all-channel insights",
-        details:
-          process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
+    return res.status(410).json({
+      error: "Legacy insights endpoint archived",
+      message: "Use /api/dashboard/insights/refresh (agentic workflow).",
+    });
   }
 );
 
@@ -440,91 +409,10 @@ router.post(
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res) => {
-    try {
-      const tenantContext = getTenantContext(req);
-      const { dateFilter = "ytd", bucket, channel_group } = req.query;
-
-      if (!bucket || !["working", "attention", "critical", "context"].includes(bucket as string)) {
-        return res.status(400).json({ error: "Invalid or missing 'bucket' param (working|attention|critical|context)" });
-      }
-
-      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
-      if (accessCtx.hasNoAccess) {
-        return res.json({ insights: [], accessFiltered: true, noAccess: true });
-      }
-
-      const job = createJob("insight-refresh-bucket", req.userId!, tenantContext.tenantId);
-      res.status(202).json({ jobId: job.id, status: "processing" });
-
-      setImmediate(async () => {
-        try {
-          updateProgress(job.id, 20, "Collecting metrics...");
-          const metricsPayload = await collectInsightMetrics(
-            tenantContext.tenantPool,
-            dateFilter as string,
-            { channelGroup: channel_group as string | undefined }
-          );
-
-          updateProgress(job.id, 50, `Regenerating ${bucket} bucket...`);
-          const allInsights = await refreshSingleBucket(
-            bucket as string,
-            metricsPayload,
-            tenantContext.tenantPool,
-            tenantContext.tenantId,
-            { channelGroup: channel_group as string | undefined }
-          );
-
-          const insights = allInsights.map((ins: any) => {
-            const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
-            return {
-              id: ins.id,
-              type: ins.insight_type,
-              message: ins.headline,
-              priority:
-                ins.severity_score >= 0.8
-                  ? "critical"
-                  : ins.severity_score >= 0.55
-                    ? "high"
-                    : ins.severity_score >= 0.3
-                      ? "medium"
-                      : "low",
-              reasoning: ins.understory,
-              source: ins.source,
-              bucket: ins.bucket,
-              headline: ins.headline,
-              understory: ins.understory,
-              severity_score: ins.severity_score,
-              bucketPriority: ins.priority,
-              impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-              evidence: ev,
-              what_changed: ev.what_changed,
-              why: ev.why,
-              business_impact: ev.business_impact,
-              risk_if_ignored: ev.risk_if_ignored,
-              recommended_action: ev.recommended_action,
-              owner: ev.owner,
-            };
-          });
-
-          completeJob(job.id, {
-            insights,
-            refreshedBucket: bucket,
-            generatedAt: new Date().toISOString(),
-            usedLLM: true,
-          });
-        } catch (error: any) {
-          console.error("Error refreshing bucket:", error);
-          failJob(job.id, error.message || "Failed to refresh bucket");
-        }
-      });
-    } catch (error: any) {
-      console.error("Error refreshing bucket:", error);
-      if (handleDatabaseError(error, res, "Failed to refresh bucket")) return;
-      res.status(500).json({
-        error: "Failed to refresh bucket",
-        details: process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
+    return res.status(410).json({
+      error: "Legacy bucket refresh archived",
+      message: "Use /api/dashboard/insights/refresh (agentic workflow).",
+    });
   }
 );
 
@@ -541,91 +429,10 @@ router.post(
   authenticateToken,
   attachTenantContext,
   async (req: AuthRequest, res) => {
-    try {
-      const tenantContext = getTenantContext(req);
-      const { dateFilter = "ytd", bucket, channel_group } = req.query;
-
-      if (!bucket || !["working", "attention", "critical", "context"].includes(bucket as string)) {
-        return res.status(400).json({ error: "Invalid or missing 'bucket' param (working|attention|critical|context)" });
-      }
-
-      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
-      if (accessCtx.hasNoAccess) {
-        return res.json({ insights: [], accessFiltered: true, noAccess: true });
-      }
-
-      const job = createJob("insight-generate-more", req.userId!, tenantContext.tenantId);
-      res.status(202).json({ jobId: job.id, status: "processing" });
-
-      setImmediate(async () => {
-        try {
-          updateProgress(job.id, 20, "Collecting metrics...");
-          const metricsPayload = await collectInsightMetrics(
-            tenantContext.tenantPool,
-            dateFilter as string,
-            { channelGroup: channel_group as string | undefined }
-          );
-
-          updateProgress(job.id, 50, `Generating more ${bucket} insights...`);
-          const allInsights = await generateMoreForBucket(
-            bucket as string,
-            metricsPayload,
-            tenantContext.tenantPool,
-            tenantContext.tenantId,
-            { channelGroup: channel_group as string | undefined }
-          );
-
-          const insights = allInsights.map((ins: any) => {
-            const ev = typeof ins.evidence === "string" ? JSON.parse(ins.evidence) : (ins.evidence || {});
-            return {
-              id: ins.id,
-              type: ins.insight_type,
-              message: ins.headline,
-              priority:
-                ins.severity_score >= 0.8
-                  ? "critical"
-                  : ins.severity_score >= 0.55
-                    ? "high"
-                    : ins.severity_score >= 0.3
-                      ? "medium"
-                      : "low",
-              reasoning: ins.understory,
-              source: ins.source,
-              bucket: ins.bucket,
-              headline: ins.headline,
-              understory: ins.understory,
-              severity_score: ins.severity_score,
-              bucketPriority: ins.priority,
-              impact: typeof ins.impact === "string" ? JSON.parse(ins.impact) : ins.impact,
-              evidence: ev,
-              what_changed: ev.what_changed,
-              why: ev.why,
-              business_impact: ev.business_impact,
-              risk_if_ignored: ev.risk_if_ignored,
-              recommended_action: ev.recommended_action,
-              owner: ev.owner,
-            };
-          });
-
-          completeJob(job.id, {
-            insights,
-            appendedBucket: bucket,
-            generatedAt: new Date().toISOString(),
-            usedLLM: true,
-          });
-        } catch (error: any) {
-          console.error("Error generating more insights:", error);
-          failJob(job.id, error.message || "Failed to generate more insights");
-        }
-      });
-    } catch (error: any) {
-      console.error("Error generating more insights:", error);
-      if (handleDatabaseError(error, res, "Failed to generate more insights")) return;
-      res.status(500).json({
-        error: "Failed to generate more insights",
-        details: process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
+    return res.status(410).json({
+      error: "Legacy generate-more archived",
+      message: "Use /api/dashboard/insights/refresh (agentic workflow).",
+    });
   }
 );
 

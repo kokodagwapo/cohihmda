@@ -1,6 +1,6 @@
 import { Express } from "express";
 import authRoutes from "./auth.js";
-import { cognitoAuth } from "./auth/index.js";
+import { cognitoAuth, mfaRoutes } from "./auth/index.js";
 import subscriptionsRoutes from "./subscriptions.js";
 import ragRoutes from "./rag.js";
 import metricsRoutes from "./metrics.js";
@@ -59,6 +59,7 @@ export function setupRoutes(app: Express) {
 
   app.use("/api/auth", authRoutes);
   app.use("/api/auth/cognito", cognitoAuth);
+  app.use("/api/auth/mfa", mfaRoutes);
 
   // SaaS & Enterprise Features
   app.use("/api/subscriptions", subscriptionsRoutes);

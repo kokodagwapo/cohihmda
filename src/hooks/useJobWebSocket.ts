@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { getApiUrl } from "@/lib/api";
+import { getWebSocketUrl, getWebSocketProtocol } from "@/lib/api";
 
 export type JobMessage = {
   type: "job:progress" | "job:complete" | "job:error";
@@ -19,15 +19,16 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let refCount = 0;
 
 function getWsUrl(): string {
-  const token = localStorage.getItem("auth_token") || "";
-  const apiUrl = getApiUrl();
-  if (apiUrl && apiUrl.startsWith("http")) {
-    const url = new URL(apiUrl);
-    const proto = url.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${url.host}/ws/jobs?token=${encodeURIComponent(token)}`;
+  const token = localStorage.getItem("auth_token") || "test-token";
+  try {
+    const backendUrl = getWebSocketUrl();
+    const urlWithoutProtocol = backendUrl.replace(/^https?:\/\//, "");
+    const wsProtocol = getWebSocketProtocol(backendUrl);
+    return `${wsProtocol}${urlWithoutProtocol}/ws/jobs?token=${encodeURIComponent(token)}`;
+  } catch {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/ws/jobs?token=${encodeURIComponent(token)}`;
   }
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws/jobs?token=${encodeURIComponent(token)}`;
 }
 
 function connect() {

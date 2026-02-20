@@ -1068,9 +1068,9 @@ router.post(
           tenantPool,
           apiServer
         );
-        const rdbResult = await encompassService.getRdbFields(tenantId, data.losConnectionId);
-        rdbFields = (rdbResult.data || []).map((f) => ({ id: f.fieldID, description: f.description }));
-        logInfo(`Fetched ${rdbFields.length} RDB fields from Encompass`);
+        const canonicalResult = await encompassService.getCanonicalFields(tenantId, data.losConnectionId);
+        rdbFields = (canonicalResult.data || []).map((f) => ({ id: f.canonicalName, description: f.displayName }));
+        logInfo(`Fetched ${rdbFields.length} canonical RDB fields from Encompass`);
       } catch (rdbError: any) {
         logError("Failed to fetch RDB fields from Encompass", rdbError);
         // Continue with fallback display names

@@ -46,31 +46,39 @@ export default function ResetPassword() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
+  const emailParam = searchParams.get('email') || sessionStorage.getItem('reset_email') || '';
 
+  // Cognito code-based flow when email is present (no token)
+  const isCognitoFlow = !token && !!emailParam;
+
+  const [email, setEmail] = useState(emailParam);
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const apiUrl = getApiUrl();
 
-  // Redirect if no token
+  const hasValidInput = token || isCognitoFlow;
+
   useEffect(() => {
-    if (!token) {
+    if (!hasValidInput) {
       toast({
         title: 'Invalid Link',
         description: 'This password reset link is invalid. Please request a new one.',
         variant: 'destructive',
       });
     }
-  }, [token, toast]);
+  }, [hasValidInput, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (password.length < 8) {
+    const minLength = isCognitoFlow ? 10 : 8;
+    if (password.length < minLength) {
       toast({
         title: 'Validation Error',
-        description: 'Password must be at least 8 characters long.',
+        description: `Password must be at least ${minLength} characters long.`,
         variant: 'destructive',
       });
       return;
@@ -88,10 +96,14 @@ export default function ResetPassword() {
     setLoading(true);
 
     try {
+      const body = isCognitoFlow
+        ? { email: email.trim(), code: code.trim(), newPassword: password }
+        : { token, newPassword: password };
+
       const response = await fetch(`${apiUrl}/api/auth/password-reset/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, newPassword: password }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -101,17 +113,17 @@ export default function ResetPassword() {
       }
 
       setSuccess(true);
+      sessionStorage.removeItem('reset_email');
       toast({
         title: 'Password Reset',
         description: 'Your password has been reset successfully.',
       });
 
-      // Redirect to login after a short delay
       setTimeout(() => navigate('/login'), 3000);
     } catch (error: any) {
       toast({
         title: 'Reset Failed',
-        description: error.message || 'Failed to reset password. The link may have expired.',
+        description: error.message || 'Failed to reset password. The code may have expired.',
         variant: 'destructive',
       });
     } finally {
@@ -149,7 +161,7 @@ export default function ResetPassword() {
                 </Button>
               </Link>
             </div>
-          ) : !token ? (
+          ) : !hasValidInput ? (
             <div className="flex flex-col items-center space-y-6 py-4">
               <div className="h-16 w-16 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
                 <XCircle className="h-8 w-8 text-rose-600 dark:text-rose-400" />
@@ -171,6 +183,36 @@ export default function ResetPassword() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              {isCognitoFlow && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="reset-email">Email</Label>
+                    <Input
+                      id="reset-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      disabled={!!emailParam || loading}
+                      autoComplete="email"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reset-code">Verification Code</Label>
+                    <Input
+                      id="reset-code"
+                      type="text"
+                      placeholder="Enter the code from your email"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      required
+                      autoFocus
+                      disabled={loading}
+                      autoComplete="one-time-code"
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="password">New Password</Label>
                 <Input
@@ -209,7 +251,12 @@ export default function ResetPassword() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={loading || password.length < 8 || password !== confirmPassword}
+                disabled={
+                  loading ||
+                  password.length < (isCognitoFlow ? 10 : 8) ||
+                  password !== confirmPassword ||
+                  (isCognitoFlow && (!code.trim() || !email.trim()))
+                }
               >
                 {loading ? (
                   <>
