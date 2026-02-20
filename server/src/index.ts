@@ -316,6 +316,9 @@ const startServer = () => {
     if (envValid) {
       console.log("✅ Environment variables validated");
     }
+    const cognitoPasswordAuth = process.env.COGNITO_PASSWORD_AUTH === "true";
+    const cognitoSso = !!(process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_DOMAIN);
+    console.log(`🔐 Auth: SSO=${cognitoSso ? "cognito" : "off"}, Password=${cognitoPasswordAuth ? "cognito" : "bcrypt"}`);
   });
 };
 

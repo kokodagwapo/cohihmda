@@ -424,7 +424,6 @@ router.post(
 
     const hashedPassword = await bcrypt.hash(validated.password, 10);
 
-    // Create user in Cognito first if enabled
     let cognitoSub: string | null = null;
     if (cognitoAuth.isCognitoAuthEnabled()) {
       try {
@@ -432,6 +431,7 @@ router.post(
           validated.email,
           validated.password,
           validated.full_name,
+          true, // sendInvite: Cognito emails temp password, user must change on first login
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
@@ -990,7 +990,6 @@ router.post(
     const validated = schema.parse(req.body);
     const hashedPassword = await bcrypt.hash(validated.password, 10);
 
-    // Create user in Cognito first if enabled
     let cognitoSub: string | null = null;
     if (cognitoAuth.isCognitoAuthEnabled()) {
       try {
@@ -998,6 +997,7 @@ router.post(
           validated.email,
           validated.password,
           validated.full_name,
+          true, // sendInvite: Cognito emails temp password, user must change on first login
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
