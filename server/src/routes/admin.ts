@@ -431,7 +431,6 @@ router.post(
           validated.email,
           validated.password,
           validated.full_name,
-          true, // sendInvite: Cognito emails temp password, user must change on first login
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
@@ -997,7 +996,6 @@ router.post(
           validated.email,
           validated.password,
           validated.full_name,
-          true, // sendInvite: Cognito emails temp password, user must change on first login
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
