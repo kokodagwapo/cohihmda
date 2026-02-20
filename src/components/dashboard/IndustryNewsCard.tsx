@@ -95,6 +95,7 @@ const EXISTING_HOME_SALES_DATA = [
 const HEADLINES_PER_PAGE = 6;
 const HEADLINES_ROTATE_MS = 15_000;
 const MAX_HEADLINE_AGE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const EXCERPT_PARAGRAPHS_PER_PAGE = 4;
 
 const isValidDate = (value: Date) => !Number.isNaN(value.getTime());
 
@@ -313,6 +314,7 @@ export const IndustryNewsCard = () => {
   const [showFullArticleModal, setShowFullArticleModal] = useState(false);
   const [articleFrameLoading, setArticleFrameLoading] = useState(false);
   const [articleFrameError, setArticleFrameError] = useState(false);
+  const [excerptPage, setExcerptPage] = useState(0);
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
   const defaultSources = [
@@ -931,6 +933,26 @@ export const IndustryNewsCard = () => {
   }, [showFullArticleModal, selectedNewsItem]);
 
   useEffect(() => {
+    setExcerptPage(0);
+  }, [selectedNewsItem, articleBrief]);
+
+  const excerptParagraphs = articleBrief?.articleParagraphs || [];
+  const excerptPageCount = Math.max(
+    1,
+    Math.ceil(excerptParagraphs.length / EXCERPT_PARAGRAPHS_PER_PAGE)
+  );
+  const visibleExcerptParagraphs = excerptParagraphs.slice(
+    excerptPage * EXCERPT_PARAGRAPHS_PER_PAGE,
+    (excerptPage + 1) * EXCERPT_PARAGRAPHS_PER_PAGE
+  );
+
+  useEffect(() => {
+    if (excerptPage >= excerptPageCount) {
+      setExcerptPage(0);
+    }
+  }, [excerptPage, excerptPageCount]);
+
+  useEffect(() => {
     prewarmArticleLink(selectedNewsItem?.item?.link);
   }, [selectedNewsItem, prewarmArticleLink]);
 
@@ -1271,31 +1293,23 @@ export const IndustryNewsCard = () => {
       >
         <DialogContent
           className="
-            /* Mobile: true fullscreen, perfectly aligned */
+            /* Fullscreen on all breakpoints */
             inset-0 top-0 bottom-0 left-0 right-0
             translate-x-0 translate-y-0
             w-screen max-w-none
             h-[100dvh] max-h-none
             rounded-none
-
-            /* Desktop/tablet: centered modal */
-            sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto
-            sm:w-[min(95vw,42rem)] sm:max-w-2xl
-            sm:h-auto sm:max-h-[90vh]
-            sm:translate-x-[-50%] sm:translate-y-[-50%]
-            sm:rounded-2xl
-
             p-0 gap-0
             overflow-hidden
             bg-white dark:bg-slate-900
-            border-0 sm:border border-slate-200/60 dark:border-slate-700/50
-            shadow-none sm:shadow-[0_20px_60px_rgba(0,0,0,0.15)] dark:sm:shadow-[0_20px_60px_rgba(0,0,0,0.5)]
+            border-0
+            shadow-none
             [&>button]:hidden
             safe-area-inset
           "
         >
           {selectedNewsItem && (
-            <div className="flex flex-col h-full sm:max-h-[90vh] md:max-h-[85vh]">
+            <div className="flex flex-col h-full">
               {/* Enhanced Header - Sticky with safe area */}
               <div
                 className="
@@ -1400,7 +1414,7 @@ export const IndustryNewsCard = () => {
                   {selectedNewsItem.item.title}
                 </h1>
 
-                {/* Article Content (3-5 paragraphs) */}
+                {/* Article Content (full extracted excerpt with pagination) */}
                 <div className="mb-5 sm:mb-5 md:mb-6">
                   <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
                     Article Excerpt
@@ -1413,14 +1427,44 @@ export const IndustryNewsCard = () => {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(articleBrief?.articleParagraphs || []).slice(0, 5).map((paragraph, idx) => (
+                      {visibleExcerptParagraphs.map((paragraph, idx) => (
                         <p
-                          key={`brief-${idx}`}
+                          key={`excerpt-${excerptPage}-${idx}`}
                           className="text-[0.9375rem] leading-[1.7] sm:text-base sm:leading-[1.7] text-slate-700 dark:text-slate-300 font-light tracking-tight break-words"
                         >
                           {paragraph}
                         </p>
                       ))}
+
+                      {excerptPageCount > 1 && (
+                        <div className="pt-2 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExcerptPage((prev) =>
+                                prev === 0 ? excerptPageCount - 1 : prev - 1
+                              )
+                            }
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            Previous
+                          </button>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            Page {excerptPage + 1} of {excerptPageCount}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExcerptPage((prev) =>
+                                prev >= excerptPageCount - 1 ? 0 : prev + 1
+                              )
+                            }
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1480,93 +1524,22 @@ export const IndustryNewsCard = () => {
                   <div className="space-y-3 sm:space-y-3 md:space-y-3.5">
                     {insightsLoading ? (
                       // Loading state
-                      <>
-                        <div className="flex items-start gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-3/4" />
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-2/3" />
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-5/6" />
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-1/2" />
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-4/5" />
-                          </div>
-                        </div>
-                      </>
-                    ) : insights?.insights && insights.insights.length > 0 ? (
-                      // AI-generated insights
-                      <>
-                        {insights.insights.map((insight, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-start gap-3 sm:gap-3"
-                          >
-                            <div
-                              className={`w-1.5 h-1.5 rounded-full ${getInsightColor(
-                                insight.color
-                              )} mt-[0.5rem] flex-shrink-0`}
-                            />
-                            <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                              <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                {insight.label}:
-                              </span>{" "}
-                              {insight.content}
-                            </p>
-                          </div>
-                        ))}
-                        {/* Client data summary if available */}
-                        {insights.clientDataSummary && (
-                          <div className="mt-3 pt-3 border-t border-slate-200/50 dark:border-slate-700/40">
-                            <p className="text-[0.8125rem] sm:text-xs md:text-sm text-blue-700 dark:text-blue-300 font-light tracking-tight">
-                              <span className="font-medium">Your Data:</span>{" "}
-                              {insights.clientDataSummary}
-                            </p>
-                          </div>
-                        )}
-                      </>
+                      <div className="space-y-2">
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-11/12" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-10/12" />
+                      </div>
                     ) : (
-                      // Fallback default insights
-                      <>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Market Signal:
-                            </span>{" "}
-                            This development may indicate broader industry
-                            trends worth monitoring.
-                          </p>
-                        </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Strategic Fit:
-                            </span>{" "}
-                            Consider how this aligns with your market
-                            positioning.
-                          </p>
-                        </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-violet-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Next Steps:
-                            </span>{" "}
-                            Read the full article for more details.
-                          </p>
-                        </div>
-                      </>
+                      <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.7] font-light tracking-tight break-words">
+                        {insights?.insights && insights.insights.length > 0
+                          ? insights.insights
+                              .map((insight) => `${insight.label}: ${insight.content}`)
+                              .join(" ")
+                          : "This development may indicate broader market and operational implications across lending. Read the full article for complete context."}
+                        {insights?.clientDataSummary
+                          ? ` Your Data: ${insights.clientDataSummary}`
+                          : ""}
+                      </p>
                     )}
                   </div>
                 </div>

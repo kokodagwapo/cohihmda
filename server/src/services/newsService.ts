@@ -1408,7 +1408,8 @@ async function extractArticleParagraphs(url: string): Promise<string[]> {
     if (!paragraphs.includes(text)) paragraphs.push(text);
   });
 
-  return paragraphs.slice(0, 18);
+  // Keep a larger slice so we can show most of the article in-app.
+  return paragraphs.slice(0, 60);
 }
 
 function fallbackArticleParagraphs(title: string, source: string): string[] {
@@ -1424,11 +1425,10 @@ export async function generateNewsDetails(
 ): Promise<NewsDetailResponse> {
   try {
     const paragraphs = await extractArticleParagraphs(article.link);
-    const articleParagraphs = paragraphs.slice(0, 5);
     return {
       articleParagraphs:
-        articleParagraphs.length >= 3
-          ? articleParagraphs
+        paragraphs.length >= 1
+          ? paragraphs
           : fallbackArticleParagraphs(article.title, article.source),
       fullArticleUrl: article.link,
       fetchedAt: new Date().toISOString(),
