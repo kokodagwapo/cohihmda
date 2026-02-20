@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -208,7 +209,14 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
   'sales-scorecard': [
     { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
   ],
+  'high-performers': [],
 };
+
+const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
+  { value: 'funding_date', label: 'Funded Loans' },
+  { value: 'closing_date', label: 'Closed Loans' },
+  { value: 'application_date', label: 'Applications Taken' },
+];
 
 // ---------------------------------------------------------------------------
 // Available dimension filter catalog — users can add these via the "+" button
@@ -245,6 +253,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'executive-dashboard':  { border: 'border-blue-400/50',    bg: 'bg-blue-50/50 dark:bg-blue-950/20',     accent: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500' },
   'loan-detail':          { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',     dot: 'bg-sky-500' },
   'workflow-conversion':  { border: 'border-teal-400/50',    bg: 'bg-teal-50/50 dark:bg-teal-950/20',    accent: 'text-teal-600 dark:text-teal-400',    dot: 'bg-teal-500' },
+  'high-performers':      { border: 'border-amber-400/50',  bg: 'bg-amber-50/50 dark:bg-amber-950/20',   accent: 'text-amber-600 dark:text-amber-400',  dot: 'bg-amber-500' },
 };
 
 /**
@@ -295,6 +304,10 @@ function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   if (item.kind === 'cohi') return GRID_SIZES.cohi;
   if (item.kind === 'registry' && item.defId === 'workflow-conversion-embed') {
     return { w: GRID_COLS, h: WORKFLOW_EMBED_GRID_H, minW: 24, minH: 40 };
+  }
+  // High Performers: 2x2 grid (two columns of 18 units each)
+  if (item.kind === 'registry' && item.defId.startsWith('high-performers-')) {
+    return { w: 18, h: 16, minW: 12, minH: 8 };
   }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
@@ -672,11 +685,23 @@ function GridCellRegistryWidget({
       ? getLoanDetailPeriodLabel(filters.periodSelection)
       : undefined;
   const filterSummary = isLoanDetail ? getLoanDetailFilterSummary(filters) : undefined;
+  const isHighPerformers = definition.dataSource === 'high-performers';
+  const highPerformersConfig = isHighPerformers
+    ? {
+        sectionId: groupId,
+        periodKey: definition.id.includes('-left') ? ('left' as const) : ('right' as const),
+        period:
+          definition.id.includes('-left')
+            ? (filters.highPerformersLeftPeriod ?? 'mtd')
+            : (filters.highPerformersRightPeriod ?? 'ytd'),
+      }
+    : {};
   const config = {
     ...definition.config,
     ...(periodLabel != null && { periodLabel }),
     ...(filterSummary != null && { filterSummary }),
     ...(customColumns != null && { customColumns }),
+    ...highPerformersConfig,
   };
 
   return (
@@ -1397,6 +1422,23 @@ export function WidgetGroup({
         {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
         {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
           <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
+            {sectionType === 'high-performers' ? (
+              <>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Loan:</span>
+                {HIGH_PERFORMERS_DATE_TYPE_OPTIONS.map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant={(filters.highPerformersDateType ?? 'funding_date') === opt.value ? 'default' : 'outline'}
+                    size="sm"
+                    className="!h-7 !py-0 !min-h-0 px-2.5 text-xs"
+                    onClick={() => updateFilters(groupId, { highPerformersDateType: opt.value })}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </>
+            ) : (
+              <>
             <DatePeriodPicker
               year={filters.year}
               onYearChange={handleYearChange}
@@ -1471,6 +1513,8 @@ export function WidgetGroup({
               filters={filters}
               onApplyPreset={handleApplyGroupPreset}
             />
+              </>
+            )}
           </div>
         )}
       </div>

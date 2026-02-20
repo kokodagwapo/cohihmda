@@ -639,7 +639,7 @@ export const ReportsSidebar: React.FC<ReportsSidebarProps> = ({
                           );
                         }
                         const Icon = it.icon;
-                        const isCurrent = location.pathname === it.path;
+                        const isCurrent = location.pathname === (it as { path?: string }).path;
                         const vid = 'visibilityId' in it ? (it as { visibilityId?: SectionId }).visibilityId : undefined;
                         if (vid) {
                           const isActive = currentVisibility[vid];

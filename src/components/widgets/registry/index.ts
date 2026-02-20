@@ -22,6 +22,7 @@ import { aletheiaInsightsWidgets } from './aletheiaInsightsWidgets';
 import { industryNewsWidgets } from './industryNewsWidgets';
 import { loanDetailWidgets } from './loanDetailWidgets';
 import { workflowConversionWidgets } from './workflowConversionWidgets';
+import { highPerformersWidgets } from './highPerformersWidgets';
 
 // ---------------------------------------------------------------------------
 // Aggregate all widgets
@@ -44,6 +45,7 @@ const allWidgets: WidgetDefinition[] = [
   ...industryNewsWidgets,
   ...loanDetailWidgets,
   ...workflowConversionWidgets,
+  ...highPerformersWidgets,
 ];
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import {
 import { getLoanAccessContext } from "../../services/userLoanAccessService.js";
 import {
   getLeaderboardData,
+  getHighPerformersRankings,
   getInsights,
   refreshInsights,
   refreshAllChannels,
@@ -139,6 +140,64 @@ router.get(
       }
 
       res.status(500).json({ error: "Failed to fetch leaderboard" });
+    }
+  }
+);
+
+/**
+ * GET /api/dashboard/high-performers
+ * Branch and loan officer rankings by date type (funding_date, closing_date, application_date)
+ * and time period (mtd, lm, ytd, ly, rolling_13). Respects user-level loan access filtering.
+ */
+router.get(
+  "/high-performers",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        dateType: z
+          .enum(["funding_date", "closing_date", "application_date"])
+          .default("funding_date"),
+        timePeriod: z
+          .enum(["mtd", "lm", "ytd", "ly", "rolling_13"])
+          .default("mtd"),
+        channel_group: z.string().optional(),
+      });
+      const { dateType, timePeriod, channel_group } = querySchema.parse(
+        req.query
+      );
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(
+        req,
+        tenantContext.tenantPool
+      );
+      if (accessCtx.hasNoAccess) {
+        return res.json({
+          branchRankings: [],
+          loanOfficerRankings: [],
+          accessFiltered: true,
+        });
+      }
+      const filter = accessCtx.getFilter("l", 3);
+      const result = await getHighPerformersRankings(tenantContext.tenantPool, {
+        dateType: dateType as "funding_date" | "closing_date" | "application_date",
+        timePeriod: timePeriod as "mtd" | "lm" | "ytd" | "ly" | "rolling_13",
+        userAccessFilter: filter ?? undefined,
+        channelGroup: channel_group,
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Error fetching high-performers:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch high-performers")) {
+        return;
+      }
+      res.status(500).json({ error: "Failed to fetch high-performers" });
     }
   }
 );

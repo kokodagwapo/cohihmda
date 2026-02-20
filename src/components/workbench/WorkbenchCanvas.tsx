@@ -421,6 +421,15 @@ const SECTION_TO_WIDGETS: Record<string, {
     sectionType: 'workflow-conversion',
     widgetIds: ['workflow-conversion-embed'],
   },
+  highPerformers: {
+    sectionType: 'high-performers',
+    widgetIds: [
+      'high-performers-branch-left',
+      'high-performers-branch-right',
+      'high-performers-lo-left',
+      'high-performers-lo-right',
+    ],
+  },
 };
 
 /**
@@ -1427,11 +1436,12 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           leaderboard: 850,
           loanDetail: 550,
           workflowConversion: 1100,
+          highPerformers: 720,
         };
         const embedOverride = EMBED_MIN_HEIGHTS[sectionId];
         let groupH: number;
 
-        if (embedOverride && (widgetLayout.widgetIds.length <= 2 || sectionId === 'workflowConversion')) {
+        if (embedOverride && (widgetLayout.widgetIds.length <= 2 || sectionId === 'workflowConversion' || sectionId === 'highPerformers')) {
           groupH = embedOverride;
         } else {
           const kpiRows = Math.ceil(kpiCount / 7);

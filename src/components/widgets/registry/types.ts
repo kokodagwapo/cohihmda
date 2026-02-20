@@ -29,7 +29,8 @@ export type DataSourceId =
   | 'aletheia-insights'
   | 'industry-news'
   | 'loan-detail'
-  | 'workflow-conversion';
+  | 'workflow-conversion'
+  | 'high-performers';
 
 // ---------------------------------------------------------------------------
 // Widget categories – drives catalog grouping & icon selection

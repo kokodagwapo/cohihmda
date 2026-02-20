@@ -36,6 +36,7 @@ import FinancialModelingSandbox from "./pages/FinancialModelingSandbox";
 import SalesScorecard from "./pages/SalesScorecard";
 import SalesTrends from "./pages/SalesTrends";
 import CompanyScorecard from "./pages/CompanyScorecard";
+import HighPerformers from "./pages/HighPerformers";
 import CreditRiskManagement from "./pages/CreditRiskManagement";
 import LoanDetail from "./pages/LoanDetail";
 import WorkflowConversion from "./pages/WorkflowConversion";
@@ -179,9 +180,14 @@ const App = () => (
                   <CreditRiskManagement />
                 </ProtectedRoute>
               } />
-              <Route path="/company-scorecard" element={
+                <Route path="/company-scorecard" element={
                 <ProtectedRoute>
                   <CompanyScorecard />
+                </ProtectedRoute>
+              } />
+              <Route path="/high-performers" element={
+                <ProtectedRoute>
+                  <HighPerformers />
                 </ProtectedRoute>
               } />
               <Route path="/performance/toptiering-comparison" element={

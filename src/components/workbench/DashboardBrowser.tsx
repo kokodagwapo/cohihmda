@@ -52,6 +52,7 @@ const sectionIdToRegistryGroup: Record<string, string> = {
   topTieringComparison: 'TopTiering Comparison',
   leaderboard: 'Leaderboard',
   executiveDashboard: 'Executive Dashboard',
+  highPerformers: 'High Performers',
 };
 
 // ---------------------------------------------------------------------------
