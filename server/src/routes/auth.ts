@@ -603,6 +603,65 @@ router.post("/signin", authLimiter, async (req, res) => {
 });
 
 /**
+ * Set new password during first login (NEW_PASSWORD_REQUIRED challenge).
+ * After Cognito accepts the new password it may return another challenge (MFA_SETUP)
+ * or authenticate the user directly.
+ */
+router.post("/new-password", authLimiter, async (req, res) => {
+  try {
+    const { email, session, newPassword, tenantSlug } = z
+      .object({
+        email: z.string().email(),
+        session: z.string().min(1),
+        newPassword: z.string().min(10, "Password must be at least 10 characters"),
+        tenantSlug: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const result = await cognitoAuth.respondToNewPasswordChallenge(
+      email,
+      session,
+      newPassword,
+    );
+
+    // Cognito may return another challenge (e.g. MFA_SETUP) after the password is set
+    if (!result.authenticated && result.challengeName) {
+      return res.json({
+        mfaRequired: result.challengeName === "SOFTWARE_TOKEN_MFA",
+        mfaSetupRequired: result.challengeName === "MFA_SETUP",
+        challengeName: result.challengeName,
+        session: result.session,
+        email,
+      });
+    }
+
+    // Fully authenticated
+    const found = await findUserByEmail(email, tenantSlug);
+    if (!found) {
+      return res.status(401).json({ error: "User not found in application" });
+    }
+
+    if (result.cognitoSub) {
+      await linkCognitoSub(found.user, found.isSuperAdmin, result.cognitoSub).catch(() => {});
+    }
+
+    const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
+
+    return res.json({
+      user: buildUserResponse(found.user, found.isSuperAdmin),
+      token,
+      refreshToken: result.refreshToken,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    const statusCode = error.statusCode || 400;
+    return res.status(statusCode).json({ error: error.message || "Failed to set new password" });
+  }
+});
+
+/**
  * Verify MFA code during sign-in
  */
 router.post("/mfa/verify", authLimiter, async (req, res) => {

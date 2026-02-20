@@ -424,7 +424,6 @@ router.post(
 
     const hashedPassword = await bcrypt.hash(validated.password, 10);
 
-    // Create user in Cognito first if enabled
     let cognitoSub: string | null = null;
     if (cognitoAuth.isCognitoAuthEnabled()) {
       try {
@@ -990,7 +989,6 @@ router.post(
     const validated = schema.parse(req.body);
     const hashedPassword = await bcrypt.hash(validated.password, 10);
 
-    // Create user in Cognito first if enabled
     let cognitoSub: string | null = null;
     if (cognitoAuth.isCognitoAuthEnabled()) {
       try {
