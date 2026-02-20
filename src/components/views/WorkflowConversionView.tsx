@@ -36,6 +36,8 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { AlertCircle, Loader2, Minus, Plus, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { WorkflowSegmentLoansModal } from "@/components/views/WorkflowSegmentLoansModal";
+import type { WorkflowSegmentLoanFilter } from "@/hooks/useWorkflowConversionSegmentLoans";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
   "mtd",
@@ -303,6 +305,10 @@ export function WorkflowConversionView({
             getToOptions={getToOptions}
             onFromChange={(value) => updateSegment(index, "from", value)}
             onToChange={(value) => updateSegment(index, "to", value)}
+            selectedTenantId={selectedTenantId}
+            selectedChannel={selectedChannel}
+            segments={segments}
+            grouping={grouping}
           />
         ))}
       </div>
@@ -321,6 +327,10 @@ interface WorkflowSegmentCardProps {
   getToOptions: (fromId: string) => WorkflowMilestone[];
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
+  selectedTenantId?: string | null;
+  selectedChannel?: string | null;
+  segments: { from: string; to: string }[];
+  grouping: WorkflowGrouping;
 }
 
 /** True when range is ≤31 days (backend uses day bucket); else months. */
@@ -332,6 +342,7 @@ function isDailyBucket(dateRange: { start: string; end: string }): boolean {
 }
 
 function WorkflowSegmentCard({
+  index,
   segment,
   result,
   dateRange,
@@ -341,7 +352,14 @@ function WorkflowSegmentCard({
   getToOptions,
   onFromChange,
   onToChange,
+  selectedTenantId,
+  selectedChannel,
+  segments,
+  grouping,
 }: WorkflowSegmentCardProps) {
+  const [loansModalOpen, setLoansModalOpen] = React.useState(false);
+  const [loansModalFilter, setLoansModalFilter] = React.useState<WorkflowSegmentLoanFilter | null>(null);
+
   const valid = isOrderValid(segment.from, segment.to);
   const fromLabel = fromOptions.find((m) => m.id === segment.from)?.label ?? segment.from;
   const toOptions = getToOptions(segment.from);
@@ -355,8 +373,13 @@ function WorkflowSegmentCard({
 
   const xAxisLabel = isDailyBucket(dateRange) ? "Days" : "Months";
 
+  const openLoansModal = (filter: WorkflowSegmentLoanFilter) => {
+    setLoansModalFilter(filter);
+    setLoansModalOpen(true);
+  };
+
   return (
-    <Card className="flex min-h-[420px] flex-col overflow-hidden border-slate-200/80 bg-white shadow-sm dark:border-slate-700/50 dark:bg-slate-900/50">
+    <Card className="flex min-h-[460px] flex-col overflow-hidden border-slate-200/80 bg-white shadow-sm dark:border-slate-700/50 dark:bg-slate-900/50">
       <CardHeader className="h-[48px] shrink-0 px-4 py-2">
         <div className="flex h-[36px] items-center justify-center gap-2">
           <Select value={segment.from} onValueChange={onFromChange}>
@@ -418,6 +441,39 @@ function WorkflowSegmentCard({
             </p>
           </div>
         </div>
+
+        {/* Initial / Fallout / Pull-Through buttons */}
+        {valid && (
+          <div className="flex flex-wrap items-center justify-center gap-2 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => openLoansModal("initial")}
+            >
+              Initial
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs bg-red-50 border-red-200 text-red-800 hover:bg-red-100 hover:text-red-900 dark:bg-red-950/40 dark:border-red-800/60 dark:text-red-200 dark:hover:bg-red-900/50"
+              onClick={() => openLoansModal("fallout")}
+            >
+              Fallout
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-200 dark:hover:bg-emerald-900/50"
+              onClick={() => openLoansModal("pull-through")}
+            >
+              Pull-Through
+            </Button>
+          </div>
+        )}
 
         {/* Chart or message - fixed height so same in every card, bottom-aligned */}
         <div className="mt-auto h-[280px] min-h-[280px] max-h-[280px] w-full shrink-0 rounded-lg border border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
@@ -533,6 +589,21 @@ function WorkflowSegmentCard({
           )}
         </div>
       </CardContent>
+
+      <WorkflowSegmentLoansModal
+        open={loansModalOpen}
+        onOpenChange={setLoansModalOpen}
+        filter={loansModalFilter}
+        fromLabel={fromLabel}
+        toLabel={toLabel}
+        startDate={dateRange.start}
+        endDate={dateRange.end}
+        segments={segments}
+        grouping={grouping}
+        segmentIndex={index}
+        selectedTenantId={selectedTenantId}
+        channelGroup={selectedChannel}
+      />
     </Card>
   );
 }

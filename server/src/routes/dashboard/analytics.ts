@@ -21,6 +21,7 @@ import {
 } from "../../services/dashboard/analyticsService.js";
 import {
   getWorkflowConversionData,
+  getWorkflowConversionSegmentLoans,
   type WorkflowSegmentInput,
 } from "../../services/dashboard/workflowConversionService.js";
 import { getStaffingUnitTargets } from "../../utils/staffingUnitTargets.js";
@@ -914,11 +915,67 @@ router.get(
 );
 
 /**
+ * GET /api/dashboard/workflow-conversion/loans
+ * Loans for a segment filtered by initial | fallout | pull-through.
+ */
+const workflowSegmentSchema = z.object({ from: z.string(), to: z.string() });
+router.get(
+  "/workflow-conversion/loans",
+  authenticateToken,
+  attachTenantContext,
+  async (req: AuthRequest, res) => {
+    try {
+      const querySchema = z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        segments: z.string().transform((s) => {
+          const arr = JSON.parse(s) as unknown;
+          return z.array(workflowSegmentSchema).parse(arr);
+        }),
+        grouping: z.enum(["workflow", "individual"]).optional(),
+        segmentIndex: z.string().transform(Number),
+        filter: z.enum(["initial", "fallout", "pull-through"]),
+        channel_group: z.string().optional(),
+      });
+      const { startDate, endDate, segments, grouping = "workflow", segmentIndex, filter, channel_group } =
+        querySchema.parse(req.query);
+      const tenantContext = getTenantContext(req);
+      const accessCtx = await getLoanAccessContext(req, tenantContext.tenantPool);
+      if (accessCtx.hasNoAccess) {
+        return res.json({ loans: [] });
+      }
+      const { accessClause, accessParams } = accessCtx.buildWhereClause("l", 3);
+      const result = await getWorkflowConversionSegmentLoans(tenantContext.tenantPool, {
+        startDate,
+        endDate,
+        segments: segments as WorkflowSegmentInput[],
+        grouping: grouping as "workflow" | "individual",
+        channelGroup: channel_group || undefined,
+        accessClause: accessClause ? " " + accessClause.trim() : undefined,
+        accessParams: accessParams.length > 0 ? accessParams : undefined,
+        segmentIndex,
+        filter,
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request", details: error.errors });
+      }
+      console.error("Error fetching workflow conversion segment loans:", error);
+      if (handleDatabaseError(error, res, "Failed to fetch workflow conversion segment loans")) return;
+      res.status(500).json({
+        error: "Failed to fetch workflow conversion segment loans",
+        details: process.env.NODE_ENV === "development" ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
  * GET /api/dashboard/workflow-conversion
  * Cohort = loans where started_date is in [startDate, endDate]. All segments use this cohort.
  * Query: startDate, endDate, segments (JSON array of {from, to} milestone ids), metric (conversion|turn_time), channel_group, tenant_id
  */
-const workflowSegmentSchema = z.object({ from: z.string(), to: z.string() });
 router.get(
   "/workflow-conversion",
   authenticateToken,

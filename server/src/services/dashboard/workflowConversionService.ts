@@ -246,3 +246,149 @@ export async function getWorkflowConversionData(
 
   return { segments: results };
 }
+
+export type WorkflowSegmentLoanFilter = "initial" | "fallout" | "pull-through";
+
+export interface WorkflowConversionSegmentLoansOptions {
+  startDate: string;
+  endDate: string;
+  segments: WorkflowSegmentInput[];
+  grouping?: WorkflowGrouping;
+  channelGroup?: string;
+  accessClause?: string;
+  accessParams?: unknown[];
+  segmentIndex: number;
+  filter: WorkflowSegmentLoanFilter;
+}
+
+export interface WorkflowSegmentLoanRow {
+  loan_id: string;
+  loan_number: string | null;
+  loan_amount: number | null;
+  fico_score: number | null;
+  ltv_ratio: number | null;
+  be_dti_ratio: number | null;
+  branch: string | null;
+  loan_officer: string | null;
+  loan_type: string | null;
+  loan_purpose: string | null;
+  occupancy_type: string | null;
+  channel: string | null;
+  current_loan_status: string | null;
+  from_date: string | null;
+  to_date: string | null;
+}
+
+export async function getWorkflowConversionSegmentLoans(
+  tenantPool: pg.Pool,
+  options: WorkflowConversionSegmentLoansOptions
+): Promise<{ loans: WorkflowSegmentLoanRow[] }> {
+  const {
+    startDate,
+    endDate,
+    segments,
+    grouping = "workflow",
+    channelGroup,
+    accessClause: accessClauseOpt,
+    accessParams: accessParamsOpt,
+    segmentIndex,
+    filter,
+  } = options;
+
+  if (segmentIndex < 0 || segmentIndex >= segments.length) {
+    return { loans: [] };
+  }
+
+  const params: unknown[] = [startDate, endDate];
+  const accessClause = accessClauseOpt ? " " + accessClauseOpt.trim() : "";
+  if (accessParamsOpt && accessParamsOpt.length > 0) {
+    params.push(...accessParamsOpt);
+  }
+  if (accessClauseOpt?.trim() === "AND FALSE") {
+    return { loans: [] };
+  }
+
+  const channelClause = buildChannelWhereClause(channelGroup, "l");
+  const isIndividual = grouping === "individual";
+  const segmentToExpressions: string[] = segments.map((s) => getDateExpression(s.to, "l"));
+  const seg = segments[segmentIndex];
+  const fromExpr = getDateExpression(seg.from, "l");
+  const toExpr = getDateExpression(seg.to, "l");
+
+  let cohortWhere: string;
+  if (isIndividual) {
+    cohortWhere = `${fromExpr} IS NOT NULL AND DATE(${fromExpr}) >= $1::date AND DATE(${fromExpr}) <= $2::date`;
+  } else {
+    const base =
+      "l.started_date IS NOT NULL AND DATE(l.started_date) >= $1::date AND DATE(l.started_date) <= $2::date";
+    const passedPrevious =
+      segmentIndex === 0
+        ? ""
+        : segmentToExpressions
+            .slice(0, segmentIndex)
+            .map((expr) => `${expr} IS NOT NULL`)
+            .join(" AND ");
+    cohortWhere = passedPrevious ? `${base} AND ${passedPrevious}` : base;
+  }
+
+  let filterWhere: string;
+  switch (filter) {
+    case "initial":
+      filterWhere = `${fromExpr} IS NOT NULL`;
+      break;
+    case "fallout":
+      filterWhere = `${fromExpr} IS NOT NULL AND ${toExpr} IS NULL`;
+      break;
+    case "pull-through":
+      filterWhere = `${fromExpr} IS NOT NULL AND ${toExpr} IS NOT NULL`;
+      break;
+    default:
+      filterWhere = "1=0";
+  }
+
+  const sql = `
+    SELECT
+      l.loan_id,
+      l.loan_number,
+      l.loan_amount,
+      l.fico_score,
+      l.ltv_ratio,
+      l.be_dti_ratio,
+      l.branch,
+      l.loan_officer,
+      l.loan_type,
+      l.loan_purpose,
+      l.occupancy_type,
+      l.channel,
+      l.current_loan_status,
+      (${fromExpr})::date::text AS from_date,
+      (${toExpr})::date::text AS to_date
+    FROM public.loans l
+    WHERE ${cohortWhere}
+      AND ${filterWhere}
+      ${channelClause}
+      ${accessClause}
+    ORDER BY l.loan_id
+  `;
+
+  const result = await tenantPool.query(sql, params);
+  const loans: WorkflowSegmentLoanRow[] = (result.rows || []).map((r: any) => ({
+    loan_id: String(r.loan_id),
+    loan_number: r.loan_number != null ? String(r.loan_number) : null,
+    loan_amount: r.loan_amount != null ? Number(r.loan_amount) : null,
+    fico_score: r.fico_score != null ? Number(r.fico_score) : null,
+    ltv_ratio: r.ltv_ratio != null ? Number(r.ltv_ratio) : null,
+    be_dti_ratio: r.be_dti_ratio != null ? Number(r.be_dti_ratio) : null,
+    branch: r.branch != null ? String(r.branch) : null,
+    loan_officer: r.loan_officer != null ? String(r.loan_officer) : null,
+    loan_type: r.loan_type != null ? String(r.loan_type) : null,
+    loan_purpose: r.loan_purpose != null ? String(r.loan_purpose) : null,
+    occupancy_type: r.occupancy_type != null ? String(r.occupancy_type) : null,
+    channel: r.channel != null ? String(r.channel) : null,
+    current_loan_status: r.current_loan_status != null ? String(r.current_loan_status) : null,
+    from_date: r.from_date != null ? String(r.from_date) : null,
+    to_date: r.to_date != null ? String(r.to_date) : null,
+  }));
+
+  return { loans };
+}
