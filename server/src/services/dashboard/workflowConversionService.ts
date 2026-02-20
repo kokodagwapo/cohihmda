@@ -1,11 +1,13 @@
 /**
  * Workflow Conversion Service
- * Cohort = loans where started_date is in the selected date range (first box's left milestone).
- * All segments use this same cohort.
  *
- * Flow-down (funnel) logic:
- * - Left count = cohort members with the "from" milestone date.
- * - Right count = cohort members with BOTH "from" and "to" milestone dates (subset of left).
+ * Individual: each segment's cohort = loans whose "from" milestone date is in range.
+ *
+ * Workflow (strict funnel): each segment's cohort = loans with started_date in range
+ * AND who have passed all previous segments (have segment0.to, segment1.to, ..., segment[i-1].to).
+ * So segment N's left count = segment N-1's right count (trickle-down).
+ * - Left count = size of cohort (everyone in cohort has the "from" milestone by construction).
+ * - Right count = cohort members who also have the "to" milestone date.
  * - Conversion % = right count / left count (always ≤ 100%).
  */
 
@@ -120,17 +122,36 @@ export async function getWorkflowConversionData(
   }
 
   const results: SegmentResult[] = [];
+  const isIndividual = grouping === "individual";
 
-  for (const seg of segments) {
+  // For workflow strict funnel: precompute "to" expressions for previous segments (used in cohort filter)
+  const segmentToExpressions: string[] = segments.map((s) => getDateExpression(s.to, "l"));
+
+  for (let segIndex = 0; segIndex < segments.length; segIndex++) {
+    const seg = segments[segIndex];
     const fromExpr = getDateExpression(seg.from, "l");
     const toExpr = getDateExpression(seg.to, "l");
-    const isIndividual = grouping === "individual";
     const bucketSql = getBucketSql(byDay, isIndividual, fromExpr);
+    // Graph only: always bucket by from-milestone date so x-axis is "when they hit from" (workflow cohort logic unchanged)
+    const seriesBucketSql = getBucketSql(byDay, true, fromExpr);
 
-    const cohortWhereIndividual = isIndividual
-      ? `${fromExpr} IS NOT NULL AND DATE(${fromExpr}) >= $1::date AND DATE(${fromExpr}) <= $2::date`
-      : "l.started_date IS NOT NULL AND DATE(l.started_date) >= $1::date AND DATE(l.started_date) <= $2::date";
+    let cohortWhere: string;
+    if (isIndividual) {
+      cohortWhere = `${fromExpr} IS NOT NULL AND DATE(${fromExpr}) >= $1::date AND DATE(${fromExpr}) <= $2::date`;
+    } else {
+      // Workflow strict funnel: cohort = started_date in range AND passed all previous segments
+      const base = "l.started_date IS NOT NULL AND DATE(l.started_date) >= $1::date AND DATE(l.started_date) <= $2::date";
+      const passedPrevious =
+        segIndex === 0
+          ? ""
+          : segmentToExpressions
+              .slice(0, segIndex)
+              .map((expr) => `${expr} IS NOT NULL`)
+              .join(" AND ");
+      cohortWhere = passedPrevious ? `${base} AND ${passedPrevious}` : base;
+    }
 
+    // In workflow strict funnel, everyone in cohort has "from" (it's the previous segment's "to"), so left_count = cohort size
     const countQuery = `
       WITH cohort AS (
         SELECT l.started_date,
@@ -138,7 +159,7 @@ export async function getWorkflowConversionData(
                ${toExpr} AS to_d,
                ${bucketSql} AS bucket
         FROM public.loans l
-        WHERE ${cohortWhereIndividual}
+        WHERE ${cohortWhere}
           ${channelClause}
           ${accessClause}
       )
@@ -170,9 +191,9 @@ export async function getWorkflowConversionData(
         SELECT l.started_date,
                ${fromExpr} AS from_d,
                ${toExpr} AS to_d,
-               ${bucketSql} AS bucket
+               ${seriesBucketSql} AS bucket
         FROM public.loans l
-        WHERE ${cohortWhereIndividual}
+        WHERE ${cohortWhere}
           ${channelClause}
           ${accessClause}
       )

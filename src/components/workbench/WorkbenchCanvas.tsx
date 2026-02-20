@@ -417,6 +417,10 @@ const SECTION_TO_WIDGETS: Record<string, {
     sectionType: 'loan-detail',
     widgetIds: ['loan-detail-table'],
   },
+  workflowConversion: {
+    sectionType: 'workflow-conversion',
+    widgetIds: ['workflow-conversion-embed'],
+  },
 };
 
 /**
@@ -1422,11 +1426,12 @@ export function WorkbenchCanvas({ loadCanvasId, onLoaded, onSaved, tenantId, onD
           executiveDashboard: 700,
           leaderboard: 850,
           loanDetail: 550,
+          workflowConversion: 1100,
         };
         const embedOverride = EMBED_MIN_HEIGHTS[sectionId];
         let groupH: number;
 
-        if (embedOverride && widgetLayout.widgetIds.length <= 2) {
+        if (embedOverride && (widgetLayout.widgetIds.length <= 2 || sectionId === 'workflowConversion')) {
           groupH = embedOverride;
         } else {
           const kpiRows = Math.ceil(kpiCount / 7);

@@ -21,7 +21,8 @@ export type SectionType =
   | 'top-tiering-comparison'
   | 'leaderboard'
   | 'executive-dashboard'
-  | 'loan-detail';
+  | 'loan-detail'
+  | 'workflow-conversion';
 
 /**
  * A dynamic (user-added) filter dimension.

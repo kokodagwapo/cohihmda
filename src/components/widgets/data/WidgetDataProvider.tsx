@@ -407,6 +407,11 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: loanDetail.loading,
       error: loanDetail.error,
     },
+    'workflow-conversion': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,

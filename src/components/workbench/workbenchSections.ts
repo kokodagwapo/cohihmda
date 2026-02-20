@@ -17,6 +17,7 @@ import {
   TrendingUp,
   LineChart,
   FileText,
+  GitBranch,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,7 @@ export const DASHBOARD_SECTION_GROUPS: { label: string; items: DashboardSectionI
     label: 'Trends & Analysis',
     items: [
       { id: 'loanFunnel', title: 'Loan Funnel', icon: Filter, iconClass: 'text-blue-500' },
+      { id: 'workflowConversion', title: 'Workflow Conversion', icon: GitBranch, iconClass: 'text-teal-500' },
       { id: 'topTieringComparison', title: 'TopTiering Comparison', icon: ArrowLeftRight, iconClass: 'text-sky-500' },
       { id: 'salesTrends', title: 'Sales Trends', icon: TrendingUp, iconClass: 'text-emerald-500' },
       { id: 'operationsTrends', title: 'Operations Trends', icon: LineChart, iconClass: 'text-blue-500' },

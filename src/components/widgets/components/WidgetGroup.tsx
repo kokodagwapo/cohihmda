@@ -139,7 +139,7 @@ const HEADER_HEIGHT = 90; // approx header+filters height
  */
 const MIN_GRID_WIDTH = 400;
 /** Bump this any time you change GRID_COLS / ROW_HEIGHT so stale saved layouts get discarded */
-const LAYOUT_VERSION = 7; // bumped from 6 → 7 for items migration
+const LAYOUT_VERSION = 8; // bumped from 7 → 8 for workflow-conversion-embed full-height default
 
 // ---------------------------------------------------------------------------
 // Section-specific filter options
@@ -244,6 +244,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'leaderboard':          { border: 'border-rose-400/50',    bg: 'bg-rose-50/50 dark:bg-rose-950/20',     accent: 'text-rose-600 dark:text-rose-400',     dot: 'bg-rose-500' },
   'executive-dashboard':  { border: 'border-blue-400/50',    bg: 'bg-blue-50/50 dark:bg-blue-950/20',     accent: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500' },
   'loan-detail':          { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',     dot: 'bg-sky-500' },
+  'workflow-conversion':  { border: 'border-teal-400/50',    bg: 'bg-teal-50/50 dark:bg-teal-950/20',    accent: 'text-teal-600 dark:text-teal-400',    dot: 'bg-teal-500' },
 };
 
 /**
@@ -254,6 +255,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
 const SELF_MANAGED_SECTIONS: Set<SectionType> = new Set([
   'executive-dashboard',
   'leaderboard',
+  'workflow-conversion',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -286,8 +288,14 @@ const GRID_SIZES: Record<string, GridSize> = {
 };
 const DEFAULT_GRID: GridSize = { w: 9, h: 8, minW: 4, minH: 4 };
 
+/** Rows so workflow conversion fits without scroll: toolbar ~72px + 2 rows of 420px cards + gap ~= 928px → 928/16 ≈ 58; use 64 for margin */
+const WORKFLOW_EMBED_GRID_H = 64;
+
 function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   if (item.kind === 'cohi') return GRID_SIZES.cohi;
+  if (item.kind === 'registry' && item.defId === 'workflow-conversion-embed') {
+    return { w: GRID_COLS, h: WORKFLOW_EMBED_GRID_H, minW: 24, minH: 40 };
+  }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
 }

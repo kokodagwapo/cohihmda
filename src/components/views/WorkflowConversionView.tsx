@@ -18,6 +18,7 @@ import {
   DEFAULT_WORKFLOW_SEGMENTS,
   isOrderValid,
   getMilestonesAfter,
+  getMilestoneIndex,
   type WorkflowMilestone,
 } from "@/lib/workflowConversionMilestones";
 import { useWorkflowConversionData, type WorkflowConversionMetric, type WorkflowGrouping, type SegmentResult } from "@/hooks/useWorkflowConversionData";
@@ -33,7 +34,7 @@ import {
 } from "recharts";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { AlertCircle, Loader2, RotateCcw } from "lucide-react";
+import { AlertCircle, Loader2, Minus, Plus, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const PERIOD_PRESETS: PeriodPreset[] = [
@@ -60,11 +61,14 @@ function getDefaultDateRange(): { start: string; end: string } {
 export interface WorkflowConversionViewProps {
   selectedTenantId?: string | null;
   selectedChannel?: string | null;
+  /** When true, show +/- buttons to add/remove cards (workbench only). */
+  embeddedInWorkbench?: boolean;
 }
 
 export function WorkflowConversionView({
   selectedTenantId,
   selectedChannel,
+  embeddedInWorkbench = false,
 }: WorkflowConversionViewProps) {
   const [periodSelection, setPeriodSelection] = useState<PeriodSelection>(() => {
     const range = getDefaultDateRange();
@@ -91,16 +95,18 @@ export function WorkflowConversionView({
     setSegments((prev) => {
       const next = prev.map((s, i) => (i === index ? { ...s, [field]: value } : s));
       if (grouping !== "workflow") return next;
-      if (field === "to" && index < next.length - 1) {
-        const nextFrom = value;
-        const optionsAfter = getMilestonesAfter(nextFrom);
-        const currentTo = next[index + 1].to;
-        const toIsValid = optionsAfter.some((m) => m.id === currentTo);
-        next[index + 1] = {
-          ...next[index + 1],
-          from: nextFrom,
-          to: toIsValid ? currentTo : optionsAfter[0]?.id ?? currentTo,
-        };
+      if (field === "to") {
+        // Cascade forward: each following card's "from" = previous card's "to", "to" = valid option
+        for (let j = index + 1; j < next.length; j++) {
+          const prevTo = next[j - 1].to;
+          const optionsAfter = getMilestonesAfter(prevTo);
+          const currentTo = next[j].to;
+          const toIsValid = optionsAfter.some((m) => m.id === currentTo);
+          next[j] = {
+            from: prevTo,
+            to: toIsValid ? currentTo : optionsAfter[0]?.id ?? prevTo,
+          };
+        }
       }
       if (field === "from" && index > 0) {
         next[index - 1] = { ...next[index - 1], to: value };
@@ -109,6 +115,17 @@ export function WorkflowConversionView({
         const toIsValid = optionsAfter.some((m) => m.id === currentTo);
         if (!toIsValid && optionsAfter.length > 0) {
           next[index] = { ...next[index], to: optionsAfter[0].id };
+        }
+        // Cascade forward from this card so the rest of the chain stays linked
+        for (let j = index + 1; j < next.length; j++) {
+          const prevTo = next[j - 1].to;
+          const optionsAfter = getMilestonesAfter(prevTo);
+          const currentTo = next[j].to;
+          const toIsValid = optionsAfter.some((m) => m.id === currentTo);
+          next[j] = {
+            from: prevTo,
+            to: toIsValid ? currentTo : optionsAfter[0]?.id ?? prevTo,
+          };
         }
       }
       return next;
@@ -119,7 +136,62 @@ export function WorkflowConversionView({
     setSegments([...DEFAULT_WORKFLOW_SEGMENTS]);
   }, []);
 
-  const fromOptions = useMemo(() => WORKFLOW_MILESTONES_ORDER.slice(0, -1), []);
+  const maxCardsWorkflow = Math.max(1, WORKFLOW_MILESTONES_ORDER.length - 1);
+
+  const addCard = useCallback(() => {
+    setSegments((prev) => {
+      if (prev.length === 0) return [DEFAULT_WORKFLOW_SEGMENTS[0]];
+      if (grouping === "workflow" && prev.length >= maxCardsWorkflow) return prev;
+      const last = prev[prev.length - 1];
+      const nextMilestones = getMilestonesAfter(last.to);
+      const nextId = nextMilestones[0]?.id;
+      if (nextId) return [...prev, { from: last.to, to: nextId }];
+      // Individual: add a default segment.
+      if (grouping === "individual") {
+        const first = DEFAULT_WORKFLOW_SEGMENTS[0];
+        return [...prev, { from: first.from, to: first.to }];
+      }
+      // Workflow at end of funnel: work backwards and split the rightmost segment that has a gap.
+      const lastMilestoneId = WORKFLOW_MILESTONES_ORDER[WORKFLOW_MILESTONES_ORDER.length - 1]?.id;
+      if (!lastMilestoneId || last.to !== lastMilestoneId) return prev;
+      for (let j = prev.length - 1; j >= 0; j--) {
+        const seg = prev[j];
+        const fromIdx = getMilestoneIndex(seg.from);
+        const toIdx = getMilestoneIndex(seg.to);
+        if (fromIdx < 0 || toIdx < 0 || toIdx - fromIdx < 2) continue;
+        const midId = WORKFLOW_MILESTONES_ORDER[toIdx - 1]?.id;
+        if (!midId) continue;
+        const next = prev.map((s, i) => (i === j ? { ...s, to: midId } : { ...s }));
+        next.splice(j + 1, 0, { from: midId, to: seg.to });
+        return next;
+      }
+      return prev;
+    });
+  }, [grouping, maxCardsWorkflow]);
+
+  const removeCard = useCallback(() => {
+    setSegments((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  }, []);
+
+  const canAddCard =
+    segments.length > 0 &&
+    (grouping === "individual" || segments.length < maxCardsWorkflow);
+  const canRemoveCard = segments.length > 1;
+
+  // In workflow mode, card i (i > 0) can only "from" = previous card's "to" or a later milestone (keeps chain in order)
+  const getFromOptions = useCallback(
+    (index: number) => {
+      if (grouping !== "workflow" || index === 0) {
+        return WORKFLOW_MILESTONES_ORDER.slice(0, -1);
+      }
+      const prevTo = segments[index - 1]?.to;
+      if (!prevTo) return WORKFLOW_MILESTONES_ORDER.slice(0, -1);
+      const idx = getMilestoneIndex(prevTo);
+      if (idx < 0) return WORKFLOW_MILESTONES_ORDER.slice(0, -1);
+      return WORKFLOW_MILESTONES_ORDER.slice(idx, -1);
+    },
+    [grouping, segments],
+  );
   const getToOptions = useCallback((fromId: string) => getMilestonesAfter(fromId), []);
 
   const segmentResults = data?.segments ?? [];
@@ -171,6 +243,33 @@ export function WorkflowConversionView({
             </SelectContent>
           </Select>
         </div>
+        {embeddedInWorkbench && (
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Cards</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={removeCard}
+              disabled={!canRemoveCard}
+              aria-label="Remove last card"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={addCard}
+              disabled={!canAddCard}
+              aria-label="Add card"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
         <Button
           type="button"
           variant="outline"
@@ -200,7 +299,7 @@ export function WorkflowConversionView({
             dateRange={dateRange}
             calculationType={calculationType}
             loading={loading}
-            fromOptions={fromOptions}
+            fromOptions={getFromOptions(index)}
             getToOptions={getToOptions}
             onFromChange={(value) => updateSegment(index, "from", value)}
             onToChange={(value) => updateSegment(index, "to", value)}
@@ -349,8 +448,12 @@ function WorkflowSegmentCard({
                   tick={{ fontSize: 10 }}
                   tickFormatter={(v) => {
                     if (!v) return "";
-                    if (v.length === 10) return format(new Date(v), "M/d");
-                    return v;
+                    if (typeof v === "string" && v.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+                      const [y, m, d] = v.split("-").map(Number);
+                      return format(new Date(y, m - 1, d), "M/d");
+                    }
+                    if (typeof v === "string" && v.length === 10) return format(new Date(v), "M/d");
+                    return String(v);
                   }}
                   label={{ value: xAxisLabel, position: "insideBottom", offset: -4, fontSize: 11 }}
                   height={32}
@@ -378,9 +481,18 @@ function WorkflowSegmentCard({
                   content={({ active, payload }) => {
                     if (!active || !payload?.length) return null;
                     const p = payload[0].payload;
+                    const periodLabel =
+                      typeof p.period === "string" &&
+                      p.period.length === 10 &&
+                      /^\d{4}-\d{2}-\d{2}$/.test(p.period)
+                        ? (() => {
+                            const [y, m, d] = p.period.split("-").map(Number);
+                            return format(new Date(y, m - 1, d), "M/d/yyyy");
+                          })()
+                        : String(p.period);
                     return (
                       <div className="rounded-lg border border-slate-200 bg-white p-2 shadow dark:border-slate-700 dark:bg-slate-800">
-                        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{p.period}</p>
+                        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">{periodLabel}</p>
                         <p className="text-xs">Left: {p.leftCount}</p>
                         <p className="text-xs">Right: {p.rightCount}</p>
                         {calculationType === "conversion" && p.conversionPercent != null && (
