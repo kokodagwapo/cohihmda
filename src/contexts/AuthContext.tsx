@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { api } from '@/lib/api';
+import { enforcePlatformOnly } from '@/stores/tenantStore';
 
 /**
  * User role types
@@ -68,6 +69,7 @@ interface AuthContextType {
   
   // Actions
   login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
+  completeMfaLogin: (email: string, session: string, code: string, tenantSlug?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   clearError: () => void;
@@ -90,6 +92,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const AUTH_TOKEN_KEY = 'auth_token';
+const REFRESH_TOKEN_KEY = 'refresh_token';
 const IMPERSONATION_KEY = 'impersonating_tenant';
 
 interface AuthProviderProps {
@@ -119,12 +122,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const response = await api.getCurrentUser();
         if (response.user) {
           setUser(response.user as AuthUser);
+          api.setUserRole(response.user.role);
+          enforcePlatformOnly(response.user.role);
         }
       } catch (err) {
         // Token is invalid or expired
         api.clearToken();
         localStorage.removeItem(AUTH_TOKEN_KEY);
         setUser(null);
+        api.setUserRole(null);
+        enforcePlatformOnly(undefined);
       } finally {
         setIsLoading(false);
       }
@@ -147,26 +154,103 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   /**
-   * Login with email and password
+   * Login with email and password.
+   * If MFA is required, throws an error with { mfaRequired, session, email } attached
+   * so the caller (Login page) can display the MFA challenge UI.
    */
   const login = useCallback(async (email: string, password: string, tenantSlug?: string) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await api.request<{ user: AuthUser; token: string }>('/api/auth/signin', {
+      const response = await api.request<{
+        user?: AuthUser;
+        token?: string;
+        refreshToken?: string;
+        mfaRequired?: boolean;
+        challengeName?: string;
+        session?: string;
+        email?: string;
+        newPasswordRequired?: boolean;
+      }>('/api/auth/signin', {
         method: 'POST',
         body: JSON.stringify({ email, password, tenantSlug }),
+      });
+
+      if (response.mfaRequired) {
+        const mfaError = Object.assign(new Error('MFA_REQUIRED'), {
+          mfaRequired: true,
+          challengeName: response.challengeName,
+          session: response.session,
+          email: response.email || email,
+        });
+        throw mfaError;
+      }
+
+      if (response.newPasswordRequired) {
+        const pwError = Object.assign(new Error('NEW_PASSWORD_REQUIRED'), {
+          newPasswordRequired: true,
+          session: response.session,
+          email: response.email || email,
+        });
+        throw pwError;
+      }
+
+      if (response.token) {
+        localStorage.setItem(AUTH_TOKEN_KEY, response.token);
+        api.setToken(response.token);
+      }
+      if (response.refreshToken) {
+        localStorage.setItem(REFRESH_TOKEN_KEY, response.refreshToken);
+      }
+      
+      if (response.user) {
+        setUser(response.user);
+        api.setUserRole(response.user.role || null);
+        enforcePlatformOnly(response.user.role);
+      }
+    } catch (err: any) {
+      if (err.mfaRequired || err.newPasswordRequired) {
+        throw err;
+      }
+      const message = err.message || 'Login failed';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  /**
+   * Complete login after MFA challenge verification
+   */
+  const completeMfaLogin = useCallback(async (email: string, session: string, code: string, tenantSlug?: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await api.request<{
+        user: AuthUser;
+        token: string;
+        refreshToken?: string;
+      }>('/api/auth/mfa/verify', {
+        method: 'POST',
+        body: JSON.stringify({ email, session, code, tenantSlug }),
       });
 
       if (response.token) {
         localStorage.setItem(AUTH_TOKEN_KEY, response.token);
         api.setToken(response.token);
       }
-      
+      if (response.refreshToken) {
+        localStorage.setItem(REFRESH_TOKEN_KEY, response.refreshToken);
+      }
+
       setUser(response.user);
+      api.setUserRole(response.user?.role || null);
+      enforcePlatformOnly(response.user?.role);
     } catch (err: any) {
-      const message = err.message || 'Login failed';
+      const message = err.message || 'MFA verification failed';
       setError(message);
       throw err;
     } finally {
@@ -186,12 +270,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Ignore errors during logout - we still want to clear local state
       console.warn('[Auth] Error during signout API call:', err);
     } finally {
-      // Clear all localStorage items related to auth
       localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
       localStorage.removeItem(IMPERSONATION_KEY);
       
       // Clear API client state (token and cache)
       api.clearToken();
+      api.setUserRole(null);
       
       // Clear React state
       setUser(null);
@@ -212,6 +297,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await api.getCurrentUser();
       if (response.user) {
         setUser(response.user as AuthUser);
+        api.setUserRole(response.user.role);
       }
     } catch (err) {
       // If refresh fails, log out
@@ -292,6 +378,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const setAuthFromToken = useCallback((token: string, userData: AuthUser) => {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
     api.setToken(token);
+    api.setUserRole(userData?.role || null);
     setUser(userData);
     setError(null);
     setIsLoading(false);
@@ -304,6 +391,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     error,
     tenants,
     login,
+    completeMfaLogin,
     logout,
     refreshUser,
     clearError,

@@ -7523,6 +7523,51 @@ router.post(
 );
 
 /**
+ * GET /api/loans/market-rates/current
+ * Returns current market rate data for the OBMMI ticker display.
+ * Uses cached FRED OBMMIC30YF data from the management database.
+ */
+router.get(
+  "/market-rates/current",
+  authenticateToken,
+  async (_req: AuthRequest, res) => {
+    try {
+      const {
+        getMostRecentMarketRate,
+        getMarketRateForDate,
+        initializeMarketRateCache,
+      } = await import("../services/dashboard/marketRateService.js");
+
+      await initializeMarketRateCache();
+      const currentRate = await getMostRecentMarketRate();
+
+      if (currentRate === null) {
+        return res.json({ available: false, rates: [] });
+      }
+
+      const today = new Date();
+      const fmt = (d: Date) => d.toISOString().split("T")[0];
+      const d1 = new Date(today);
+      d1.setDate(d1.getDate() - 1);
+      const yesterdayRate = await getMarketRateForDate(fmt(d1));
+      const delta = yesterdayRate !== null ? currentRate - yesterdayRate : 0;
+
+      return res.json({
+        available: true,
+        conforming30yr: {
+          rate: currentRate,
+          delta: Math.round(delta * 1000) / 1000,
+          trend: delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat",
+        },
+      });
+    } catch (error: any) {
+      logError("Error fetching current market rates", error);
+      return res.status(500).json({ error: "Failed to fetch market rates" });
+    }
+  },
+);
+
+/**
  * GET /api/loans/:loanId/recommendations
  * Get AI-powered recommendations for a specific loan (on-demand)
  * Uses loan signal data to generate actionable recommendations via GPT

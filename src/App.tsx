@@ -7,6 +7,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavig
 import { useEffect } from "react";
 import { EditProvider } from "@/contexts/EditContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { DebugModeProvider } from "@/contexts/DebugModeContext";
+import { DebugModeIndicator } from "@/components/layout/DebugModeIndicator";
 import { UserSettingsProvider } from "@/hooks/useUserSettings";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ScrollToTop } from "@/components/ScrollToTop";
@@ -47,6 +49,8 @@ import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
+// Research Lab
+import ResearchAnalyst from "./pages/ResearchAnalyst";
 
 const queryClient = new QueryClient();
 
@@ -91,6 +95,8 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <AuthProvider>
+        <DebugModeProvider>
+        <DebugModeIndicator />
         <UserSettingsProvider>
         <EditProvider>
           <TooltipProvider>
@@ -156,6 +162,13 @@ const App = () => (
               <Route path="/workbench/favorites" element={
                 <ProtectedRoute>
                   <Favorites />
+                </ProtectedRoute>
+              } />
+              
+              {/* Research Lab */}
+              <Route path="/research" element={
+                <ProtectedRoute>
+                  <ResearchAnalyst />
                 </ProtectedRoute>
               } />
               
@@ -254,6 +267,7 @@ const App = () => (
         </TooltipProvider>
       </EditProvider>
     </UserSettingsProvider>
+    </DebugModeProvider>
     </AuthProvider>
   </ThemeProvider>
 </QueryClientProvider>

@@ -491,11 +491,20 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
     //   1. Strip any existing date comparison conditions on the same column
     //      (including aliased references like l.column or loans.column) so we
     //      don't end up with contradictory ranges.
-    //   2. Inject our own condition into the WHERE clause.
+    //   2. Inject our own condition into the WHERE clause using parameterized values.
     let effectiveSql = sql;
+    const queryParams: any[] = [];
+    let paramIdx = 1;
+
     if (dateFilter && dateFilter.column && dateFilter.start && dateFilter.end) {
       const col = dateFilter.column.replace(/[^a-zA-Z0-9_.]/g, ''); // sanitise column name
-      const cond = `${col} >= '${dateFilter.start}'::date AND ${col} <= '${dateFilter.end}'::date`;
+      if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(col)) {
+        return res.status(400).json({ error: 'Invalid date filter column name' });
+      }
+      const dateStartParam = paramIdx++;
+      const dateEndParam = paramIdx++;
+      queryParams.push(dateFilter.start, dateFilter.end);
+      const cond = `${col} >= $${dateStartParam}::date AND ${col} <= $${dateEndParam}::date`;
 
       // --- Step 1: Strip existing date conditions on this column ---
       // Match patterns like:
@@ -580,10 +589,11 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
     if (Array.isArray(dimensionFilters) && dimensionFilters.length > 0) {
       for (const df of dimensionFilters) {
         if (!df.column || !df.value || typeof df.column !== 'string' || typeof df.value !== 'string') continue;
-        const dimCol = df.column.replace(/[^a-zA-Z0-9_.]/g, ''); // sanitise
-        // Use parameterised-style quoting to prevent injection
-        const safeVal = df.value.replace(/'/g, "''"); // escape single quotes
-        const dimCond = `${dimCol} = '${safeVal}'`;
+        const dimCol = df.column.replace(/[^a-zA-Z0-9_.]/g, '');
+        if (!/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(dimCol)) continue;
+        const dimParamIdx = paramIdx++;
+        queryParams.push(df.value);
+        const dimCond = `${dimCol} = $${dimParamIdx}`;
 
         // Check if the SQL references this column (with or without alias)
         const colEscaped = dimCol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -617,7 +627,7 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
           }
         }
 
-        console.log(`[CohiChat] Dimension filter applied: ${dimCol} = '${safeVal}'`);
+        console.log(`[CohiChat] Dimension filter applied: ${dimCol} = $${dimParamIdx}`);
       }
     }
 
@@ -628,7 +638,7 @@ router.post('/execute-sql', authenticateToken, attachTenantContext, async (req: 
       userRole: 'user',
     };
 
-    const result = await executeQuery(effectiveSql, [], context);
+    const result = await executeQuery(effectiveSql, queryParams, context);
 
     // Apply the same formatting as the chat pipeline so data matches
     // the vizConfig expectations (dates formatted, numerics parsed, etc.)

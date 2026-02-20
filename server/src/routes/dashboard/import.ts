@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../../middleware/auth.js';
+import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
 import multer from 'multer';
 import { logError, logInfo, createLogger } from '../../services/logger.js';
-import { getTenantId } from '../../utils/tenantUtils.js';
 import { importLoansFromCSV, importEmployeesFromCSV, parseCSV } from '../../services/dashboard/importService.js';
 import { createImportJob, getImportProgress, completeImportJob } from '../../services/importProgress.js';
 
@@ -25,7 +25,7 @@ const upload = multer({
  * POST /api/dashboard/import/loans
  * Import loans from CSV file
  */
-router.post('/import/loans', authenticateToken, upload.single('file'), async (req: AuthRequest, res) => {
+router.post('/import/loans', authenticateToken, attachTenantContext, upload.single('file'), async (req: AuthRequest, res) => {
   const logger = createLogger({ userId: req.userId });
   try {
     if (!req.file) {
@@ -40,12 +40,7 @@ router.post('/import/loans', authenticateToken, upload.single('file'), async (re
       hasBuffer: !!req.file.buffer,
     });
 
-    // Get tenant_id using helper function (supports super admins)
-    const tenantId = await getTenantId(req.userId!, req.body?.tenant_id);
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found. Please specify a tenant_id or ensure your profile has a tenant assigned.' });
-    }
+    const { tenantId } = getTenantContext(req);
 
     // Read CSV file buffer
     let csvText: string;
@@ -151,18 +146,13 @@ router.get('/import/progress/:jobId', authenticateToken, async (req: AuthRequest
  * POST /api/dashboard/import/employees
  * Import employees from CSV file
  */
-router.post('/import/employees', authenticateToken, upload.single('file'), async (req: AuthRequest, res) => {
+router.post('/import/employees', authenticateToken, attachTenantContext, upload.single('file'), async (req: AuthRequest, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Get tenant_id using helper function (supports super admins)
-    const tenantId = await getTenantId(req.userId!, req.body?.tenant_id);
-
-    if (!tenantId) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
+    const { tenantId } = getTenantContext(req);
 
     // Read CSV file buffer
     const csvText = req.file.buffer.toString('utf-8');

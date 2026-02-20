@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../middleware/tenantContext.js';
-import { requireRole } from '../middleware/rbac.js';
+import { requirePlatformStaff } from '../middleware/rbac.js';
 import { z } from 'zod';
 import { auditLog } from '../services/auditLogger.js';
 
@@ -20,37 +20,7 @@ const knowledgeEntrySchema = z.object({
 
 const updateKnowledgeEntrySchema = knowledgeEntrySchema.partial();
 
-/**
- * Middleware to check superadmin/admin access (with dev-friendly override)
- * Uses auth token role instead of querying legacy public.users
- */
-async function requireSuperAdminOrDev(req: AuthRequest, res: any, next: any) {
-  try {
-    if (!req.userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // Allow access in development environment
-    const isDevelopment = process.env.NODE_ENV !== 'production' || 
-                          process.env.ALLOW_DEV_ACCESS === 'true';
-
-    if (isDevelopment) {
-      const role = req.userRole || 'user';
-      if (req.isSuperAdmin || role === 'super_admin' || role === 'platform_admin' || role === 'admin' || role === 'tenant_admin') {
-        return next();
-      }
-      // In dev, allow access even without admin role for local development
-      console.log('Dev mode: Allowing access without admin role');
-      return next();
-    }
-
-    // In production, use strict requireRole
-    return requireRole('super_admin', 'platform_admin', 'tenant_admin')(req, res, next);
-  } catch (error: any) {
-    console.error('Superadmin check error:', error);
-    res.status(500).json({ error: 'Access check failed' });
-  }
-}
+const requireSuperAdminOrDev = requirePlatformStaff();
 
 /**
  * GET /api/rag/knowledge-base

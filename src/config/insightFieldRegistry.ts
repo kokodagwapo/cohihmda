@@ -122,96 +122,97 @@ export interface SummaryMetricConfig {
   label: string;
   format: "number" | "currency" | "percent" | "days" | "bps";
   color: "blue" | "green" | "red" | "amber" | "purple";
+  description?: string;
 }
 
 export const SUMMARY_REGISTRY: Record<string, SummaryMetricConfig> = {
   // Predictions
-  totalAtRisk:         { label: "At Risk",          format: "number",   color: "red" },
-  likelyWithdraw:      { label: "Likely Withdraw",  format: "number",   color: "amber" },
-  likelyDeny:          { label: "Likely Deny",      format: "number",   color: "red" },
-  avgConfidence:       { label: "Avg Confidence",   format: "percent",  color: "amber" },
+  totalAtRisk:         { label: "At Risk",          format: "number",   color: "red",    description: "Loans with a predicted outcome of deny or withdraw based on current data signals" },
+  likelyWithdraw:      { label: "Likely Withdraw",  format: "number",   color: "amber",  description: "Loans where the borrower is likely to withdraw their application before closing" },
+  likelyDeny:          { label: "Likely Deny",      format: "number",   color: "red",    description: "Loans likely to be denied based on credit, income, or collateral factors" },
+  avgConfidence:       { label: "Avg Confidence",   format: "percent",  color: "amber",  description: "Average model confidence across all predictions in this cohort" },
 
   // Credit
-  totalHighRisk:       { label: "High Risk Loans",  format: "number",   color: "red" },
-  lowFico:             { label: "Low FICO (<620)",   format: "number",   color: "amber" },
-  highLtv:             { label: "High LTV (>95%)",   format: "number",   color: "amber" },
-  highDti:             { label: "High DTI (>50%)",   format: "number",   color: "amber" },
+  totalHighRisk:       { label: "High Risk Loans",  format: "number",   color: "red",    description: "Loans flagged for elevated credit risk (low FICO, high LTV, or high DTI)" },
+  lowFico:             { label: "Low FICO (<620)",   format: "number",   color: "amber",  description: "Loans with a borrower FICO score below 620" },
+  highLtv:             { label: "High LTV (>95%)",   format: "number",   color: "amber",  description: "Loans where the loan-to-value ratio exceeds 95%" },
+  highDti:             { label: "High DTI (>50%)",   format: "number",   color: "amber",  description: "Loans where the borrower's debt-to-income ratio exceeds 50%" },
 
   // Lost opportunity
-  totalLost:           { label: "Total Lost",        format: "number",   color: "red" },
-  withdrawn:           { label: "Withdrawn",         format: "number",   color: "amber" },
-  denied:              { label: "Denied",            format: "number",   color: "red" },
-  estimatedLostRevenue: { label: "Lost Revenue",     format: "currency", color: "purple" },
-  withdrawnVolume:     { label: "Withdrawn Volume",  format: "currency", color: "purple" },
-  deniedVolume:        { label: "Denied Volume",     format: "currency", color: "purple" },
+  totalLost:           { label: "Total Lost",        format: "number",   color: "red",    description: "Total loans lost to withdrawal or denial during the selected period" },
+  withdrawn:           { label: "Withdrawn",         format: "number",   color: "amber",  description: "Loans where the borrower withdrew their application" },
+  denied:              { label: "Denied",            format: "number",   color: "red",    description: "Loans denied by underwriting or the lender" },
+  estimatedLostRevenue: { label: "Lost Revenue",     format: "currency", color: "purple", description: "Estimated revenue impact from withdrawn and denied loans" },
+  withdrawnVolume:     { label: "Withdrawn Volume",  format: "currency", color: "purple", description: "Total dollar volume of withdrawn loan applications" },
+  deniedVolume:        { label: "Denied Volume",     format: "currency", color: "purple", description: "Total dollar volume of denied loan applications" },
 
   // Pipeline
-  totalActive:         { label: "Active Loans",      format: "number",   color: "blue" },
-  locked:              { label: "Locked",             format: "number",   color: "green" },
-  unlocked:            { label: "Unlocked",           format: "number",   color: "amber" },
-  over30Days:          { label: "Over 30 Days",       format: "number",   color: "amber" },
-  over45Days:          { label: "Over 45 Days",       format: "number",   color: "red" },
-  avgDaysInPipeline:   { label: "Avg Days",           format: "days",     color: "blue" },
+  totalActive:         { label: "Active Loans",      format: "number",   color: "blue",   description: "Loans currently in active pipeline (not yet funded, denied, or withdrawn)" },
+  locked:              { label: "Locked",             format: "number",   color: "green",  description: "Loans with an active rate lock in place" },
+  unlocked:            { label: "Unlocked",           format: "number",   color: "amber",  description: "Active loans that have not yet locked a rate" },
+  over30Days:          { label: "Over 30 Days",       format: "number",   color: "amber",  description: "Loans that have been in pipeline for more than 30 days" },
+  over45Days:          { label: "Over 45 Days",       format: "number",   color: "red",    description: "Loans that have been in pipeline for more than 45 days — may need intervention" },
+  avgDaysInPipeline:   { label: "Avg Days",           format: "days",     color: "blue",   description: "Average number of business days loans have been in the active pipeline" },
 
   // Volume (shared)
-  totalVolume:         { label: "Volume",             format: "currency", color: "purple" },
+  totalVolume:         { label: "Volume",             format: "currency", color: "purple", description: "Total dollar volume of loans in this cohort" },
 
   // Performance
-  totalOfficers:       { label: "Loan Officers",      format: "number",   color: "blue" },
-  totalLoans:          { label: "Total Loans",         format: "number",   color: "blue" },
-  totalFunded:         { label: "Total Funded",        format: "number",   color: "green" },
+  totalOfficers:       { label: "Loan Officers",      format: "number",   color: "blue",   description: "Number of loan officers included in this analysis" },
+  totalLoans:          { label: "Total Loans",         format: "number",   color: "blue",   description: "Total number of loans originated or in pipeline" },
+  totalFunded:         { label: "Total Funded",        format: "number",   color: "green",  description: "Number of loans that have successfully funded" },
 
   // Comparisons
-  monthsAnalyzed:      { label: "Months Analyzed",     format: "number",   color: "blue" },
-  currentYtdVolume:    { label: "Current YTD Vol",     format: "currency", color: "green" },
-  priorYtdVolume:      { label: "Prior YTD Vol",       format: "currency", color: "blue" },
-  currentYtdFunded:    { label: "Current YTD Funded",  format: "number",   color: "green" },
-  priorYtdFunded:      { label: "Prior YTD Funded",    format: "number",   color: "blue" },
-  ytdVolumeDelta:      { label: "YTD Vol Δ",           format: "percent",  color: "amber" },
+  monthsAnalyzed:      { label: "Months Analyzed",     format: "number",   color: "blue",   description: "Number of months included in this comparison" },
+  currentYtdVolume:    { label: "Current YTD Vol",     format: "currency", color: "green",  description: "Year-to-date funded volume for the current year" },
+  priorYtdVolume:      { label: "Prior YTD Vol",       format: "currency", color: "blue",   description: "Year-to-date funded volume for the same period last year" },
+  currentYtdFunded:    { label: "Current YTD Funded",  format: "number",   color: "green",  description: "Year-to-date funded loan count for the current year" },
+  priorYtdFunded:      { label: "Prior YTD Funded",    format: "number",   color: "blue",   description: "Year-to-date funded loan count for the same period last year" },
+  ytdVolumeDelta:      { label: "YTD Vol Δ",           format: "percent",  color: "amber",  description: "Percentage change in year-to-date volume vs. the prior year" },
 
   // Closing risk
-  avgDaysToClose:      { label: "Avg Days to Close",   format: "days",     color: "amber" },
+  avgDaysToClose:      { label: "Avg Days to Close",   format: "days",     color: "amber",  description: "Average business days from today to estimated closing date" },
 
   // Lock expiration
-  totalExpiring:       { label: "Locks Expiring",      format: "number",   color: "red" },
-  avgDaysToExpiry:     { label: "Avg Days to Expiry",  format: "days",     color: "amber" },
+  totalExpiring:       { label: "Locks Expiring",      format: "number",   color: "red",    description: "Number of rate locks expiring within the monitored window" },
+  avgDaysToExpiry:     { label: "Avg Days to Expiry",  format: "days",     color: "amber",  description: "Average days remaining before rate locks expire" },
 
   // Margin
-  currentMonthBps:     { label: "Current Month",       format: "bps",      color: "blue" },
-  priorMonthBps:       { label: "Prior Month",         format: "bps",      color: "blue" },
-  deltaBps:            { label: "Delta",               format: "bps",      color: "amber" },
+  currentMonthBps:     { label: "Current Month",       format: "bps",      color: "blue",   description: "Revenue margin for the current month in basis points" },
+  priorMonthBps:       { label: "Prior Month",         format: "bps",      color: "blue",   description: "Revenue margin for the prior month in basis points" },
+  deltaBps:            { label: "Delta",               format: "bps",      color: "amber",  description: "Change in revenue margin between current and prior month" },
 
   // Condition backlog
-  avgConditions:       { label: "Avg Conditions",      format: "number",   color: "blue" },
+  avgConditions:       { label: "Avg Conditions",      format: "number",   color: "blue",   description: "Average number of outstanding conditions per loan" },
 
   // Cycle time (shared)
-  avgCycleTime:        { label: "Avg Cycle Time",      format: "days",     color: "blue" },
+  avgCycleTime:        { label: "Avg Cycle Time",      format: "days",     color: "blue",   description: "Average business days from application to funding" },
 
   // Tiering — all-officers view
-  totalActors:         { label: "Total Personnel",      format: "number",   color: "blue" },
-  topCount:            { label: "Top Tier",              format: "number",   color: "green" },
-  secondCount:         { label: "Second Tier",           format: "number",   color: "amber" },
-  bottomCount:         { label: "Bottom Tier",           format: "number",   color: "red" },
-  totalRevenue:        { label: "Total Revenue",         format: "currency", color: "purple" },
+  totalActors:         { label: "Total Personnel",      format: "number",   color: "blue",   description: "Total number of personnel included in the tiering analysis" },
+  topCount:            { label: "Top Tier",              format: "number",   color: "green",  description: "Number of personnel in the top performance tier" },
+  secondCount:         { label: "Second Tier",           format: "number",   color: "amber",  description: "Number of personnel in the middle performance tier" },
+  bottomCount:         { label: "Bottom Tier",           format: "number",   color: "red",    description: "Number of personnel in the lowest performance tier" },
+  totalRevenue:        { label: "Total Revenue",         format: "currency", color: "purple", description: "Total revenue generated across all personnel" },
 
   // Product breakdown
-  totalProducts:       { label: "Product Types",         format: "number",   color: "blue" },
-  totalFallout:        { label: "Total Fallout",         format: "number",   color: "red" },
-  avgPullThrough:      { label: "Avg Pull-Through",      format: "percent",  color: "green" },
+  totalProducts:       { label: "Product Types",         format: "number",   color: "blue",   description: "Number of distinct loan product types in this analysis" },
+  totalFallout:        { label: "Total Fallout",         format: "number",   color: "red",    description: "Total number of loans that fell out (withdrawn + denied)" },
+  avgPullThrough:      { label: "Avg Pull-Through",      format: "percent",  color: "green",  description: "Average percentage of started loans that successfully fund" },
 
   // Risk cross-tab
-  totalPockets:        { label: "Risk Segments",         format: "number",   color: "blue" },
-  worstFalloutRate:    { label: "Worst Fallout Rate",    format: "percent",  color: "red" },
-  totalFallenOut:      { label: "Total Fallen Out",      format: "number",   color: "red" },
+  totalPockets:        { label: "Risk Segments",         format: "number",   color: "blue",   description: "Number of distinct risk segments identified in the cross-tab" },
+  worstFalloutRate:    { label: "Worst Fallout Rate",    format: "percent",  color: "red",    description: "Highest fallout rate across all risk segments" },
+  totalFallenOut:      { label: "Total Fallen Out",      format: "number",   color: "red",    description: "Total loans that fell out across all risk segments" },
 
-  // Tiering — officer-specific view (used when drilldown filters to named officers)
-  officerUnits:        { label: "Units",                 format: "number",   color: "green" },
-  officerVolume:       { label: "Volume",                format: "currency", color: "purple" },
-  officerRevenue:      { label: "Revenue",               format: "currency", color: "purple" },
-  officerPullThrough:  { label: "Pull-Through",          format: "percent",  color: "blue" },
-  officerCycleTime:    { label: "Cycle Time",            format: "days",     color: "blue" },
-  officerLost:         { label: "Lost",                  format: "number",   color: "amber" },
-  officerDenied:       { label: "Denied",                format: "number",   color: "red" },
+  // Tiering — officer-specific view
+  officerUnits:        { label: "Units",                 format: "number",   color: "green",  description: "Number of funded loan units for this officer" },
+  officerVolume:       { label: "Volume",                format: "currency", color: "purple", description: "Total funded dollar volume for this officer" },
+  officerRevenue:      { label: "Revenue",               format: "currency", color: "purple", description: "Total revenue generated by this officer" },
+  officerPullThrough:  { label: "Pull-Through",          format: "percent",  color: "blue",   description: "Percentage of this officer's started loans that fund" },
+  officerCycleTime:    { label: "Cycle Time",            format: "days",     color: "blue",   description: "Average days from application to funding for this officer" },
+  officerLost:         { label: "Lost",                  format: "number",   color: "amber",  description: "Number of loans lost by this officer (withdrawn)" },
+  officerDenied:       { label: "Denied",                format: "number",   color: "red",    description: "Number of loans denied for this officer" },
 };
 
 // ============================================================================

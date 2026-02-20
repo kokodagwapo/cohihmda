@@ -4,3 +4,4 @@
  */
 
 export { default as cognitoAuth } from "./cognitoAuth.js";
+export { default as mfaRoutes } from "./mfa.js";

@@ -52,7 +52,14 @@ function buildDetailFromEvidence(
   insight: CategorizedInsight,
 ): InsightDetailSnapshot | null {
   const ev = insight.evidence_table;
-  if (!ev || ev.columns.length === 0) return null;
+  if (!ev) {
+    console.warn(`[Hydrator] No evidence_table for "${insight.headline?.substring(0, 60)}" (source=${insight.source})`);
+    return null;
+  }
+  if (ev.columns.length === 0) {
+    console.warn(`[Hydrator] Empty columns in evidence_table for "${insight.headline?.substring(0, 60)}" (source=${insight.source}, rows=${ev.rows.length})`);
+    return null;
+  }
 
   // Build ETM section for the detail view
   const etm = (insight.what_changed || insight.why || insight.business_impact) ? {

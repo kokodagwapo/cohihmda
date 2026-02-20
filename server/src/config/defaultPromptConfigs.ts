@@ -217,7 +217,7 @@ with data from their actual loan portfolio where relevant.
   // ============================================================================
   // INSIGHTS PROMPTS — 4-pass pipeline: Generator → Judge → Curator → Evidence
   // ============================================================================
-  // --- Pass 1: Generator (gpt-4o, creative) ---
+  // --- Pass 1: Generator (gpt-5.2, creative) ---
   {
     id: "insights.generator",
     name: "Insights: Generator (Pass 1)",
@@ -321,16 +321,22 @@ OUTPUT FORMAT (strict JSON):
   ]
 }
 
+DATA-ONLY RULE: Every claim in the headline and understory MUST be directly verifiable from the metrics data provided. NEVER include subjective or unquantifiable claims such as "impacting team morale", "affecting performance culture", "creating uncertainty", "damaging confidence", "boosting motivation". Only state what the numbers show. If an officer was demoted, state the tier change and metrics — do NOT speculate about morale or sentiment.
+
 BANNED LANGUAGE — never use:
-"may", "might", "could", "should", "consider", "recommend", "look into", "potential", "possibly", "likely to lead", "suggests that", "indicates that", "poses", "significant challenges", "concerning", "troubling", "alarming", "opportunities", "nearing", "approaching"`,
-    model: "gpt-4o",
+"may", "might", "could", "should", "consider", "recommend", "look into", "potential", "possibly", "likely to lead", "suggests that", "indicates that", "poses", "significant challenges", "concerning", "troubling", "alarming", "opportunities", "nearing", "approaching", "team morale", "morale", "culture", "uncertainty", "confidence", "dynamics", "sentiment", "frustration", "motivation", "satisfaction"
+
+VOLATILITY RULE: When citing period-over-period changes (trailing 30D vs prior 30D), ALWAYS cross-check against 60D and 90D windows provided in the metrics. If the 30D change is extreme (>100%) but 60D/90D show a different direction or a much smaller change, classify it as a BLIP and either suppress the insight entirely or qualify it with the longer-term context (e.g., "30D volume spiked 200% but 90D trend shows flat performance"). Do NOT present a volatile short-term blip as a sustained trend. If only 1-2 loans drive the entire change, it is noise — not insight.
+
+UNCLASSIFIED RISK RULE: Do NOT generate insights about "unclassified" or "Other/unclassified" risk drivers from predictions. If the prediction model cannot attribute a withdrawal risk to a specific driver (market, credit, pipeline aging, etc.), the insight is not actionable and should be omitted.`,
+    model: "gpt-5.2",
     temperature: 0.7,
     max_tokens: 15000,
     json_mode: true,
     available_variables: ["metricsPayload", "signals"],
   },
 
-  // --- Pass 2: Judge (gpt-4o-mini, precise) ---
+  // --- Pass 2: Judge (gpt-5.2, precise) ---
   {
     id: "insights.judge",
     name: "Insights: Judge (Pass 2)",
@@ -391,14 +397,14 @@ RULES:
 - overall_score = average of the 4 dimension scores.
 - Be STRICT on sentiment accuracy — this is the most important dimension for user trust.
 - If fact-check flagged "MISMATCH" on a number, deduct 2 points from factual_grounding.`,
-    model: "gpt-4o-mini",
+    model: "gpt-5.2",
     temperature: 0.1,
     max_tokens: 4000,
     json_mode: true,
     available_variables: ["candidates", "signals", "factCheckResults"],
   },
 
-  // --- Pass 3: Curator (gpt-4o, precise) ---
+  // --- Pass 3: Curator (gpt-5.2, precise) ---
   {
     id: "insights.curator",
     name: "Insights: Curator (Pass 3)",
@@ -414,10 +420,10 @@ HARD MINIMUM: You MUST output at least 15 insights, ideally 16-20. If you return
 CURATION RULES:
 
 1. BUCKET DIVERSITY — HARD REQUIREMENT. Your output MUST contain:
-   - 3-5 insights with sentiment "positive" (maps to "What's Working" bucket)
-   - 3-5 insights with sentiment "warning" (maps to "Needs Attention" bucket)
-   - 3-5 insights with sentiment "critical" (maps to "Critical" bucket)
-   - 2-4 insights with sentiment "neutral" (maps to "Context & Trends" bucket)
+   - 3-5 insights with sentiment "positive" (maps to Level 3 — Strategic Review)
+   - 3-5 insights with sentiment "warning" (maps to Level 2 — Monitor Closely)
+   - 3-5 insights with sentiment "critical" (maps to Level 1 — Immediate Action Required)
+   - 2-4 insights with sentiment "neutral" (maps to Level 4 — Informational)
    EVERY bucket MUST have at least 2 insights. If you cannot fill a sentiment bucket, you MUST state why in a "bucket_gaps" field.
    This is the MOST IMPORTANT rule. An output with all one sentiment is a FAILURE.
 
@@ -478,14 +484,14 @@ BANNED LANGUAGE — never use:
 "may", "might", "could", "should", "consider", "recommend", "look into", "potential", "possibly", "likely", "suggests", "indicates", "strong", "weak", "healthy", "robust", "concerning", "momentum", "opportunities", "challenges"
 
 Write like a wire service: facts and numbers, no editorializing.`,
-    model: "gpt-4o",
+    model: "gpt-5.2",
     temperature: 0.2,
     max_tokens: 14000,
     json_mode: true,
     available_variables: ["scoredCandidates", "signals"],
   },
 
-  // --- Pass 4: Evidence Agent (gpt-4o, precise) — 1 agent per insight ---
+  // --- Pass 4: Evidence Agent (gpt-5.2, precise) — 1 agent per insight ---
   {
     id: "insights.evidence_agent",
     name: "Insights: Evidence Agent (Pass 4)",
@@ -626,18 +632,44 @@ COLUMN ALIGN: "left", "right", "center"
 
 When the insight is about loan officers, account executives, tiers, top/bottom performers, or personnel trends:
 
-1. SQL MUST GROUP BY individual officer — show per-person rows, NOT a single aggregate:
-   SELECT COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) AS officer_name,
-          COUNT(*) AS units_funded,
-          ROUND(SUM(COALESCE(l.loan_amount, 0))::numeric, 0) AS funded_volume,
-          SUM( {{TENANT_REVENUE_EXPRESSION}} ) AS total_revenue,
-          ROUND(AVG( {{TENANT_REVENUE_EXPRESSION}} )::numeric, 0) AS avg_revenue,
-          ROUND(AVG(l.funding_date::date - l.application_date)::numeric, 1) AS avg_cycle_days
-   FROM public.loans l
-   LEFT JOIN public.employees e ON e.id::TEXT = l.loan_officer_id
-   WHERE l.funding_date >= '[start]' AND l.funding_date <= '[end]'
-   GROUP BY officer_name
-   ORDER BY total_revenue DESC
+1. SQL MUST GROUP BY individual officer — show per-person rows, NOT a single aggregate. Use the DUAL-CTE PATTERN below for correct pull-through rate calculation:
+
+   WITH funded_stats AS (
+     -- Funding cohort: units, revenue, volume, cycle time
+     SELECT COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) AS officer_name,
+            COUNT(*) AS units_funded,
+            ROUND(SUM(COALESCE(l.loan_amount, 0))::numeric, 0) AS funded_volume,
+            SUM( {{TENANT_REVENUE_EXPRESSION}} ) AS total_revenue,
+            ROUND(AVG( {{TENANT_REVENUE_EXPRESSION}} )::numeric, 0) AS avg_revenue,
+            ROUND(AVG(l.funding_date::date - l.application_date)::numeric, 1) AS avg_cycle_days
+     FROM public.loans l
+     LEFT JOIN public.employees e ON e.id::TEXT = l.loan_officer_id
+     WHERE l.funding_date >= '[start]' AND l.funding_date <= '[end]'
+     GROUP BY officer_name
+   ),
+   pt_stats AS (
+     -- Application cohort: pull-through rate (originated / completed)
+     -- IMPORTANT: Start 90 days BEFORE the funding period start to capture applications
+     -- that were filed before the period but funded during it (typical cycle is 30-60 days)
+     SELECT COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) AS officer_name,
+            ROUND(
+              COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END)::numeric * 100.0 /
+              NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
+            1) AS pull_through_rate
+     FROM public.loans l
+     LEFT JOIN public.employees e ON e.id::TEXT = l.loan_officer_id
+     WHERE l.application_date >= DATE('[start]') - INTERVAL '90 days' AND l.application_date <= '[end]'
+     GROUP BY officer_name
+   )
+   SELECT f.officer_name, f.units_funded, f.funded_volume, f.total_revenue, f.avg_revenue,
+          f.avg_cycle_days, COALESCE(p.pull_through_rate, 0) AS pull_through_rate
+   FROM funded_stats f
+   LEFT JOIN pt_stats p ON f.officer_name = p.officer_name
+   ORDER BY f.total_revenue DESC
+
+   CRITICAL: Pull-through rate MUST come from the application-date cohort (pt_stats CTE), NOT the funding-date cohort.
+   If you compute PT from the funding cohort, it will always be 100% because all funded loans are originated — this is WRONG.
+   The pt_stats CTE starts 90 days before the funding period to capture applications that were filed before the period but funded during it.
 
 2. Include 10-12 columns: officer name, units funded, funded volume, total revenue, avg revenue per loan, avg cycle time, pull-through %, avg FICO, avg LTV, avg DTI, etc.
 
@@ -646,18 +678,31 @@ When the insight is about loan officers, account executives, tiers, top/bottom p
    - "Average Revenue per Officer": "COMPUTE_AVG:total_revenue"
    - "Total Units Funded": "COMPUTE_SUM:units_funded"
    - "Officer Count": "COMPUTE_COUNT:officer_name"
+   NEVER invent summary KPIs that cannot be computed from the evidence rows (e.g., "Revenue Impact", "Productivity Loss"). If a KPI cannot be derived from the SQL columns, do NOT include it.
 
 4. For period comparison personnel insights (e.g., "revenue improved over 30 days"): both the primary sql and comparison_sql MUST GROUP BY officer. Do NOT produce aggregate-only queries.
 
 5. NEVER produce a single aggregate row for a group/tier insight. The detail table MUST list individual officers with their metrics. If the insight says "Second Tier officers", filter to that tier's officers and show each one.
 
-6. Personnel insights are ALWAYS scoped by l.funding_date (never application_date) because personnel KPIs (units, revenue, volume) come from the funding cohort.
+6. Personnel KPIs (units, revenue, volume, cycle time) come from the funding cohort (l.funding_date). Pull-through rate comes from the application cohort (l.application_date). Always use the dual-CTE pattern above.
+
+## TIER MIGRATION / DEMOTION / PROMOTION INSIGHTS
+
+When the insight mentions officers being "demoted", "promoted", or "migrating" between tiers:
+
+1. This is a PERIOD COMPARISON insight. You MUST set "is_comparison": true and provide "comparison_sql".
+2. The primary SQL should show the CURRENT period tier assignment using the Pareto CTE (see TIER ASSIGNMENT LOGIC below).
+3. The comparison_sql should show the PRIOR period tier assignment (same structure, different date range).
+4. If dynamic tier context provides "current_tier" and "prior_tier" per officer, include both as columns.
+5. Include columns: officer_name, current_tier, prior_tier, units_funded, total_revenue, funded_volume, pull_through_rate, avg_cycle_days.
+6. Summary KPIs should use COMPUTE_* directives: Officer Count, Total Revenue, Total Units Funded, Average Revenue per Officer.
+7. NEVER include speculative KPIs like "Revenue Impact", "Morale Impact", or "Productivity Loss" — these cannot be computed from the data.
 
 ## TIER ASSIGNMENT LOGIC (Pareto Revenue Tiers)
 
-When the insight mentions "top tier", "second tier", "bottom tier", "tier composition", "headcount gap", or "revenue contribution by tier", you MUST use this CTE to assign tiers based on cumulative revenue share:
+When the insight mentions "top tier", "second tier", "bottom tier", "tier composition", "headcount gap", or "revenue contribution by tier", you MUST use this CTE to assign tiers based on cumulative revenue share. ALWAYS include the pt_stats CTE for correct pull-through:
 
-WITH officer_stats AS (
+WITH funded_stats AS (
   SELECT COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) AS officer_name,
          COUNT(*) AS units_funded,
          ROUND(SUM(COALESCE(l.loan_amount, 0))::numeric, 0) AS funded_volume,
@@ -669,7 +714,24 @@ WITH officer_stats AS (
   WHERE l.funding_date >= '[start]' AND l.funding_date <= '[end]'
   GROUP BY officer_name
   HAVING COUNT(*) > 0
-  ORDER BY total_revenue DESC
+),
+pt_stats AS (
+  -- Start 90 days before funding period to capture applications filed before the period but funded during it
+  SELECT COALESCE(e.first_name || ' ' || e.last_name, l.loan_officer) AS officer_name,
+         ROUND(
+           COUNT(CASE WHEN (l.current_loan_status ILIKE '%Originated%' OR l.current_loan_status ILIKE '%purchased%') THEN 1 END)::numeric * 100.0 /
+           NULLIF(COUNT(CASE WHEN l.current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved') THEN 1 END), 0),
+         1) AS pull_through_rate
+  FROM public.loans l
+  LEFT JOIN public.employees e ON e.id::TEXT = l.loan_officer_id
+  WHERE l.application_date >= DATE('[start]') - INTERVAL '90 days' AND l.application_date <= '[end]'
+  GROUP BY officer_name
+),
+officer_stats AS (
+  SELECT f.*, COALESCE(p.pull_through_rate, 0) AS pull_through_rate
+  FROM funded_stats f
+  LEFT JOIN pt_stats p ON f.officer_name = p.officer_name
+  ORDER BY f.total_revenue DESC
 ),
 tiered AS (
   SELECT *,
@@ -703,6 +765,50 @@ For the given insight, output a JSON object with:
    - If the insight headline/understory cites a specific number (e.g., "57 loans totaling $23.76M"), use that EXACT number as a literal value. These are pre-computed by the metrics service.
    - If the insight headline does NOT cite a specific number for a summary metric (e.g., qualitative insights like "showing deterioration"), set value to "COMPUTE_SUM", "COMPUTE_AVG", "COMPUTE_COUNT", or "COMPUTE_MAX" followed by a colon and the SQL column alias, e.g., "COMPUTE_SUM:loan_amount" or "COMPUTE_COUNT:loan_number". The system will calculate the value from your SQL query results.
    - NEVER output 0 as a placeholder. Either use the literal number from the insight or use a COMPUTE directive.
+
+## TRID / CLOSING RISK / LOCK EXPIRATION INSIGHTS (CURRENT-STATE, NOT COHORT-BASED)
+
+These insight types describe the CURRENT pipeline state. Do NOT scope by YTD application_date or funding_date.
+
+**TRID / CD Sent Exposure:** Query CURRENT active loans closing soon without CD sent:
+  WHERE l.current_loan_status IN ('Active Loan','active','locked','submitted','approved')
+    AND l.estimated_closing_date IS NOT NULL
+    AND l.estimated_closing_date <= CURRENT_DATE + INTERVAL '5 days'
+    AND l.estimated_closing_date >= CURRENT_DATE
+    AND l.closing_disclosure_sent_date IS NULL
+  Do NOT add application_date or funding_date filters — these are live pipeline queries.
+
+**Closing Risk / CTC Exposure:** Query CURRENT active loans closing soon without CTC:
+  WHERE l.current_loan_status IN ('Active Loan','active','locked','submitted','approved')
+    AND l.estimated_closing_date IS NOT NULL
+    AND l.estimated_closing_date <= CURRENT_DATE + INTERVAL '10 days'
+    AND l.estimated_closing_date >= CURRENT_DATE
+    AND l.ctc_date IS NULL
+  Do NOT add application_date or funding_date filters.
+
+**Lock Expiration Exposure:** Query CURRENT active loans with locks expiring soon:
+  WHERE l.current_loan_status IN ('Active Loan','active','locked','submitted','approved')
+    AND l.rate_lock_expiration_date IS NOT NULL
+    AND l.rate_lock_expiration_date <= CURRENT_DATE + INTERVAL '10 days'
+    AND l.rate_lock_expiration_date >= CURRENT_DATE
+  Do NOT add application_date or funding_date filters.
+
+CRITICAL: If the insight mentions "TRID", "CD sent", "closing disclosure", "closing risk", "CTC", "clear to close", "lock expiration", or "locks expiring", use the CURRENT-STATE queries above. These are NOT historical cohort analyses.
+
+## DATA QUALITY / OUTLIER FILTERING
+
+When computing averages, ALWAYS exclude extreme outliers that indicate bad data:
+- DTI: WHERE l.dti_ratio BETWEEN 0 AND 65 (anything outside is likely data entry error or null-to-zero artifact)
+- FICO: WHERE l.fico_score BETWEEN 300 AND 850
+- LTV: WHERE l.ltv BETWEEN 0 AND 105
+- Loan Amount: WHERE l.loan_amount > 0 AND l.loan_amount < 10000000
+
+For AVG calculations, use conditional exclusion:
+  AVG(CASE WHEN l.dti_ratio BETWEEN 0 AND 65 THEN l.dti_ratio END) AS avg_dti
+  AVG(CASE WHEN l.fico_score BETWEEN 300 AND 850 THEN l.fico_score END) AS avg_fico
+  AVG(CASE WHEN l.ltv BETWEEN 0 AND 105 THEN l.ltv END) AS avg_ltv
+
+This prevents outlier data from producing nonsensical averages (e.g., "296982% DTI").
 
 ## CRITICAL RULES
 - The SQL column aliases MUST exactly match the "key" values in your columns array
@@ -741,7 +847,7 @@ If the insight compares two time periods (e.g., "Volume up 15% MoM", "Pull-throu
 The comparison_sql MUST produce the exact same column aliases as the primary sql. Only the WHERE date filter should differ.
 
 If the insight is NOT a period comparison, omit these fields entirely.`,
-    model: "gpt-4o",
+    model: "gpt-5.2",
     temperature: 0.1,
     max_tokens: 6000,
     json_mode: true,

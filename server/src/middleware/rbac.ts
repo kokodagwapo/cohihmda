@@ -271,6 +271,77 @@ export function requireRole(...allowedRoles: string[]) {
   };
 }
 
+const PLATFORM_STAFF_ROLES = new Set(["super_admin", "platform_admin", "support", "admin"]);
+const ADMIN_ROLES = new Set([...PLATFORM_STAFF_ROLES, "tenant_admin"]);
+
+/**
+ * Middleware: restrict to platform-level staff only.
+ * Rejects tenant_admin and below — use for endpoints that manage tenants,
+ * subscriptions, platform settings, or cross-tenant data.
+ */
+export function requirePlatformStaff() {
+  return async (req: RBACRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const role = req.userRole || "user";
+      req.userTenantId = req.tenantId || null;
+
+      if (!PLATFORM_STAFF_ROLES.has(role)) {
+        auditLog({
+          userId: req.userId,
+          userEmail: req.userEmail,
+          userRole: role,
+          tenantId: req.tenantId || null,
+          action: "access",
+          resource: req.path,
+          status: "failure",
+          errorMessage: `Platform staff required — caller role: ${role}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        }).catch(() => {});
+
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "This action requires platform staff access.",
+        });
+      }
+      next();
+    } catch (error: any) {
+      logError("requirePlatformStaff error", error, { userId: req.userId });
+      res.status(500).json({ error: "Role check failed" });
+    }
+  };
+}
+
+/**
+ * Middleware: restrict to any admin role (platform staff OR tenant_admin).
+ * Use for endpoints that are admin-only but should work within a tenant scope.
+ */
+export function requireAnyAdmin() {
+  return async (req: RBACRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const role = req.userRole || "user";
+      req.userTenantId = req.tenantId || null;
+
+      if (!ADMIN_ROLES.has(role)) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "This action requires admin access.",
+        });
+      }
+      next();
+    } catch (error: any) {
+      logError("requireAnyAdmin error", error, { userId: req.userId });
+      res.status(500).json({ error: "Role check failed" });
+    }
+  };
+}
+
 /**
  * Middleware to enforce tenant isolation
  * Ensures users can only access data from their own tenant

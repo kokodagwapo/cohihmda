@@ -336,6 +336,26 @@ if (SKIP_DB) {
           console.warn("⚠️ Failed to start LOS sync scheduler:", error);
         }
 
+        if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
+          try {
+            const { startEncompassWebhookScheduler } = await import(
+              "./services/encompassWebhookScheduler.js"
+            );
+            startEncompassWebhookScheduler();
+          } catch (error) {
+            console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
+          }
+        }
+
+        // Register post-sync hooks (insight generation + tracked insight evaluation)
+        try {
+          const { registerInsightHooks } =
+            await import("./services/hooks/registerInsightHooks.js");
+          registerInsightHooks();
+        } catch (error) {
+          console.warn("⚠️ Failed to register insight hooks:", error);
+        }
+
         // Vendor sync scheduler disabled - not yet ready for production use
         // When vendor outbound integrations (accounting, capital markets, servicing) are needed,
         // re-enable and fix to use tenant-specific database pools instead of management pool.

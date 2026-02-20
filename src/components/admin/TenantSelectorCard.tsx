@@ -100,113 +100,90 @@ export function TenantSelectorCard({
     );
   }
 
-  // Prominent version for tenant context mode
+  // Prominent version for tenant context mode — compact single-row bar for platform admins
   if (variant === "prominent") {
     return (
       <Card
-        className={`border-emerald-200/60 dark:border-emerald-700/50 bg-gradient-to-r from-emerald-50/50 via-white to-teal-50/50 dark:from-emerald-900/10 dark:via-slate-800/50 dark:to-teal-900/10 shadow-lg shadow-emerald-500/10 ${className}`}
+        className={`border-emerald-200/60 dark:border-emerald-700/50 bg-gradient-to-r from-emerald-50/50 via-white to-teal-50/50 dark:from-emerald-900/10 dark:via-slate-800/50 dark:to-teal-900/10 shadow-sm ${className}`}
       >
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/30">
-                <Building2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <CardTitle className="text-xl font-thin text-slate-900 dark:text-white tracking-tight">
-                  Select Tenant to Manage
-                </CardTitle>
-                <CardDescription className="text-sm text-slate-600 dark:text-slate-400 font-light">
-                  Choose a tenant to view and manage their settings
-                </CardDescription>
-              </div>
-            </div>
-            {showRefresh && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => loadTenants()}
-                disabled={tenantsLoading}
-                className="border-emerald-200 dark:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
-              >
-                {tenantsLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-              </Button>
-            )}
+        <div className="px-4 py-3 flex flex-wrap items-center gap-3 gap-y-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
+              Tenant
+            </span>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <Select
-              value={selectedTenantId || "__none__"}
-              onValueChange={(value) =>
-                setSelectedTenantId(value === "__none__" ? null : value)
-              }
-              disabled={tenantsLoading}
-            >
-              <SelectTrigger className="w-full sm:w-[350px] font-light text-base h-12 border-emerald-200 dark:border-emerald-700 focus:ring-emerald-500">
-                {tenantsLoading ? (
+          <Select
+            value={selectedTenantId || "__none__"}
+            onValueChange={(value) =>
+              setSelectedTenantId(value === "__none__" ? null : value)
+            }
+            disabled={tenantsLoading}
+          >
+            <SelectTrigger className="w-full min-w-[180px] max-w-[280px] h-9 text-sm font-normal border-emerald-200 dark:border-emerald-700 focus:ring-emerald-500">
+              {tenantsLoading ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Loading...</span>
+                </div>
+              ) : (
+                <SelectValue placeholder="Select tenant..." />
+              )}
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">
+                <span className="text-slate-500">— Select tenant —</span>
+              </SelectItem>
+              {tenants.map((tenant) => (
+                <SelectItem key={tenant.id} value={tenant.id}>
                   <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Loading tenants...</span>
+                    <span>{tenant.name}</span>
+                    {tenant.status && tenant.status !== "active" && (
+                      <Badge variant="outline" className="text-xs">
+                        {tenant.status}
+                      </Badge>
+                    )}
                   </div>
-                ) : (
-                  <SelectValue placeholder="Select a tenant..." />
-                )}
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">
-                  <span className="text-slate-500">-- Select a tenant --</span>
                 </SelectItem>
-                {tenants.map((tenant) => (
-                  <SelectItem key={tenant.id} value={tenant.id}>
-                    <div className="flex items-center gap-2">
-                      <span>{tenant.name}</span>
-                      {tenant.status && tenant.status !== "active" && (
-                        <Badge variant="outline" className="text-xs">
-                          {tenant.status}
-                        </Badge>
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {selectedTenantId && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelectedTenantId(null)}
-                className="font-extralight whitespace-nowrap border-slate-300 dark:border-slate-600"
-              >
-                Clear Selection
-              </Button>
-            )}
-          </div>
-
+              ))}
+            </SelectContent>
+          </Select>
+          {showRefresh && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => loadTenants()}
+              disabled={tenantsLoading}
+              className="h-8 w-8 p-0 text-slate-500 hover:text-slate-700"
+            >
+              {tenantsLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
+          {selectedTenantId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedTenantId(null)}
+              className="h-8 text-xs font-normal whitespace-nowrap border-slate-300 dark:border-slate-600"
+            >
+              Clear
+            </Button>
+          )}
           {selectedTenantId && currentTenantName && (
-            <div className="mt-4 p-3 rounded-lg bg-emerald-100/50 dark:bg-emerald-900/20 border border-emerald-200/50 dark:border-emerald-700/30">
-              <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-2">
-                <Building2 className="h-4 w-4" />
-                Currently managing:{" "}
-                <span className="font-semibold">{currentTenantName}</span>
-              </p>
-            </div>
+            <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium truncate max-w-[200px] sm:max-w-none">
+              Managing: {currentTenantName}
+            </span>
           )}
-
           {!selectedTenantId && tenants.length > 0 && (
-            <div className="mt-4 p-3 rounded-lg bg-amber-50/50 dark:bg-amber-900/10 border border-amber-200/50 dark:border-amber-700/30">
-              <p className="text-sm text-amber-700 dark:text-amber-400 font-light">
-                Select a tenant above to view and manage their data, users, and
-                settings
-              </p>
-            </div>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Select a tenant to manage
+            </span>
           )}
-        </CardContent>
+        </div>
       </Card>
     );
   }

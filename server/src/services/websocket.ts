@@ -1,19 +1,20 @@
-import { WebSocketServer, WebSocket } from 'ws';
-import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { pool } from '../config/database.js';
+import { WebSocketServer, WebSocket } from "ws";
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { pool } from "../config/database.js";
+import { registerSendToUser } from "./jobManager.js";
 
 // Ensure environment variables are loaded even when this module is imported before index.ts runs dotenv.config
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config({ path: join(__dirname, "../../.env") });
 
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    throw new Error('JWT_SECRET environment variable is required');
+    throw new Error("JWT_SECRET environment variable is required");
   }
   return secret;
 }
@@ -21,7 +22,7 @@ function getJwtSecret(): string {
 const JWT_SECRET = getJwtSecret();
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const ALETHEIA_AI_PROVIDER = process.env.ALETHEIA_AI_PROVIDER || 'openai'; // 'openai' or 'gemini'
+const ALETHEIA_AI_PROVIDER = process.env.ALETHEIA_AI_PROVIDER || "openai"; // 'openai' or 'gemini'
 
 // Aletheia system prompt for executive intelligence
 const ALETHEIA_SYSTEM_PROMPT = `You are Aletheia, an executive-intelligent, fact-driven AI analyst designed for mortgage executives. You are the voice of the Coheus Executive Intelligence Platform.
@@ -87,128 +88,163 @@ When answering questions about Qlik migration:
 - Use function calling to fetch real-time analytics data when needed
 `;
 
+const jobConnections = new Map<string, Set<WebSocket>>();
+
+export function sendToUser(userId: string, message: object): void {
+  const sockets = jobConnections.get(userId);
+  if (!sockets) return;
+  const payload = JSON.stringify(message);
+  for (const ws of sockets) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
+  }
+}
+
 export function setupWebSocket(wss: WebSocketServer) {
-  wss.on('connection', (ws: WebSocket, req) => {
-    console.log('New WebSocket connection attempt');
-    
+  registerSendToUser(sendToUser);
+  wss.on("connection", (ws: WebSocket, req) => {
+    console.log("New WebSocket connection attempt");
+
     // Extract token from query or headers
-    const url = new URL(req.url || '', 'http://localhost');
-    const token = url.searchParams.get('token') || 
-                  req.headers.authorization?.replace('Bearer ', '') ||
-                  req.headers.cookie?.split('token=')[1]?.split(';')[0];
-    
+    const url = new URL(req.url || "", "http://localhost");
+    const token =
+      url.searchParams.get("token") ||
+      req.headers.authorization?.replace("Bearer ", "") ||
+      req.headers.cookie?.split("token=")[1]?.split(";")[0];
+
     let userId: string | null = null;
-    
+    let tenantId: string | null = null;
+
     // For development/testing: allow connections without token, but log warning
-    if (!token || token === 'test-token') {
-      if (process.env.NODE_ENV === 'production') {
-        console.log('WebSocket connection rejected: No token in production');
-        ws.close(1008, 'Unauthorized');
+    if (!token || token === "test-token") {
+      if (process.env.NODE_ENV === "production") {
+        console.log("WebSocket connection rejected: No token in production");
+        ws.close(1008, "Unauthorized");
         return;
       }
-      console.log('WebSocket connection allowed without token (development mode)');
-      userId = 'dev-user';
+      console.log(
+        "WebSocket connection allowed without token (development mode)",
+      );
+      userId = "dev-user";
     } else {
       try {
-        const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+        const decoded = jwt.verify(token, JWT_SECRET) as {
+          userId: string;
+          email: string;
+          tenantId?: string;
+          tenantSlug?: string;
+          role?: string;
+        };
         userId = decoded.userId;
-        console.log(`WebSocket authenticated for user: ${userId}`);
+        tenantId = decoded.tenantId || null;
+        console.log(
+          `WebSocket authenticated for user: ${userId}, tenant: ${tenantId || "none"}`,
+        );
       } catch (error) {
-        console.log('WebSocket connection rejected: Invalid token');
-        ws.close(1008, 'Invalid token');
+        console.log("WebSocket connection rejected: Invalid token");
+        ws.close(1008, "Invalid token");
         return;
       }
     }
-    
+
     let openAISocket: WebSocket | null = null;
     let geminiSocket: WebSocket | null = null;
-    
+
     // Determine which service to use based on path
     const path = url.pathname;
-    
-    if (path.includes('maylin') || path.includes('luna') || (path.includes('aletheia') && ALETHEIA_AI_PROVIDER === 'openai')) {
+
+    if (
+      path.includes("maylin") ||
+      path.includes("luna") ||
+      (path.includes("aletheia") && ALETHEIA_AI_PROVIDER === "openai")
+    ) {
       // Load RAG settings from database for this tenant BEFORE connecting
       (async () => {
         let tenantOpenAIApiKey: string | null = null;
-        
-        if (userId && userId !== 'dev-user') {
+
+        if (tenantId) {
           try {
-            const profileResult = await pool.query(
-              'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-              [userId]
+            const settingsResult = await pool.query(
+              "SELECT openai_api_key FROM public.tenant_rag_settings WHERE tenant_id = $1",
+              [tenantId],
             );
-            if (profileResult.rows.length > 0) {
-              const tenantId = profileResult.rows[0].tenant_id;
-              const settingsResult = await pool.query(
-                'SELECT openai_api_key FROM public.tenant_rag_settings WHERE tenant_id = $1',
-                [tenantId]
-              );
-              if (settingsResult.rows.length > 0 && settingsResult.rows[0].openai_api_key) {
-                tenantOpenAIApiKey = settingsResult.rows[0].openai_api_key;
-              }
+            if (
+              settingsResult.rows.length > 0 &&
+              settingsResult.rows[0].openai_api_key
+            ) {
+              tenantOpenAIApiKey = settingsResult.rows[0].openai_api_key;
             }
           } catch (error) {
-            console.error('Error loading RAG settings for OpenAI voice:', error);
-            // Continue with environment variable if loading fails
+            console.error(
+              "Error loading RAG settings for OpenAI voice:",
+              error,
+            );
           }
         }
-        
-        // Use tenant-specific API key if available, otherwise fall back to environment variable
+
         const apiKeyToUse = tenantOpenAIApiKey || OPENAI_API_KEY;
-        
+
         if (!apiKeyToUse) {
-          ws.close(1011, 'OpenAI API key not configured. Please set it in RAG settings or environment variables.');
+          ws.close(
+            1011,
+            "OpenAI API key not configured. Please set it in RAG settings or environment variables.",
+          );
           return;
         }
-        
-        const isAletheia = path.includes('aletheia');
-        const openAIUrl = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17";
-        openAISocket = new WebSocket(
-          openAIUrl,
-          ["realtime"],
-          {
-            headers: {
-              Authorization: `Bearer ${apiKeyToUse}`,
-              "OpenAI-Beta": "realtime=v1",
-            },
-          }
+
+        const isAletheia = path.includes("aletheia");
+        const openAIUrl =
+          "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17";
+        openAISocket = new WebSocket(openAIUrl, ["realtime"], {
+          headers: {
+            Authorization: `Bearer ${apiKeyToUse}`,
+            "OpenAI-Beta": "realtime=v1",
+          },
+        });
+
+        console.log(
+          `Connecting to OpenAI Realtime API${tenantOpenAIApiKey ? " (using tenant-specific API key)" : " (using environment API key)"}`,
         );
-        
-        console.log(`Connecting to OpenAI Realtime API${tenantOpenAIApiKey ? ' (using tenant-specific API key)' : ' (using environment API key)'}`);
-      
-        openAISocket.on('open', () => {
-          console.log(`Connected to OpenAI Realtime API for ${isAletheia ? 'Aletheia' : 'Maylin/Luna'}`);
-          
+
+        openAISocket.on("open", () => {
+          console.log(
+            `Connected to OpenAI Realtime API for ${isAletheia ? "Aletheia" : "Maylin/Luna"}`,
+          );
+
           // Send session update with Aletheia-specific configuration
           if (isAletheia && openAISocket) {
             const sessionUpdate = {
-              type: 'session.update',
+              type: "session.update",
               session: {
                 instructions: ALETHEIA_SYSTEM_PROMPT,
-                voice: 'alloy', // Neutral, reliable voice
-                output_audio_format: 'pcm16',
-                modalities: ['text', 'audio'],
-              }
+                voice: "alloy", // Neutral, reliable voice
+                output_audio_format: "pcm16",
+                modalities: ["text", "audio"],
+              },
             };
             openAISocket.send(JSON.stringify(sessionUpdate));
-            console.log('Sent Aletheia session configuration to OpenAI');
+            console.log("Sent Aletheia session configuration to OpenAI");
           }
         });
-        
+
         // Handle all OpenAI messages and forward to client
-        openAISocket.on('message', (data) => {
+        openAISocket.on("message", (data) => {
           if (ws.readyState === WebSocket.OPEN) {
             try {
               // Log important events
               const message = JSON.parse(data.toString());
-              if (message.type === 'session.created') {
-                console.log('OpenAI session created, forwarding to client');
-              } else if (message.type === 'response.audio.delta') {
+              if (message.type === "session.created") {
+                console.log("OpenAI session created, forwarding to client");
+              } else if (message.type === "response.audio.delta") {
                 // Audio data - don't log, too verbose
-              } else if (message.type === 'error') {
-                console.error('OpenAI error payload:', JSON.stringify(message, null, 2));
+              } else if (message.type === "error") {
+                console.error(
+                  "OpenAI error payload:",
+                  JSON.stringify(message, null, 2),
+                );
               } else {
-                console.log('OpenAI message:', message.type);
+                console.log("OpenAI message:", message.type);
               }
             } catch (e) {
               // Not JSON, forward as-is (binary audio data)
@@ -217,37 +253,55 @@ export function setupWebSocket(wss: WebSocketServer) {
             ws.send(data);
           }
         });
-        
-        openAISocket.on('error', (error) => {
-          console.error('OpenAI WebSocket error:', error);
-          ws.close(1011, 'OpenAI connection error');
+
+        openAISocket.on("error", (error) => {
+          console.error("OpenAI WebSocket error:", error);
+          ws.close(1011, "OpenAI connection error");
         });
-        
-        openAISocket.on('close', () => {
-          console.log('OpenAI WebSocket closed');
+
+        openAISocket.on("close", () => {
+          console.log("OpenAI WebSocket closed");
           if (ws.readyState === WebSocket.OPEN) {
             ws.close();
           }
         });
-        
-        ws.on('message', (data) => {
+
+        ws.on("message", (data) => {
           if (openAISocket?.readyState === WebSocket.OPEN) {
             try {
               const messageData = JSON.parse(data.toString());
-              
-              // Handle simple text message
+
+              // Extract text from various client message formats
+              let textContent: string | null = null;
+
               if (messageData.text && !messageData.type) {
-                const openAIMessage = {
-                  type: 'conversation.item.create',
-                  item: {
-                    type: 'message',
-                    role: 'user',
-                    content: [{ type: 'input_text', text: messageData.text }]
+                textContent = messageData.text;
+              } else if (messageData.client_content) {
+                // Gemini format: { client_content: { turns: [{ parts: [{ text }] }] } }
+                const turns = messageData.client_content.turns || [];
+                for (const turn of turns) {
+                  for (const part of turn.parts || []) {
+                    if (part.text) {
+                      textContent = part.text;
+                      break;
+                    }
                   }
+                  if (textContent) break;
+                }
+              }
+
+              if (textContent) {
+                const openAIMessage = {
+                  type: "conversation.item.create",
+                  item: {
+                    type: "message",
+                    role: "user",
+                    content: [{ type: "input_text", text: textContent }],
+                  },
                 };
                 openAISocket.send(JSON.stringify(openAIMessage));
-                openAISocket.send(JSON.stringify({ type: 'response.create' }));
-              } else {
+                openAISocket.send(JSON.stringify({ type: "response.create" }));
+              } else if (messageData.type) {
                 // Already formatted OpenAI message
                 openAISocket.send(data);
               }
@@ -258,78 +312,105 @@ export function setupWebSocket(wss: WebSocketServer) {
           }
         });
       })();
-      
-    } else if (path.includes('aletheia') && ALETHEIA_AI_PROVIDER === 'gemini') {
+    } else if (path.includes("aletheia") && ALETHEIA_AI_PROVIDER === "gemini") {
       // Queue for messages received before Gemini is ready
       const messageQueue: any[] = [];
       let geminiReady = false;
-      
+
       // Load RAG settings from database for this tenant BEFORE connecting
       (async () => {
         let ragSettings: any = {};
         let tenantGeminiApiKey: string | null = null;
-        
-        if (userId && userId !== 'dev-user') {
+
+        if (tenantId) {
           try {
-            const profileResult = await pool.query(
-              'SELECT tenant_id FROM public.profiles WHERE user_id = $1',
-              [userId]
+            const settingsResult = await pool.query(
+              "SELECT * FROM public.tenant_rag_settings WHERE tenant_id = $1",
+              [tenantId],
             );
-            if (profileResult.rows.length > 0) {
-              const tenantId = profileResult.rows[0].tenant_id;
-              const settingsResult = await pool.query(
-                'SELECT * FROM public.tenant_rag_settings WHERE tenant_id = $1',
-                [tenantId]
-              );
-              if (settingsResult.rows.length > 0) {
-                ragSettings = settingsResult.rows[0];
-                tenantGeminiApiKey = ragSettings.gemini_api_key;
-              }
+            if (settingsResult.rows.length > 0) {
+              ragSettings = settingsResult.rows[0];
+              tenantGeminiApiKey = ragSettings.gemini_api_key;
             }
           } catch (error) {
-            console.error('Error loading RAG settings for voice agentic:', error);
-            // Continue with default settings if loading fails
+            console.error(
+              "Error loading RAG settings for voice agentic:",
+              error,
+            );
           }
         }
-        
-        // Use tenant-specific API key if available, otherwise fall back to environment variable
+
         const apiKeyToUse = tenantGeminiApiKey || GEMINI_API_KEY;
-        
+
         if (!apiKeyToUse) {
-          ws.close(1011, 'Gemini API key not configured. Please set it in RAG settings or environment variables.');
+          ws.close(
+            1011,
+            "Gemini API key not configured. Please set it in RAG settings or environment variables.",
+          );
           return;
         }
-        
+
         // Check if this is a V2 backend architecture context
-        const isV2Context = url.searchParams.get('context') === 'v2' || url.searchParams.get('v2') === 'true';
+        const isV2Context =
+          url.searchParams.get("context") === "v2" ||
+          url.searchParams.get("v2") === "true";
         // Check if this is a Qlik migration context (from CohiChatPanel)
-        const isQlikContext = url.searchParams.get('context') === 'qlik' || url.searchParams.get('qlik') === 'true';
-        
+        const isQlikContext =
+          url.searchParams.get("context") === "qlik" ||
+          url.searchParams.get("qlik") === "true";
+
         const geminiUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKeyToUse}`;
-        
+
         try {
           geminiSocket = new WebSocket(geminiUrl);
-          
-          geminiSocket.on('open', async () => {
-          console.log(`Connected to Gemini Live API for Aletheia${isV2Context ? ' (V2 Backend Architecture)' : ''}${tenantGeminiApiKey ? ' (using tenant-specific API key)' : ' (using environment API key)'}`);
-          
-          
-          // Build dynamic system prompt from RAG settings
-          const allowedTopics = ragSettings.allowed_topics ? `\n\nALLOWED TOPICS:\n${ragSettings.allowed_topics.split('\n').filter(t => t.trim()).map(t => `- ${t.trim()}`).join('\n')}\n\nOnly discuss topics listed above. If asked about topics not listed, politely redirect to allowed topics.` : '';
-          
-          const conversationRules = ragSettings.conversation_rules ? `\n\nCONVERSATION RULES:\n${ragSettings.conversation_rules.split('\n').filter(r => r.trim()).map(r => `- ${r.trim()}`).join('\n')}\n\nYou must follow these rules strictly during all conversations.` : '';
-          
-          const knowledgeBaseLinks = ragSettings.knowledge_base_links ? `\n\nKNOWLEDGE BASE RESOURCES:\n${ragSettings.knowledge_base_links.split('\n').filter(l => l.trim()).map(l => `- ${l.trim()}`).join('\n')}\n\nReference these resources when providing information.` : '';
-          
-          // Build personality description from settings
-          const personalityTone = ragSettings.personality_tone || 'professional';
-          const personalityStyle = ragSettings.personality_style || 'concise';
-          const personalityCustom = ragSettings.personality_custom || '';
-          
-          const personalityDescription = `\n\nPERSONALITY:\n- Tone: ${personalityTone}\n- Communication Style: ${personalityStyle}${personalityCustom ? `\n- Custom: ${personalityCustom}` : ''}`;
-          
-          // V2 Backend Architecture Knowledge Base
-          const v2ArchitectureKnowledge = isV2Context ? `
+
+          geminiSocket.on("open", async () => {
+            console.log(
+              `Connected to Gemini Live API for Aletheia${isV2Context ? " (V2 Backend Architecture)" : ""}${tenantGeminiApiKey ? " (using tenant-specific API key)" : " (using environment API key)"}`,
+            );
+
+            // Build dynamic system prompt from RAG settings
+            const allowedTopics = ragSettings.allowed_topics
+              ? `\n\nALLOWED TOPICS:\n${ragSettings.allowed_topics
+                  .split("\n")
+                  .filter((t) => t.trim())
+                  .map((t) => `- ${t.trim()}`)
+                  .join(
+                    "\n",
+                  )}\n\nOnly discuss topics listed above. If asked about topics not listed, politely redirect to allowed topics.`
+              : "";
+
+            const conversationRules = ragSettings.conversation_rules
+              ? `\n\nCONVERSATION RULES:\n${ragSettings.conversation_rules
+                  .split("\n")
+                  .filter((r) => r.trim())
+                  .map((r) => `- ${r.trim()}`)
+                  .join(
+                    "\n",
+                  )}\n\nYou must follow these rules strictly during all conversations.`
+              : "";
+
+            const knowledgeBaseLinks = ragSettings.knowledge_base_links
+              ? `\n\nKNOWLEDGE BASE RESOURCES:\n${ragSettings.knowledge_base_links
+                  .split("\n")
+                  .filter((l) => l.trim())
+                  .map((l) => `- ${l.trim()}`)
+                  .join(
+                    "\n",
+                  )}\n\nReference these resources when providing information.`
+              : "";
+
+            // Build personality description from settings
+            const personalityTone =
+              ragSettings.personality_tone || "professional";
+            const personalityStyle = ragSettings.personality_style || "concise";
+            const personalityCustom = ragSettings.personality_custom || "";
+
+            const personalityDescription = `\n\nPERSONALITY:\n- Tone: ${personalityTone}\n- Communication Style: ${personalityStyle}${personalityCustom ? `\n- Custom: ${personalityCustom}` : ""}`;
+
+            // V2 Backend Architecture Knowledge Base
+            const v2ArchitectureKnowledge = isV2Context
+              ? `
 
 BACKEND ARCHITECTURE EXPERTISE:
 You are an expert software architect specializing in the Coheus v2 backend architecture. You think like a senior software architect—analytical, strategic, and solution-oriented. You have comprehensive knowledge of:
@@ -402,25 +483,29 @@ COMMUNICATION APPROACH FOR V2 CONTEXT:
 - Always bring conversations back to backend architecture when they drift, but do so naturally and helpfully
 - Your expertise is backend architecture—be confident in that domain, defer to others outside it
 
-When answering questions about the backend architecture, be specific, reference implementation details, and help engineers understand design decisions and rationale.` : '';
+When answering questions about the backend architecture, be specific, reference implementation details, and help engineers understand design decisions and rationale.`
+              : "";
 
-          // Send setup message
-          const setupMsg = {
-            setup: {
-              model: ragSettings.voice_model || "models/gemini-2.0-flash-exp",
-              generation_config: { 
-                response_modalities: ["AUDIO"],
-                speech_config: {
-                  voice_config: { 
-                    prebuilt_voice_config: { 
-                      voice_name: ragSettings.voice_name || "Aoede" 
-                    } 
-                  }
-                }
-              },
-              system_instruction: {
-                parts: [{ 
-                  text: `You are Cohi, an executive-intelligent, predictive, and proactive AI assistant designed for mortgage executives. You are the voice of the Coheus Executive Intelligence Platform.
+            // Send setup message
+            const setupMsg = {
+              setup: {
+                model:
+                  ragSettings.voice_model ||
+                  "models/gemini-2.0-flash-exp",
+                generation_config: {
+                  response_modalities: ["AUDIO"],
+                  speech_config: {
+                    voice_config: {
+                      prebuilt_voice_config: {
+                        voice_name: ragSettings.voice_name || "Aoede",
+                      },
+                    },
+                  },
+                },
+                system_instruction: {
+                  parts: [
+                    {
+                      text: `You are Cohi, an executive-intelligent, predictive, and proactive AI assistant designed for mortgage executives. You are the voice of the Coheus Executive Intelligence Platform.
 
 CORE IDENTITY:
 - Executive-intelligent: You think like a Chief of Staff, delivering insights that matter to leadership
@@ -442,8 +527,8 @@ ${personalityDescription}
 
 COMMUNICATION STYLE:
 - Executive-level: Speak to leaders, not operators
-- ${personalityStyle === 'concise' ? 'Concise: Get to the point quickly, but with depth' : personalityStyle === 'detailed' ? 'Detailed: Provide comprehensive information with context' : personalityStyle === 'conversational' ? 'Conversational: Engage naturally while maintaining professionalism' : 'Formal: Use formal language and structure'}
-- ${personalityTone === 'professional' ? 'Professional: Maintain a professional demeanor' : personalityTone === 'friendly' ? 'Friendly: Be warm and approachable' : personalityTone === 'executive' ? 'Executive: Speak with authority and confidence' : personalityTone === 'consultative' ? 'Consultative: Provide expert guidance and recommendations' : 'Analytical: Focus on data-driven insights'}
+- ${personalityStyle === "concise" ? "Concise: Get to the point quickly, but with depth" : personalityStyle === "detailed" ? "Detailed: Provide comprehensive information with context" : personalityStyle === "conversational" ? "Conversational: Engage naturally while maintaining professionalism" : "Formal: Use formal language and structure"}
+- ${personalityTone === "professional" ? "Professional: Maintain a professional demeanor" : personalityTone === "friendly" ? "Friendly: Be warm and approachable" : personalityTone === "executive" ? "Executive: Speak with authority and confidence" : personalityTone === "consultative" ? "Consultative: Provide expert guidance and recommendations" : "Analytical: Focus on data-driven insights"}
 - Insightful: Connect dots others might miss
 - Proactive: Don't wait to be asked—surface important information
 - Confident: You know your domain deeply
@@ -458,192 +543,251 @@ ${knowledgeBaseLinks}
 
 ${v2ArchitectureKnowledge}
 
-${isQlikContext ? QLIK_MIGRATION_CONTEXT : ''}
+${isQlikContext ? QLIK_MIGRATION_CONTEXT : ""}
 
-Remember: You are Cohi${isQlikContext ? ' (also known as Cohi)' : ''}—the executive intelligence platform. You don't just report data; you provide strategic clarity that helps leaders make better decisions.${isV2Context ? ' When in V2 context, you\'re a software architect expert who thinks deeply about system design, handles difficult questions professionally, and always guides conversations back to backend architecture.' : ''}${isQlikContext ? ' When in Qlik migration context, you specialize in Qlik to Coheus v2 migration, field mappings, formulas, and implementation status.' : ''}` 
-                }]
-              }
+Remember: You are Cohi${isQlikContext ? " (also known as Cohi)" : ""}—the executive intelligence platform. You don't just report data; you provide strategic clarity that helps leaders make better decisions.${isV2Context ? " When in V2 context, you're a software architect expert who thinks deeply about system design, handles difficult questions professionally, and always guides conversations back to backend architecture." : ""}${isQlikContext ? " When in Qlik migration context, you specialize in Qlik to Coheus v2 migration, field mappings, formulas, and implementation status." : ""}`,
+                    },
+                  ],
+                },
+              },
+            };
+
+            geminiSocket.send(JSON.stringify(setupMsg));
+            console.log("Sent Gemini setup message");
+
+            // Mark Gemini as ready and process queued messages
+            geminiReady = true;
+            while (
+              messageQueue.length > 0 &&
+              geminiSocket.readyState === WebSocket.OPEN
+            ) {
+              const queuedMessage = messageQueue.shift();
+              geminiSocket.send(queuedMessage);
             }
-          };
-          
-          geminiSocket.send(JSON.stringify(setupMsg));
-          console.log('Sent Gemini setup message');
-          
-          // Mark Gemini as ready and process queued messages
-          geminiReady = true;
-          while (messageQueue.length > 0 && geminiSocket.readyState === WebSocket.OPEN) {
-            const queuedMessage = messageQueue.shift();
-            geminiSocket.send(queuedMessage);
-          }
-        });
-        
-        geminiSocket.on('message', async (data) => {
-          try {
-            const messageData = JSON.parse(data.toString());
-            console.log('Gemini raw message:', JSON.stringify(messageData, null, 2));
-            
-            console.log('Gemini message type:', messageData.serverContent?.modelTurn?.parts?.[0]?.inlineData?.mimeType || 
-                                               messageData.server_content?.model_turn?.parts?.[0]?.inline_data?.mime_type || 'text');
-            
-            // Forward to client
-            if (ws.readyState === WebSocket.OPEN) {
-              if (data instanceof Buffer) {
-                ws.send(data);
-              } else {
-                ws.send(JSON.stringify(messageData));
-              }
-            }
-          } catch (error) {
-            console.error('Error processing Gemini message:', error);
-          }
-        });
-        
-        geminiSocket.on('error', (error) => {
-          console.error('Gemini WebSocket error:', error);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ 
-              error: 'Gemini connection error',
-              message: error.message 
-            }));
-          }
-        });
-        
-        geminiSocket.on('close', (code, reason) => {
-          console.log(`Gemini WebSocket closed: ${code} - ${reason}`);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.close();
-          }
-        });
-        
-        ws.on('message', (data) => {
-          // Queue message if Gemini isn't ready yet
-          if (!geminiReady || geminiSocket?.readyState !== WebSocket.OPEN) {
+          });
+
+          let geminiAudioChunks = 0;
+          geminiSocket.on("message", async (data) => {
             try {
-              // Parse and format the message before queuing
+              const messageData = JSON.parse(data.toString());
+              const parts =
+                messageData.serverContent?.modelTurn?.parts ||
+                messageData.server_content?.model_turn?.parts ||
+                [];
+              const hasAudio = parts.some(
+                (p: any) => p.inlineData || p.inline_data,
+              );
+              const hasThought = parts.some(
+                (p: any) => p.thought === true,
+              );
+              const hasTurnComplete =
+                messageData.serverContent?.turnComplete ||
+                messageData.server_content?.turn_complete;
+
+              if (messageData.setupComplete) {
+                console.log("Gemini: setup complete");
+              } else if (hasAudio) {
+                geminiAudioChunks++;
+                if (geminiAudioChunks === 1)
+                  console.log("Gemini: audio streaming started");
+              } else if (hasTurnComplete) {
+                console.log(
+                  `Gemini: turn complete (${geminiAudioChunks} audio chunks)`,
+                );
+                geminiAudioChunks = 0;
+              } else if (hasThought) {
+                // Don't forward thought messages to client, but log count
+                return;
+              }
+
+              if (ws.readyState === WebSocket.OPEN) {
+                if (data instanceof Buffer) {
+                  ws.send(data);
+                } else {
+                  ws.send(JSON.stringify(messageData));
+                }
+              }
+            } catch (error) {
+              console.error("Error processing Gemini message:", error);
+            }
+          });
+
+          geminiSocket.on("error", (error) => {
+            console.error("Gemini WebSocket error:", error);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  error: "Gemini connection error",
+                  message: error.message,
+                }),
+              );
+            }
+          });
+
+          geminiSocket.on("close", (code, reason) => {
+            console.log(`Gemini WebSocket closed: ${code} - ${reason}`);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+          });
+
+          ws.on("message", (data) => {
+            // Queue message if Gemini isn't ready yet
+            if (!geminiReady || geminiSocket?.readyState !== WebSocket.OPEN) {
+              try {
+                // Parse and format the message before queuing
+                let messageData;
+                if (data instanceof Buffer) {
+                  messageData = JSON.parse(data.toString());
+                } else if (typeof data === "string") {
+                  messageData = JSON.parse(data);
+                } else {
+                  messageData = data;
+                }
+
+                // Format the message for Gemini
+                let formattedMessage;
+                if (messageData.text) {
+                  // Simple text message
+                  formattedMessage = JSON.stringify({
+                    client_content: {
+                      turns: [
+                        {
+                          role: "user",
+                          parts: [{ text: messageData.text }],
+                        },
+                      ],
+                      turn_complete: true,
+                    },
+                  });
+                } else if (messageData.client_content) {
+                  // Already formatted Gemini message
+                  formattedMessage = JSON.stringify(messageData);
+                } else if (messageData.parts) {
+                  // Message with parts
+                  formattedMessage = JSON.stringify({
+                    client_content: {
+                      turns: [
+                        {
+                          role: "user",
+                          parts: messageData.parts,
+                        },
+                      ],
+                      turn_complete: true,
+                    },
+                  });
+                } else {
+                  // Try as-is
+                  formattedMessage = JSON.stringify(messageData);
+                }
+
+                messageQueue.push(formattedMessage);
+              } catch (error) {
+                console.error("Error parsing message for queue:", error);
+                // Queue raw data as fallback
+                messageQueue.push(
+                  data instanceof Buffer ? data.toString() : String(data),
+                );
+              }
+              return;
+            }
+
+            // Gemini is ready, send immediately
+            try {
+              // Parse client message
               let messageData;
               if (data instanceof Buffer) {
                 messageData = JSON.parse(data.toString());
-              } else if (typeof data === 'string') {
+              } else if (typeof data === "string") {
                 messageData = JSON.parse(data);
               } else {
                 messageData = data;
               }
-              
-              // Format the message for Gemini
-              let formattedMessage;
+
+              // Handle different message formats
               if (messageData.text) {
                 // Simple text message
-                formattedMessage = JSON.stringify({
+                const clientMessage = {
                   client_content: {
-                    turns: [{
-                      role: "user",
-                      parts: [{ text: messageData.text }]
-                    }],
-                    turn_complete: true
-                  }
-                });
+                    turns: [
+                      {
+                        role: "user",
+                        parts: [{ text: messageData.text }],
+                      },
+                    ],
+                    turn_complete: true,
+                  },
+                };
+                geminiSocket.send(JSON.stringify(clientMessage));
               } else if (messageData.client_content) {
                 // Already formatted Gemini message
-                formattedMessage = JSON.stringify(messageData);
+                geminiSocket.send(JSON.stringify(messageData));
               } else if (messageData.parts) {
                 // Message with parts
-                formattedMessage = JSON.stringify({
+                const clientMessage = {
                   client_content: {
-                    turns: [{
-                      role: "user",
-                      parts: messageData.parts
-                    }],
-                    turn_complete: true
-                  }
-                });
+                    turns: [
+                      {
+                        role: "user",
+                        parts: messageData.parts,
+                      },
+                    ],
+                    turn_complete: true,
+                  },
+                };
+                geminiSocket.send(JSON.stringify(clientMessage));
               } else {
-                // Try as-is
-                formattedMessage = JSON.stringify(messageData);
+                // Try sending as-is
+                geminiSocket.send(JSON.stringify(messageData));
               }
-              
-              messageQueue.push(formattedMessage);
             } catch (error) {
-              console.error('Error parsing message for queue:', error);
-              // Queue raw data as fallback
-              messageQueue.push(data instanceof Buffer ? data.toString() : String(data));
+              console.error("Error forwarding message to Gemini:", error);
+              // Try sending raw data if JSON parsing fails
+              if (data instanceof Buffer) {
+                geminiSocket.send(data);
+              } else {
+                geminiSocket.send(String(data));
+              }
             }
-            return;
-          }
-          
-          // Gemini is ready, send immediately
-          try {
-            // Parse client message
-            let messageData;
-            if (data instanceof Buffer) {
-              messageData = JSON.parse(data.toString());
-            } else if (typeof data === 'string') {
-              messageData = JSON.parse(data);
-            } else {
-              messageData = data;
-            }
-            
-            // Handle different message formats
-            if (messageData.text) {
-              // Simple text message
-              const clientMessage = {
-                client_content: {
-                  turns: [{
-                    role: "user",
-                    parts: [{ text: messageData.text }]
-                  }],
-                  turn_complete: true
-                }
-              };
-              geminiSocket.send(JSON.stringify(clientMessage));
-            } else if (messageData.client_content) {
-              // Already formatted Gemini message
-              geminiSocket.send(JSON.stringify(messageData));
-            } else if (messageData.parts) {
-              // Message with parts
-              const clientMessage = {
-                client_content: {
-                  turns: [{
-                    role: "user",
-                    parts: messageData.parts
-                  }],
-                  turn_complete: true
-                }
-              };
-              geminiSocket.send(JSON.stringify(clientMessage));
-            } else {
-              // Try sending as-is
-              geminiSocket.send(JSON.stringify(messageData));
-            }
-          } catch (error) {
-            console.error('Error forwarding message to Gemini:', error);
-            // Try sending raw data if JSON parsing fails
-            if (data instanceof Buffer) {
-              geminiSocket.send(data);
-            } else {
-              geminiSocket.send(String(data));
-            }
-          }
-        });
-        
+          });
         } catch (error: any) {
-          console.error('Error creating Gemini connection:', error);
-          ws.close(1011, 'Failed to connect to Gemini');
+          console.error("Error creating Gemini connection:", error);
+          ws.close(1011, "Failed to connect to Gemini");
         }
       })();
+    } else if (path.includes("jobs")) {
+      if (!userId) {
+        ws.close(1008, "Unauthorized");
+        return;
+      }
+      if (!jobConnections.has(userId)) {
+        jobConnections.set(userId, new Set());
+      }
+      jobConnections.get(userId)!.add(ws);
+      console.log(`Job WebSocket connected for user: ${userId}`);
+
+      ws.on("close", () => {
+        const set = jobConnections.get(userId!);
+        if (set) {
+          set.delete(ws);
+          if (set.size === 0) jobConnections.delete(userId!);
+        }
+        console.log(`Job WebSocket closed for user: ${userId}`);
+      });
+      return;
     } else {
-      ws.close(1008, 'Unknown WebSocket path');
+      ws.close(1008, "Unknown WebSocket path");
       return;
     }
-    
-    ws.on('error', (error) => {
-      console.error('Client WebSocket error:', error);
+
+    ws.on("error", (error) => {
+      console.error("Client WebSocket error:", error);
     });
-    
-    ws.on('close', () => {
-      console.log('Client WebSocket closed');
+
+    ws.on("close", () => {
+      console.log("Client WebSocket closed");
       openAISocket?.close();
       geminiSocket?.close();
     });
   });
 }
-

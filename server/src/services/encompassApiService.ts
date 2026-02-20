@@ -16,11 +16,25 @@ export interface EncompassField {
   description: string;
   fieldType: number;
   format?: string;
+  jsonPath?: string;
+  contractPath?: string;
+  dataType?: string;
+  readOnly?: boolean;
+  nullable?: boolean;
+  category?: string;
+  maxLength?: number;
+  multiInstance?: boolean;
 }
 
 export interface EncompassCustomFieldFromApi {
   Id: string;
   Audit?: { Data?: string };
+  Description?: string;
+  Format?: string;
+  jsonPath?: string;
+  contractPath?: string;
+  maxLength?: number;
+  isCalculatedField?: boolean;
 }
 
 interface EncompassTokenResponse {
@@ -52,10 +66,26 @@ export interface EncompassLoan {
   [key: string]: any; // Dynamic structure based on requested fields
 }
 
+export interface LoanSchemaField {
+  fieldId: string;
+  jsonPath: string;
+  description: string;
+  type: string;
+}
+
+/** Single field value from V3 Field Reader API */
+export interface FieldReaderValue {
+  fieldId: string;
+  value: string;
+}
+
 // Encompass User types from v1 API
 // Note: The 'id' field IS the username/login ID in Encompass v1 API
 export interface EncompassUserFromApi {
   id: string; // This is the login username (e.g., "jsmith")
+  userId?: string;
+  userName?: string;
+  enabled?: boolean;
   firstName?: string;
   lastName?: string;
   middleName?: string;
@@ -85,6 +115,10 @@ export interface EncompassUserFromApi {
     entityType?: string;
     entityName?: string;
   }>;
+  licenses?: Array<{
+    id?: string;
+    state?: string;
+  }>;
 }
 
 export interface EncompassUser {
@@ -111,23 +145,32 @@ export interface EncompassUser {
  * Note: In Encompass v1 API, the 'id' field IS the username/login ID
  */
 function mapEncompassUser(user: EncompassUserFromApi): EncompassUser {
+  const resolvedId = user.id || user.userId || user.userName || "";
+  const personaNames =
+    user.personas?.map((p) => p.entityName).filter(Boolean) as string[] || [];
+  const enabledFromIndicators = user.userIndicators?.includes("Enabled");
+  const resolvedEnabled =
+    typeof user.enabled === "boolean"
+      ? user.enabled
+      : enabledFromIndicators ?? true;
+
   return {
-    id: user.id,
-    username: user.id, // In v1 API, id IS the username
+    id: resolvedId,
+    username: user.userName || resolvedId,
     firstName: user.firstName,
     lastName: user.lastName,
     fullName:
       user.fullName ||
       (user.firstName && user.lastName
         ? `${user.firstName} ${user.lastName}`.trim()
-        : user.firstName || user.lastName || user.id),
+        : user.firstName || user.lastName || resolvedId),
     email: user.email,
     phone: user.phone,
     cellPhone: user.cellPhone,
     jobTitle: user.jobTitle,
-    isEnabled: user.userIndicators?.includes("Enabled") ?? false,
+    isEnabled: resolvedEnabled,
     userIndicators: user.userIndicators || [],
-    personas: user.personas?.map((p) => p.entityName).filter(Boolean) as string[] || [],
+    personas: personaNames,
     nmlsId: user.nmlsOriginatorID,
     orgId: user.organization?.entityId,
     orgName: user.organization?.entityName,
@@ -136,11 +179,20 @@ function mapEncompassUser(user: EncompassUserFromApi): EncompassUser {
 }
 
 export class EncompassApiService {
+  private static tokenRefreshLocks = new Map<string, Promise<string>>();
+  private static concurrencyPermits = new Map<string, number>();
+  private static concurrencyInFlight = new Map<string, number>();
+  private static concurrencyWaitQueues = new Map<
+    string,
+    Array<() => void>
+  >();
+  private static lastThrottleLogAt = 0;
+
   private apiClient: AxiosInstance;
   private encompassApiBaseUrl: string;
-  private tenantPool?: pg.Pool; // Tenant-specific database pool
-  private MAX_CONCURRENCY_RATIO = 0.2; // 20% threshold for ISV partners
-  private CONCURRENCY_POLL_INTERVAL = 2000; // 2 seconds in milliseconds
+  private tenantPool?: pg.Pool;
+  private MAX_CONCURRENCY_RATIO = 0.2; // 20% — ICE ISV partner hard limit per docs
+  private CONCURRENCY_POLL_INTERVAL = 2000; // 2 seconds — exponential backoff base
 
   constructor(tenantPool?: pg.Pool, apiServer?: string) {
     // Use provided API server or default to production
@@ -173,6 +225,53 @@ export class EncompassApiService {
     }`;
   }
 
+  private getLimiterKey(tenantId: string, losConnectionId: string): string {
+    return `${tenantId}:${losConnectionId}`;
+  }
+
+  private async acquireConcurrencyPermit(
+    tenantId: string,
+    losConnectionId: string,
+  ): Promise<void> {
+    const key = this.getLimiterKey(tenantId, losConnectionId);
+    const permits = EncompassApiService.concurrencyPermits.get(key) ?? 1;
+    const inFlight = EncompassApiService.concurrencyInFlight.get(key) ?? 0;
+    if (inFlight < permits) {
+      EncompassApiService.concurrencyInFlight.set(key, inFlight + 1);
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const queue = EncompassApiService.concurrencyWaitQueues.get(key) || [];
+      queue.push(resolve);
+      EncompassApiService.concurrencyWaitQueues.set(key, queue);
+    });
+    const current = EncompassApiService.concurrencyInFlight.get(key) ?? 0;
+    EncompassApiService.concurrencyInFlight.set(key, current + 1);
+  }
+
+  private releaseConcurrencyPermit(tenantId: string, losConnectionId: string): void {
+    const key = this.getLimiterKey(tenantId, losConnectionId);
+    const inFlight = EncompassApiService.concurrencyInFlight.get(key) ?? 0;
+    if (inFlight > 0) {
+      EncompassApiService.concurrencyInFlight.set(key, inFlight - 1);
+    }
+    const queue = EncompassApiService.concurrencyWaitQueues.get(key) || [];
+    const next = queue.shift();
+    EncompassApiService.concurrencyWaitQueues.set(key, queue);
+    if (next) next();
+  }
+
+  private updateConcurrencyPermits(
+    tenantId: string,
+    losConnectionId: string,
+    limit: number,
+  ): void {
+    const key = this.getLimiterKey(tenantId, losConnectionId);
+    const capped = Math.max(1, Math.floor(limit * this.MAX_CONCURRENCY_RATIO));
+    EncompassApiService.concurrencyPermits.set(key, capped);
+  }
+
   /**
    * Get cached token from PostgreSQL (tenant-specific database)
    */
@@ -186,7 +285,7 @@ export class EncompassApiService {
     const cacheKey = this.getCacheKey(clientDetails);
     try {
       const result = await this.tenantPool.query(
-        `SELECT token, expires_at 
+        `SELECT token, expires_at, updated_at
          FROM public.encompass_token_cache 
          WHERE cache_key = $1`,
         [cacheKey],
@@ -195,11 +294,16 @@ export class EncompassApiService {
       if (result.rows.length > 0) {
         const cachedToken = result.rows[0];
         const now = Date.now();
-        if (cachedToken.expires_at > now) {
+        const lastUsedAt = cachedToken.updated_at
+          ? new Date(cachedToken.updated_at).getTime()
+          : 0;
+        const withinKeepAliveWindow =
+          now - lastUsedAt <= 15 * 60 * 1000; // ICE keepalive cadence
+        if (cachedToken.expires_at > now && withinKeepAliveWindow) {
           return cachedToken.token;
         } else {
           console.log(
-            `[EncompassApiService] Cached token expired for ${cacheKey}`,
+            `[EncompassApiService] Cached token expired or stale for ${cacheKey}`,
           );
           await this.invalidateToken(clientDetails);
         }
@@ -241,6 +345,26 @@ export class EncompassApiService {
     } catch (error: any) {
       console.error(
         "[EncompassApiService] Error caching token:",
+        error.message,
+      );
+    }
+  }
+
+  private async touchTokenUsage(
+    clientDetails: EncompassClientDetails,
+  ): Promise<void> {
+    if (!this.tenantPool) return;
+    const cacheKey = this.getCacheKey(clientDetails);
+    try {
+      await this.tenantPool.query(
+        `UPDATE public.encompass_token_cache
+         SET updated_at = NOW()
+         WHERE cache_key = $1`,
+        [cacheKey],
+      );
+    } catch (error: any) {
+      console.warn(
+        "[EncompassApiService] Error touching token usage:",
         error.message,
       );
     }
@@ -309,6 +433,7 @@ export class EncompassApiService {
    */
   private async checkConcurrencyAndThrottle(
     response: AxiosResponse,
+    tenantId?: string,
     losConnectionId?: string,
   ): Promise<ConcurrencyMetrics | null> {
     const limitStr = response.headers["x-concurrency-limit-limit"];
@@ -350,22 +475,24 @@ export class EncompassApiService {
 
     // Log metrics to PostgreSQL
     await this.logConcurrencyMetrics(metrics, losConnectionId);
+    if (tenantId && losConnectionId) {
+      this.updateConcurrencyPermits(tenantId, losConnectionId, limit);
+    }
 
-    // Throttle if threshold exceeded
     if (metrics.exceeded_threshold) {
       const waitTime = this.CONCURRENCY_POLL_INTERVAL;
-      console.warn(
-        `[EncompassApiService] Concurrency utilization ${(
-          utilizationRatio * 100
-        ).toFixed(1)}% exceeds ISV partner threshold ${(
-          this.MAX_CONCURRENCY_RATIO * 100
-        ).toFixed(1)}%. Waiting ${waitTime}ms before next request...`,
-      );
-
+      const now = Date.now();
+      if (now - EncompassApiService.lastThrottleLogAt > 10_000) {
+        EncompassApiService.lastThrottleLogAt = now;
+        console.warn(
+          `[EncompassApiService] Concurrency ${utilized}/${limit} (${(
+            utilizationRatio * 100
+          ).toFixed(0)}%) exceeds ${(
+            this.MAX_CONCURRENCY_RATIO * 100
+          ).toFixed(0)}% threshold — throttling ${waitTime}ms`,
+        );
+      }
       await new Promise((resolve) => setTimeout(resolve, waitTime));
-      console.log(
-        `[EncompassApiService] Resumed after ${waitTime}ms concurrency wait`,
-      );
     }
 
     return metrics;
@@ -383,6 +510,7 @@ export class EncompassApiService {
       tenantId,
       losConnectionId,
     );
+    const cacheKey = this.getCacheKey(clientDetails);
 
     // Check cache first unless force refresh
     if (!forceRefresh) {
@@ -392,6 +520,23 @@ export class EncompassApiService {
       }
     }
 
+    const existingRefresh = EncompassApiService.tokenRefreshLocks.get(cacheKey);
+    if (existingRefresh && !forceRefresh) {
+      return existingRefresh;
+    }
+
+    const refreshPromise = this.fetchAndCacheEncompassAccessToken(clientDetails);
+    EncompassApiService.tokenRefreshLocks.set(cacheKey, refreshPromise);
+    try {
+      return await refreshPromise;
+    } finally {
+      EncompassApiService.tokenRefreshLocks.delete(cacheKey);
+    }
+  }
+
+  private async fetchAndCacheEncompassAccessToken(
+    clientDetails: EncompassClientDetails,
+  ): Promise<string> {
     const {
       InstanceId,
       ApiClientId,
@@ -641,8 +786,8 @@ export class EncompassApiService {
         matchType: 'isNotEmpty',
         value: '',
       },
-      fields: ['Loan.LoanNumber'], // Minimal fields, we just need GUIDs
-      sortOrder: [{ canonicalName: 'Loan.LastModified', order: 'desc' }],
+      fields: ['Loan.LoanNumber'],
+      sortOrder: [{ canonicalName: 'Loan.LastModified', order: 'descending' }],
     };
     const initialBodyJson = JSON.stringify(initialRequestBody);
     
@@ -668,24 +813,23 @@ export class EncompassApiService {
       // Build request body - filter should only be included on first page
       let pageBodyJson: string;
       if (cursor) {
-        // Subsequent pages: no filter, just fields and sortOrder
         pageBodyJson = JSON.stringify({
           fields: ['Loan.LoanNumber'],
-          sortOrder: [{ canonicalName: 'Loan.LastModified', order: 'desc' }],
+          sortOrder: [{ canonicalName: 'Loan.LastModified', order: 'descending' }],
         });
       } else {
         pageBodyJson = initialBodyJson;
       }
       
       try {
-        // v1 pipeline expects Content-Type: text/plain with JSON string body
+        // v3 pipeline accepts JSON body
         const response = await apiClientForConnection.post<any>(
-          '/v1/loanPipeline',
-          pageBodyJson,
+          '/v3/loanPipeline',
+          JSON.parse(pageBodyJson),
           {
             headers: { 
               Authorization: impersonationToken,
-              'Content-Type': 'text/plain',
+              'Content-Type': 'application/json',
             },
             params: pageParams,
           },
@@ -775,56 +919,94 @@ export class EncompassApiService {
       tenantId,
       losConnectionId,
     );
+    const clientDetails = await getEncompassCredentials(tenantId, losConnectionId);
 
-    try {
-      const response = await operation(accessToken);
+    const MAX_THROTTLE_RETRIES = 5;
+    let throttleAttempt = 0;
 
-      // Check concurrency headers and throttle if needed
-      const concurrency = await this.checkConcurrencyAndThrottle(
-        response,
-        losConnectionId,
-      );
+    while (true) {
+      await this.acquireConcurrencyPermit(tenantId, losConnectionId);
+      try {
+        const response = await operation(accessToken);
+        await this.touchTokenUsage(clientDetails);
 
-      return {
-        data: response.data,
-        concurrency: concurrency || undefined,
-      };
-    } catch (error: any) {
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        console.warn(`[Sync] Token expired (401), refreshing...`);
-        const clientDetails = await getEncompassCredentials(
+        // Check concurrency headers and throttle if needed
+        const concurrency = await this.checkConcurrencyAndThrottle(
+          response,
           tenantId,
           losConnectionId,
         );
-        await this.invalidateToken(clientDetails);
-        accessToken = await this.getEncompassAccessToken(
-          tenantId,
-          losConnectionId,
-          true,
-        );
 
-        try {
-          const retryResponse = await operation(accessToken);
+        return {
+          data: response.data,
+          concurrency: concurrency || undefined,
+        };
+      } catch (error: any) {
+        const status = axios.isAxiosError(error)
+          ? error.response?.status
+          : undefined;
 
-          // Check concurrency on retry as well
-          const retryConcurrency = await this.checkConcurrencyAndThrottle(
-            retryResponse,
-            losConnectionId,
+        // 429 = concurrency/rate limit exhausted (Too Many Requests)
+        // 409 = pipeline or object state conflict from rapid queries (Conflict)
+        // Both are transient and recoverable with back-off.
+        if (
+          (status === 429 || status === 409) &&
+          throttleAttempt < MAX_THROTTLE_RETRIES
+        ) {
+          throttleAttempt++;
+          const jitter = Math.floor(Math.random() * 500);
+          const backoff = this.CONCURRENCY_POLL_INTERVAL * throttleAttempt + jitter;
+          console.warn(
+            `[EncompassApiService] Transient Encompass error (${status}), retry ${throttleAttempt}/${MAX_THROTTLE_RETRIES} in ${backoff}ms...`,
           );
-
-          return {
-            data: retryResponse.data,
-            concurrency: retryConcurrency || undefined,
-          };
-        } catch (retryError: any) {
-          console.error(
-            `[EncompassApiService] Retry failed after token refresh:`,
-            retryError.response?.data || retryError.message,
-          );
-          throw retryError;
+          await new Promise((resolve) => setTimeout(resolve, backoff));
+          continue;
         }
+
+        // Log non-retryable Encompass errors with response details
+        if (axios.isAxiosError(error) && error.response && status !== 401) {
+          console.error(
+            `[EncompassApiService] Encompass API error ${status}:`,
+            JSON.stringify(error.response.data ?? {}).slice(0, 500),
+          );
+        }
+
+        // Handle 401 (token expired) with token refresh
+        if (status === 401) {
+          console.warn(`[Sync] Token expired (401), refreshing...`);
+          await this.invalidateToken(clientDetails);
+          accessToken = await this.getEncompassAccessToken(
+            tenantId,
+            losConnectionId,
+            true,
+          );
+          throttleAttempt = 0;
+
+          try {
+            const retryResponse = await operation(accessToken);
+
+            const retryConcurrency = await this.checkConcurrencyAndThrottle(
+              retryResponse,
+              tenantId,
+              losConnectionId,
+            );
+
+            return {
+              data: retryResponse.data,
+              concurrency: retryConcurrency || undefined,
+            };
+          } catch (retryError: any) {
+            console.error(
+              `[EncompassApiService] Retry failed after token refresh:`,
+              retryError.response?.data || retryError.message,
+            );
+            throw retryError;
+          }
+        }
+        throw error;
+      } finally {
+        this.releaseConcurrencyPermit(tenantId, losConnectionId);
       }
-      throw error;
     }
   }
 
@@ -879,52 +1061,68 @@ export class EncompassApiService {
       `[EncompassApiService] Fetching RDB fields for connection: ${losConnectionId}`,
     );
 
-    const clientDetails = await getEncompassCredentials(
-      tenantId,
-      losConnectionId,
-    );
-    let instanceIdParam = clientDetails.InstanceId;
-    if (instanceIdParam && instanceIdParam.startsWith("30")) {
-      instanceIdParam = instanceIdParam.replace("30", "BE");
+    const fields: EncompassField[] = [];
+    let start = 0;
+    const pageLimit = 500;
+    let latestConcurrency: ConcurrencyMetrics | undefined;
+
+    while (true) {
+      const response = await this.executeWithTokenRetry<any>(
+        tenantId,
+        losConnectionId,
+        async (accessToken) => {
+          return await this.apiClient.get<any>("/v3/schemas/loan/standardFields", {
+            headers: { Authorization: accessToken },
+            params: { start, limit: pageLimit },
+          });
+        },
+      );
+
+      latestConcurrency = response.concurrency;
+      const payload = response.data;
+      const pageItems: any[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.fields)
+            ? payload.fields
+            : [];
+
+      if (pageItems.length === 0) break;
+
+      for (const p of pageItems) {
+        const fieldId = p.id || p.Id || p.fieldId || p.fieldID;
+        if (!fieldId) continue;
+        fields.push({
+          fieldID: fieldId,
+          description: p.description || p.Description || "",
+          fieldType: 0,
+          format: p.format || p.Format,
+          jsonPath: p.jsonPath || p.JsonPath,
+          contractPath: p.contractPath,
+          dataType: p.dataType,
+          readOnly: p.readOnly,
+          nullable: p.nullable,
+          category: p.category,
+          maxLength: p.maxLength,
+          multiInstance: p.multiInstance,
+        });
+      }
+
+      if (pageItems.length < pageLimit) break;
+      start += pageLimit;
     }
 
-    return this.executeWithTokenRetry<{ pipelineLoanReportFieldDefs: any[] }>(
-      tenantId,
-      losConnectionId,
-      async (accessToken) => {
-        const apiUrl = `/v1/loanPipeline/fieldDefinitions`;
-        return await this.apiClient.get<{
-          pipelineLoanReportFieldDefs: any[];
-        }>(apiUrl, {
-          headers: { Authorization: accessToken },
-          params: { instanceId: instanceIdParam },
-        });
-      },
-    ).then((response) => {
-      const data = response.data;
-      if (data && data.pipelineLoanReportFieldDefs) {
-        return {
-          data: data.pipelineLoanReportFieldDefs
-            .filter(
-              (p: any) =>
-                p.fieldID &&
-                !p.fieldID.startsWith("97") &&
-                !p.fieldID.startsWith("65"),
-            )
-            .map((p: any) => ({
-              fieldID: p.fieldID,
-              description: p.description,
-              fieldType: parseInt(p.fieldType, 10) || 0,
-              format: p.format,
-            })),
-          concurrency: response.concurrency,
-        };
-      }
-      return {
-        data: [],
-        concurrency: response.concurrency,
-      };
-    });
+    return {
+      data: fields
+        .filter(
+          (p) =>
+            p.fieldID &&
+            !p.fieldID.startsWith("97") &&
+            !p.fieldID.startsWith("65"),
+        ),
+      concurrency: latestConcurrency,
+    };
   }
 
   /**
@@ -938,40 +1136,368 @@ export class EncompassApiService {
       `[EncompassApiService] Fetching Custom fields for connection: ${losConnectionId}`,
     );
 
-    const clientDetails = await getEncompassCredentials(
-      tenantId,
-      losConnectionId,
-    );
-    let instanceIdParam = clientDetails.InstanceId;
-    if (instanceIdParam && instanceIdParam.startsWith("30")) {
-      instanceIdParam = instanceIdParam.replace("30", "BE");
+    const customFields: EncompassCustomFieldFromApi[] = [];
+    let start = 0;
+    const pageLimit = 100;
+    let latestConcurrency: ConcurrencyMetrics | undefined;
+
+    while (true) {
+      const response = await this.executeWithTokenRetry<any>(
+        tenantId,
+        losConnectionId,
+        async (accessToken) => {
+          return await this.apiClient.get<any>("/v3/settings/loan/customFields", {
+            headers: { Authorization: accessToken },
+            params: { start, limit: pageLimit },
+          });
+        },
+      );
+
+      latestConcurrency = response.concurrency;
+      const payload = response.data;
+      const pageItems: any[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.customFields)
+            ? payload.customFields
+            : [];
+      if (pageItems.length === 0) break;
+
+      customFields.push(
+        ...pageItems.map((cf: any) => ({
+          Id: cf.id || cf.Id,
+          Audit: { Data: cf.description || cf.Description || cf.id || cf.Id },
+          Description: cf.description || cf.Description,
+          Format: cf.format || cf.Format,
+          jsonPath: cf.jsonPath || cf.JsonPath,
+          contractPath: cf.contractPath,
+          maxLength: cf.maxLength,
+          isCalculatedField: cf.isCalculatedField,
+        })),
+      );
+
+      if (pageItems.length < pageLimit) break;
+      start += pageLimit;
     }
 
-    return this.executeWithTokenRetry<any[]>(
-      tenantId,
-      losConnectionId,
-      async (accessToken) => {
-        const apiUrl = `/v1/settings/loan/customFields`;
-        return await this.apiClient.get<any[]>(apiUrl, {
-          headers: { Authorization: accessToken },
-          params: { instanceId: instanceIdParam },
-        });
-      },
-    ).then((response) => {
-      return {
-        data:
-          response.data.map((cf: any) => ({
-            Id: cf.id,
-            Audit: cf.audit ? { Data: cf.audit.data } : undefined,
-          })) || [],
-        concurrency: response.concurrency,
-      };
-    });
+    return {
+      data: customFields,
+      concurrency: latestConcurrency,
+    };
   }
 
   /**
-   * Get loans using v1 pipeline endpoint (POST with JSON body containing filter, fields, sortOrder)
-   * Response structure: { root: [{ loanGuid, fields: [{ fieldId, value }] }] }
+   * Get virtual field definitions (milestones, team members, documents, employment, etc.).
+   * Used to build complete fieldId→jsonPath mappings for full-loan analysis bridging.
+   * GET /v3/schemas/loan/virtualFields with pagination.
+   * Capped at maxTotal (default 3000) to avoid OOM — the API can return 100k+ definitions.
+   */
+  public async getVirtualFields(
+    tenantId: string,
+    losConnectionId: string,
+    options?: {
+      virtualFieldTypes?: string[];
+      start?: number;
+      limit?: number;
+      /** Stop after this many fields to avoid heap exhaustion (default 3000). */
+      maxTotal?: number;
+    }
+  ): Promise<EncompassApiResponse<LoanSchemaField[]>> {
+    console.log(
+      `[EncompassApiService] Fetching virtual fields for connection: ${losConnectionId}`,
+    );
+
+    const fields: LoanSchemaField[] = [];
+    let start = options?.start ?? 0;
+    const pageLimit = Math.min(options?.limit ?? 200, 500);
+    const maxTotal = options?.maxTotal ?? 3000;
+    let latestConcurrency: ConcurrencyMetrics | undefined;
+
+    const params: Record<string, string | number> = { start, limit: pageLimit };
+    if (options?.virtualFieldTypes?.length) {
+      params.virtualFieldTypes = options.virtualFieldTypes.join(",");
+    }
+
+    while (fields.length < maxTotal) {
+      const response = await this.executeWithTokenRetry<any>(
+        tenantId,
+        losConnectionId,
+        async (accessToken) => {
+          return await this.apiClient.get<any>("/v3/schemas/loan/virtualFields", {
+            headers: { Authorization: accessToken },
+            params,
+          });
+        },
+      );
+
+      latestConcurrency = response.concurrency;
+      const payload = response.data;
+      const pageItems: any[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.fields)
+            ? payload.fields
+            : [];
+
+      if (pageItems.length === 0) break;
+
+      for (const p of pageItems) {
+        if (fields.length >= maxTotal) break;
+        const fieldId = p.id ?? p.Id ?? p.fieldId ?? p.fieldID;
+        if (!fieldId) continue;
+        const jsonPath = p.jsonPath ?? p.JsonPath ?? "";
+        fields.push({
+          fieldId: String(fieldId),
+          jsonPath,
+          description: p.description ?? p.Description ?? "",
+          type: p.dataType ?? p.format ?? p.Format ?? "string",
+        });
+      }
+
+      if (pageItems.length < pageLimit) break;
+      start += pageLimit;
+      params.start = start;
+    }
+
+    console.log(
+      `[EncompassApiService] Virtual fields: ${fields.length} definitions (capped at ${maxTotal})`,
+    );
+    return {
+      data: fields,
+      concurrency: latestConcurrency,
+    };
+  }
+
+  /**
+   * Get the canonical field names configured in the tenant's Reporting Database (RDB).
+   * GET /v3/loanPipeline/canonicalFields — returns ONLY fields the Pipeline API can query,
+   * i.e. those the admin has added to the RDB in Encompass settings.
+   */
+  public async getCanonicalFields(
+    tenantId: string,
+    losConnectionId: string,
+  ): Promise<EncompassApiResponse<{ canonicalName: string; displayName: string; dataType?: string }[]>> {
+    console.log(
+      `[EncompassApiService] Fetching canonical (RDB) fields for connection: ${losConnectionId}`,
+    );
+
+    const response = await this.executeWithTokenRetry<any>(
+      tenantId,
+      losConnectionId,
+      async (accessToken) => {
+        return await this.apiClient.get<any>("/v3/loanPipeline/canonicalFields", {
+          headers: { Authorization: accessToken },
+        });
+      },
+    );
+
+    const payload = response.data;
+    const items: any[] = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : [];
+
+    const out: { canonicalName: string; displayName: string; dataType?: string }[] = [];
+    for (const it of items) {
+      const cname = it.canonicalName || it.name || it.criterionFieldName;
+      const dname = it.displayName || it.description || cname;
+      const dtype = it.dataType || it.fieldType;
+      if (!cname) continue;
+      out.push({ canonicalName: cname, displayName: dname, dataType: dtype });
+    }
+
+    console.log(
+      `[EncompassApiService] Canonical fields: ${out.length} RDB entries`,
+    );
+    return { data: out, concurrency: response.concurrency };
+  }
+
+  /**
+   * Get the full loan schema — every field ID with its JSON path, description, and type.
+   * Includes v3 standard fields, custom fields, and virtual fields (milestones, team members, documents, employment, etc.).
+   */
+  public async getLoanSchema(
+    tenantId: string,
+    losConnectionId: string,
+  ): Promise<EncompassApiResponse<LoanSchemaField[]>> {
+    console.log(
+      `[EncompassApiService] Fetching loan schema for connection: ${losConnectionId}`,
+    );
+
+    const fieldsResponse = await this.getRdbFields(tenantId, losConnectionId);
+    const customFieldsResponse = await this.getCustomFields(tenantId, losConnectionId);
+    let virtualFieldsResponse: { data: LoanSchemaField[]; concurrency?: ConcurrencyMetrics };
+    try {
+      virtualFieldsResponse = await this.getVirtualFields(tenantId, losConnectionId);
+    } catch (err) {
+      console.warn(
+        `[EncompassApiService] Virtual fields fetch failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      virtualFieldsResponse = { data: [], concurrency: undefined };
+    }
+
+    const fields: LoanSchemaField[] = fieldsResponse.data.map((f) => ({
+      fieldId: f.fieldID,
+      jsonPath: f.jsonPath || "",
+      description: f.description || "",
+      type: f.dataType || f.format || "string",
+    }));
+    for (const customField of customFieldsResponse.data) {
+      fields.push({
+        fieldId: customField.Id,
+        jsonPath: customField.jsonPath || "",
+        description: customField.Description || customField.Audit?.Data || "",
+        type: customField.Format || "string",
+      });
+    }
+    const seenIds = new Set(fields.map((f) => f.fieldId));
+    for (const vf of virtualFieldsResponse.data) {
+      if (vf.fieldId && !seenIds.has(vf.fieldId)) {
+        seenIds.add(vf.fieldId);
+        fields.push(vf);
+      }
+    }
+
+    console.log(
+      `[EncompassApiService] Loan schema: ${fields.length} fields (standard + custom + virtual)`,
+    );
+    return {
+      data: fields,
+      concurrency:
+        fieldsResponse.concurrency ||
+        customFieldsResponse.concurrency ||
+        virtualFieldsResponse.concurrency,
+    };
+  }
+
+  /**
+   * Get schema for a specific field ID — returns the JSON path and metadata.
+   * Implemented by looking up the v3 standard fields list.
+   */
+  public async getFieldSchema(
+    tenantId: string,
+    losConnectionId: string,
+    fieldId: string,
+  ): Promise<EncompassApiResponse<LoanSchemaField | null>> {
+    const [fieldsResponse, customFieldsResponse] = await Promise.all([
+      this.getRdbFields(tenantId, losConnectionId),
+      this.getCustomFields(tenantId, losConnectionId),
+    ]);
+    const normalized = fieldId.startsWith("Fields.")
+      ? fieldId.substring(7)
+      : fieldId;
+    const match = fieldsResponse.data.find((f) => {
+      const candidate = f.fieldID.startsWith("Fields.")
+        ? f.fieldID.substring(7)
+        : f.fieldID;
+      return candidate === normalized || f.fieldID === fieldId;
+    });
+    if (!match) {
+      const customMatch = customFieldsResponse.data.find((f) => f.Id === fieldId);
+      if (!customMatch) {
+        return {
+          data: null,
+          concurrency: fieldsResponse.concurrency || customFieldsResponse.concurrency,
+        };
+      }
+      return {
+        data: {
+          fieldId: customMatch.Id,
+          jsonPath: customMatch.jsonPath || "",
+          description: customMatch.Description || customMatch.Audit?.Data || "",
+          type: customMatch.Format || "string",
+        },
+        concurrency: customFieldsResponse.concurrency || fieldsResponse.concurrency,
+      };
+    }
+    return {
+      data: {
+        fieldId: match.fieldID,
+        jsonPath: match.jsonPath || "",
+        description: match.description || "",
+        type: match.dataType || match.format || "string",
+      },
+      concurrency: fieldsResponse.concurrency,
+    };
+  }
+
+  /**
+   * Read specific field values from a loan by field ID (standard, custom, and virtual).
+   * POST /v3/loans/{loanGuid}/fieldReader with invalidFieldBehavior=Include so invalid
+   * field IDs return blank instead of failing the request.
+   */
+  public async readLoanFields(
+    tenantId: string,
+    losConnectionId: string,
+    loanGuid: string,
+    fieldIds: string[],
+  ): Promise<EncompassApiResponse<FieldReaderValue[]>> {
+    if (fieldIds.length === 0) {
+      return { data: [] };
+    }
+    const normalizedGuid = loanGuid.replace(/[{}]/g, "");
+    const response = await this.executeWithTokenRetry<any>(
+      tenantId,
+      losConnectionId,
+      async (accessToken) => {
+        return await this.apiClient.post<any>(
+          `/v3/loans/${normalizedGuid}/fieldReader`,
+          fieldIds,
+          {
+            headers: {
+              Authorization: accessToken,
+              "Content-Type": "application/json",
+            },
+            params: { invalidFieldBehavior: "Include" },
+          },
+        );
+      },
+    );
+    const raw = response.data;
+    const items: FieldReaderValue[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.fieldData)
+        ? raw.fieldData
+        : Array.isArray(raw?.loanFieldDataContract)
+          ? raw.loanFieldDataContract
+          : [];
+    const data = items.map((item: any) => ({
+      fieldId: String(item.fieldId ?? item.fieldID ?? item.id ?? ""),
+      value: item.value != null ? String(item.value) : "",
+    }));
+    return { data, concurrency: response.concurrency };
+  }
+
+  /**
+   * Get a single loan by GUID — returns the full loan object with ALL fields.
+   * Endpoint: GET /v3/loans/{loanGuid}
+   */
+  public async getLoanById(
+    tenantId: string,
+    losConnectionId: string,
+    loanGuid: string,
+  ): Promise<EncompassApiResponse<Record<string, any>>> {
+    return this.executeWithTokenRetry<Record<string, any>>(
+      tenantId,
+      losConnectionId,
+      async (accessToken) => {
+        const normalizedGuid = loanGuid.replace(/[{}]/g, "");
+        return await this.apiClient.get<Record<string, any>>(
+          `/v3/loans/${normalizedGuid}`,
+          {
+            headers: { Authorization: accessToken },
+            params: { view: "entity" },
+          },
+        );
+      },
+    );
+  }
+
+  /**
+   * Get loans using v3 pipeline endpoint (POST with JSON body containing filter, fields, sortOrder)
    */
   public async getLoans(
     tenantId: string,
@@ -997,14 +1523,6 @@ export class EncompassApiService {
     const apiClientForConnection = axios.create({
       baseURL: `${apiServer}/encompass`,
     });
-
-    // Build query parameters
-    const params: any = {
-      cursorType: "randomAccess", // Required for v1 pipeline
-    };
-    if (options.limit) {
-      params.limit = options.limit;
-    }
 
     // Build field GUIDs array - only numeric field IDs get "Fields." prefix
     // Canonical names (Loan.*, etc.) should NOT have "Fields." prefix
@@ -1035,13 +1553,11 @@ export class EncompassApiService {
     // Build filter terms array
     const filterTerms: any[] = [];
 
-    // Add modifiedFrom filter if provided
     if (options.modifiedFrom) {
       filterTerms.push({
         canonicalName: "Loan.LastModified",
         value: options.modifiedFrom.toISOString(),
         matchType: "greaterThanOrEquals",
-        precision: "exact",
       });
     }
 
@@ -1091,21 +1607,23 @@ export class EncompassApiService {
       });
     }
 
-    // Build JSON body structure for v1 pipeline
-    // NOTE: Qlik defaults to includeArchivedLoans: true (matching Encompass API default behavior)
+    // Build JSON body structure for v3 pipeline
+    // v3 contract: { filter, fields, sortOrder } — no includeArchivedLoans (was v1-only)
+    // v3 sort order values: "ascending" / "descending" (not "asc" / "desc")
     const body: any = {
-      fields: fieldGuids, // Array of field GUIDs as strings
+      fields: fieldGuids,
       sortOrder: [
         {
           canonicalName: "Loan.LastModified",
-          order: "desc",
+          order: "descending",
         },
       ],
-      includeArchivedLoans: true, // Match Qlik's default (configurable in Qlik, defaults to true)
     };
 
-    // Add filter if we have any filter terms
-    if (filterTerms.length > 0) {
+    // Add filter — v3 requires: if only one term, supply it directly (no operator wrapper)
+    if (filterTerms.length === 1) {
+      body.filter = filterTerms[0];
+    } else if (filterTerms.length > 1) {
       body.filter = {
         operator: "and",
         terms: filterTerms,
@@ -1120,60 +1638,27 @@ export class EncompassApiService {
       `[Sync] Pipeline request: ${fieldGuids.length} fields, modifiedFrom=${options.modifiedFrom?.toISOString() || "none"}, folders=${folderNames?.length || 0}, startDate=${loanStartDate.toISOString().split("T")[0]}`,
     );
 
-    // NOTE: v1 pipeline endpoint does NOT use instanceId in query params
-    // The instanceId is only used for token generation, not for pipeline calls
-    // This matches the Qlik script which has no instanceId in the pipeline URL
-
-    // Pagination: Fetch all pages using cursor and start parameter (like Qlik script)
+    // Simple start/limit pagination (no cursors).
+    // The v3/loanPipeline endpoint supports start+limit query params directly.
+    // The server may override `limit` to an optimal value based on field count,
+    // so we use actual page size (not requested limit) to advance `start`.
     const allLoans: EncompassLoan[] = [];
-    const uniqueLoanGuids = new Set<string>(); // Track unique GUIDs to detect when we've fetched all loans
-    let cursor: string | undefined = undefined;
+    const uniqueLoanGuids = new Set<string>();
     let totalCount: number | undefined = undefined;
     let pageNumber = 0;
-    let start = 0; // Start offset for pagination (increments by maxLoansPerRequest)
-    const maxLoansPerRequest = 1000; // Always use 1000 as page size (API limit)
-    const totalLimit = options.limit; // Total number of loans to fetch (if specified)
+    let start = 0;
+    const requestedLimit = 1000;
+    const totalLimit = options.limit;
+    const bodyObj = JSON.parse(bodyJson);
 
-    do {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
       pageNumber++;
-      const pageParams: any = {
-        limit: maxLoansPerRequest, // Always use 1000 as page size
-      };
 
-      // For first page, use cursorType. For subsequent pages, use both cursor AND start
-      // Only add start if it's less than totalCount (to avoid API error)
-      if (cursor) {
-        pageParams.cursor = cursor;
-        // Only add start parameter if it's less than totalCount
-        if (totalCount === undefined || start < totalCount) {
-          pageParams.start = start;
-        } else {
-          break;
-        }
-      } else {
-        pageParams.cursorType = "randomAccess";
-      }
-
-      // Build request body - filter should only be included on first page
-      // Subsequent pages only need fields, sortOrder, and includeArchivedLoans (no filter)
-      let pageBodyJson: string;
-      if (cursor) {
-        // Subsequent pages: no filter, just fields and sortOrder
-        const pageBody: any = {
-          fields: fieldGuids,
-          sortOrder: [
-            {
-              canonicalName: "Loan.LastModified",
-              order: "desc",
-            },
-          ],
-          includeArchivedLoans: true, // Match Qlik's default
-        };
-        pageBodyJson = JSON.stringify(pageBody);
-      } else {
-        // First page: include filter
-        pageBodyJson = bodyJson;
-      }
+      const pageLimit = totalLimit
+        ? Math.min(requestedLimit, totalLimit - allLoans.length)
+        : requestedLimit;
+      if (pageLimit <= 0) break;
 
       const response = await this.executeWithTokenRetry<{
         root: Array<{
@@ -1181,52 +1666,34 @@ export class EncompassApiService {
           fields: Array<{ [key: string]: any }>;
         }>;
       }>(tenantId, losConnectionId, async (accessToken) => {
-        // Use the connection-specific API client with the correct base URL
         const response = await apiClientForConnection.post<{
           root: Array<{
             loanGuid: string;
             fields: Array<{ [key: string]: any }>;
           }>;
-        }>("/v1/loanPipeline", pageBodyJson, {
+        }>("/v3/loanPipeline", bodyObj, {
           headers: {
             Authorization: accessToken,
-            "Content-Type": "text/plain", // v1 pipeline expects text/plain with JSON string body
+            "Content-Type": "application/json",
           },
-          params: pageParams, // Contains limit, cursorType, and cursor (if present)
+          params: { start, limit: pageLimit },
         });
 
-        // Check for x-total-count header (case-insensitive)
         const totalCountHeader =
           response.headers["x-total-count"] ||
           response.headers["X-Total-Count"] ||
           response.headers["X-TOTAL-COUNT"];
-        const cursorHeader =
-          response.headers["x-cursor"] ||
-          response.headers["X-Cursor"] ||
-          response.headers["X-CURSOR"];
 
-        // Get total count from first page
         if (pageNumber === 1 && totalCountHeader) {
-          totalCount = parseInt(totalCountHeader, 10);
-          if (isNaN(totalCount)) {
-            console.warn(
-              `[Sync] Invalid x-total-count header: "${totalCountHeader}"`,
-            );
-          }
-        } else if (pageNumber === 1) {
-          console.warn(`[Sync] x-total-count header not found in response`);
+          const parsed = parseInt(totalCountHeader, 10);
+          if (!isNaN(parsed)) totalCount = parsed;
         }
-
-        // Get cursor for next page (case-insensitive)
-        cursor = cursorHeader as string | undefined;
 
         return response;
       });
 
-      // Transform this page's loans
       const pageLoans = this.transformPipelineResponse(response);
 
-      // Track unique GUIDs from this page
       let newUniqueGuids = 0;
       for (const loan of pageLoans) {
         const guid =
@@ -1242,46 +1709,28 @@ export class EncompassApiService {
 
       allLoans.push(...pageLoans);
 
-      // Stop pagination if:
-      // 1. No cursor (API indicates no more pages)
-      // 2. OR we got 0 loans (empty page)
-      // 3. OR we've fetched all unique loans (uniqueLoanGuids.size >= totalCount)
-      // 4. OR we got 0 new unique GUIDs (stuck in a loop - same loans repeating)
-      // 5. OR we've reached the requested limit (totalLimit)
-      const hasFetchedAll =
-        totalCount !== undefined && uniqueLoanGuids.size >= totalCount;
-      const hasReachedLimit =
-        totalLimit !== undefined && uniqueLoanGuids.size >= totalLimit;
-      const isStuck =
-        cursor &&
-        pageLoans.length > 0 &&
-        newUniqueGuids === 0 &&
-        uniqueLoanGuids.size < (totalCount || Infinity);
-      const shouldContinue =
-        cursor &&
-        pageLoans.length > 0 &&
-        !hasFetchedAll &&
-        !hasReachedLimit &&
-        !isStuck;
+      const actualPageSize = pageLoans.length;
 
-      // Increment start for next page ONLY if we're going to continue
-      // Use the number of unique loans fetched so far as the start position
-      // This ensures we don't exceed totalCount
-      if (shouldContinue && cursor) {
-        start = uniqueLoanGuids.size; // Use unique count as start position
-        // But also ensure we don't exceed totalCount
-        if (totalCount !== undefined && start >= totalCount) {
-          console.log(
-            `[EncompassApiService] Start position (${start}) would exceed totalCount (${totalCount}), stopping pagination`,
-          );
-          break;
-        }
-      }
+      console.log(
+        `[Sync] Page ${pageNumber}: ${actualPageSize} loans (${newUniqueGuids} new unique), ` +
+        `total fetched=${allLoans.length}, totalCount=${totalCount ?? "?"}, start=${start}`,
+      );
 
-      if (!shouldContinue) {
+      start += actualPageSize;
+
+      // Stop when: empty page, server returned fewer than requested (last page),
+      // we've reached totalCount, or we hit user's limit
+      if (actualPageSize === 0) break;
+      if (totalCount !== undefined && start >= totalCount) break;
+      if (totalLimit !== undefined && allLoans.length >= totalLimit) break;
+      // Safety: if page returned 0 new unique GUIDs, we're in a loop
+      if (newUniqueGuids === 0 && actualPageSize > 0) {
+        console.warn(
+          `[Sync] Page ${pageNumber} returned ${actualPageSize} loans but 0 new unique GUIDs — stopping to avoid infinite loop`,
+        );
         break;
       }
-    } while (cursor);
+    }
 
     console.log(
       `[Sync] Fetched ${allLoans.length} loans in ${pageNumber} page(s)${totalCount ? ` (${totalCount} available)` : ""}`,
@@ -1336,15 +1785,15 @@ export class EncompassApiService {
 
     let uniqueLoans = Array.from(uniqueLoansMap.values());
 
+    if (duplicateGuids.length > 0) {
+      console.warn(
+        `[Sync] Removed ${duplicateGuids.length} duplicate loan(s) (${allLoans.length} -> ${uniqueLoans.length})`,
+      );
+    }
+
     // Apply limit if specified (slice to exact limit after deduplication)
     if (totalLimit !== undefined && uniqueLoans.length > totalLimit) {
       uniqueLoans = uniqueLoans.slice(0, totalLimit);
-    }
-
-    if (uniqueLoans.length !== allLoans.length) {
-      console.warn(
-        `[Sync] Deduplicated: ${allLoans.length} -> ${uniqueLoans.length} loans`,
-      );
     }
 
     return {
@@ -1354,8 +1803,8 @@ export class EncompassApiService {
   }
 
   /**
-   * Get company users from Encompass v1 API
-   * Endpoint: GET /encompass/v1/company/users
+   * Get internal users from Encompass v3 API
+   * Endpoint: GET /encompass/v3/users
    */
   public async getEncompassUsers(
     tenantId: string,
@@ -1368,39 +1817,59 @@ export class EncompassApiService {
       `[EncompassApiService] Fetching Encompass users (enabledOnly: ${enabledOnly}, limit: ${limit})`,
     );
 
-    return this.executeWithTokenRetry<EncompassUserFromApi[]>(
-      tenantId,
-      losConnectionId,
-      async (accessToken) => {
-        return await this.apiClient.get<EncompassUserFromApi[]>(
-          "/v1/company/users",
-          {
+    const users: EncompassUserFromApi[] = [];
+    let start = 0;
+    const pageLimit = Math.min(250, limit);
+    let latestConcurrency: ConcurrencyMetrics | undefined;
+
+    while (users.length < limit) {
+      const response = await this.executeWithTokenRetry<any>(
+        tenantId,
+        losConnectionId,
+        async (accessToken) => {
+          return await this.apiClient.get<any>("/v3/users", {
             headers: { Authorization: accessToken },
-            params: { limit },
-          },
-        );
-      },
-    ).then((response) => {
-      // Filter to enabled users only if requested
-      let users = response.data;
-      if (enabledOnly) {
-        users = users.filter((user) =>
-          user.userIndicators?.includes("Enabled"),
-        );
-      }
-
-      // Map to standard format
-      const mappedUsers = users.map(mapEncompassUser);
-
-      console.log(
-        `[EncompassApiService] Fetched ${response.data.length} users, ${mappedUsers.length} after filtering`,
+            params: {
+              orgId: 0,
+              isRecursive: true,
+              entities: "all",
+              start,
+              limit: pageLimit,
+            },
+          });
+        },
       );
+      latestConcurrency = response.concurrency;
+      const payload = response.data;
+      const pageUsers: EncompassUserFromApi[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.users)
+            ? payload.users
+            : [];
+      if (pageUsers.length === 0) break;
+      users.push(...pageUsers);
+      if (pageUsers.length < pageLimit) break;
+      start += pageLimit;
+    }
 
-      return {
-        data: mappedUsers,
-        concurrency: response.concurrency,
-      };
-    });
+    let filteredUsers = users;
+    if (enabledOnly) {
+      filteredUsers = users.filter((user) => {
+        if (typeof user.enabled === "boolean") return user.enabled;
+        return user.userIndicators?.includes("Enabled");
+      });
+    }
+
+    const mappedUsers = filteredUsers.slice(0, limit).map(mapEncompassUser);
+    console.log(
+      `[EncompassApiService] Fetched ${users.length} users, ${mappedUsers.length} after filtering`,
+    );
+    return {
+      data: mappedUsers,
+      concurrency: latestConcurrency,
+    };
   }
 
   /**

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Loader2, Download, Calendar, Telescope, Lightbulb, Target, ShieldAlert, Zap, User, ChevronDown, ChevronRight, Database, ArrowUpDown, ArrowUp, ArrowDown, Search } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Download, Calendar, Telescope, FlaskConical, Lightbulb, Target, ShieldAlert, Zap, User, ChevronDown, ChevronRight, Database, ArrowUpDown, ArrowUp, ArrowDown, Search, Bookmark, Check, HelpCircle, TrendingUp, TrendingDown, MessageSquare } from 'lucide-react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -14,6 +14,7 @@ import {
 } from '@tanstack/react-table';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDebugMode } from '@/contexts/DebugModeContext';
 import {
   FIELD_REGISTRY,
   SUMMARY_REGISTRY,
@@ -21,6 +22,8 @@ import {
   DEFAULT_SUMMARY_METRICS,
   type FieldFormat,
 } from '@/config/insightFieldRegistry';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { InsightChat } from './InsightChat';
 
 // ============================================================================
 // Types
@@ -35,7 +38,6 @@ interface InsightDetailModalProps {
   dateFilter: string;
   selectedTenantId?: string | null;
   isAdmin?: boolean;
-  // ETM fields passed from the insight
   etmData?: {
     what_changed?: string;
     why?: string;
@@ -44,6 +46,7 @@ interface InsightDetailModalProps {
     recommended_action?: string;
     owner?: string;
   };
+  onTrackInsight?: () => void;
 }
 
 interface AuditSummaryDef {
@@ -318,13 +321,88 @@ function formatSummaryValue(value: any, format: string): string {
 }
 
 // ============================================================================
+// Shared tooltip helper
+// ============================================================================
+
+function InfoTip({ text }: { text: string }) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <HelpCircle className="w-3 h-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-help flex-shrink-0" />
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs text-xs">
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ============================================================================
+// ETM field tooltip descriptions
+// ============================================================================
+
+const ETM_TOOLTIPS: Record<string, string> = {
+  what_changed: 'The specific metric or trend that triggered this insight',
+  why: 'Root cause analysis — what is likely driving the change',
+  business_impact: 'Estimated effect on revenue, volume, or operational efficiency',
+  risk_if_ignored: 'What could happen if no action is taken in the next 30–90 days',
+  recommended_action: 'Suggested next step for your team',
+  owner: 'The role or person best positioned to act on this',
+};
+
+// ============================================================================
+// Table context sentence templates
+// ============================================================================
+
+const TABLE_CONTEXT: Record<string, string> = {
+  predictions: 'Loans flagged by the prediction model with their risk scores and key attributes.',
+  credit_risk: 'Loans with elevated credit risk factors such as low FICO, high LTV, or high DTI.',
+  lost_opportunity: 'Loans that were withdrawn or denied during the selected period.',
+  pipeline: 'Active pipeline loans and their current status, age, and lock information.',
+  performance: 'Loan officer performance metrics including volume, pull-through, and cycle time.',
+  comparisons: 'Month-over-month comparison of funded volume and loan counts.',
+  closing_risk: 'Loans with approaching closing dates that may need attention.',
+  lock_expiration: 'Loans with rate locks expiring soon.',
+  trid: 'Loans approaching TRID compliance deadlines.',
+  margin: 'Margin data is shown as summary metrics above.',
+  condition_backlog: 'Loans with outstanding underwriting conditions.',
+  tiering: 'Personnel ranked by performance tier with revenue and volume metrics.',
+  product_breakdown: 'Loan products broken down by volume, pull-through, and fallout rates.',
+  risk_cross_tab: 'Risk segments showing fallout rates across product, FICO, and DTI bands.',
+};
+
+// ============================================================================
+// Suggested Q&A starter questions by insight source
+// ============================================================================
+
+const STARTER_QUESTIONS: Record<string, string[]> = {
+  predictions: ['Which loan officers have the most at-risk loans?', 'What is the most common reason for predicted withdrawals?'],
+  credit_risk: ['Are high-risk loans concentrated in any product type?', 'How does this compare to last month?'],
+  lost_opportunity: ['Are these losses concentrated in any product type or officer?', 'What is driving the withdrawals?'],
+  pipeline: ["What's causing the longest cycle times?", 'Which loans have been stalled the longest?'],
+  performance: ['Who are the top-improving officers this month?', 'Which officers have the highest fallout?'],
+  comparisons: ['What products are driving the volume change?', 'How does pull-through compare year-over-year?'],
+  closing_risk: ['Which loans are most likely to miss their closing date?', 'What milestones are blocking closings?'],
+  lock_expiration: ['What is the total volume at risk from lock expirations?', 'Can any of these locks be extended?'],
+  margin: ['What products have the best margins?', 'Is margin trending up or down?'],
+  condition_backlog: ['Which loans have the most outstanding conditions?', 'Are conditions concentrated in any product?'],
+  tiering: ['What separates top-tier from bottom-tier performers?', 'How has tiering changed from last month?'],
+  product_breakdown: ['Which product has the worst pull-through?', 'Where is volume growing fastest?'],
+  risk_cross_tab: ['Which risk segment has the highest fallout?', 'How large is the worst-performing segment?'],
+};
+
+// ============================================================================
 // Summary Card component
 // ============================================================================
 
-const SummaryCard = ({ label, value, color = 'blue' }: {
+const SummaryCard = ({ label, value, color = 'blue', description, delta }: {
   label: string;
   value: string | number;
   color?: 'blue' | 'green' | 'red' | 'amber' | 'purple';
+  description?: string;
+  delta?: { value: number; favorable: 'up' | 'down' };
 }) => {
   const colorClasses = {
     blue: 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300',
@@ -334,10 +412,27 @@ const SummaryCard = ({ label, value, color = 'blue' }: {
     purple: 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300',
   };
 
+  const deltaIsGood = delta && (
+    (delta.favorable === 'up' && delta.value > 0) ||
+    (delta.favorable === 'down' && delta.value < 0)
+  );
+  const deltaIsBad = delta && !deltaIsGood && delta.value !== 0;
+
   return (
     <div className={`rounded-lg p-3 ${colorClasses[color]}`}>
-      <span className="text-xs font-medium opacity-80">{label}</span>
-      <div className="text-lg font-semibold mt-0.5">{value}</div>
+      <div className="flex items-center gap-1">
+        <span className="text-xs font-medium opacity-80">{label}</span>
+        {description && <InfoTip text={description} />}
+      </div>
+      <div className="flex items-baseline gap-1.5 mt-0.5">
+        <span className="text-lg font-semibold">{value}</span>
+        {delta && delta.value !== 0 && (
+          <span className={`flex items-center gap-0.5 text-xs font-medium ${deltaIsGood ? 'text-emerald-600 dark:text-emerald-400' : deltaIsBad ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'}`}>
+            {delta.value > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+            {delta.value > 0 ? '+' : ''}{delta.value.toFixed(1)}%
+          </span>
+        )}
+      </div>
     </div>
   );
 };
@@ -550,14 +645,17 @@ export const InsightDetailModal = ({
   selectedTenantId,
   isAdmin,
   etmData,
+  onTrackInsight,
 }: InsightDetailModalProps) => {
   const navigate = useNavigate();
   const { isPlatformStaff } = useAuth();
   const isAdminUser = isAdmin ?? isPlatformStaff();
+  const { isDebugMode } = useDebugMode();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DetailData | null>(null);
   const [isCreatingDeepDive, setIsCreatingDeepDive] = useState(false);
+  const [isTracked, setIsTracked] = useState(false);
   const [activePeriod, setActivePeriod] = useState<'current' | 'prior'>('current');
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [auditSection, setAuditSection] = useState<string | null>(null);
@@ -609,6 +707,44 @@ export const InsightDetailModal = ({
       setIsCreatingDeepDive(false);
     }
   }, [insightId, isCreatingDeepDive, selectedTenantId, onClose, navigate]);
+
+  const [isCreatingResearch, setIsCreatingResearch] = useState(false);
+
+  const handleMoveToResearch = useCallback(async () => {
+    if (isCreatingResearch) return;
+    setIsCreatingResearch(true);
+    try {
+      const tenantParam = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : '';
+      const summaryMetrics: Record<string, any> = {};
+      if (data?.summary) {
+        for (const [k, v] of Object.entries(data.summary)) {
+          summaryMetrics[k] = v;
+        }
+      }
+
+      const result = await api.request<{ sessionId: string }>(
+        `/api/research/sessions${tenantParam}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            initialContext: {
+              insightId,
+              headline: insightMessage,
+              understory: etmData?.what_changed || data?.title || insightMessage,
+              keyMetrics: summaryMetrics,
+              evidenceSummary: etmData?.business_impact || undefined,
+            },
+          }),
+        }
+      );
+      onClose();
+      navigate(`/research?session=${result.sessionId}`);
+    } catch (err: any) {
+      console.error('Error creating research session from insight:', err);
+    } finally {
+      setIsCreatingResearch(false);
+    }
+  }, [isCreatingResearch, selectedTenantId, insightId, insightMessage, etmData, data, onClose, navigate]);
 
   const hasComparison = useMemo(() => !!data?.comparison, [data]);
 
@@ -767,6 +903,24 @@ export const InsightDetailModal = ({
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {onTrackInsight && (
+                <button
+                  onClick={() => {
+                    onTrackInsight();
+                    setIsTracked(true);
+                  }}
+                  disabled={isTracked}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                    isTracked
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                      : 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 hover:text-amber-700 dark:hover:bg-amber-900/30 dark:hover:text-amber-300'
+                  }`}
+                  title={isTracked ? 'Tracked' : 'Track this insight'}
+                >
+                  {isTracked ? <Check className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{isTracked ? 'Tracked' : 'Track'}</span>
+                </button>
+              )}
               {insightId && (
                 <button
                   onClick={handleDeepDive}
@@ -784,6 +938,21 @@ export const InsightDetailModal = ({
                   </span>
                 </button>
               )}
+              <button
+                onClick={handleMoveToResearch}
+                disabled={isCreatingResearch}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/30 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors disabled:opacity-50"
+                title="Investigate further in Research Lab"
+              >
+                {isCreatingResearch ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FlaskConical className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline">
+                  {isCreatingResearch ? 'Opening...' : 'Research Lab'}
+                </span>
+              </button>
               {rows.length > 0 && columns.length > 0 && (
                 <button
                   onClick={exportCSV}
@@ -824,7 +993,26 @@ export const InsightDetailModal = ({
               </div>
             ) : data ? (
               <div className="space-y-6">
-                {/* ========== ETM Reasoning Panel ========== */}
+                {/* ========== Recommended Action Hero Callout ========== */}
+                {etm?.recommended_action && (
+                  <div className="flex gap-3 rounded-xl border-l-4 border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 p-4">
+                    <Target className="w-5 h-5 text-indigo-600 dark:text-indigo-400 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">Recommended Action</span>
+                        <InfoTip text={ETM_TOOLTIPS.recommended_action} />
+                      </div>
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200 leading-relaxed">{etm.recommended_action}</p>
+                      {etm.owner && (
+                        <span className="inline-flex items-center gap-1 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                          <User className="w-3 h-3" /> Owner: {etm.owner}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ========== ETM Reasoning Panel (with tooltips) ========== */}
                 {etm && (etm.what_changed || etm.why || etm.business_impact) && (
                   <div className="rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/30 p-4 space-y-3">
                     <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
@@ -837,6 +1025,7 @@ export const InsightDetailModal = ({
                           <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                             <Target className="w-3.5 h-3.5 text-blue-500" />
                             What Changed
+                            <InfoTip text={ETM_TOOLTIPS.what_changed} />
                           </span>
                           <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.what_changed}</p>
                         </div>
@@ -846,6 +1035,7 @@ export const InsightDetailModal = ({
                           <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                             <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
                             Why
+                            <InfoTip text={ETM_TOOLTIPS.why} />
                           </span>
                           <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.why}</p>
                         </div>
@@ -855,6 +1045,7 @@ export const InsightDetailModal = ({
                           <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                             <Zap className="w-3.5 h-3.5 text-emerald-500" />
                             Business Impact
+                            <InfoTip text={ETM_TOOLTIPS.business_impact} />
                           </span>
                           <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.business_impact}</p>
                         </div>
@@ -864,26 +1055,9 @@ export const InsightDetailModal = ({
                           <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                             <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
                             Risk if Ignored
+                            <InfoTip text={ETM_TOOLTIPS.risk_if_ignored} />
                           </span>
                           <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.risk_if_ignored}</p>
-                        </div>
-                      )}
-                      {etm.recommended_action && (
-                        <div className="space-y-1">
-                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-                            <Target className="w-3.5 h-3.5 text-indigo-500" />
-                            Recommended Action
-                          </span>
-                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.recommended_action}</p>
-                        </div>
-                      )}
-                      {etm.owner && (
-                        <div className="space-y-1">
-                          <span className="font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-                            <User className="w-3.5 h-3.5 text-purple-500" />
-                            Owner
-                          </span>
-                          <p className="text-slate-700 dark:text-slate-300 pl-5">{etm.owner}</p>
                         </div>
                       )}
                     </div>
@@ -920,8 +1094,21 @@ export const InsightDetailModal = ({
                 {summaryMetricKeys.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                     {summaryMetricKeys.map(metricKey => {
-                      // Prefer self-describing summary_defs, fall back to SUMMARY_REGISTRY
                       const sDef = summaryDefMap[metricKey];
+                      const config = SUMMARY_REGISTRY[metricKey];
+
+                      // Compute delta if comparison data is available
+                      let delta: { value: number; favorable: 'up' | 'down' } | undefined;
+                      if (activePeriod === 'current' && data.comparison?.summary) {
+                        const currentVal = sDef ? Number(sDef.value) : data.summary?.[metricKey];
+                        const priorVal = data.comparison.summary[metricKey];
+                        if (currentVal != null && priorVal != null && !isNaN(Number(currentVal)) && !isNaN(Number(priorVal)) && Number(priorVal) !== 0) {
+                          const pct = ((Number(currentVal) - Number(priorVal)) / Math.abs(Number(priorVal))) * 100;
+                          const isNegativeGood = metricKey.includes('Risk') || metricKey.includes('Lost') || metricKey.includes('denied') || metricKey.includes('withdrawn') || metricKey.includes('Fallout') || metricKey.includes('Expiring');
+                          delta = { value: pct, favorable: isNegativeGood ? 'down' : 'up' };
+                        }
+                      }
+
                       if (sDef) {
                         return (
                           <SummaryCard
@@ -929,10 +1116,11 @@ export const InsightDetailModal = ({
                             label={sDef.label}
                             value={formatSummaryValue(sDef.value, sDef.format)}
                             color={(sDef.color as any) || 'blue'}
+                            description={config?.description}
+                            delta={delta}
                           />
                         );
                       }
-                      const config = SUMMARY_REGISTRY[metricKey];
                       const value = data.summary?.[metricKey];
                       if (value == null || !config) return null;
                       return (
@@ -941,10 +1129,23 @@ export const InsightDetailModal = ({
                           label={config.label}
                           value={formatSummaryValue(value, config.format)}
                           color={config.color}
+                          description={config.description}
+                          delta={delta}
                         />
                       );
                     })}
                   </div>
+                )}
+
+                {/* ========== Table Context Sentence ========== */}
+                {columns.length > 0 && rows.length > 0 && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400 -mb-3">
+                    {TABLE_CONTEXT[insightSource] || 'Detailed data supporting this insight.'}{' '}
+                    <span className="font-medium">
+                      {rows.length} {rows.length === 1 ? 'record' : 'records'}
+                      {data?.dateRange ? ` from ${formatDateRange(data.dateRange)}` : ''}.
+                    </span>
+                  </p>
                 )}
 
                 {/* ========== Dynamic Data Table (sortable + searchable) ========== */}
@@ -969,8 +1170,26 @@ export const InsightDetailModal = ({
                   </div>
                 )}
 
-                {/* Admin-only: Data Provenance Audit Panel */}
-                {isAdminUser && (
+                {/* ========== Inline Q&A (InsightChat) ========== */}
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+                  <InsightChat
+                    insightContext={{
+                      title: insightMessage,
+                      summary: etm?.what_changed || data?.title || insightMessage,
+                      keyMetrics: data.summary as Record<string, string | number> | undefined,
+                      evidence: data.audit?.generatedSql ? [{
+                        sql: data.audit.generatedSql,
+                        explanation: etm?.why || '',
+                        rowCount: data.audit.rowCount,
+                      }] : undefined,
+                    }}
+                    selectedTenantId={selectedTenantId}
+                    starterQuestions={STARTER_QUESTIONS[insightSource]}
+                  />
+                </div>
+
+                {/* Debug mode: Data Provenance Audit Panel */}
+                {isDebugMode && (
                   <div className="mt-4 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
                     <button
                       onClick={() => { setIsAuditOpen(!isAuditOpen); if (isAuditOpen) setAuditSection(null); }}

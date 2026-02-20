@@ -441,6 +441,8 @@ async function fetchPredictions(
     // Get most recent prediction per loan — ONLY for currently active loans.
     // Predictions for withdrawn / denied / funded loans are stale and should not
     // be surfaced as fallout risk.
+    // Also exclude stale active loans (application_date > 180 days ago) — these are
+    // likely abandoned or stuck, and inflate prediction counts misleadingly.
     const channelClause = buildChannelWhereClause(channelGroup);
     const result = await tenantPool.query(`
       SELECT DISTINCT ON (p.loan_id)
@@ -454,6 +456,7 @@ async function fetchPredictions(
       FROM public.loan_predictions p
       JOIN public.loans l ON p.loan_id = l.loan_id
       WHERE l.current_loan_status = 'Active Loan'
+        AND l.application_date >= CURRENT_DATE - INTERVAL '180 days'
         ${channelGroup ? channelClause : ""}
       ORDER BY p.loan_id, p.created_at DESC
       LIMIT 5000
@@ -673,6 +676,7 @@ async function fetchCreditRiskLoans(
       SELECT loan_id, COALESCE(loan_amount, 0) as loan_amount
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND (
           (fico_score IS NOT NULL AND CAST(fico_score AS DECIMAL) < 620)
           OR (ltv_ratio IS NOT NULL AND CAST(ltv_ratio AS DECIMAL) > 95)
@@ -856,7 +860,7 @@ async function fetchProductBreakdown(
       `
       SELECT
         COALESCE(NULLIF(TRIM(loan_type), ''), 'Other') AS product_type,
-        COUNT(*) FILTER (WHERE current_loan_status = 'Active Loan') AS active,
+        COUNT(*) FILTER (WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL) AS active,
         COUNT(*) FILTER (
           WHERE current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
             AND application_date >= $1 AND application_date <= $2
@@ -884,6 +888,7 @@ async function fetchProductBreakdown(
         ), 0) AS funded_volume,
         COUNT(*) FILTER (
           WHERE current_loan_status = 'Active Loan'
+            AND application_date IS NOT NULL
             AND (
               (fico_score IS NOT NULL AND CAST(fico_score AS DECIMAL) < 620)
               OR (ltv_ratio IS NOT NULL AND CAST(ltv_ratio AS DECIMAL) > 95)
@@ -892,7 +897,7 @@ async function fetchProductBreakdown(
         ) AS high_risk_credit
       FROM public.loans
       WHERE (
-        current_loan_status = 'Active Loan'
+        (current_loan_status = 'Active Loan' AND application_date IS NOT NULL)
         OR (application_date >= $1 AND application_date <= $2)
       )
         ${channelClause}
@@ -955,6 +960,7 @@ async function fetchClosingLateRisk(
              (estimated_closing_date - CURRENT_DATE) as days_to_close
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND estimated_closing_date IS NOT NULL
         AND estimated_closing_date <= CURRENT_DATE + INTERVAL '10 days'
         AND estimated_closing_date >= CURRENT_DATE
@@ -1048,6 +1054,7 @@ async function fetchCloseLateEnhanced(
       FROM public.loan_predictions p
       JOIN public.loans l ON p.loan_id = l.loan_id
       WHERE l.current_loan_status = 'Active Loan'
+        AND l.application_date >= CURRENT_DATE - INTERVAL '180 days'
         AND l.estimated_closing_date IS NOT NULL
         AND p.loan_data->>'closeOnTimeProbability' IS NOT NULL
         ${channelGroup ? channelClause : ""}
@@ -1150,6 +1157,7 @@ async function fetchLockExpirationExposure(
              (lock_expiration_date - CURRENT_DATE) as days_to_expiry
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND lock_date IS NOT NULL
         AND lock_expiration_date IS NOT NULL
         AND lock_expiration_date <= CURRENT_DATE + INTERVAL '7 days'
@@ -1208,6 +1216,7 @@ async function fetchTridExposure(
              (estimated_closing_date - CURRENT_DATE) as days_to_close
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND estimated_closing_date IS NOT NULL
         AND estimated_closing_date <= CURRENT_DATE + INTERVAL '5 days'
         AND estimated_closing_date >= CURRENT_DATE
@@ -1311,6 +1320,7 @@ async function fetchConditionBacklog(
       SELECT loan_id, COALESCE(number_of_conditions, 0) as conditions
       FROM public.loans
       WHERE current_loan_status = 'Active Loan'
+        AND application_date IS NOT NULL
         AND number_of_conditions IS NOT NULL
         AND number_of_conditions > 0
         ${channelClause}
@@ -1553,9 +1563,12 @@ async function fetchPersonnelTiering(
           GROUP BY ${cfg.actorColumn}
         `;
 
+        // Use rolling 90D for current tier assignment (not YTD) so that
+        // tier migration comparisons use equal-length windows (90D vs prior 90D).
+        const cur90dStart = new Date(now.getTime() - 90 * DAY).toISOString().split("T")[0];
         const [fundedRes, appRes] = await Promise.all([
-          tenantPool.query(fundedQuery, [startOfYear, today]),
-          tenantPool.query(appQuery, [startOfYear, today]),
+          tenantPool.query(fundedQuery, [cur90dStart, today]),
+          tenantPool.query(appQuery, [cur90dStart, today]),
         ]);
 
         // Build lookup from application cohort query

@@ -11,6 +11,7 @@ import { authenticateToken, AuthRequest } from '../../middleware/auth.js';
 import { attachTenantContext, getTenantContext } from '../../middleware/tenantContext.js';
 import { handleDatabaseError } from '../../config/database.js';
 import { apiLimiter } from '../../middleware/rateLimiter.js';
+import { callLLM, getOpenAIKey, safeExecuteSQL, formatResultsForLLM, type LLMMessage } from '../../services/research/tools.js';
 
 const router = Router();
 
@@ -162,6 +163,116 @@ router.get('/details/:source', authenticateToken, attachTenantContext, apiLimite
     res.status(500).json({
       error: 'Failed to fetch insight details',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ============================================================================
+// POST /insights/chat — Follow-up conversation about an insight
+// ============================================================================
+
+const INSIGHT_CHAT_SYSTEM = `You are Cohi, an AI analyst for a mortgage lending platform. The user is asking follow-up questions about a specific data insight.
+
+You have full context about the insight including its headline, summary, key metrics, and the evidence that produced it. You can also run new SQL queries against the loans database to answer the user's questions.
+
+RULES:
+- Be concise and specific. Use numbers from the context.
+- NEVER show SQL queries, table names, column names, or any database syntax to the user. Speak in business language only.
+- If you need to query new data, output ONLY a \`\`\`sql block containing the query and nothing else. The system will execute it and feed results back to you. Then interpret the results in plain business language.
+- Only SELECT queries against public.loans (alias: l).
+- Use CURRENT_DATE for dates, never hardcoded dates.
+- PostgreSQL syntax: DATE - DATE = integer days.
+- Present findings with specific numbers, comparisons, and actionable observations.
+- Use markdown formatting: **bold** for key numbers, bullet lists for breakdowns, numbered lists for ranked items.
+- If the question is unrelated to the insight or data, politely redirect.`;
+
+router.post('/chat', authenticateToken, attachTenantContext, apiLimiter, async (req: AuthRequest, res) => {
+  try {
+    const tenantContext = getTenantContext(req);
+    const { tenantPool, tenantId } = tenantContext;
+    const { insightContext, messages } = req.body || {};
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'messages array is required' });
+    }
+
+    const apiKey = await getOpenAIKey(tenantId);
+
+    // Build context from the insight
+    let contextBlock = '';
+    if (insightContext) {
+      contextBlock += `\n## Insight\nTitle: ${insightContext.title || 'N/A'}\n`;
+      contextBlock += `Summary: ${insightContext.summary || 'N/A'}\n`;
+      contextBlock += `Confidence: ${insightContext.confidence || 'N/A'}\n`;
+
+      if (insightContext.keyMetrics && Object.keys(insightContext.keyMetrics).length > 0) {
+        contextBlock += `\nKey Metrics:\n`;
+        for (const [k, v] of Object.entries(insightContext.keyMetrics)) {
+          contextBlock += `- ${k}: ${v}\n`;
+        }
+      }
+
+      if (insightContext.evidence && Array.isArray(insightContext.evidence)) {
+        contextBlock += `\n## Evidence (internal — do NOT expose SQL to the user)\n`;
+        for (const [i, ev] of insightContext.evidence.entries()) {
+          const fields = ev.fields?.length ? ` (fields: ${ev.fields.join(', ')})` : '';
+          contextBlock += `- Evidence ${i + 1}: ${ev.explanation || 'Analysis query'} — returned ${ev.rowCount || 0} rows${fields}\n`;
+        }
+      }
+    }
+
+    // Build LLM conversation
+    const llmMessages: LLMMessage[] = [
+      { role: 'system', content: INSIGHT_CHAT_SYSTEM + contextBlock },
+    ];
+
+    for (const msg of messages) {
+      llmMessages.push({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content,
+      });
+    }
+
+    // First LLM call
+    let response = await callLLM(llmMessages, apiKey, {
+      temperature: 0.3,
+      maxTokens: 3000,
+    });
+
+    // Check if the response contains SQL queries to execute
+    const sqlMatch = response.match(/```sql\n([\s\S]*?)```/);
+    if (sqlMatch) {
+      const sql = sqlMatch[1].trim();
+      try {
+        const result = await safeExecuteSQL(sql, tenantPool);
+        const formatted = formatResultsForLLM(result);
+
+        // Ask LLM to interpret the results
+        llmMessages.push({ role: 'assistant', content: response });
+        llmMessages.push({
+          role: 'user',
+          content: `The query returned ${result.rowCount} rows:\n\n${formatted}\n\nPlease interpret these results in the context of the original question. Be specific with numbers.`,
+        });
+
+        response = await callLLM(llmMessages, apiKey, {
+          temperature: 0.3,
+          maxTokens: 3000,
+        });
+      } catch (sqlErr: any) {
+        response += `\n\nI wasn't able to pull additional data for that question. Let me answer based on what we already know.`;
+      }
+    }
+
+    // Strip any residual SQL blocks from the final user-facing response
+    response = response.replace(/```sql[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+
+    res.json({ response });
+  } catch (error: any) {
+    console.error('[InsightChat] Error:', error);
+    if (handleDatabaseError(error, res, 'Failed to process insight chat')) return;
+    res.status(500).json({
+      error: 'Failed to process insight chat',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 });
