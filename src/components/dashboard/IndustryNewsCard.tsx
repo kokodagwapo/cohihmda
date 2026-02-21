@@ -27,6 +27,10 @@ import {
   Zap,
   ExternalLink,
   Loader2,
+  Mail,
+  Link2,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import {
   Dialog,
@@ -91,6 +95,118 @@ const EXISTING_HOME_SALES_DATA = [
   { month: "Dec '25", value: 3.31 },
   { month: "Jan '26", value: 3.91 },
 ];
+
+type DrilldownRange = "mtd" | "qtr" | "ytd" | "3y";
+type DrilldownChartKey =
+  | "fixedRate"
+  | "treasury"
+  | "mba"
+  | "nahb"
+  | "rateSnapshot"
+  | "existingSales";
+
+const CHART_SOURCE_META: Record<
+  DrilldownChartKey,
+  { label: string; url: string }
+> = {
+  fixedRate: {
+    label: "Freddie Mac PMMS",
+    url: "https://www.freddiemac.com/pmms",
+  },
+  treasury: {
+    label: "U.S. Treasury",
+    url: "https://home.treasury.gov/",
+  },
+  mba: {
+    label: "MBA Weekly Applications Survey",
+    url: "https://www.mba.org/news-and-research/newsroom",
+  },
+  nahb: {
+    label: "NAHB Housing Market Index",
+    url: "https://www.nahb.org/news-and-economics/housing-economics/indices/housing-market-index",
+  },
+  rateSnapshot: {
+    label: "Optimal Blue OBMMI",
+    url: "https://www2.optimalblue.com/obmmi",
+  },
+  existingSales: {
+    label: "NAR Existing-Home Sales",
+    url: "https://www.nar.realtor/research-and-statistics/housing-statistics/existing-home-sales",
+  },
+};
+
+const DRILLDOWN_RANGE_LABELS: Record<DrilldownRange, string> = {
+  mtd: "MTD",
+  qtr: "QTR",
+  ytd: "YTD",
+  "3y": "Last 3 Years",
+};
+
+const CHART_DRILLDOWN_DATA: Record<
+  DrilldownChartKey,
+  Partial<Record<DrilldownRange, any[]>>
+> = {
+  fixedRate: {
+    mtd: FIXED_RATE_DATA.slice(-3),
+    qtr: FIXED_RATE_DATA,
+    ytd: FIXED_RATE_DATA,
+    "3y": [
+      { week: "2023", rate: 6.8 },
+      { week: "2024", rate: 6.4 },
+      { week: "2025", rate: 6.1 },
+      { week: "2026", rate: 5.9 },
+    ],
+  },
+  treasury: {
+    mtd: TREASURY_DATA.slice(-4),
+    qtr: TREASURY_DATA,
+    ytd: TREASURY_DATA,
+    "3y": [
+      { date: "2023", yield: 4.62 },
+      { date: "2024", yield: 4.25 },
+      { date: "2025", yield: 4.08 },
+      { date: "2026", yield: 4.0 },
+    ],
+  },
+  mba: {
+    mtd: MBA_INDEX_DATA.slice(-2),
+    qtr: MBA_INDEX_DATA,
+    ytd: MBA_INDEX_DATA,
+    "3y": [
+      { week: "2023", purchase: 118, refi: 92 },
+      { week: "2024", purchase: 122, refi: 97 },
+      { week: "2025", purchase: 128, refi: 112 },
+      { week: "2026", purchase: 130, refi: 120 },
+    ],
+  },
+  nahb: {
+    mtd: NAHB_DATA.slice(-2),
+    qtr: NAHB_DATA.slice(-4),
+    ytd: NAHB_DATA,
+    "3y": [
+      { month: "2023", value: 34 },
+      { month: "2024", value: 37 },
+      { month: "2025", value: 39 },
+      { month: "2026", value: 38 },
+    ],
+  },
+  rateSnapshot: {
+    mtd: RATE_SNAPSHOT_DATA,
+    qtr: RATE_SNAPSHOT_DATA,
+    ytd: RATE_SNAPSHOT_DATA,
+  },
+  existingSales: {
+    mtd: EXISTING_HOME_SALES_DATA.slice(-2),
+    qtr: EXISTING_HOME_SALES_DATA.slice(-4),
+    ytd: EXISTING_HOME_SALES_DATA,
+    "3y": [
+      { month: "2023", value: 4.28 },
+      { month: "2024", value: 4.11 },
+      { month: "2025", value: 4.05 },
+      { month: "2026", value: 3.91 },
+    ],
+  },
+};
 
 const HEADLINES_PER_PAGE = 6;
 const HEADLINES_ROTATE_MS = 15_000;
@@ -315,6 +431,16 @@ export const IndustryNewsCard = () => {
   const [articleFrameLoading, setArticleFrameLoading] = useState(false);
   const [articleFrameError, setArticleFrameError] = useState(false);
   const [excerptPage, setExcerptPage] = useState(0);
+  const [showChartDrilldown, setShowChartDrilldown] = useState(false);
+  const [activeChart, setActiveChart] = useState<DrilldownChartKey | null>(null);
+  const [drilldownRange, setDrilldownRange] = useState<DrilldownRange>("mtd");
+  const [showDataSourceModal, setShowDataSourceModal] = useState(false);
+  const [activeDataSource, setActiveDataSource] = useState<{
+    label: string;
+    url: string;
+  } | null>(null);
+  const [dataSourceFrameLoading, setDataSourceFrameLoading] = useState(false);
+  const [dataSourceFrameError, setDataSourceFrameError] = useState(false);
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
   const defaultSources = [
@@ -334,6 +460,15 @@ export const IndustryNewsCard = () => {
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
   const [headlinePage, setHeadlinePage] = useState(0);
   const [headlinesPaused, setHeadlinesPaused] = useState(false);
+  const [pinnedHeadlineId, setPinnedHeadlineId] = useState<string | null>(null);
+  const [copiedHeadlineId, setCopiedHeadlineId] = useState<string | null>(null);
+  const [showNewsletterModal, setShowNewsletterModal] = useState(false);
+  const [newsletterEnabled, setNewsletterEnabled] = useState(false);
+  const [newsletterEmail, setNewsletterEmail] = useState("");
+  const [newsletterLoading, setNewsletterLoading] = useState(false);
+  const [newsletterSaving, setNewsletterSaving] = useState(false);
+  const [newsletterSending, setNewsletterSending] = useState(false);
+  const [newsletterMessage, setNewsletterMessage] = useState<string | null>(null);
 
   // Load user preferences from database
   const loadUserPreferences = async () => {
@@ -695,10 +830,32 @@ export const IndustryNewsCard = () => {
     Math.ceil(recentHeadlines.length / HEADLINES_PER_PAGE)
   );
 
+  const getHeadlineId = useCallback(
+    (headline: any) =>
+      headline?.item?.link || `${headline?.source?.source}-${headline?.item?.title || "headline"}`,
+    []
+  );
+
+  const pinnedHeadline = useMemo(() => {
+    if (!pinnedHeadlineId) return null;
+    return recentHeadlines.find((headline: any) => getHeadlineId(headline) === pinnedHeadlineId) || null;
+  }, [recentHeadlines, pinnedHeadlineId, getHeadlineId]);
+
   const visibleHeadlines = useMemo(() => {
     const start = (headlinePage % headlinePageCount) * HEADLINES_PER_PAGE;
-    return recentHeadlines.slice(start, start + HEADLINES_PER_PAGE);
-  }, [recentHeadlines, headlinePage, headlinePageCount]);
+    if (!pinnedHeadline) {
+      return recentHeadlines.slice(start, start + HEADLINES_PER_PAGE);
+    }
+    const pageItems = recentHeadlines
+      .slice(start, start + HEADLINES_PER_PAGE)
+      .filter((headline: any) => getHeadlineId(headline) !== getHeadlineId(pinnedHeadline));
+    return [pinnedHeadline, ...pageItems].slice(0, HEADLINES_PER_PAGE);
+  }, [recentHeadlines, headlinePage, headlinePageCount, pinnedHeadline, getHeadlineId]);
+
+  const selectedHeadlineId = useMemo(() => {
+    if (!selectedNewsItem) return null;
+    return getHeadlineId(selectedNewsItem);
+  }, [selectedNewsItem, getHeadlineId]);
 
   useEffect(() => {
     if (headlinePage >= headlinePageCount) {
@@ -707,12 +864,41 @@ export const IndustryNewsCard = () => {
   }, [headlinePage, headlinePageCount]);
 
   useEffect(() => {
-    if (headlinesPaused || headlinePageCount <= 1) return;
+    if (headlinesPaused || !!pinnedHeadline || headlinePageCount <= 1) return;
     const interval = setInterval(() => {
       setHeadlinePage((prev) => (prev + 1) % headlinePageCount);
     }, HEADLINES_ROTATE_MS);
     return () => clearInterval(interval);
-  }, [headlinesPaused, headlinePageCount]);
+  }, [headlinesPaused, pinnedHeadline, headlinePageCount]);
+
+  useEffect(() => {
+    if (pinnedHeadlineId && !pinnedHeadline) {
+      setPinnedHeadlineId(null);
+    }
+  }, [pinnedHeadlineId, pinnedHeadline]);
+
+  const handleHeadlineShareEmail = useCallback((headline: any) => {
+    const title = headline?.item?.title || "Industry headline";
+    const link = headline?.item?.link || "";
+    const subject = encodeURIComponent(title);
+    const body = encodeURIComponent(`Thought you might find this useful:\n\n${title}\n${link}`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  }, []);
+
+  const handleHeadlineCopyLink = useCallback(async (headline: any) => {
+    const link = headline?.item?.link;
+    if (!link) return;
+    const headlineId = getHeadlineId(headline);
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedHeadlineId(headlineId);
+      window.setTimeout(() => {
+        setCopiedHeadlineId((current) => (current === headlineId ? null : current));
+      }, 1500);
+    } catch (error) {
+      console.warn("Could not copy article link:", error);
+    }
+  }, [getHeadlineId]);
 
   // Handle source selection - Allow all sources to be selected
   const handleSourceToggle = (sourceName: string) => {
@@ -733,6 +919,57 @@ export const IndustryNewsCard = () => {
       }
     });
   };
+
+  const loadNewsletterSubscription = useCallback(async () => {
+    setNewsletterLoading(true);
+    setNewsletterMessage(null);
+    try {
+      const pref = await api.getDailyBriefNewsletterSubscription();
+      setNewsletterEnabled(Boolean(pref.enabled));
+      setNewsletterEmail(pref.email || "");
+    } catch (error: any) {
+      setNewsletterMessage(error?.message || "Could not load newsletter settings.");
+    } finally {
+      setNewsletterLoading(false);
+    }
+  }, []);
+
+  const handleSaveNewsletterSubscription = useCallback(async () => {
+    setNewsletterSaving(true);
+    setNewsletterMessage(null);
+    try {
+      const email = newsletterEmail.trim();
+      const result = await api.updateDailyBriefNewsletterSubscription({
+        enabled: newsletterEnabled,
+        email,
+      });
+      setNewsletterEnabled(result.enabled);
+      setNewsletterEmail(result.email);
+      setNewsletterMessage(
+        result.enabled
+          ? "Subscribed. You will receive automated Daily Brief emails."
+          : "Newsletter subscription disabled."
+      );
+    } catch (error: any) {
+      setNewsletterMessage(error?.message || "Could not save newsletter settings.");
+    } finally {
+      setNewsletterSaving(false);
+    }
+  }, [newsletterEnabled, newsletterEmail]);
+
+  const handleSendNewsletterPreview = useCallback(async () => {
+    setNewsletterSending(true);
+    setNewsletterMessage(null);
+    try {
+      const email = newsletterEmail.trim();
+      const result = await api.sendDailyBriefPreviewEmail({ email });
+      setNewsletterMessage(`Preview sent to ${result.recipient}.`);
+    } catch (error: any) {
+      setNewsletterMessage(error?.message || "Could not send preview email.");
+    } finally {
+      setNewsletterSending(false);
+    }
+  }, [newsletterEmail]);
 
   // Re-fetch news when selected sources change (to ensure we have latest data)
   // The filtering is handled by filteredNewsFeed useMemo
@@ -952,6 +1189,35 @@ export const IndustryNewsCard = () => {
     }
   }, [excerptPage, excerptPageCount]);
 
+  const openChartDrilldown = useCallback((chartKey: DrilldownChartKey) => {
+    setActiveChart(chartKey);
+    setDrilldownRange("mtd");
+    setShowChartDrilldown(true);
+  }, []);
+
+  const openDataSourceModal = useCallback((chartKey: DrilldownChartKey) => {
+    const source = CHART_SOURCE_META[chartKey];
+    if (!source) return;
+    setActiveDataSource(source);
+    setDataSourceFrameLoading(true);
+    setDataSourceFrameError(false);
+    setShowDataSourceModal(true);
+  }, []);
+
+  const availableDrilldownRanges = useMemo<DrilldownRange[]>(() => {
+    if (!activeChart) return [];
+    return (Object.keys(CHART_DRILLDOWN_DATA[activeChart]) as DrilldownRange[]).filter(
+      (range) => (CHART_DRILLDOWN_DATA[activeChart][range] || []).length > 0
+    );
+  }, [activeChart]);
+
+  useEffect(() => {
+    if (!showChartDrilldown || !activeChart) return;
+    if (!availableDrilldownRanges.includes(drilldownRange)) {
+      setDrilldownRange(availableDrilldownRanges[0] || "mtd");
+    }
+  }, [showChartDrilldown, activeChart, drilldownRange, availableDrilldownRanges]);
+
   useEffect(() => {
     prewarmArticleLink(selectedNewsItem?.item?.link);
   }, [selectedNewsItem, prewarmArticleLink]);
@@ -966,6 +1232,115 @@ export const IndustryNewsCard = () => {
       violet: "bg-violet-500",
     };
     return colorMap[color] || "bg-slate-500";
+  };
+
+  const chartTitles: Record<DrilldownChartKey, string> = {
+    fixedRate: "30-Yr Fixed Rate",
+    treasury: "10-Yr Treasury Yield",
+    mba: "MBA Application Index",
+    nahb: "NAHB Builder Confidence",
+    rateSnapshot: "Rate Snapshot by Product",
+    existingSales: "Existing Home Sales (SAAR)",
+  };
+
+  const renderDrilldownChart = () => {
+    if (!activeChart) return null;
+    const chartData = CHART_DRILLDOWN_DATA[activeChart][drilldownRange];
+    if (!chartData || chartData.length === 0) {
+      return (
+        <div className="h-full flex items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Data not available for this range yet.
+          </p>
+        </div>
+      );
+    }
+
+    if (activeChart === "fixedRate") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
+            <RechartsTooltip formatter={(v: number) => [`${v}%`, "Rate"]} />
+            <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2.5} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "treasury") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
+            <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} />
+            <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2.5} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "mba") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barCategoryGap="20%">
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} />
+            <RechartsTooltip />
+            <Legend />
+            <Bar dataKey="purchase" fill="rgb(59, 130, 246)" name="Purchase" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="refi" fill="rgb(249, 115, 22)" name="Refi" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "nahb") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} />
+            <RechartsTooltip />
+            <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "rateSnapshot") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} layout="vertical" barCategoryGap="14%">
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
+            <YAxis type="category" dataKey="product" tick={{ fontSize: 12 }} width={120} />
+            <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} />
+            <Legend />
+            <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+          <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}M`} />
+          <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} />
+          <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    );
   };
 
   return (
@@ -1000,6 +1375,17 @@ export const IndustryNewsCard = () => {
               shareTarget={{ type: "industry-news", label: "Industry News" }}
             />
             <button
+              onClick={() => {
+                setShowNewsletterModal(true);
+                void loadNewsletterSubscription();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-700 dark:text-slate-200"
+              aria-label="Subscribe to daily brief newsletter"
+            >
+              <Mail className="w-4 h-4" strokeWidth={1.8} />
+              Newsletter
+            </button>
+            <button
               onClick={() => setShowSourceSelector(true)}
               className="flex items-center justify-center p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700"
               aria-label="Select news sources"
@@ -1017,9 +1403,23 @@ export const IndustryNewsCard = () => {
         {/* Charts Grid - 2 rows x 3 */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8">
           {/* 30-Yr Fixed Rate */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("fixedRate")}
+          >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">30-YR FIXED RATE</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Lowest in several years — now sub-6%</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("fixedRate");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: Freddie Mac PMMS
+              <ExternalLink className="w-3 h-3" />
+            </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={FIXED_RATE_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -1033,9 +1433,23 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           {/* 10-Yr Treasury */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("treasury")}
+          >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">10-YR TREASURY YIELD</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">~65bps of Fed cuts priced for 2026</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("treasury");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: U.S. Treasury
+              <ExternalLink className="w-3 h-3" />
+            </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={TREASURY_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -1049,9 +1463,23 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           {/* MBA Application Index */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("mba")}
+          >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">MBA APPLICATION INDEX</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Refi share of total apps</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("mba");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: MBA Weekly Applications Survey
+              <ExternalLink className="w-3 h-3" />
+            </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={MBA_INDEX_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barCategoryGap="20%">
@@ -1067,9 +1495,23 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           {/* NAHB Builder Confidence */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("nahb")}
+          >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">NAHB BUILDER CONFIDENCE</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Feb forecast releasing 10am ET</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("nahb");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: NAHB HMI
+              <ExternalLink className="w-3 h-3" />
+            </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={NAHB_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -1083,9 +1525,23 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           {/* Rate Snapshot by Product */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("rateSnapshot")}
+          >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">RATE SNAPSHOT BY PRODUCT</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Prior week vs today</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("rateSnapshot");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: Optimal Blue OBMMI
+              <ExternalLink className="w-3 h-3" />
+            </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={RATE_SNAPSHOT_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
@@ -1101,9 +1557,23 @@ export const IndustryNewsCard = () => {
             </div>
           </div>
           {/* Existing Home Sales */}
-          <div className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50">
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("existingSales")}
+          >
             <p className="text-sm font-medium text-slate-800 dark:text-slate-200">EXISTING HOME SALES (SAAR)</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Jan drops — weather impact muted</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("existingSales");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: NAR Existing-Home Sales
+              <ExternalLink className="w-3 h-3" />
+            </button>
             <div className="h-[140px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={EXISTING_HOME_SALES_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -1143,15 +1613,19 @@ export const IndustryNewsCard = () => {
                         : "N/A"
                     }`}
               </span>
+              <span className="mt-0.5">
+                {pinnedHeadline ? "Pinned in place • rotation paused" : "Auto-rotates every 15s when unpinned"}
+              </span>
             </div>
           </div>
           <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {visibleHeadlines.map((headline: any, idx: number) => (
-                <li key={`${headline.source.source}-${headline.item.link || idx}`} className="h-full">
+              <li key={`${headline.source.source}-${headline.item.link || idx}`} className="h-full">
+                <div className="w-full h-full p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-800/35 hover:bg-slate-100 dark:hover:bg-slate-800/55 border border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 transition-all shadow-sm hover:shadow-md">
                   <button
                     type="button"
                     onClick={() => handleNewsItemClick(headline.item, headline.source)}
-                    className="w-full h-full text-left group p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-800/35 hover:bg-slate-100 dark:hover:bg-slate-800/55 border border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 transition-all shadow-sm hover:shadow-md"
+                    className="w-full text-left group"
                   >
                     <p className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2">
                       {headline.item.title}
@@ -1162,12 +1636,63 @@ export const IndustryNewsCard = () => {
                         headline.item.summary ||
                         "Read more"}
                     </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
+                  </button>
+
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                       [{headline.source.source}] • {headline.releaseLabel}
                     </p>
-                  </button>
-                </li>
-              ))}
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleHeadlineShareEmail(headline);
+                        }}
+                        className="w-7 h-7 rounded-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        aria-label="Share by email"
+                        title="Share by email"
+                      >
+                        <Mail className="w-3.5 h-3.5" strokeWidth={1.8} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleHeadlineCopyLink(headline);
+                        }}
+                        className="w-7 h-7 rounded-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        aria-label="Copy article link"
+                        title={copiedHeadlineId === getHeadlineId(headline) ? "Copied" : "Copy link"}
+                      >
+                        <Link2 className="w-3.5 h-3.5" strokeWidth={1.8} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const headlineId = getHeadlineId(headline);
+                          setPinnedHeadlineId((current) => (current === headlineId ? null : headlineId));
+                        }}
+                        className={`w-7 h-7 rounded-md border flex items-center justify-center ${
+                          pinnedHeadlineId === getHeadlineId(headline)
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
+                            : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        }`}
+                        aria-label={pinnedHeadlineId === getHeadlineId(headline) ? "Unpin headline" : "Pin headline in place"}
+                        title={pinnedHeadlineId === getHeadlineId(headline) ? "Unpin" : "Pin in place"}
+                      >
+                        {pinnedHeadlineId === getHeadlineId(headline) ? (
+                          <PinOff className="w-3.5 h-3.5" strokeWidth={1.8} />
+                        ) : (
+                          <Pin className="w-3.5 h-3.5" strokeWidth={1.8} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
           </ul>
           {headlinePageCount > 1 && (
             <div className="mt-3 flex items-center justify-center gap-1.5">
@@ -1188,6 +1713,232 @@ export const IndustryNewsCard = () => {
           )}
         </div>
       </motion.div>
+
+      <Dialog
+        open={showChartDrilldown}
+        onOpenChange={(open) => {
+          setShowChartDrilldown(open);
+          if (!open) setActiveChart(null);
+        }}
+      >
+        <DialogContent className="left-0 top-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 border-0 shadow-none [&>button]:hidden">
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/60 dark:border-slate-700/50">
+              <div>
+                <DialogTitle className="text-base sm:text-lg font-medium text-slate-900 dark:text-slate-100">
+                  {activeChart ? `${chartTitles[activeChart]} Drilldown` : "Chart Drilldown"}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  MTD, QTR, YTD, and 3-year views (when available)
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChartDrilldown(false);
+                  setActiveChart(null);
+                }}
+                className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Close chart drilldown"
+              >
+                <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
+              </button>
+            </div>
+
+            <div className="px-4 pt-3 pb-2 border-b border-slate-200/60 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto">
+              {(Object.keys(DRILLDOWN_RANGE_LABELS) as DrilldownRange[]).map((range) => {
+                const hasData = availableDrilldownRanges.includes(range);
+                return (
+                  <button
+                    key={range}
+                    type="button"
+                    disabled={!hasData}
+                    onClick={() => setDrilldownRange(range)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
+                      drilldownRange === range
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : hasData
+                        ? "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700 cursor-not-allowed"
+                    }`}
+                  >
+                    {DRILLDOWN_RANGE_LABELS[range]}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex-1 p-4 sm:p-6">
+              <div className="h-full min-h-[420px] rounded-xl border border-slate-200/60 dark:border-slate-700/50 bg-slate-50/40 dark:bg-slate-800/30 p-3 sm:p-4">
+                {renderDrilldownChart()}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showDataSourceModal}
+        onOpenChange={(open) => {
+          setShowDataSourceModal(open);
+          if (!open) {
+            setDataSourceFrameLoading(false);
+            setDataSourceFrameError(false);
+          }
+        }}
+      >
+        <DialogContent className="left-0 top-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 border-0 shadow-none [&>button]:hidden">
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/60 dark:border-slate-700/50">
+              <div className="min-w-0 pr-3">
+                <DialogTitle className="text-sm sm:text-base font-medium text-slate-800 dark:text-slate-200 truncate">
+                  {activeDataSource?.label || "Data Source"}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  {activeDataSource?.url || ""}
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDataSourceModal(false);
+                  setDataSourceFrameLoading(false);
+                  setDataSourceFrameError(false);
+                }}
+                className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Close source modal"
+              >
+                <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
+              </button>
+            </div>
+            <div className="relative flex-1 bg-slate-50 dark:bg-slate-900">
+              {dataSourceFrameLoading && !dataSourceFrameError && (
+                <div className="absolute inset-0 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm flex items-center justify-center px-6">
+                  <p className="text-sm text-slate-600 dark:text-slate-300">Loading source page...</p>
+                </div>
+              )}
+              {dataSourceFrameError && (
+                <div className="absolute inset-0 z-10 bg-white dark:bg-slate-900 flex items-center justify-center p-6">
+                  <div className="text-center max-w-lg">
+                    <p className="text-base text-slate-800 dark:text-slate-200 font-medium">
+                      Unable to render this source in embedded view.
+                    </p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                      Use the source URL below to open it in a new tab.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {activeDataSource?.url ? (
+                <iframe
+                  title={activeDataSource.label}
+                  src={activeDataSource.url}
+                  loading="eager"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  onLoad={() => setDataSourceFrameLoading(false)}
+                  onError={() => {
+                    setDataSourceFrameLoading(false);
+                    setDataSourceFrameError(true);
+                  }}
+                  className={`w-full h-full border-0 transition-opacity duration-200 ${
+                    dataSourceFrameLoading ? "opacity-0" : "opacity-100"
+                  }`}
+                />
+              ) : null}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900 flex justify-end">
+              {activeDataSource?.url ? (
+                <a
+                  href={activeDataSource.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Open source URL
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showNewsletterModal}
+        onOpenChange={(open) => {
+          setShowNewsletterModal(open);
+          if (!open) {
+            setNewsletterMessage(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-xl w-[95vw] rounded-2xl border border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900">
+          <DialogTitle className="text-lg font-medium text-slate-900 dark:text-slate-100">
+            Subscribe to Cohi Daily Brief
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 dark:text-slate-400">
+            Receive automated email snapshots with charts and top headlines only (no sensitive data).
+          </DialogDescription>
+
+          <div className="mt-3 space-y-4">
+            <label className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2.5">
+              <span className="text-sm text-slate-700 dark:text-slate-300">Enable newsletter delivery</span>
+              <input
+                type="checkbox"
+                checked={newsletterEnabled}
+                onChange={(event) => setNewsletterEnabled(event.target.checked)}
+                className="h-4 w-4 accent-blue-600"
+              />
+            </label>
+
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+                Recipient email
+              </label>
+              <input
+                type="email"
+                value={newsletterEmail}
+                onChange={(event) => setNewsletterEmail(event.target.value)}
+                placeholder="you@company.com"
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Automated sends run on the Daily Brief schedule (5AM, 8AM, 10AM, 2PM, 4PM, 6PM).
+            </p>
+
+            {newsletterMessage ? (
+              <p className="text-xs text-blue-600 dark:text-blue-400">{newsletterMessage}</p>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowNewsletterModal(false)}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSendNewsletterPreview()}
+                disabled={newsletterLoading || newsletterSending || !newsletterEmail.trim()}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
+              >
+                {newsletterSending ? "Sending..." : "Send Preview"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveNewsletterSubscription()}
+                disabled={newsletterLoading || newsletterSaving || !newsletterEmail.trim()}
+                className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+              >
+                {newsletterSaving ? "Saving..." : "Save Subscription"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Source Selector Dialog */}
       <Dialog open={showSourceSelector} onOpenChange={setShowSourceSelector}>
@@ -1357,34 +2108,74 @@ export const IndustryNewsCard = () => {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setSelectedNewsItem(null);
-                    setShowFullArticleModal(false);
-                  }}
-                  className="
-                    min-w-[44px] min-h-[44px] w-11 h-11 sm:w-9 sm:h-9
-                    rounded-full 
-                    bg-white/90 dark:bg-slate-800/90 
-                    border border-slate-200 dark:border-slate-700 
-                    shadow-sm 
-                    hover:bg-slate-50 dark:hover:bg-slate-700 
-                    active:bg-slate-100 dark:active:bg-slate-600
-                    backdrop-blur-sm 
-                    flex items-center justify-center 
-                    transition-all duration-200 
-                    flex-shrink-0 
-                    ml-3 
-                    focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1
-                    touch-manipulation
-                  "
-                  aria-label="Close"
-                >
-                  <X
-                    className="w-5 h-5 sm:w-4 sm:h-4 text-slate-500 dark:text-slate-400"
-                    strokeWidth={1.5}
-                  />
-                </button>
+                <div className="flex items-center gap-1.5 ml-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeadlineShareEmail(selectedNewsItem)}
+                    className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    aria-label="Share by email"
+                    title="Share by email"
+                  >
+                    <Mail className="w-4 h-4" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleHeadlineCopyLink(selectedNewsItem)}
+                    className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    aria-label="Copy article link"
+                    title={copiedHeadlineId === selectedHeadlineId ? "Copied" : "Copy link"}
+                  >
+                    <Link2 className="w-4 h-4" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPinnedHeadlineId((current) =>
+                        current === selectedHeadlineId ? null : selectedHeadlineId
+                      )
+                    }
+                    className={`w-9 h-9 rounded-full border flex items-center justify-center ${
+                      pinnedHeadlineId === selectedHeadlineId
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
+                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    }`}
+                    aria-label={pinnedHeadlineId === selectedHeadlineId ? "Unpin headline" : "Pin headline in place"}
+                    title={pinnedHeadlineId === selectedHeadlineId ? "Unpin" : "Pin in place"}
+                  >
+                    {pinnedHeadlineId === selectedHeadlineId ? (
+                      <PinOff className="w-4 h-4" strokeWidth={1.8} />
+                    ) : (
+                      <Pin className="w-4 h-4" strokeWidth={1.8} />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedNewsItem(null);
+                      setShowFullArticleModal(false);
+                    }}
+                    className="
+                      min-w-[44px] min-h-[44px] w-11 h-11 sm:w-9 sm:h-9
+                      rounded-full 
+                      bg-white/90 dark:bg-slate-800/90 
+                      border border-slate-200 dark:border-slate-700 
+                      shadow-sm 
+                      hover:bg-slate-50 dark:hover:bg-slate-700 
+                      active:bg-slate-100 dark:active:bg-slate-600
+                      backdrop-blur-sm 
+                      flex items-center justify-center 
+                      transition-all duration-200 
+                      flex-shrink-0 
+                      focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1
+                      touch-manipulation
+                    "
+                    aria-label="Close"
+                  >
+                    <X
+                      className="w-5 h-5 sm:w-4 sm:h-4 text-slate-500 dark:text-slate-400"
+                      strokeWidth={1.5}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Enhanced Content - Scrollable with safe area */}
@@ -1606,18 +2397,63 @@ export const IndustryNewsCard = () => {
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate pr-3">
                 {selectedNewsItem?.item?.title || "Full Article"}
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowFullArticleModal(false);
-                  setArticleFrameLoading(false);
-                  setArticleFrameError(false);
-                }}
-                className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
-                aria-label="Close full article"
-              >
-                <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {selectedNewsItem ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleHeadlineShareEmail(selectedNewsItem)}
+                      className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                      aria-label="Share by email"
+                      title="Share by email"
+                    >
+                      <Mail className="w-4 h-4" strokeWidth={1.8} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleHeadlineCopyLink(selectedNewsItem)}
+                      className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                      aria-label="Copy article link"
+                      title={copiedHeadlineId === selectedHeadlineId ? "Copied" : "Copy link"}
+                    >
+                      <Link2 className="w-4 h-4" strokeWidth={1.8} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPinnedHeadlineId((current) =>
+                          current === selectedHeadlineId ? null : selectedHeadlineId
+                        )
+                      }
+                      className={`w-9 h-9 rounded-full border flex items-center justify-center ${
+                        pinnedHeadlineId === selectedHeadlineId
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
+                          : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                      }`}
+                      aria-label={pinnedHeadlineId === selectedHeadlineId ? "Unpin headline" : "Pin headline in place"}
+                      title={pinnedHeadlineId === selectedHeadlineId ? "Unpin" : "Pin in place"}
+                    >
+                      {pinnedHeadlineId === selectedHeadlineId ? (
+                        <PinOff className="w-4 h-4" strokeWidth={1.8} />
+                      ) : (
+                        <Pin className="w-4 h-4" strokeWidth={1.8} />
+                      )}
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFullArticleModal(false);
+                    setArticleFrameLoading(false);
+                    setArticleFrameError(false);
+                  }}
+                  className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                  aria-label="Close full article"
+                >
+                  <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
+                </button>
+              </div>
             </div>
             <div className="relative flex-1 bg-slate-50 dark:bg-slate-900">
               {articleFrameLoading && !articleFrameError && (

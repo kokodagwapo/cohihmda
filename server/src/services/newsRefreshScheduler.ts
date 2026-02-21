@@ -1,4 +1,5 @@
 import { clearNewsCache, getIndustryNews } from "./newsService.js";
+import { sendDailyBriefNewsletterToSubscribers } from "./dailyBriefNewsletterService.js";
 
 let nextRunTimer: NodeJS.Timeout | null = null;
 const DAILY_REFRESH_HOURS = [5, 8, 10, 14, 16, 18];
@@ -27,6 +28,11 @@ async function refreshNewsCache(reason: string) {
     console.log(
       `[NewsScheduler] Refresh complete. Sources: ${result.newsFeed.length}, updated: ${result.lastUpdated}`
     );
+
+    // Send newsletter only for scheduled refreshes (not startup prime).
+    if (reason.startsWith("scheduled-")) {
+      await sendDailyBriefNewsletterToSubscribers(reason, result);
+    }
   } catch (error) {
     console.warn("[NewsScheduler] Refresh failed:", error);
   }
