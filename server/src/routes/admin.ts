@@ -79,7 +79,7 @@ async function resolveTenantContext(
 // Validation schemas
 const createUserSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(6).optional(),
   full_name: z.string().optional(),
   tenant_id: z.string().uuid().optional(),
   role: z
@@ -422,15 +422,24 @@ router.post(
       });
     }
 
-    const hashedPassword = await bcrypt.hash(validated.password, 10);
+    const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
+    if (!useCognitoInvite && !validated.password) {
+      return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });
+    }
+
+    const hashedPassword = validated.password
+      ? await bcrypt.hash(validated.password, 10)
+      : await bcrypt.hash("", 10); // placeholder when Cognito invite is used
 
     let cognitoSub: string | null = null;
-    if (cognitoAuth.isCognitoAuthEnabled()) {
+    if (useCognitoInvite) {
       try {
+        const sendInvite = !validated.password;
         const cognitoResult = await cognitoAuth.createUser(
           validated.email,
-          validated.password,
+          validated.password ?? undefined,
           validated.full_name,
+          sendInvite,
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
@@ -972,7 +981,7 @@ router.post(
 
     const schema = z.object({
       email: z.string().email(),
-      password: z.string().min(6),
+      password: z.string().min(6).optional(),
       full_name: z.string().optional(),
         role: z
           .enum([
@@ -987,15 +996,23 @@ router.post(
     });
     
     const validated = schema.parse(req.body);
-    const hashedPassword = await bcrypt.hash(validated.password, 10);
+    const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
+    if (!useCognitoInvite && !validated.password) {
+      return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });
+    }
+    const hashedPassword = validated.password
+      ? await bcrypt.hash(validated.password, 10)
+      : await bcrypt.hash("", 10);
 
     let cognitoSub: string | null = null;
-    if (cognitoAuth.isCognitoAuthEnabled()) {
+    if (useCognitoInvite) {
       try {
+        const sendInvite = !validated.password;
         const cognitoResult = await cognitoAuth.createUser(
           validated.email,
-          validated.password,
+          validated.password ?? undefined,
           validated.full_name,
+          sendInvite,
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {

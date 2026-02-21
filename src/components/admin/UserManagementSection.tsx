@@ -129,6 +129,9 @@ export function UserManagementSection() {
     tenant_slug: '',
   });
 
+  // When true, new users receive an email with sign-in instructions (no password field in form)
+  const [useInviteFlow, setUseInviteFlow] = useState(false);
+
   // Load LOS connections for Encompass user sync
   const loadLosConnections = useCallback(async () => {
     const tenantId = selectedTenantId || currentUser?.tenant_id;
@@ -163,6 +166,15 @@ export function UserManagementSection() {
     loadLosConnections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTenantAdmin, selectedTenantId]);
+
+  // Fetch auth config to know if we use invite flow (no password; user gets email)
+  useEffect(() => {
+    let cancelled = false;
+    api.request('/api/auth/cognito/config').then((data: { useInviteFlow?: boolean }) => {
+      if (!cancelled) setUseInviteFlow(!!data.useInviteFlow);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -243,6 +255,10 @@ export function UserManagementSection() {
   };
 
   const handleCreateUser = async () => {
+    if (!useInviteFlow && !formData.password?.trim()) {
+      toast({ title: 'Error', description: 'Please enter a password', variant: 'destructive' });
+      return;
+    }
     try {
       // Determine tenant ID:
       // 1. Tenant admins: always use their own tenant
@@ -265,20 +281,23 @@ export function UserManagementSection() {
         return;
       }
       
-      // Create user in tenant database
+      const body: Record<string, unknown> = {
+        email: formData.email,
+        full_name: formData.full_name,
+        role: formData.role || 'user',
+      };
+      if (!useInviteFlow && formData.password) body.password = formData.password;
+
       await api.request(`/api/admin/tenants/${tenantId}/users`, {
         method: 'POST',
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          full_name: formData.full_name,
-          role: formData.role || 'user',
-        }),
+        body: JSON.stringify(body),
       });
       
       toast({
         title: 'User Created',
-        description: `User ${formData.email} has been created successfully`
+        description: useInviteFlow
+          ? `An email with sign-in instructions has been sent to ${formData.email}`
+          : `User ${formData.email} has been created successfully`,
       });
       setCreateDialogOpen(false);
       resetForm();
@@ -838,15 +857,24 @@ export function UserManagementSection() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Password</Label>
-              <Input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                placeholder="••••••••"
-              />
-            </div>
+            {useInviteFlow ? (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/60 border border-border">
+                <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <p className="text-sm text-muted-foreground">
+                  An email with sign-in instructions will be sent to this user. They will set their password on first login and can then set up two-factor authentication in account settings.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="••••••••"
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Role</Label>

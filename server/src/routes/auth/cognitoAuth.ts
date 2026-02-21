@@ -18,6 +18,7 @@ import {
   getCognitoConfig,
   type CognitoUserInfo,
 } from "../../services/cognito/cognitoService.js";
+import { isCognitoAuthEnabled } from "../../services/cognito/cognitoAuthService.js";
 import { auditLog, createSession } from "../../services/auditLogger.js";
 import { logError, logInfo, logDebug, logWarn } from "../../services/logger.js";
 import { authLimiter } from "../../middleware/rateLimiter.js";
@@ -120,6 +121,8 @@ router.get("/config", (req, res) => {
     isConfigured: config.isConfigured,
     domain: config.domain,
     region: config.region,
+    /** When true, admin user creation should not ask for a password; user receives an email with sign-in instructions. */
+    useInviteFlow: isCognitoAuthEnabled(),
   });
 });
 
