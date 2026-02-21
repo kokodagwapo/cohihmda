@@ -29,6 +29,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   Users,
   UserPlus,
@@ -47,7 +54,8 @@ import {
   Database,
   Clock,
   AlertCircle,
-  Unlink
+  Unlink,
+  MoreHorizontal
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
@@ -343,21 +351,21 @@ export function UserManagementSection() {
   };
 
   const handleDeleteUser = async (user: UserDisplay) => {
-    if (!confirm(`Are you sure you want to delete ${user.email}?`)) return;
-    
+    const message = `Permanently delete ${user.email}? They will be removed from this organization and cannot sign in again. This cannot be undone.`;
+    if (!confirm(message)) return;
+
     try {
       await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, { method: 'DELETE' });
-      
       toast({
         title: 'User Deleted',
-        description: `User ${user.email} has been deleted`
+        description: `${user.email} has been permanently removed`,
       });
       await loadData();
     } catch (error: any) {
       toast({
         title: 'Error',
         description: error.message || 'Failed to delete user',
-        variant: 'destructive'
+        variant: 'destructive',
       });
     }
   };
@@ -717,35 +725,46 @@ export function UserManagementSection() {
                         <TableCell className="text-sm text-slate-500">
                           {formatDate(user.last_login_at)}
                     </TableCell>
-                        <TableCell className="text-right space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openLoanAccessDialog(user)}
-                          title="Loan Access Settings"
-                        >
-                            <Settings2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditDialog(user)}
-                          title="Edit User"
-                        >
-                            <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                            onClick={() => handleToggleActive(user)}
-                          title={user.is_active ? 'Deactivate User' : 'Activate User'}
-                          >
-                            {user.is_active ? (
-                              <XCircle className="h-4 w-4 text-slate-500" />
-                            ) : (
-                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                            )}
-                        </Button>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openLoanAccessDialog(user)}
+                              title="Loan Access Settings"
+                            >
+                              <Settings2 className="h-4 w-4" />
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" title="Actions">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openEditDialog(user)}>
+                                  <Edit2 className="h-4 w-4 mr-2" />
+                                  Edit user
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleToggleActive(user)}>
+                                  {user.is_active ? (
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                  ) : (
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                  )}
+                                  {user.is_active ? 'Deactivate' : 'Activate'}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleDeleteUser(user)}
+                                  className="text-rose-600 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/30"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete user (frees email for reuse)
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                     </TableCell>
                   </TableRow>
                     );
