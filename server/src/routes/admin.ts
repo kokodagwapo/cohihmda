@@ -79,7 +79,7 @@ async function resolveTenantContext(
 // Validation schemas
 const createUserSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(6).optional(),
   full_name: z.string().optional(),
   tenant_id: z.string().uuid().optional(),
   role: z
@@ -422,15 +422,24 @@ router.post(
       });
     }
 
-    const hashedPassword = await bcrypt.hash(validated.password, 10);
+    const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
+    if (!useCognitoInvite && !validated.password) {
+      return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });
+    }
+
+    const hashedPassword = validated.password
+      ? await bcrypt.hash(validated.password, 10)
+      : await bcrypt.hash("", 10); // placeholder when Cognito invite is used
 
     let cognitoSub: string | null = null;
-    if (cognitoAuth.isCognitoAuthEnabled()) {
+    if (useCognitoInvite) {
       try {
+        const sendInvite = !validated.password;
         const cognitoResult = await cognitoAuth.createUser(
           validated.email,
-          validated.password,
+          validated.password ?? undefined,
           validated.full_name,
+          sendInvite,
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
@@ -592,7 +601,8 @@ router.put(
 
 /**
  * DELETE /api/admin/users/:id
- * Delete a user (admin only)
+ * Permanently delete a platform user (platform staff only).
+ * Removes user_tenant_mappings, then coheus_users, then Cognito.
  */
 router.delete(
   "/users/:id",
@@ -601,19 +611,22 @@ router.delete(
   async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    
+
     // Don't allow deleting yourself
     if (id === req.userId) {
         return res
           .status(400)
           .json({ error: "Cannot delete your own account" });
     }
-    
+
+    // Remove tenant mappings first (FK from user_tenant_mappings to coheus_users)
+    await managementPool.query("DELETE FROM user_tenant_mappings WHERE user_id = $1", [id]);
+
     const result = await managementPool.query(
         "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email, cognito_sub",
         [id],
     );
-    
+
     if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
     }
@@ -972,7 +985,7 @@ router.post(
 
     const schema = z.object({
       email: z.string().email(),
-      password: z.string().min(6),
+      password: z.string().min(6).optional(),
       full_name: z.string().optional(),
         role: z
           .enum([
@@ -987,15 +1000,23 @@ router.post(
     });
     
     const validated = schema.parse(req.body);
-    const hashedPassword = await bcrypt.hash(validated.password, 10);
+    const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
+    if (!useCognitoInvite && !validated.password) {
+      return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });
+    }
+    const hashedPassword = validated.password
+      ? await bcrypt.hash(validated.password, 10)
+      : await bcrypt.hash("", 10);
 
     let cognitoSub: string | null = null;
-    if (cognitoAuth.isCognitoAuthEnabled()) {
+    if (useCognitoInvite) {
       try {
+        const sendInvite = !validated.password;
         const cognitoResult = await cognitoAuth.createUser(
           validated.email,
-          validated.password,
+          validated.password ?? undefined,
           validated.full_name,
+          sendInvite,
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
@@ -1175,7 +1196,8 @@ router.put(
 
 /**
  * DELETE /api/admin/tenants/:tenantId/users/:userId
- * Delete a user from a specific tenant
+ * Permanently delete a tenant user. Removes from tenant DB and Cognito so the email can be reused.
+ * Allowed: platform staff; tenant admins for their own tenant only.
  */
 router.delete(
   "/tenants/:tenantId/users/:userId",
@@ -1185,12 +1207,11 @@ router.delete(
   try {
     const tenantId = req.params.tenantId as string;
     const userId = req.params.userId as string;
-    
-    // Tenant admins can only delete users in their own tenant
-      if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
-      return res.status(403).json({ 
-          error: "Forbidden",
-          message: "You can only delete users in your own organization",
+
+    if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "You can only delete users in your own organization",
       });
     }
     
