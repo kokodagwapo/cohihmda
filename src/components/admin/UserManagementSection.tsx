@@ -139,6 +139,21 @@ export function UserManagementSection() {
 
   // When true, new users receive an email with sign-in instructions (no password field in form)
   const [useInviteFlow, setUseInviteFlow] = useState(false);
+  const [inviteFlowKnown, setInviteFlowKnown] = useState(false);
+
+  const fetchInviteFlowConfig = useCallback(async () => {
+    try {
+      const data = await api.request<{ useInviteFlow?: boolean }>(
+        '/api/auth/cognito/config',
+        { headers: { 'Cache-Control': 'no-cache' } }
+      );
+      setUseInviteFlow(!!data?.useInviteFlow);
+      setInviteFlowKnown(true);
+    } catch {
+      setUseInviteFlow(false);
+      setInviteFlowKnown(true);
+    }
+  }, []);
 
   // Load LOS connections for Encompass user sync
   const loadLosConnections = useCallback(async () => {
@@ -175,14 +190,10 @@ export function UserManagementSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTenantAdmin, selectedTenantId]);
 
-  // Fetch auth config to know if we use invite flow (no password; user gets email)
+  // Fetch invite flow config on mount so we know whether to show password or invite message
   useEffect(() => {
-    let cancelled = false;
-    api.request('/api/auth/cognito/config').then((data: { useInviteFlow?: boolean }) => {
-      if (!cancelled) setUseInviteFlow(!!data.useInviteFlow);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+    fetchInviteFlowConfig();
+  }, [fetchInviteFlowConfig]);
 
   const loadData = async () => {
     setLoading(true);
@@ -816,7 +827,13 @@ export function UserManagementSection() {
       </Tabs>
 
       {/* Create User Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+      <Dialog
+        open={createDialogOpen}
+        onOpenChange={(open) => {
+          setCreateDialogOpen(open);
+          if (open) fetchInviteFlowConfig();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add User</DialogTitle>
@@ -876,11 +893,16 @@ export function UserManagementSection() {
               />
             </div>
 
-            {useInviteFlow ? (
+            {!inviteFlowKnown ? (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/60 border border-border text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                Checking sign-in method…
+              </div>
+            ) : useInviteFlow ? (
               <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/60 border border-border">
                 <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                 <p className="text-sm text-muted-foreground">
-                  An email with sign-in instructions will be sent to this user. They will set their password on first login and can then set up two-factor authentication in account settings.
+                  An email with sign-in instructions will be sent to this user. They will set their password on first login and can then set up two-factor authentication in account settings. You do not need to enter a password.
                 </p>
               </div>
             ) : (
@@ -919,8 +941,15 @@ export function UserManagementSection() {
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateUser}>
-                  Create User
+            <Button
+              onClick={handleCreateUser}
+              disabled={
+                !formData.email?.trim() ||
+                !inviteFlowKnown ||
+                (!useInviteFlow && !formData.password?.trim())
+              }
+            >
+              Create User
             </Button>
           </DialogFooter>
         </DialogContent>
