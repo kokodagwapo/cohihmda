@@ -433,9 +433,17 @@ router.post(
 
     let cognitoSub: string | null = null;
     if (useCognitoInvite) {
+      const existingPlatform = await managementPool.query(
+        "SELECT id FROM coheus_users WHERE LOWER(email) = LOWER($1)",
+        [validated.email],
+      );
+      if (existingPlatform.rows.length > 0) {
+        return res.status(409).json({ error: "User with this email already exists" });
+      }
+
       try {
         const sendInvite = !validated.password;
-        const cognitoResult = await cognitoAuth.createUser(
+        let cognitoResult = await cognitoAuth.createUser(
           validated.email,
           validated.password ?? undefined,
           validated.full_name,
@@ -443,10 +451,30 @@ router.post(
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
-        logError("Failed to create Cognito user", cognitoError, { email: validated.email });
-        return res.status(cognitoError.statusCode || 500).json({
-          error: cognitoError.message || "Failed to create user in identity provider",
-        });
+        if (cognitoError.code === "USER_EXISTS") {
+          try {
+            await cognitoAuth.deleteUser(validated.email);
+            logInfo("Removed orphan Cognito user for retry", { email: validated.email });
+            const sendInvite = !validated.password;
+            const cognitoResult = await cognitoAuth.createUser(
+              validated.email,
+              validated.password ?? undefined,
+              validated.full_name,
+              sendInvite,
+            );
+            cognitoSub = cognitoResult.cognitoSub;
+          } catch (retryError: any) {
+            logError("Failed to create Cognito user after orphan cleanup", retryError, { email: validated.email });
+            return res.status(retryError.statusCode || 500).json({
+              error: retryError.message || "Failed to create user in identity provider",
+            });
+          }
+        } else {
+          logError("Failed to create Cognito user", cognitoError, { email: validated.email });
+          return res.status(cognitoError.statusCode || 500).json({
+            error: cognitoError.message || "Failed to create user in identity provider",
+          });
+        }
       }
     }
 
@@ -1008,8 +1036,19 @@ router.post(
       ? await bcrypt.hash(validated.password, 10)
       : await bcrypt.hash("", 10);
 
+    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     let cognitoSub: string | null = null;
     if (useCognitoInvite) {
+      const existingInTenant = await tenantPool.query(
+        "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
+        [validated.email],
+      );
+      if (existingInTenant.rows.length > 0) {
+        return res.status(409).json({
+          error: "User with this email already exists in this tenant",
+        });
+      }
+
       try {
         const sendInvite = !validated.password;
         const cognitoResult = await cognitoAuth.createUser(
@@ -1020,16 +1059,34 @@ router.post(
         );
         cognitoSub = cognitoResult.cognitoSub;
       } catch (cognitoError: any) {
-        logError("Failed to create Cognito user for tenant", cognitoError, { email: validated.email });
-        return res.status(cognitoError.statusCode || 500).json({
-          error: cognitoError.message || "Failed to create user in identity provider",
-        });
+        if (cognitoError.code === "USER_EXISTS") {
+          try {
+            await cognitoAuth.deleteUser(validated.email);
+            logInfo("Removed orphan Cognito user for retry", { email: validated.email });
+            const sendInvite = !validated.password;
+            const cognitoResult = await cognitoAuth.createUser(
+              validated.email,
+              validated.password ?? undefined,
+              validated.full_name,
+              sendInvite,
+            );
+            cognitoSub = cognitoResult.cognitoSub;
+          } catch (retryError: any) {
+            logError("Failed to create Cognito user for tenant after orphan cleanup", retryError, { email: validated.email });
+            return res.status(retryError.statusCode || 500).json({
+              error: retryError.message || "Failed to create user in identity provider",
+            });
+          }
+        } else {
+          logError("Failed to create Cognito user for tenant", cognitoError, { email: validated.email });
+          return res.status(cognitoError.statusCode || 500).json({
+            error: cognitoError.message || "Failed to create user in identity provider",
+          });
+        }
       }
     }
 
-    const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-    
-      const result = await tenantPool.query(
+    const result = await tenantPool.query(
         `
       INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode, cognito_sub)
       VALUES ($1, $2, $3, $4, true, 'full_access', $5)
