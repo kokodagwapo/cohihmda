@@ -1607,9 +1607,65 @@ export class EncompassApiService {
       });
     }
 
-    // Build JSON body structure for v3 pipeline
-    // v3 contract: { filter, fields, sortOrder } — no includeArchivedLoans (was v1-only)
-    // v3 sort order values: "ascending" / "descending" (not "asc" / "desc")
+    // Build filter object (shared between archive-detection call and main call)
+    let filter: any = undefined;
+    if (filterTerms.length === 1) {
+      filter = filterTerms[0];
+    } else if (filterTerms.length > 1) {
+      filter = { operator: "and", terms: filterTerms };
+    }
+
+    // =========================================================================
+    // ARCHIVE DETECTION: Lightweight call with includeArchivedLoans:false to
+    // collect non-archived GUIDs. We diff against the full call to tag archived.
+    // =========================================================================
+    const nonArchivedGuids = new Set<string>();
+    try {
+      const archiveDetectBody: any = {
+        fields: ["Fields.GUID"],
+        sortOrder: [{ canonicalName: "Loan.LastModified", order: "descending" }],
+        includeArchivedLoans: false,
+      };
+      if (filter) archiveDetectBody.filter = filter;
+
+      let adStart = 0;
+      const adLimit = 5000;
+      let adTotal: number | undefined;
+      let adPage = 0;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        adPage++;
+        const adResponse = await this.executeWithTokenRetry<any>(
+          tenantId, losConnectionId, async (accessToken) => {
+            const r = await apiClientForConnection.post<any>(
+              "/v3/loanPipeline", archiveDetectBody,
+              { headers: { Authorization: accessToken, "Content-Type": "application/json" }, params: { start: adStart, limit: adLimit } },
+            );
+            if (adPage === 1) {
+              const tc = r.headers["x-total-count"] || r.headers["X-Total-Count"] || r.headers["X-TOTAL-COUNT"];
+              if (tc) { const p = parseInt(tc, 10); if (!isNaN(p)) adTotal = p; }
+            }
+            return r;
+          },
+        );
+        const adLoans = this.transformPipelineResponse(adResponse);
+        for (const loan of adLoans) {
+          const guid = loan["Fields.GUID"] || loan["GUID"] || loan.loanGuid || loan.guid;
+          if (guid) nonArchivedGuids.add(guid.replace(/[{}]/g, "").toLowerCase());
+        }
+        adStart += adLoans.length;
+        if (adLoans.length === 0) break;
+        if (adTotal !== undefined && adStart >= adTotal) break;
+      }
+      console.log(`[Sync] Archive detection: ${nonArchivedGuids.size} non-archived GUIDs collected in ${adPage} page(s)`);
+    } catch (err: any) {
+      console.warn(`[Sync] Archive detection call failed (will default is_archived to false): ${err.message}`);
+    }
+
+    // =========================================================================
+    // MAIN CALL: Fetch all loans (including archived) with full fields
+    // =========================================================================
     const body: any = {
       fields: fieldGuids,
       sortOrder: [
@@ -1618,30 +1674,16 @@ export class EncompassApiService {
           order: "descending",
         },
       ],
+      includeArchivedLoans: true,
     };
+    if (filter) body.filter = filter;
 
-    // Add filter — v3 requires: if only one term, supply it directly (no operator wrapper)
-    if (filterTerms.length === 1) {
-      body.filter = filterTerms[0];
-    } else if (filterTerms.length > 1) {
-      body.filter = {
-        operator: "and",
-        terms: filterTerms,
-      };
-    }
-
-    // Convert body to JSON string
     const bodyJson = JSON.stringify(body);
 
-    // Log concise sync summary
     console.log(
       `[Sync] Pipeline request: ${fieldGuids.length} fields, modifiedFrom=${options.modifiedFrom?.toISOString() || "none"}, folders=${folderNames?.length || 0}, startDate=${loanStartDate.toISOString().split("T")[0]}`,
     );
 
-    // Simple start/limit pagination (no cursors).
-    // The v3/loanPipeline endpoint supports start+limit query params directly.
-    // The server may override `limit` to an optimal value based on field count,
-    // so we use actual page size (not requested limit) to advance `start`.
     const allLoans: EncompassLoan[] = [];
     const uniqueLoanGuids = new Set<string>();
     let totalCount: number | undefined = undefined;
@@ -1718,11 +1760,23 @@ export class EncompassApiService {
 
       start += actualPageSize;
 
-      // Stop when: empty page, server returned fewer than requested (last page),
-      // we've reached totalCount, or we hit user's limit
+      // Stop when: empty page, we hit user's limit, or we've received everything.
+      // Do NOT stop on "partial page" alone: API can return < limit mid-stream (e.g. 393 then more).
+      // Only treat partial page as last when we've received totalCount (start >= totalCount) or we have no totalCount.
+      // For full sync (no totalLimit), do NOT stop on totalCount — API may cap X-Total-Count at 10k.
       if (actualPageSize === 0) break;
-      if (totalCount !== undefined && start >= totalCount) break;
       if (totalLimit !== undefined && allLoans.length >= totalLimit) break;
+      if (
+        totalLimit !== undefined &&
+        totalCount !== undefined &&
+        start >= totalCount
+      )
+        break;
+      if (
+        actualPageSize < pageLimit &&
+        (totalCount === undefined || start >= totalCount)
+      )
+        break; // partial page and we've got all (or don't know total)
       // Safety: if page returned 0 new unique GUIDs, we're in a loop
       if (newUniqueGuids === 0 && actualPageSize > 0) {
         console.warn(
@@ -1796,9 +1850,27 @@ export class EncompassApiService {
       uniqueLoans = uniqueLoans.slice(0, totalLimit);
     }
 
+    // Tag archived loans: any GUID in the full set but NOT in the non-archived set
+    if (nonArchivedGuids.size > 0) {
+      let archivedCount = 0;
+      for (const loan of uniqueLoans) {
+        const guid = loan["Fields.GUID"] || loan["GUID"] || loan.loanGuid || loan.guid;
+        if (guid) {
+          const normalizedGuid = guid.replace(/[{}]/g, "").toLowerCase();
+          if (!nonArchivedGuids.has(normalizedGuid)) {
+            loan._isArchived = true;
+            archivedCount++;
+          }
+        }
+      }
+      console.log(
+        `[Sync] Archive tagging: ${archivedCount} archived, ${uniqueLoans.length - archivedCount} non-archived out of ${uniqueLoans.length} total`,
+      );
+    }
+
     return {
       data: uniqueLoans,
-      concurrency: undefined, // Concurrency info not available from paginated responses
+      concurrency: undefined,
     };
   }
 
@@ -1916,8 +1988,15 @@ export class EncompassApiService {
       // Convert fields array to flat object
       if (loanItem.fields && Array.isArray(loanItem.fields)) {
         for (const field of loanItem.fields) {
-          // Fields can be in format { fieldId: "value" } or { "Fields.123": "value" }
-          Object.assign(loan, field);
+          const fieldKey =
+            field.canonicalName ?? field.fieldId ?? field.fieldID ?? field.id;
+          const fieldValue = field.value;
+          if (fieldKey != null && fieldKey !== "" && "value" in field) {
+            loan[fieldKey] = fieldValue != null ? fieldValue : "";
+          } else {
+            // Key-value format: { "Fields.5016": "Y" }
+            Object.assign(loan, field);
+          }
         }
       } else if (loanItem.fields && typeof loanItem.fields === "object") {
         // Fields might be an object instead of array

@@ -948,8 +948,8 @@ async function gatherInsightMetrics(
     "activeLoans",
     `
     SELECT 
-      COUNT(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL THEN 1 END) as active_count,
-      COALESCE(SUM(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL THEN l.loan_amount ELSE 0 END), 0) as active_volume
+      COUNT(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND (l.is_archived IS DISTINCT FROM TRUE) THEN 1 END) as active_count,
+      COALESCE(SUM(CASE WHEN l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND (l.is_archived IS DISTINCT FROM TRUE) THEN l.loan_amount ELSE 0 END), 0) as active_volume
     FROM public.loans l
   `
   );

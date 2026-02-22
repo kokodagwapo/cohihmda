@@ -19,6 +19,7 @@ import { listTenants } from "../services/tenantProvisioningService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
 import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
+import { requestEmailVerification } from "../services/sesVerificationService.js";
 
 const router = Router();
 
@@ -441,8 +442,11 @@ router.post(
         return res.status(409).json({ error: "User with this email already exists" });
       }
 
+      const sendInvite = !validated.password;
+      if (sendInvite) {
+        await requestEmailVerification(validated.email);
+      }
       try {
-        const sendInvite = !validated.password;
         let cognitoResult = await cognitoAuth.createUser(
           validated.email,
           validated.password ?? undefined,
@@ -1049,8 +1053,11 @@ router.post(
         });
       }
 
+      const sendInvite = !validated.password;
+      if (sendInvite) {
+        await requestEmailVerification(validated.email);
+      }
       try {
-        const sendInvite = !validated.password;
         const cognitoResult = await cognitoAuth.createUser(
           validated.email,
           validated.password ?? undefined,
@@ -2490,13 +2497,14 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const connectionId = req.params.connectionId as string;
-      const { tenant_id } = req.body;
+      const { tenant_id, fullSync: requestFullSync } = req.body;
 
       if (!tenant_id) {
         return res.status(400).json({ error: "tenant_id is required" });
       }
 
       const tenantId = tenant_id as string;
+      const fullSync = requestFullSync === true || requestFullSync === "true";
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get full connection details (need sync state for incremental sync)
@@ -2521,6 +2529,7 @@ router.post(
         const etlService = new EncompassEtlService(tenantPool);
 
         // Determine modifiedFrom for incremental sync (same logic as manual sync in los.ts)
+        // When fullSync is requested (e.g. after adding new field mappings), skip date filter to re-fetch all loans
         let modifiedFrom: Date | undefined;
         const lastLoanModifiedAt = conn.last_loan_modified_at;
         const lastSyncedAt = conn.last_synced_at;
@@ -2536,10 +2545,10 @@ router.post(
           // loans table may not exist
         }
 
-        if (lastLoanModifiedAt && loansCount > 0) {
+        if (!fullSync && lastLoanModifiedAt && loansCount > 0) {
           // Best case: use last_loan_modified_at from a previous successful sync
           modifiedFrom = new Date(lastLoanModifiedAt);
-        } else if (loansCount > 0) {
+        } else if (!fullSync && loansCount > 0) {
           // Fallback: query MAX(last_modified_date) directly from loans table.
           // This handles the case where a previous sync was interrupted before
           // last_loan_modified_at could be written, but loans were already loaded.
@@ -2554,7 +2563,7 @@ router.post(
             // will do full sync
           }
         }
-        // If no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
+        // If fullSync requested, or no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
 
         // Set loanStartDate to 36 months ago (matching Qlik's vLoanStartDate)
         const threeYearsAgo = new Date();
@@ -2577,6 +2586,7 @@ router.post(
         logInfo("Admin trigger sync", {
           connectionId,
           tenantId,
+          fullSync,
           modifiedFrom: modifiedFrom?.toISOString() || "full sync",
           loansCount,
           folders: selectedFolders.length,
@@ -2585,7 +2595,7 @@ router.post(
         // Run sync asynchronously
         etlService
           .syncLoans(tenantId, connectionId, {
-            fullSync: false,
+            fullSync,
             modifiedFrom,
             loanStartDate: threeYearsAgo,
             loanStartDateField: "Fields.Log.MS.Date.Started",
@@ -2601,9 +2611,11 @@ router.post(
 
         return res.json({
           success: true,
-          message: modifiedFrom
-            ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
-            : "Full sync started (no previous sync data)",
+          message: fullSync
+            ? "Full sync started (re-fetching all loans)"
+            : modifiedFrom
+              ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
+              : "Full sync started (no previous sync data)",
         });
       } else if (conn.connection_method === "api") {
         const { syncLoansFromAPI } = await import(

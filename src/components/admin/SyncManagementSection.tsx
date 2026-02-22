@@ -39,6 +39,7 @@ import {
   ChevronUp,
   Plus,
   ArrowUpDown,
+  BarChart3,
 } from 'lucide-react';
 
 interface SyncConnection {
@@ -364,8 +365,14 @@ export const SyncManagementSection = () => {
     }
   };
 
-  const handleTriggerSync = async (connection: SyncConnection) => {
+  const handleTriggerSync = async (connection: SyncConnection, fullSync: boolean = false) => {
     const key = connKey(connection);
+    if (fullSync) {
+      const confirmed = window.confirm(
+        'Full sync will re-fetch all loans from the LOS (no date filter). Use this after adding new field mappings to backfill data. Continue?'
+      );
+      if (!confirmed) return;
+    }
     setTriggeringIds(prev => new Set(prev).add(key));
 
     try {
@@ -375,6 +382,7 @@ export const SyncManagementSection = () => {
           method: 'POST',
           body: JSON.stringify({
             tenant_id: connection.tenant_id,
+            fullSync,
           }),
         }
       );
@@ -387,8 +395,8 @@ export const SyncManagementSection = () => {
       );
 
       toast({
-        title: 'Sync triggered',
-        description: response.message || `Sync started for ${connection.name} (${connection.tenant_name})`,
+        title: fullSync ? 'Full sync triggered' : 'Sync triggered',
+        description: response.message || (fullSync ? `Full sync started for ${connection.name} (${connection.tenant_name})` : `Sync started for ${connection.name} (${connection.tenant_name})`),
       });
     } catch (error: any) {
       toast({
@@ -727,7 +735,7 @@ export const SyncManagementSection = () => {
                               connection.last_sync_status === 'in_progress' ||
                               !connection.is_active
                             }
-                            title="Trigger sync now"
+                            title="Sync now (incremental)"
                           >
                             {triggeringIds.has(key) || connection.last_sync_status === 'in_progress' ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -735,6 +743,22 @@ export const SyncManagementSection = () => {
                               <Play className="h-4 w-4" />
                             )}
                           </Button>
+                          {connection.los_type === 'encompass' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                              onClick={() => handleTriggerSync(connection, true)}
+                              disabled={
+                                triggeringIds.has(key) ||
+                                connection.last_sync_status === 'in_progress' ||
+                                !connection.is_active
+                              }
+                              title="Full sync (re-fetch all loans; use after adding new fields)"
+                            >
+                              <BarChart3 className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"

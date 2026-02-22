@@ -253,7 +253,9 @@ export async function createUser(
       UserAttributes: userAttributes,
       // When sending invite, Cognito emails a temp password.
       // When not sending invite, we suppress the email and set password manually below.
-      ...(sendInvite ? {} : { MessageAction: "SUPPRESS" }),
+      ...(sendInvite
+        ? { DesiredDeliveryMediums: ["EMAIL"] }
+        : { MessageAction: "SUPPRESS" }),
     });
 
     const createResponse = await getClient().send(createCommand);
