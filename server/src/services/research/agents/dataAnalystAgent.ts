@@ -152,7 +152,8 @@ RULES:
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
 
 ACTIVE PIPELINE DEFINITION (CRITICAL — READ BEFORE EVERY QUERY):
-- The active pipeline filter is: current_loan_status = 'Active Loan' AND application_date IS NOT NULL. This is non-negotiable. EVERY query touching active loans MUST include both conditions.
+- The active pipeline filter is: current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE). This is non-negotiable. EVERY query touching active loans MUST include all three conditions.
+- Archived loans are excluded from active pipeline. NULL is_archived is treated as not archived (included in active). — they've been moved to archive folders in the LOS and are no longer part of the working pipeline.
 - Loans with NULL application_date are pre-excluded artifacts (bulk imports, test files, incomplete records). They do not exist for analysis purposes. Do NOT query them, count them, report on them, or mention them in findings. Do NOT write insights about "X% of active loans missing application_date" — that is a known data artifact, not a discovery.
 - Even among loans that pass this filter, many may be stale (application_date > 6 months old). Consider segmenting by recency when relevant — an "active" loan from 14 months ago is likely abandoned.
 

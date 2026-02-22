@@ -696,6 +696,15 @@ export class EncompassLoanExtractor {
     // Note: raw_data column has been removed. Unmapped fields are no longer stored.
     // Use the additional_field_definitions system to track additional fields.
 
+    // Archive detection: prefer the _isArchived tag set by the two-call diff in getLoans,
+    // then Fields.5016 if it was populated, then default to false.
+    if (loan._isArchived === true && (record.is_archived === undefined || record.is_archived === null || record.is_archived === false)) {
+      record.is_archived = true;
+    }
+    if (record.is_archived === undefined || record.is_archived === null) {
+      record.is_archived = false;
+    }
+
     // =============================================================================
     // IMPORTANT: Loan Identifiers
     // =============================================================================
@@ -917,8 +926,9 @@ export class EncompassLoanExtractor {
       return typeof value === "number" ? value : null;
     }
 
-    // Handle boolean fields - expanded patterns
+    // Handle boolean fields - expanded patterns (including "Is Archived" when format not from RDB)
     if (
+      aliasLower.includes("archived") ||
       aliasLower.includes("flag") ||
       aliasLower.includes("indicator") ||
       aliasLower.includes("self employed") ||

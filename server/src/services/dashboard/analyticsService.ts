@@ -2467,10 +2467,10 @@ export async function getDashboardOverview(
           `
         SELECT 
           COUNT(*) as total,
-          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL THEN 1 END) as active,
+          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE) THEN 1 END) as active,
           COUNT(CASE WHEN funding_date IS NOT NULL THEN 1 END) as closed,
           COUNT(CASE WHEN lock_date IS NOT NULL THEN 1 END) as locked,
-          SUM(CASE WHEN current_loan_status = 'Active Loan' THEN loan_amount ELSE 0 END) as active_volume,
+          SUM(CASE WHEN current_loan_status = 'Active Loan' AND (is_archived IS DISTINCT FROM TRUE) THEN loan_amount ELSE 0 END) as active_volume,
           SUM(CASE WHEN funding_date IS NOT NULL THEN loan_amount ELSE 0 END) as closed_volume,
           AVG(CASE WHEN funding_date IS NOT NULL AND application_date IS NOT NULL 
             THEN DATE(funding_date::date) - DATE(application_date) ELSE NULL END) as avg_cycle_time,
@@ -2489,8 +2489,8 @@ export async function getDashboardOverview(
         SELECT 
           COUNT(CASE WHEN application_date IS NOT NULL THEN 1 END) as loans_started,
           SUM(CASE WHEN application_date IS NOT NULL THEN loan_amount ELSE 0 END) as loans_started_volume,
-          COUNT(CASE WHEN current_loan_status = 'Active Loan' THEN 1 END) as still_active,
-          SUM(CASE WHEN current_loan_status = 'Active Loan' THEN loan_amount ELSE 0 END) as still_active_volume,
+          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND (is_archived IS DISTINCT FROM TRUE) THEN 1 END) as still_active,
+          SUM(CASE WHEN current_loan_status = 'Active Loan' AND (is_archived IS DISTINCT FROM TRUE) THEN loan_amount ELSE 0 END) as still_active_volume,
           COUNT(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN 1 END) as originated,
           SUM(CASE WHEN (current_loan_status ILIKE '%Originated%' OR current_loan_status ILIKE '%purchased%') THEN loan_amount ELSE 0 END) as originated_volume,
           COUNT(CASE WHEN current_loan_status IN ('withdrawn', 'cancelled') THEN 1 END) as fallout_withdrawn,
@@ -2532,6 +2532,7 @@ export async function getDashboardOverview(
         FROM public.loans
         WHERE current_loan_status = 'Active Loan'
           AND application_date IS NOT NULL
+          AND (is_archived IS DISTINCT FROM TRUE)
           ${startDate ? "AND application_date >= $1" : ""}
         ORDER BY risk_score DESC, loan_amount DESC
         LIMIT 50
@@ -2548,6 +2549,7 @@ export async function getDashboardOverview(
           COUNT(CASE WHEN current_loan_status IN ('denied', 'declined') THEN 1 END) as likely_decline
         FROM public.loans
         WHERE current_loan_status = 'Active Loan'
+          AND (is_archived IS DISTINCT FROM TRUE)
           ${startDate ? "AND application_date >= $1" : ""}
       `,
             startDate ? [startDate] : []

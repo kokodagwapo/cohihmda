@@ -145,6 +145,11 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
   } = useMetrics(selectedTenantId, year, selectedChannel);
   const [metricsData, setMetricsData] = useState<Record<string, any>>({});
   const [loadingKpis, setLoadingKpis] = useState<Set<string>>(new Set());
+  // Single source of truth for active loans count (matches ClosingFalloutForecast "all time")
+  const [serverActiveLoansCount, setServerActiveLoansCount] = useState<{
+    count: number;
+    loading: boolean;
+  }>({ count: 0, loading: true });
 
   // Modal-specific loan mix data - keyed by KPI id, fetched lazily when modal opens
   const [modalLoanMixData, setModalLoanMixData] = useState<
@@ -542,9 +547,32 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     [fetchKpiMetrics]
   );
 
+  // Single source of truth: fetch active loans count from same endpoint as ClosingFalloutForecast (no period = all time, no channel)
+  useEffect(() => {
+    let cancelled = false;
+    setServerActiveLoansCount((prev) => ({ ...prev, loading: true }));
+    const params = new URLSearchParams();
+    if (selectedTenantId) params.set("tenant_id", selectedTenantId);
+    api
+      .request<{ count: number; volume: number }>(
+        `/api/loans/active-loans-count${params.toString() ? `?${params.toString()}` : ""}`
+      )
+      .then((res) => {
+        if (!cancelled)
+          setServerActiveLoansCount({ count: res.count ?? 0, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled)
+          setServerActiveLoansCount((prev) => ({ ...prev, loading: false }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTenantId]);
+
   // Initial fetch for all KPIs based on their default timeframes
   useEffect(() => {
-    // Fetch active loans (no date filter)
+    // Active Loans card value comes from serverActiveLoansCount above; still fetch metrics for volume/weighted averages
     fetchKpiMetrics("activeLoans", "all");
 
     // Fetch other KPIs with their selected timeframes
@@ -582,10 +610,13 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     // To show real changes, we would need to fetch metrics for the prior period and compare.
     // Showing fake/estimated changes was removed as it was misleading.
 
+    // Use same source as ClosingFalloutForecast (GET active-loans-count) when available
     const activeLoans =
-      typeof metricsData.active_loans?.value === "number"
-        ? metricsData.active_loans.value
-        : parseFloat(metricsData.active_loans?.value as string) || 0;
+      !serverActiveLoansCount.loading
+        ? serverActiveLoansCount.count
+        : typeof metricsData.active_loans?.value === "number"
+          ? metricsData.active_loans.value
+          : parseFloat(metricsData.active_loans?.value as string) || 0;
 
     const closedLoans =
       typeof metricsData.closed_loans?.value === "number"
@@ -616,7 +647,9 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
     // TODO: Implement actual prior period comparison by fetching metrics for previous period
     return {
       activeLoans: {
-        value: activeLoans.toLocaleString(),
+        value: serverActiveLoansCount.loading
+          ? "--"
+          : activeLoans.toLocaleString(),
         change: "--", // No prior period data available
         trend: "up" as const, // Neutral - no comparison data
       },
@@ -646,7 +679,7 @@ export const ExecutiveDashboard = React.memo(function ExecutiveDashboard({
         trend: "up" as const,
       },
     };
-  }, [metricsLoading, metricsData]);
+  }, [metricsLoading, metricsData, serverActiveLoansCount]);
 
   // Helper function to parse numeric value from formatted string
   const parseValue = (valueStr: string): number => {

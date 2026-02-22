@@ -22,11 +22,6 @@ export const useSynapseConnections = () => {
     } catch (error: any) {
       console.error('Error loading Synapse Connect data:', error);
       setError(error.message || 'Failed to load vendor connections');
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to load vendor connections.',
-        variant: 'destructive',
-      });
     } finally {
       setLoading(false);
     }
