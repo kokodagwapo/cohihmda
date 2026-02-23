@@ -14,6 +14,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -610,17 +612,133 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
 }
 
 // ============================================================================
+// Evidence Preview Table (lightweight, for inline use in Report)
+// ============================================================================
+
+const EVIDENCE_PREVIEW_MAX_ROWS = 10;
+
+export interface EvidencePreviewTableProps {
+  evidence: EvidenceItem;
+  maxRows?: number;
+}
+
+export function EvidencePreviewTable({ evidence, maxRows = EVIDENCE_PREVIEW_MAX_ROWS }: EvidencePreviewTableProps) {
+  const columnFormats = useMemo(() => {
+    const formats: Record<string, FieldFormat> = {};
+    const agentFmts = evidence.columnFormats || {};
+    for (const f of evidence.fields) {
+      const fromAgent = agentFormatToFieldFormat(agentFmts[f]);
+      if (fromAgent) {
+        formats[f] = fromAgent;
+        continue;
+      }
+      const registryFormat = inferFormat(f);
+      if (registryFormat !== "text") {
+        formats[f] = registryFormat;
+        continue;
+      }
+      const sample = evidence.rows.find((r) => r[f] != null)?.[f];
+      if (sample != null) {
+        if (typeof sample === "number") formats[f] = "number";
+        else if (typeof sample === "boolean") formats[f] = "boolean";
+        else {
+          const s = String(sample);
+          if (s.startsWith("$")) formats[f] = "currency";
+          else if (s.endsWith("%")) formats[f] = "percent";
+          else if (/^\d{4}-\d{2}-\d{2}/.test(s)) formats[f] = "date";
+          else formats[f] = "text";
+        }
+      } else {
+        formats[f] = "text";
+      }
+    }
+    return formats;
+  }, [evidence.fields, evidence.rows, evidence.columnFormats]);
+
+  const isNumericFormat = (fmt: FieldFormat) =>
+    ["currency", "number", "percent", "rate", "days", "bps"].includes(fmt);
+
+  const displayRows = evidence.rows.slice(0, maxRows);
+  const totalRows = evidence.rows.length;
+  const gridCols = { display: "grid" as const, gridTemplateColumns: `repeat(${evidence.fields.length}, minmax(70px, 1fr))` };
+
+  if (totalRows === 0) return null;
+
+  return (
+    <div className="rounded-md border overflow-hidden" role="grid" aria-label="Evidence preview table">
+      <div className="overflow-x-auto max-h-48 overflow-y-auto">
+        <div style={{ minWidth: "max-content" }}>
+          <div
+            className="sticky top-0 z-10 border-b bg-muted/80 text-xs"
+            style={gridCols}
+            role="row"
+          >
+            {evidence.fields.map((f) => {
+              const fmt = columnFormats[f] || "text";
+              return (
+                <div
+                  key={f}
+                  role="columnheader"
+                  className={cn(
+                    "px-2 py-1.5 font-medium whitespace-nowrap",
+                    isNumericFormat(fmt) ? "text-right" : "text-left",
+                  )}
+                >
+                  {humanizeKey(f)}
+                </div>
+              );
+            })}
+          </div>
+          {displayRows.map((row, i) => (
+            <div
+              key={i}
+              className={cn("border-b last:border-b-0 text-xs hover:bg-muted/30", gridCols)}
+              role="row"
+            >
+              {evidence.fields.map((f) => {
+                const fmt = columnFormats[f] || "text";
+                return (
+                  <div
+                    key={f}
+                    role="gridcell"
+                    className={cn(
+                      "px-2 py-1 whitespace-nowrap max-w-[160px] truncate",
+                      isNumericFormat(fmt) ? "text-right tabular-nums" : "text-left",
+                    )}
+                  >
+                    {row[f] == null ? (
+                      <span className="text-muted-foreground italic">-</span>
+                    ) : (
+                      formatValue(row[f], fmt)
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      {totalRows > maxRows && (
+        <div className="px-2 py-1 text-[10px] text-muted-foreground bg-muted/30 border-t">
+          Showing {maxRows} of {totalRows} rows
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Auto Chart
 // ============================================================================
 
-interface AutoChartProps {
+export interface AutoChartProps {
   evidence: EvidenceItem;
   findingTitle?: string;
   sessionId?: string | null;
   onSaveToWorkbench?: (payload: SaveToWorkbenchPayload) => void;
 }
 
-function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: AutoChartProps) {
+export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: AutoChartProps) {
   const { fields, rows } = evidence;
   if (rows.length < 2 || rows.length > 30) return null;
 
@@ -691,6 +809,17 @@ function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: Aut
   const uniqueLabels = new Set(chartData.map((d) => d.name));
   if (uniqueLabels.size < 2) return null;
 
+  // Chart type inference: time-series -> line; long/many labels -> horizontal bar; else vertical bar
+  const labelFieldLower = labelField.toLowerCase();
+  const sampleLabel = chartData[0]?.name ?? "";
+  const isTimeSeries =
+    /date|month|quarter|year/.test(labelFieldLower) || /^\d{4}-\d{2}/.test(sampleLabel);
+  const avgLabelLength =
+    chartData.reduce((sum, d) => sum + (d.name?.length ?? 0), 0) / chartData.length;
+  const isHorizontal = chartData.length > 12 || avgLabelLength > 20;
+
+  const tooltipFormatter = (value: number) => [formatValue(value, bestFormat), humanizeKey(bestField)];
+
   return (
     <div className="space-y-1">
       <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -699,27 +828,63 @@ function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench }: Aut
       </p>
       <div className="h-48 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-            <XAxis
-              dataKey="name"
-              tick={{ fontSize: 10 }}
-              interval={0}
-              angle={-30}
-              textAnchor="end"
-              height={50}
-            />
-            <YAxis tick={{ fontSize: 10 }} width={55} />
-            <RechartsTooltip
-              contentStyle={{ fontSize: 11 }}
-              formatter={(value: number) => [formatValue(value, bestFormat), humanizeKey(bestField)]}
-            />
-            <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-              {chartData.map((_, i) => (
-                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-              ))}
-            </Bar>
-          </BarChart>
+          {isTimeSeries ? (
+            <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 10 }}
+                interval={0}
+                angle={-30}
+                textAnchor="end"
+                height={50}
+              />
+              <YAxis tick={{ fontSize: 10 }} width={55} />
+              <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke={CHART_COLORS[0]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+            </LineChart>
+          ) : isHorizontal ? (
+            <BarChart
+              layout="vertical"
+              data={chartData}
+              margin={{ top: 5, right: 30, bottom: 5, left: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+              <XAxis type="number" tick={{ fontSize: 10 }} width={50} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={80} />
+              <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+              <Bar dataKey="value" radius={[0, 3, 3, 0]}>
+                {chartData.map((_, i) => (
+                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          ) : (
+            <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 10 }}
+                interval={0}
+                angle={-30}
+                textAnchor="end"
+                height={50}
+              />
+              <YAxis tick={{ fontSize: 10 }} width={55} />
+              <RechartsTooltip contentStyle={{ fontSize: 11 }} formatter={tooltipFormatter} />
+              <Bar dataKey="value" radius={[3, 3, 0, 0]}>
+                {chartData.map((_, i) => (
+                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          )}
         </ResponsiveContainer>
       </div>
       {onSaveToWorkbench && (

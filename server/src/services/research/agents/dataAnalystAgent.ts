@@ -146,7 +146,7 @@ RULES:
   - Completed (non-active): current_loan_status NOT IN ('Active Loan','active','locked','submitted','approved')
   - Pull-through: funded / completed * 100 (use application_date cohort)
   - Revenue: loan_amount * (rate_lock_buy_side_base_price_rate - 100) / 100 (when rate > 100, else use 25bps default)
-- Limit results to 100 rows max
+- Result set size: you may return up to 1000 rows. The UI uses lazy loading and virtualization, so large result sets are fine. For pipelines or cohorts larger than 1000, aggregate in your query (e.g. by status, by personnel, by month) rather than returning raw rows.
 - Use multiple time windows for comparison: YTD, rolling 90D, rolling 30D, prior 90D
 - Include NULL handling: COALESCE, NULLIF where appropriate
 - When action is "query", include columnFormats mapping each SELECT alias to its display format: "number" (counts/integers), "currency" (dollar amounts), "percent" (rates/percentages), "days" (day counts), "date" (calendar dates), or "text" (labels/names).
@@ -181,7 +181,34 @@ POSTGRESQL DATE ARITHMETIC (CRITICAL):
 - For averages: AVG(l.funding_date::date - l.application_date::date)
 - Cast to ::date if needed to ensure date subtraction, not timestamp subtraction
 - Date comparisons: l.application_date >= CURRENT_DATE - INTERVAL '90 days' is fine (the interval is subtracted from the date)
+
+STRING PARSING (for multi-value fields):
+- Some fields store multiple values in a single text column (space-delimited pairs, pipe-separated lists, etc.)
+- To parse space-delimited key-value pairs like "user1 0.5 user2 1.2" (alternating name then number):
+  Use a CTE with regexp_split_to_table and WITH ORDINALITY to split tokens, then pair odd positions (keys) with even positions (values):
+  WITH tokens AS (
+    SELECT l.loan_number, t.token, t.ordinality
+    FROM public.loans l,
+    LATERAL regexp_split_to_table(TRIM(l.some_field), '\\s+') WITH ORDINALITY AS t(token, ordinality)
+    WHERE l.some_field IS NOT NULL AND TRIM(l.some_field) != ''
+  ),
+  paired AS (
+    SELECT loan_number,
+      MAX(CASE WHEN ordinality % 2 = 1 THEN token END) AS username,
+      MAX(CASE WHEN ordinality % 2 = 0 THEN token END)::numeric AS hours
+    FROM tokens
+    GROUP BY loan_number, CEIL(ordinality::numeric / 2)
+  )
+  SELECT username, COUNT(*) AS loans, SUM(hours) AS total_hours, AVG(hours) AS avg_hours_per_loan
+  FROM paired GROUP BY username ORDER BY total_hours DESC
+- For pipe-separated lists: unnest(string_to_array(field, '|'))
+- For comma-separated lists: unnest(string_to_array(field, ','))
+- Always handle NULLs and empty strings (TRIM, COALESCE) before parsing
+- After parsing, aggregate as the investigation requires (SUM, AVG, COUNT per parsed entity)
+- Column names may use dots (e.g. cx_touches_all_userhours); reference them with double quotes if needed: l."CX.TOUCHES.ALL.USERHOURS"
+
 - When you have enough evidence (usually 2-3 queries), produce your finding
+- If a desired output format (outputHint) is provided in the question, ensure your final query produces exactly that structure (e.g. a table with personnel name and hours per loan). The user expects this specific output.
 - CRITICAL: Your finding title MUST reflect what the data actually shows, NOT the original hypothesis. If your investigation disproved the hypothesis, the title must reflect the real finding.
 - Every key in keyMetrics MUST have a corresponding entry in keyMetricDescriptions AND keyMetricFormats.
 - keyMetricDescriptions: 1 sentence explaining what the metric measures in plain business language.
@@ -243,6 +270,9 @@ export async function runDataAnalystAgent(
     `Topic: ${question.topic}`,
     `Hypothesis: ${question.hypothesis}`,
     `Suggested Approach: ${question.approach}`,
+    ...(question.outputHint
+      ? [`Desired output format: ${question.outputHint} — ensure your final query produces data in this structure.`]
+      : []),
     `\nBegin your investigation. Think about what data you need first.`
   );
 

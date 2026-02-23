@@ -339,7 +339,7 @@ export async function getKnowledgeContext(
 // Utility: Format query results for LLM context
 // ============================================================================
 
-export function formatResultsForLLM(result: QueryResult, maxRows: number = 30): string {
+export function formatResultsForLLM(result: QueryResult, maxRows: number = 50): string {
   if (result.rowCount === 0) return "(No rows returned)";
 
   const { fields, rows } = result;
