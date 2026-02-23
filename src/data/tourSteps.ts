@@ -100,33 +100,68 @@ export const workbenchTourSteps: Step[] = [
 
 export const researchLabTourSteps: Step[] = [
   {
+    target: '[data-tour="research-sessions"]',
+    content:
+      "Your session history lives here. Previous investigations are saved automatically so you can revisit them anytime. Sessions shared with you by other users also appear here.",
+    placement: "right",
+    disableBeacon: true,
+    title: "Session Sidebar",
+  },
+  {
     target: '[data-tour="research-input"]',
     content:
-      "Type your research question here. Be specific — the AI analyst will investigate your loan data and generate a comprehensive report.",
+      "Type your research question here. Be specific — for example, 'What factors are driving loan fallout in our Wholesale channel?' The AI analyst will plan, investigate, and synthesize insights from your data.",
     placement: "bottom",
-    disableBeacon: true,
     title: "Ask a Question",
   },
   {
     target: '[data-tour="research-suggestions"]',
     content:
-      "Not sure what to ask? These topic suggestions cover common areas like pipeline health, personnel performance, and risk patterns.",
+      "Not sure where to start? Pick one of these suggested topics covering pipeline health, personnel performance, risk patterns, and more.",
     placement: "bottom",
     title: "Topic Suggestions",
   },
   {
     target: '[data-tour="research-timeline"]',
     content:
-      "Watch the AI's research process in real-time. The timeline shows each step of the investigation as it happens.",
+      "Watch the AI work through its investigation in real-time. Each step — planning queries, executing SQL, analyzing results — is shown as it happens. You can pause the investigation and steer it with follow-up instructions.",
     placement: "left",
-    title: "Research Timeline",
+    title: "Live Timeline",
   },
   {
     target: '[data-tour="research-findings"]',
     content:
-      "Research findings are presented with severity levels and drill-down details. Click any finding to see the full analysis.",
+      "Findings appear here as the AI discovers insights. Each finding has a confidence level, key metrics, and supporting evidence. Click any finding to drill down into the underlying data, export tables, or save visualizations to your Workbench.",
     placement: "top",
     title: "Research Findings",
+  },
+  {
+    target: '[data-tour="research-report"]',
+    content:
+      "Once the investigation completes, a synthesized report is generated with an executive summary, ranked insights, and recommendations you can act on.",
+    placement: "top",
+    title: "Synthesized Report",
+  },
+  {
+    target: '[data-tour="research-share"]',
+    content:
+      "Share your research session with specific colleagues, or — if you're an admin — make it globally visible to everyone in your organization.",
+    placement: "bottom",
+    title: "Share Session",
+  },
+  {
+    target: '[data-tour="research-export"]',
+    content:
+      "Export the full research report to Excel, PDF, PowerPoint, or as an image to share outside the platform.",
+    placement: "bottom",
+    title: "Export Report",
+  },
+  {
+    target: '[data-tour="research-followup"]',
+    content:
+      "After the investigation completes, use this input to ask follow-up questions. The AI retains full context from the session, so you can drill deeper into any finding or ask for a different angle.",
+    placement: "top",
+    title: "Follow-Up Chat",
   },
 ];
 
