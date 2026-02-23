@@ -33,11 +33,15 @@ if (-not $ALB_FULL_NAME -or -not $TG_FULL_NAME) {
 $AURORA_CLUSTER_ID = "$PROJECT_NAME-$ENVIRONMENT-management"
 $AURORA_INSTANCE_ID = "$AURORA_CLUSTER_ID-instance"
 
+# ECS log group (same name as in coheus_ecs_fargate_stack.yaml)
+$ECS_LOG_GROUP = "/ecs/$PROJECT_NAME-$ENVIRONMENT"
+
 Write-Status "ECS Cluster: $ECS_CLUSTER"
 Write-Status "ECS Service: $ECS_SERVICE"
 Write-Status "ALB Full Name: $ALB_FULL_NAME"
 Write-Status "Target Group Full Name: $TG_FULL_NAME"
 Write-Status "Aurora Instance: $AURORA_INSTANCE_ID"
+Write-Status "ECS Log Group: $ECS_LOG_GROUP"
 
 # Deploy monitoring stack
 Write-Status "Deploying monitoring stack..."
@@ -48,6 +52,7 @@ $params = @(
     "ParameterKey=ECSClusterName,ParameterValue=$ECS_CLUSTER"
     "ParameterKey=ECSServiceName,ParameterValue=$ECS_SERVICE"
     "ParameterKey=RDSInstanceIdentifier,ParameterValue=$AURORA_INSTANCE_ID"
+    "ParameterKey=ECSLogGroupName,ParameterValue=$ECS_LOG_GROUP"
 )
 
 if ($ALB_FULL_NAME -and $TG_FULL_NAME) {
@@ -59,6 +64,18 @@ if ($ALB_FULL_NAME -and $TG_FULL_NAME) {
 
 if ($ALERT_EMAIL) {
     $params += "ParameterKey=AlertEmail,ParameterValue=$ALERT_EMAIL"
+}
+
+if ($BACKEND_ORIGIN_DOMAIN) {
+    $params += "ParameterKey=HealthCheckDomain,ParameterValue=$BACKEND_ORIGIN_DOMAIN"
+} else {
+    Write-Status "Skipping HealthCheckDomain (BACKEND_ORIGIN_DOMAIN not set). Route 53 uptime check will be disabled." "Yellow"
+}
+
+$params += "ParameterKey=RDSClusterIdentifier,ParameterValue=$AURORA_CLUSTER_ID"
+
+if ($env:TEAMS_WEBHOOK_URL) {
+    $params += "ParameterKey=TeamsWebhookUrl,ParameterValue=$env:TEAMS_WEBHOOK_URL"
 }
 
 if (Test-StackExists $STACK_MONITORING) {
@@ -103,5 +120,5 @@ Write-Host "CloudWatch Dashboard: $DASHBOARD_URL" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next Steps:" -ForegroundColor Yellow
 Write-Host "  1. Confirm SNS subscription email"
-Write-Host "  2. Add Slack webhook to SNS topic (optional)"
+Write-Host "  2. Set env TEAMS_WEBHOOK_URL and redeploy to enable Microsoft Teams notifications (optional)"
 Write-Host "  3. Review and customize alarm thresholds"

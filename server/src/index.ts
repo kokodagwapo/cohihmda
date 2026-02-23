@@ -10,9 +10,7 @@ import { setupWebSocket } from "./services/websocket.js";
 import { initDatabase } from "./config/database.js";
 import {
   initSentry,
-  sentryRequestHandler,
-  sentryTracingHandler,
-  sentryErrorHandler,
+  setupSentryErrorHandler,
 } from "./middleware/sentry.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { devLogger, prodLogger } from "./middleware/logger.js";
@@ -84,10 +82,6 @@ const allowedOrigins = (
     }
     return [origin];
   });
-
-// Sentry request handler (must be before other middleware)
-app.use(sentryRequestHandler);
-app.use(sentryTracingHandler);
 
 // CORS - Allow CloudFront and all configured origins
 app.use(
@@ -255,8 +249,8 @@ const startServer = () => {
   // Setup routes
   setupRoutes(app);
 
-  // Sentry error handler (must be after routes)
-  app.use(sentryErrorHandler);
+  // Sentry error handler (must be after routes, before other error handlers)
+  setupSentryErrorHandler(app);
 
   // Final catch-all error handler to ensure all errors return JSON
   // This prevents empty responses that cause "Unexpected end of JSON input" errors
