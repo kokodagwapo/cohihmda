@@ -1297,10 +1297,10 @@ const Dashboard = () => {
           setTrendsModal={setTrendsModal}
         />
 
-        <div className="w-full h-full min-w-0 overflow-x-hidden px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
+        <div className="w-full h-full min-w-0 max-w-full overflow-x-hidden px-3 sm:px-6 md:px-8 lg:px-12 pt-4 sm:pt-6 md:pt-8 pb-4 sm:pb-8 md:pb-12 relative z-10">
           {/* Insights Section - Minimalist */}
           {isAuthenticated && (
-            <div className="section-insights mb-16 md:mb-20 w-full">
+            <div className="section-insights mb-16 md:mb-20 w-full min-w-0 max-w-full">
               {/* Cohi Insights */}
               {dashboardVisibility.aletheiaInsights && (
                 <div
@@ -1338,7 +1338,7 @@ const Dashboard = () => {
               {(dashboardVisibility.leaderboard ||
                 dashboardVisibility.executiveDashboard ||
                 dashboardVisibility.closingFalloutForecast) && (
-                <div className="section-dashboards mt-12 sm:mt-16 w-full">
+                <div className="section-dashboards mt-12 sm:mt-16 w-full min-w-0 max-w-full">
                   <h2 className="text-2xl font-semibold mb-6 text-slate-900 dark:text-white">
                     Dashboards
                   </h2>
@@ -1374,7 +1374,7 @@ const Dashboard = () => {
                     <div
                       ref={closingFalloutSectionRef}
                       id="closingFalloutForecast"
-                      className="section-closing-fallout-forecast"
+                      className="section-closing-fallout-forecast min-w-0 max-w-full overflow-hidden"
                     >
                       <ClosingFalloutForecast
                         dateFilter={dateFilter}

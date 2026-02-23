@@ -249,8 +249,8 @@ export const LoanCardContent = memo(
                 })()}
               </p>
               <p
-                className={`text-[13px] sm:text-sm font-medium mt-0.5 ${
-                  isDarkMode ? "text-slate-400" : "text-slate-500"
+                className={`text-[13px] sm:text-sm font-bold mt-0.5 ${
+                  isDarkMode ? "text-white" : "text-black"
                 }`}
               >
                 Estimated commission at risk:{" "}

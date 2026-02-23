@@ -48,9 +48,11 @@ const sectionIdToRegistryGroup: Record<string, string> = {
   salesTrends: 'Sales Trends',
   creditRiskManagement: 'Credit Risk',
   loanFunnel: 'Loan Funnel',
+  workflowConversion: 'Workflow Conversion',
   topTieringComparison: 'TopTiering Comparison',
   leaderboard: 'Leaderboard',
   executiveDashboard: 'Executive Dashboard',
+  highPerformers: 'High Performers',
 };
 
 // ---------------------------------------------------------------------------

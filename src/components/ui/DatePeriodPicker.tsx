@@ -11,7 +11,7 @@
  * consumers always receive YYYY-MM-DD strings.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   format,
   subMonths,
@@ -124,6 +124,12 @@ export interface DatePeriodPickerProps {
   showLabel?: boolean;
   /** NEW: Initially selected preset (optional) */
   defaultPreset?: PeriodPreset;
+  /** Show an "All" option (no date filter); when selected, onAllSelect is used */
+  showAllOption?: boolean;
+  /** Called when user selects "All" (clear date filter) */
+  onAllSelect?: () => void;
+  /** Current period from store so we can show "All" as active when undefined */
+  periodSelectionFromStore?: PeriodSelection | null;
 }
 
 // Generate years from current year down
@@ -149,6 +155,9 @@ export const DatePeriodPicker = ({
   label = 'Period:',
   showLabel = true,
   defaultPreset,
+  showAllOption,
+  onAllSelect,
+  periodSelectionFromStore,
 }: DatePeriodPickerProps) => {
   const currentYear = new Date().getFullYear();
   const availableYears = useMemo(() => generateYears(yearsToShow), [yearsToShow]);
@@ -156,15 +165,25 @@ export const DatePeriodPicker = ({
   // Effective presets – default to legacy rolling 13/12 when not specified
   const effectivePresets = presets ?? ['rolling-13', 'rolling-12'];
 
-  // Active selection state
-  const [activeType, setActiveType] = useState<'year' | 'preset' | 'custom'>(
-    defaultPreset ? 'preset' : 'year',
+  // Active selection state: when "All" is the store state, never show year/preset as selected
+  const [activeType, setActiveType] = useState<'year' | 'preset' | 'custom'>(() =>
+    showAllOption && periodSelectionFromStore == null ? 'preset' : defaultPreset ? 'preset' : 'year',
   );
-  const [activePreset, setActivePreset] = useState<PeriodPreset | null>(defaultPreset ?? null);
+  const [activePreset, setActivePreset] = useState<PeriodPreset | null>(() =>
+    showAllOption && periodSelectionFromStore == null ? null : defaultPreset ?? null,
+  );
   const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({
     start: null,
     end: null,
   });
+
+  // When "All" is selected (store has no period), keep internal state so no year/preset appears active
+  useEffect(() => {
+    if (showAllOption && periodSelectionFromStore == null) {
+      setActiveType('preset');
+      setActivePreset(null);
+    }
+  }, [showAllOption, periodSelectionFromStore]);
 
   // ---- Notification helpers ------------------------------------------------
 
@@ -235,7 +254,10 @@ export const DatePeriodPicker = ({
 
   const labelClasses = size === 'sm' ? 'text-[9px] sm:text-[10px]' : 'text-[10px] sm:text-xs';
 
+  // When "All" is selected in the store, only "All" should appear active (override year/preset/custom)
+  const allSelected = Boolean(showAllOption && periodSelectionFromStore == null);
   const isActive = (type: 'year' | 'preset' | 'custom', value?: number | PeriodPreset) => {
+    if (allSelected) return false;
     if (type === 'year') return activeType === 'year' && year === value;
     if (type === 'preset') return activeType === 'preset' && activePreset === value;
     return activeType === 'custom';
@@ -331,6 +353,24 @@ export const DatePeriodPicker = ({
             />
           </PopoverContent>
         </Popover>
+
+        {/* All (no date filter) — e.g. for Loan Detail */}
+        {showAllOption && onAllSelect && (
+          <>
+            <div className="w-px h-4 bg-slate-300 dark:bg-slate-600 mx-0.5" />
+            <button
+              type="button"
+              onClick={onAllSelect}
+              className={cn(
+                btnCn(periodSelectionFromStore == null),
+                'flex items-center gap-1',
+              )}
+              title="All time (no date filter)"
+            >
+              All
+            </button>
+          </>
+        )}
       </div>
 
       {/* Clear custom date button */}

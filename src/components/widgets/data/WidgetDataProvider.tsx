@@ -27,7 +27,19 @@ import { useSalesTrendsData } from '@/hooks/useSalesTrendsData';
 import { useFunnelData } from '@/hooks/useFunnelData';
 import { useTopTieringComparisonData } from '@/hooks/useTopTieringComparisonData';
 import { useLeaderboardData } from '@/hooks/useLeaderboardData';
+import { useLoanDetailData } from '@/hooks/useLoanDetailData';
+import {
+  useHighPerformersData,
+  type HighPerformersDateType,
+  type HighPerformersTimePeriod,
+} from '@/hooks/useHighPerformersData';
 import type { DataSourceId } from '../registry/types';
+
+/** Build dimension filter array from section dynamicFilters (for APIs that accept them). */
+function toDimensionFilters(filters: SectionFilters | null): Array<{ column: string; value: string }> | undefined {
+  const list = filters?.dynamicFilters?.filter((df) => df.value && df.value !== 'all').map((df) => ({ column: df.column, value: df.value }));
+  return list && list.length > 0 ? list : undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -190,6 +202,8 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
   const fnFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'funnel'), [sections, scopedFilters]);
   const ttcFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'top-tiering-comparison'), [sections, scopedFilters]);
   const lbFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'leaderboard'), [sections, scopedFilters]);
+  const ldFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'loan-detail'), [sections, scopedFilters]);
+  const hpFilters = useMemo(() => scopedFilters ?? findSectionFilters(sections, 'high-performers'), [sections, scopedFilters]);
 
   // ---- Hook calls with dynamic filter values ----
 
@@ -299,6 +313,48 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     },
   );
 
+  // Loan detail: only apply date filter when user has explicitly selected a period (preset/year/custom).
+  // When periodSelection is missing, show all loans so the table isn't empty by default.
+  // Include dynamic filters (loan purpose, channel, etc.) so ADD FILTER DIMENSION filters are applied.
+  const loanDetailFilters = useMemo(
+    () =>
+      ldFilters
+        ? {
+            dateField: ldFilters.dateField,
+            dateRange:
+              ldFilters.sectionType === 'loan-detail'
+                ? (ldFilters.periodSelection?.dateRange ?? undefined)
+                : (ldFilters.periodSelection?.dateRange ?? ldFilters.dateRange),
+            branch: ldFilters.branch,
+            loanOfficer: ldFilters.loanOfficer,
+            dimensionFilters: toDimensionFilters(ldFilters),
+          }
+        : undefined,
+    [ldFilters],
+  );
+  const loanDetail = useLoanDetailData(selectedTenantId, loanDetailFilters ?? undefined);
+
+  // High Performers: left and right period with shared date type
+  const hpDateType = (hpFilters?.highPerformersDateType ?? 'funding_date') as HighPerformersDateType;
+  const hpLeftPeriod = (hpFilters?.highPerformersLeftPeriod ?? 'mtd') as HighPerformersTimePeriod;
+  const hpRightPeriod = (hpFilters?.highPerformersRightPeriod ?? 'ytd') as HighPerformersTimePeriod;
+  const { data: hpLeftData, loading: hpLeftLoading, error: hpLeftError } = useHighPerformersData(
+    hpDateType,
+    hpLeftPeriod,
+    { channelGroup: selectedChannel, tenantId: selectedTenantId },
+  );
+  const { data: hpRightData, loading: hpRightLoading, error: hpRightError } = useHighPerformersData(
+    hpDateType,
+    hpRightPeriod,
+    { channelGroup: selectedChannel, tenantId: selectedTenantId },
+  );
+  const highPerformersData = useMemo(
+    () => ({ left: hpLeftData, right: hpRightData }),
+    [hpLeftData, hpRightData],
+  );
+  const highPerformersLoading = hpLeftLoading || hpRightLoading;
+  const highPerformersError = hpLeftError || hpRightError;
+
   // Build lookup
   const sourceMap = useMemo<Record<string, SourceResult>>(() => ({
     'company-scorecard': {
@@ -373,6 +429,21 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
       loading: false,
       error: null,
     },
+    'loan-detail': {
+      data: loanDetail.data,
+      loading: loanDetail.loading,
+      error: loanDetail.error,
+    },
+    'workflow-conversion': {
+      data: { ready: true },
+      loading: false,
+      error: null,
+    },
+    'high-performers': {
+      data: highPerformersData,
+      loading: highPerformersLoading,
+      error: highPerformersError,
+    },
   }), [
     companyScorecard.data, companyScorecard.loading, companyScorecard.error,
     creditRisk.data, creditRisk.loading, creditRisk.error,
@@ -383,6 +454,8 @@ export function WidgetDataProvider({ children, sectionId }: WidgetDataProviderPr
     funnelData, funnelLoading,
     topTieringComparison.data, topTieringComparison.loading, topTieringComparison.error,
     leaderboardData, leaderboardLoading,
+    loanDetail.data, loanDetail.loading, loanDetail.error,
+    highPerformersData, highPerformersLoading, highPerformersError,
   ]);
 
   const contextValue = useMemo<WidgetDataContextValue>(

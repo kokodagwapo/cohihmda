@@ -57,6 +57,9 @@ const SECTION_TO_SOURCE: Record<SectionType, string> = {
   'top-tiering-comparison': 'top-tiering-comparison',
   'leaderboard': 'dashboard-metrics',
   'executive-dashboard': 'executive-dashboard',
+  'loan-detail': 'loan-detail',
+  'workflow-conversion': 'workflow-conversion',
+  'high-performers': 'high-performers',
 };
 
 // Contextual suggested prompts per section type
