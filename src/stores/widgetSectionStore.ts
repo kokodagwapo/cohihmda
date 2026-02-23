@@ -20,7 +20,10 @@ export type SectionType =
   | 'funnel'
   | 'top-tiering-comparison'
   | 'leaderboard'
-  | 'executive-dashboard';
+  | 'executive-dashboard'
+  | 'loan-detail'
+  | 'workflow-conversion'
+  | 'high-performers';
 
 /**
  * A dynamic (user-added) filter dimension.
@@ -52,6 +55,12 @@ export interface SectionFilters {
   applicationType: string;
   /** For sales: branch or loan_officer */
   actorType: 'branch' | 'loan_officer';
+  /** High Performers: date field (funding_date, closing_date, application_date) */
+  highPerformersDateType?: 'funding_date' | 'closing_date' | 'application_date';
+  /** High Performers: left column period (mtd, lm, ytd, ly, rolling_13) */
+  highPerformersLeftPeriod?: string;
+  /** High Performers: right column period */
+  highPerformersRightPeriod?: string;
   /** User-added dynamic filters (column = value conditions) */
   dynamicFilters?: DynamicFilterEntry[];
 }
@@ -121,10 +130,23 @@ export const useWidgetSectionStore = create<WidgetSectionState>((set, get) => ({
   registerSection: (sectionId: string, sectionType: SectionType) => {
     set((state) => {
       if (state.sections[sectionId]) return state; // Already registered
+      const base = { ...DEFAULT_SECTION_FILTERS, sectionType };
+      // Loan detail defaults to "All" (no date filter) so the table shows all loans
+      let filters = base;
+      if (sectionType === 'loan-detail') {
+        filters = { ...base, periodSelection: undefined, dateRange: undefined };
+      } else if (sectionType === 'high-performers') {
+        filters = {
+          ...base,
+          highPerformersDateType: 'funding_date',
+          highPerformersLeftPeriod: 'mtd',
+          highPerformersRightPeriod: 'ytd',
+        };
+      }
       return {
         sections: {
           ...state.sections,
-          [sectionId]: { ...DEFAULT_SECTION_FILTERS, sectionType },
+          [sectionId]: filters,
         },
       };
     });

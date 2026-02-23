@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DatePeriodPicker, type DateRange, type PeriodSelection, type PeriodPreset, computePresetDateRange } from '@/components/ui/DatePeriodPicker';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -63,11 +64,14 @@ import {
 import {
   getWidgetDefinition,
 } from '@/components/widgets/registry';
+import type { ColumnDef } from '@/components/views/LoanDetailView';
 import { useWidgetData } from '@/components/widgets/data';
 import { CohiWidgetRenderer } from '@/components/workbench/canvas/CohiWidgetRenderer';
 import { EditWidgetDialog } from '@/components/widgets/components/EditWidgetDialog';
 import { AddWidgetDialog } from '@/components/widgets/components/AddWidgetDialog';
+import { LoanDetailColumnsModal } from '@/components/widgets/components/LoanDetailColumnsModal';
 import { WidgetDataProvider } from '@/components/widgets/data';
+import { useLoanDetailColumnsStore } from '@/stores/loanDetailColumnsStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useFilterOptions } from '@/hooks/useFilterOptions';
 import { useCanvasDataStore } from '@/stores/canvasDataStore';
@@ -136,7 +140,7 @@ const HEADER_HEIGHT = 90; // approx header+filters height
  */
 const MIN_GRID_WIDTH = 400;
 /** Bump this any time you change GRID_COLS / ROW_HEIGHT so stale saved layouts get discarded */
-const LAYOUT_VERSION = 7; // bumped from 6 → 7 for items migration
+const LAYOUT_VERSION = 8; // bumped from 7 → 8 for workflow-conversion-embed full-height default
 
 // ---------------------------------------------------------------------------
 // Section-specific filter options
@@ -194,13 +198,25 @@ const SECTION_FILTER_CONFIG: Partial<Record<SectionType, SectionFilterField[]>> 
     { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
     { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
   ],
+  'loan-detail': [
+    { key: 'dateField', label: 'Date Field', allLabel: '', staticOptions: DATE_FIELD_OPTIONS },
+    { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsSource: 'branch' },
+    { key: 'loanOfficer', label: 'Loan Officer', allLabel: 'All Loan Officers', optionsSource: 'loan_officer', dependsOn: 'branch' },
+  ],
   'credit-risk': [
     { key: 'applicationType', label: 'Type', allLabel: '', staticOptions: APPLICATION_TYPE_OPTIONS },
   ],
   'sales-scorecard': [
     { key: 'actorType', label: 'View', allLabel: '', staticOptions: ACTOR_TYPE_OPTIONS },
   ],
+  'high-performers': [],
 };
+
+const HIGH_PERFORMERS_DATE_TYPE_OPTIONS: { value: 'funding_date' | 'closing_date' | 'application_date'; label: string }[] = [
+  { value: 'funding_date', label: 'Funded Loans' },
+  { value: 'closing_date', label: 'Closed Loans' },
+  { value: 'application_date', label: 'Applications Taken' },
+];
 
 // ---------------------------------------------------------------------------
 // Available dimension filter catalog — users can add these via the "+" button
@@ -235,6 +251,9 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
   'top-tiering-comparison': { border: 'border-cyan-400/50',  bg: 'bg-cyan-50/50 dark:bg-cyan-950/20',     accent: 'text-cyan-600 dark:text-cyan-400',     dot: 'bg-cyan-500' },
   'leaderboard':          { border: 'border-rose-400/50',    bg: 'bg-rose-50/50 dark:bg-rose-950/20',     accent: 'text-rose-600 dark:text-rose-400',     dot: 'bg-rose-500' },
   'executive-dashboard':  { border: 'border-blue-400/50',    bg: 'bg-blue-50/50 dark:bg-blue-950/20',     accent: 'text-blue-600 dark:text-blue-400',     dot: 'bg-blue-500' },
+  'loan-detail':          { border: 'border-sky-400/50',     bg: 'bg-sky-50/50 dark:bg-sky-950/20',       accent: 'text-sky-600 dark:text-sky-400',     dot: 'bg-sky-500' },
+  'workflow-conversion':  { border: 'border-teal-400/50',    bg: 'bg-teal-50/50 dark:bg-teal-950/20',    accent: 'text-teal-600 dark:text-teal-400',    dot: 'bg-teal-500' },
+  'high-performers':      { border: 'border-amber-400/50',  bg: 'bg-amber-50/50 dark:bg-amber-950/20',   accent: 'text-amber-600 dark:text-amber-400',  dot: 'bg-amber-500' },
 };
 
 /**
@@ -245,6 +264,7 @@ const SECTION_COLORS: Record<SectionType, { border: string; bg: string; accent: 
 const SELF_MANAGED_SECTIONS: Set<SectionType> = new Set([
   'executive-dashboard',
   'leaderboard',
+  'workflow-conversion',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -277,8 +297,18 @@ const GRID_SIZES: Record<string, GridSize> = {
 };
 const DEFAULT_GRID: GridSize = { w: 9, h: 8, minW: 4, minH: 4 };
 
+/** Rows so workflow conversion fits without scroll: toolbar ~72px + 2 rows of 420px cards + gap ~= 928px → 928/16 ≈ 58; use 64 for margin */
+const WORKFLOW_EMBED_GRID_H = 64;
+
 function getGridSizeForItem(item: GroupWidgetItem): GridSize {
   if (item.kind === 'cohi') return GRID_SIZES.cohi;
+  if (item.kind === 'registry' && item.defId === 'workflow-conversion-embed') {
+    return { w: GRID_COLS, h: WORKFLOW_EMBED_GRID_H, minW: 24, minH: 40 };
+  }
+  // High Performers: 2x2 grid (two columns of 18 units each)
+  if (item.kind === 'registry' && item.defId.startsWith('high-performers-')) {
+    return { w: 18, h: 16, minW: 12, minH: 8 };
+  }
   const def = getWidgetDefinition(item.defId);
   return (def && GRID_SIZES[def.category]) || DEFAULT_GRID;
 }
@@ -388,6 +418,10 @@ function GridCellWidget({
 }) {
   const [hovered, setHovered] = useState(false);
   const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [loanDetailColumnsModalOpen, setLoanDetailColumnsModalOpen] = useState(false);
+  const { selectedTenantId } = useTenantStore();
+
+  const isLoanDetailTable = item.kind === 'registry' && item.defId === 'loan-detail-table';
 
   const isValid =
     item.kind === 'cohi' ||
@@ -453,6 +487,18 @@ function GridCellWidget({
               aria-label="Edit with Cohi"
             >
               <MessageSquare className="h-3 w-3" />
+            </button>
+          )}
+          {/* Edit columns (only for Loan Detail table) */}
+          {isLoanDetailTable && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setLoanDetailColumnsModalOpen(true); }}
+              className="p-0.5 rounded text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:text-sky-400 dark:hover:bg-sky-900/30 canvas-interactive transition-colors"
+              title="Edit columns"
+              aria-label="Edit columns"
+            >
+              <Pencil className="h-3 w-3" />
             </button>
           )}
           {/* Move to group popover */}
@@ -532,8 +578,57 @@ function GridCellWidget({
           <GridCellCohiWidget item={item} canvasItemId={itemId} width={width} height={height - 20} dateFilter={dateFilter} dimensionFilters={dimensionFilters} filterSyncEnabled={filterSyncEnabled} onFilterChange={onFilterChange} onVizTypeChange={onVizTypeChange} />
         )}
       </div>
+
+      {isLoanDetailTable && (
+        <LoanDetailColumnsModal
+          open={loanDetailColumnsModalOpen}
+          onClose={() => setLoanDetailColumnsModalOpen(false)}
+          canvasItemId={itemId}
+          tenantId={selectedTenantId}
+        />
+      )}
     </div>
   );
+}
+
+/** Human-readable period label for Loan Detail subtitle (workbench only). Returns undefined when "All". */
+function getLoanDetailPeriodLabel(periodSelection: PeriodSelection | undefined): string | undefined {
+  if (!periodSelection?.dateRange) return undefined;
+  const { type, preset, year, dateRange } = periodSelection;
+  if (type === 'year' && year != null) return String(year);
+  if (type === 'preset' && preset) {
+    const presetLabels: Record<PeriodPreset, string> = {
+      'rolling-3': 'Last 3 Months',
+      'rolling-6': 'Last 6 Months',
+      'rolling-12': 'Last 12 Months',
+      'rolling-13': 'Last 13 Months',
+      'mtd': 'Month to Date',
+      'qtd': 'Quarter to Date',
+      'ytd': dateRange.start ? `${dateRange.start.slice(0, 4)} YTD` : 'YTD',
+      'last-month': 'Last Month',
+      'last-quarter': 'Last Quarter',
+      'last-year': 'Last Year',
+      'trailing-12': 'Last 12 Months',
+    };
+    return presetLabels[preset] ?? preset;
+  }
+  if (type === 'custom' && dateRange?.start && dateRange?.end) {
+    return 'custom date range';
+  }
+  return undefined;
+}
+
+/** Build comma-separated filter summary for Loan Detail subtitle (e.g. "Branch: X, Loan Purpose: Y"). */
+function getLoanDetailFilterSummary(filters: SectionFilters): string | undefined {
+  const parts: string[] = [];
+  if (filters.branch && filters.branch !== 'all') parts.push(`Branch: ${filters.branch}`);
+  if (filters.loanOfficer && filters.loanOfficer !== 'all') parts.push(`Loan Officer: ${filters.loanOfficer}`);
+  if (filters.dynamicFilters?.length) {
+    for (const df of filters.dynamicFilters) {
+      if (df.value && df.value !== 'all') parts.push(`${df.label}: ${df.value}`);
+    }
+  }
+  return parts.length > 0 ? parts.join(', ') : undefined;
 }
 
 function GridCellRegistryWidget({
@@ -550,6 +645,8 @@ function GridCellRegistryWidget({
   const definition = getWidgetDefinition(defId);
   const reportWidgetData = useCanvasDataStore((s) => s.reportWidgetData);
   const removeWidget = useCanvasDataStore((s) => s.removeWidget);
+  const groupId = canvasItemId.split('__')[0] ?? '';
+  const filters = useWidgetSectionStore((s) => s.getFilters(groupId));
 
   const { data: selectedData, loading, error } = useWidgetData(
     definition?.dataSource ?? '',
@@ -574,18 +671,51 @@ function GridCellRegistryWidget({
 
   if (!definition) return null;
 
+  const getColumns = useLoanDetailColumnsStore((s) => s.getColumns);
+  const isLoanDetail = definition.dataSource === 'loan-detail';
+  const savedColumns = isLoanDetail ? getColumns(canvasItemId) : undefined;
+  const customColumns: ColumnDef[] | undefined =
+    savedColumns?.length
+      ? savedColumns.map((c) => ({ id: c.id, label: c.label, field: c.field }))
+      : undefined;
+
   const Component = definition.component;
+  const periodLabel =
+    isLoanDetail
+      ? getLoanDetailPeriodLabel(filters.periodSelection)
+      : undefined;
+  const filterSummary = isLoanDetail ? getLoanDetailFilterSummary(filters) : undefined;
+  const isHighPerformers = definition.dataSource === 'high-performers';
+  const highPerformersConfig = isHighPerformers
+    ? {
+        sectionId: groupId,
+        periodKey: definition.id.includes('-left') ? ('left' as const) : ('right' as const),
+        period:
+          definition.id.includes('-left')
+            ? (filters.highPerformersLeftPeriod ?? 'mtd')
+            : (filters.highPerformersRightPeriod ?? 'ytd'),
+      }
+    : {};
+  const config = {
+    ...definition.config,
+    ...(periodLabel != null && { periodLabel }),
+    ...(filterSummary != null && { filterSummary }),
+    ...(customColumns != null && { customColumns }),
+    ...highPerformersConfig,
+  };
 
   return (
-    <div className="h-full w-full">
-      <Component
-        data={selectedData}
-        loading={loading}
-        error={error}
-        width={width}
-        height={height}
-        config={definition.config}
-      />
+    <div className="h-full w-full flex flex-col min-h-0">
+      <div className="flex-1 min-h-0 min-w-0">
+        <Component
+          data={selectedData}
+          loading={loading}
+          error={error}
+          width={width}
+          height={height}
+          config={config}
+        />
+      </div>
     </div>
   );
 }
@@ -792,7 +922,12 @@ export function WidgetGroup({
     registerSection(groupId, sectionType);
     if (savedFiltersProp && !filtersRestoredRef.current) {
       filtersRestoredRef.current = true;
-      updateFilters(groupId, savedFiltersProp);
+      // Loan-detail always defaults to "All" (no date filter); don't restore periodSelection/dateRange
+      const toRestore =
+        sectionType === 'loan-detail'
+          ? { ...savedFiltersProp, periodSelection: undefined, dateRange: undefined }
+          : savedFiltersProp;
+      updateFilters(groupId, toRestore);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, sectionType, registerSection]);
@@ -1287,6 +1422,23 @@ export function WidgetGroup({
         {/* Expanded filter controls — compact row below header, only when sync ON and filters expanded */}
         {!collapsed && !SELF_MANAGED_SECTIONS.has(sectionType) && filterSync && !filtersCollapsed && (
           <div className="flex items-center gap-1.5 px-2.5 pb-1.5 flex-wrap">
+            {sectionType === 'high-performers' ? (
+              <>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mr-0.5">Loan:</span>
+                {HIGH_PERFORMERS_DATE_TYPE_OPTIONS.map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant={(filters.highPerformersDateType ?? 'funding_date') === opt.value ? 'default' : 'outline'}
+                    size="sm"
+                    className="!h-7 !py-0 !min-h-0 px-2.5 text-xs"
+                    onClick={() => updateFilters(groupId, { highPerformersDateType: opt.value })}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </>
+            ) : (
+              <>
             <DatePeriodPicker
               year={filters.year}
               onYearChange={handleYearChange}
@@ -1297,6 +1449,13 @@ export function WidgetGroup({
               size="sm"
               showLabel={false}
               yearsToShow={4}
+              showAllOption={sectionType === 'loan-detail'}
+              onAllSelect={
+                sectionType === 'loan-detail'
+                  ? () => updateFilters(groupId, { periodSelection: undefined, dateRange: undefined })
+                  : undefined
+              }
+              periodSelectionFromStore={sectionType === 'loan-detail' ? filters.periodSelection : undefined}
             />
 
             {/* Data-driven filters from SECTION_FILTER_CONFIG */}
@@ -1354,6 +1513,8 @@ export function WidgetGroup({
               filters={filters}
               onApplyPreset={handleApplyGroupPreset}
             />
+              </>
+            )}
           </div>
         )}
       </div>

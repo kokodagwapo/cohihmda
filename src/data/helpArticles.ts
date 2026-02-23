@@ -762,6 +762,113 @@ Create multiple scenarios and compare them side by side to evaluate different st
 ## Exporting
 Export your scenario results for presentations and strategic planning meetings.`,
   },
+  {
+    id: 'tt-workflow-conversion',
+    slug: 'workflow-conversion',
+    title: 'Workflow Conversion',
+    category: 'TopTiering Analytics',
+    categorySlug: 'toptiering',
+    summary: 'Analyze milestone-to-milestone conversion rates and turn times.',
+    content: `# Workflow Conversion
+
+## What Is It?
+The Workflow Conversion dashboard measures how efficiently loans move between milestones in your pipeline. Unlike the Loan Funnel (which shows the full pipeline shape), this view lets you define specific milestone pairs and track the conversion rate or average turn time between them.
+
+## Key Concepts
+- **Segment** — A pair of milestones (e.g., Application → Submitted, Submitted → Approved). Each segment card shows how many loans reached each milestone and the conversion percentage or turn time between them.
+- **Conversion %** — The percentage of loans that reached the "From" milestone and also reached the "To" milestone within the selected period.
+- **Turn Time** — The average number of days between the two milestones for loans that completed both.
+
+## Filters & Controls
+- **Period** — Choose from MTD, Last Month, QTD, Last Quarter, YTD, Last Year, or a custom date range.
+- **Calculation** — Switch between Conversion % and Turn Time views.
+- **Grouping** — View data at the Workflow level (overall) or by Individual loan officers.
+- **Segments** — Add, remove, or customize milestone pairs. Click the + / − buttons to manage segments, or use the dropdowns to change which milestones a segment spans.
+
+## Reading the Charts
+Each segment card contains a combined bar-and-line chart. Bars represent loan counts and the line shows the conversion rate or turn time over time (daily or monthly buckets depending on the date range).
+
+## Drilling Into Loans
+Click the loan count on a segment card to open a modal listing the individual loans in that segment. This is useful for investigating specific bottlenecks.
+
+## Use Cases
+- Identify which workflow steps have the lowest conversion rates
+- Track process improvements by monitoring turn time trends
+- Compare individual loan officer conversion rates to the team average`,
+  },
+  {
+    id: 'tt-loan-detail',
+    slug: 'loan-detail',
+    title: 'Loan Detail',
+    category: 'TopTiering Analytics',
+    categorySlug: 'toptiering',
+    summary: 'Browse and export a detailed table of all loans.',
+    content: `# Loan Detail
+
+## What Is It?
+The Loan Detail page provides a comprehensive, sortable table of every loan in your pipeline. It displays dozens of data fields pulled directly from your LOS, making it the go-to view for looking up individual loans or exporting raw data.
+
+## Available Columns
+The table includes columns across several categories:
+- **Loan Info** — Loan Number, Loan Type, Loan Program, Loan Purpose, Loan Folder, Loan Term
+- **Financial** — Volume (Loan Amount), WAC (Weighted Average Coupon), FICO, LTV, Back-End DTI
+- **People** — Loan Officer, Processor, Underwriter, Closer
+- **Property** — Street, City, State, County, Zip
+- **Dates** — Application, Credit Pull, Loan Estimate Sent/Received, Approval, Closing, Funding, and many more
+- **Status** — Current Loan Status, Current Milestone, Locked Flag, Lock Expiration, Investor
+
+## Sorting
+Click any column header to sort the table by that column. Click again to reverse the sort direction. An arrow indicator shows the active sort column and direction.
+
+## Exporting
+Click **Export to Excel** to download the full dataset as a spreadsheet. This is useful for offline analysis, audits, or sharing with stakeholders who don't have platform access.
+
+## Performance
+The table uses virtualized rendering, meaning only the rows visible on screen are rendered. This keeps the page fast even with thousands of loans.
+
+## Channel & Tenant Filtering
+The table respects the global Channel and Tenant selectors in the navigation bar, so you only see loans matching your current context.`,
+  },
+  {
+    id: 'tt-high-performers',
+    slug: 'high-performers',
+    title: 'High Performers',
+    category: 'TopTiering Analytics',
+    categorySlug: 'toptiering',
+    summary: 'View rankings of top loan officers and teams.',
+    content: `# High Performers
+
+## What Is It?
+The High Performers dashboard ranks your loan officers and teams by production metrics. It surfaces who your top producers are and how they compare across different time periods and measurement criteria.
+
+## Rankings Tables
+The page shows two tables:
+- **Top Loan Officers** — Individual LO rankings with columns for Rank, Units, Volume, and product mix percentages (Government, Conventional, Refinance, Purchase).
+- **Top Teams/Branches** — Aggregated rankings at the team or branch level with the same metrics.
+
+## Filters
+- **Date Type** — Choose which date to measure by: Funding Date, Closing Date, or Application Date. This changes which loans are included in the rankings.
+- **Time Period** — Select from MTD (Month To Date), Last Month, YTD (Year To Date), Last Year, or Rolling 13 Months.
+- **Search** — Type to filter the table by name.
+
+## Metrics Explained
+- **Rank** — Position in the leaderboard based on total units
+- **Units** — Number of loans
+- **Volume** — Total dollar amount of loans
+- **Govt %** — Percentage of loans that are government products (FHA, VA, USDA)
+- **Conv %** — Percentage of conventional loans
+- **Refi %** — Percentage of refinance transactions
+- **Purch %** — Percentage of purchase transactions
+
+## Exporting
+Use the export button to download rankings as an Excel file. Multiple export formats are available including full data or summary views.
+
+## Use Cases
+- Recognize and reward top-producing loan officers
+- Identify production patterns (e.g., LOs who specialize in government products)
+- Compare team-level output across branches
+- Track individual ranking changes month over month`,
+  },
 
   // ─── Cohi Chat ─────────────────────────────────────────────────────
   {

@@ -3336,10 +3336,10 @@ export const ClosingFalloutForecast = ({
 
   return (
     <TooltipProvider>
-      <div className="mb-8 md:mb-12">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch">
+      <div className="mb-8 md:mb-12 min-w-0 max-w-full">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8 lg:gap-10 items-stretch min-w-0">
           {/* Main Forecast Section */}
-          <div className="md:col-span-12 flex flex-col">
+          <div className="md:col-span-12 flex flex-col min-w-0">
             <div ref={forecastRef}>
               <DashboardCard className="relative flex-1 flex flex-col">
                 <div className="p-6 md:p-10 lg:p-12 flex-1 flex flex-col">
@@ -4118,16 +4118,17 @@ export const ClosingFalloutForecast = ({
           </section>
         )}
 
-        {/* Critical Loans and Top Loan Officers Section */}
+        {/* Critical Loans and Top Loan Officers Section - width constrained so table tab cannot expand */}
         <section
-          className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] ${
+          className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] min-w-0 max-w-full w-full box-border ${
             isDarkMode
               ? "bg-transparent md:bg-slate-900/50 md:border-white/10"
               : "bg-transparent md:bg-white md:border-slate-200 md:shadow-sm"
           }`}
+          style={{ width: "100%", maxWidth: "100%", minWidth: 0 }}
         >
           <div
-            className={`flex border-b ${
+            className={`flex border-b min-w-0 ${
               isDarkMode ? "border-white/10" : "border-slate-100"
             }`}
           >
@@ -4179,9 +4180,9 @@ export const ClosingFalloutForecast = ({
             </button>
           </div>
 
-          <div className="py-2 md:p-3 lg:p-4">
+          <div className="py-2 md:p-3 lg:p-4 min-w-0 w-full overflow-hidden">
             {insightsTab === "critical" && (
-              <div>
+              <div className="min-w-0">
                 {loansError ? (
                   <div
                     className={`text-sm py-6 text-center ${
@@ -4213,7 +4214,7 @@ export const ClosingFalloutForecast = ({
             )}
 
             {insightsTab === "officers" && (
-              <div className="w-full">
+              <div className="w-full min-w-0 max-w-full overflow-hidden">
                 {loansLoading && !loansRaw ? (
                   <div
                     className={`text-sm py-6 text-center ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
@@ -4221,7 +4222,7 @@ export const ClosingFalloutForecast = ({
                     Loading loans…
                   </div>
                 ) : (
-                  <div className="w-full space-y-3">
+                  <div className="w-full min-w-0 max-w-full overflow-hidden space-y-3">
                     {/* Critical outcome filter (shared with cards) - show when we have critical loans data */}
                     {criticalLoanCards.length > 0 && (() => {
                       const criticalTabs: {
@@ -4316,7 +4317,7 @@ export const ClosingFalloutForecast = ({
                         },
                       };
                       return (
-                        <div className="flex gap-1 sm:gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                        <div className="flex gap-1 sm:gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1 min-w-0">
                           {criticalTabs.map((tab) => {
                             const isActive =
                               criticalOutcomeFilter === tab.id;
@@ -4359,7 +4360,7 @@ export const ClosingFalloutForecast = ({
                     })()}
                     {sortedCriticalLoans.length === 0 ? (
                       <div
-                        className={`text-center py-12 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                        className={`text-center py-12 min-w-0 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
                       >
                         <Table className="w-12 h-12 mx-auto mb-4 opacity-40" />
                         <p className="text-sm font-medium">
@@ -4375,10 +4376,19 @@ export const ClosingFalloutForecast = ({
                       </div>
                     ) : (
                     <div
-                      className={`overflow-x-auto overflow-y-auto border rounded-lg ${isDarkMode ? "border-white/10" : "border-slate-200"}`}
-                      style={{ maxHeight: "45rem" }}
+                      className={`border rounded-lg ${isDarkMode ? "border-white/10" : "border-slate-200"}`}
+                      style={{
+                        maxHeight: "45rem",
+                        width: "100%",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        overflowX: "auto",
+                        overflowY: "auto",
+                        boxSizing: "border-box",
+                      }}
                     >
-                      <table className="table-auto divide-y divide-slate-200 dark:divide-white/10">
+                      <div style={{ minWidth: "min(100%, max-content)", width: "max-content" }}>
+                      <table className="table-auto divide-y divide-slate-200 dark:divide-white/10" style={{ width: "max-content" }}>
                         <thead
                           className={`sticky top-0 z-10 ${isDarkMode ? "bg-slate-800/90" : "bg-slate-50"}`}
                         >
@@ -4624,11 +4634,12 @@ export const ClosingFalloutForecast = ({
                           })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                     )}
                     {sortedCriticalLoans.length > 0 && (
                       <div
-                        className={`mt-2 flex items-center justify-center gap-3 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
+                        className={`mt-2 flex items-center justify-center gap-3 min-w-0 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}
                       >
                         <span className="text-xs">
                           Showing {sortedCriticalLoans.length} critical loan
