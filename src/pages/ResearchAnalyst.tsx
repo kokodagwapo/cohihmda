@@ -45,6 +45,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useTutorial } from "@/contexts/TutorialContext";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,7 +115,7 @@ function SessionSidebar({
 
   if (collapsed) {
     return (
-      <div className="border-r flex flex-col items-center py-3 px-1 gap-2">
+      <div className="border-r flex flex-col items-center py-3 px-1 gap-2" data-tour="research-sessions">
         <Button variant="ghost" size="icon" onClick={onToggle} className="h-8 w-8">
           <PanelLeftOpen className="h-4 w-4" />
         </Button>
@@ -126,7 +127,7 @@ function SessionSidebar({
   }
 
   return (
-    <div className="border-r w-64 flex flex-col flex-shrink-0">
+    <div className="border-r w-64 flex flex-col flex-shrink-0" data-tour="research-sessions">
       <div className="flex items-center justify-between px-3 py-2 border-b">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Sessions</span>
         <div className="flex items-center gap-1">
@@ -449,6 +450,34 @@ export default function ResearchAnalyst() {
     [submitFeedback]
   );
 
+  // ── Tour: auto-load first session when tour advances past idle-state steps ──
+  const { setTourStepHandler, activeTourId } = useTutorial();
+  const tourSessionLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (activeTourId !== "research") {
+      tourSessionLoadedRef.current = false;
+      return;
+    }
+
+    setTourStepHandler((tourId, completedStepIndex) => {
+      if (tourId !== "research") return;
+      // Step 2 (0-indexed) = "Topic Suggestions" — load a session before showing timeline
+      if (completedStepIndex === 2 && !tourSessionLoadedRef.current && sessionList.length > 0) {
+        tourSessionLoadedRef.current = true;
+        return new Promise<void>((resolve) => {
+          loadSession(sessionList[0].id);
+          setActiveTab("timeline");
+          lastReportRef.current = false;
+          // Give the UI time to render the session content
+          setTimeout(resolve, 1200);
+        });
+      }
+    });
+
+    return () => setTourStepHandler(null);
+  }, [activeTourId, sessionList, loadSession, setTourStepHandler]);
+
   // Show the bottom input bar when running OR when complete (for follow-ups)
   const showBottomInput = isRunning || phase === "complete";
 
@@ -488,7 +517,7 @@ export default function ResearchAnalyst() {
 
                 <Card>
                   <CardContent className="pt-6 space-y-4">
-                    <div>
+                    <div data-tour="research-input">
                       <label className="text-sm font-medium mb-1.5 block">
                         Investigation Topic (optional)
                       </label>
@@ -509,7 +538,7 @@ export default function ResearchAnalyst() {
 
                     <Separator />
 
-                    <div>
+                    <div data-tour="research-suggestions">
                       <p className="text-xs text-muted-foreground mb-2">Or try one of these:</p>
                       <div className="flex flex-wrap gap-1.5">
                         {TOPIC_SUGGESTIONS.map((topic) => (
@@ -561,6 +590,7 @@ export default function ResearchAnalyst() {
                         variant="outline"
                         size="sm"
                         className="gap-2"
+                        data-tour="research-share"
                         onClick={() => {
                           setShareDialogVisibility(
                             sessionVisibility === "global" ? "global" :
@@ -575,6 +605,7 @@ export default function ResearchAnalyst() {
                       </Button>
                     )}
                     {report && (
+                      <div data-tour="research-export">
                       <ExportMenu
                         title={currentSessionTopic ? `Research Report - ${currentSessionTopic}` : "Research Report"}
                         targetRef={reportContainerRef}
@@ -605,6 +636,7 @@ export default function ResearchAnalyst() {
                             : [],
                         })}
                       />
+                      </div>
                     )}
                     <Button variant="outline" size="sm" onClick={handleNewInvestigation}>
                       <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
@@ -614,7 +646,7 @@ export default function ResearchAnalyst() {
                 </div>
 
                 {/* Timeline Tab */}
-                <TabsContent value="timeline" className="flex-1 overflow-hidden m-0 px-6 pb-0">
+                <TabsContent value="timeline" className="flex-1 overflow-hidden m-0 px-6 pb-0" data-tour="research-timeline">
                   <AgentTimeline
                     events={events}
                     isRunning={isRunning}
@@ -625,7 +657,7 @@ export default function ResearchAnalyst() {
                 </TabsContent>
 
               {/* Findings Tab */}
-              <TabsContent value="findings" className="flex-1 overflow-y-auto m-0 px-6 pb-4">
+              <TabsContent value="findings" className="flex-1 overflow-y-auto m-0 px-6 pb-4" data-tour="research-findings">
                 {drillDownFinding ? (
                   <div className="py-3">
                     <FindingDrillDown
@@ -679,7 +711,7 @@ export default function ResearchAnalyst() {
               </TabsContent>
 
                 {/* Report Tab */}
-                <TabsContent value="report" className="flex-1 overflow-y-auto m-0 px-6 pb-4">
+                <TabsContent value="report" className="flex-1 overflow-y-auto m-0 px-6 pb-4" data-tour="research-report">
                   {report ? (
                     <div ref={reportContainerRef} className="space-y-4 py-2">
                       {phase === "complete" && (
@@ -728,7 +760,7 @@ export default function ResearchAnalyst() {
 
               {/* Bottom Input Bar: Steering (running) or Follow-up (complete) */}
               {showBottomInput && (
-                <div className="border-t px-6 py-3">
+                <div className="border-t px-6 py-3" data-tour="research-followup">
                   <div className="flex gap-2 max-w-2xl">
                     {isRunning && (
                       isPaused ? (

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 
@@ -20,6 +20,12 @@ const DEFAULT_TUTORIAL_PREFS: TutorialPreferences = {
   onboarding_complete: false,
 };
 
+/**
+ * Async handler called when a tour step completes (before advancing).
+ * Return a promise to delay the next step (e.g. loading data).
+ */
+export type TourStepHandler = (tourId: string, completedStepIndex: number) => void | Promise<void>;
+
 interface TutorialContextType {
   prefs: TutorialPreferences;
   isLoading: boolean;
@@ -35,6 +41,8 @@ interface TutorialContextType {
   markWhatsNewSeen: () => Promise<void>;
   resetTours: () => Promise<void>;
   refresh: () => Promise<void>;
+  setTourStepHandler: (handler: TourStepHandler | null) => void;
+  tourStepHandlerRef: React.RefObject<TourStepHandler | null>;
 }
 
 const TutorialContext = createContext<TutorialContextType | undefined>(undefined);
@@ -45,6 +53,11 @@ export function TutorialProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isTourActive, setIsTourActive] = useState(false);
   const [activeTourId, setActiveTourId] = useState<string | null>(null);
+  const tourStepHandlerRef = useRef<TourStepHandler | null>(null);
+
+  const setTourStepHandler = useCallback((handler: TourStepHandler | null) => {
+    tourStepHandlerRef.current = handler;
+  }, []);
 
   const fetchPrefs = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -151,6 +164,8 @@ export function TutorialProvider({ children }: { children: ReactNode }) {
         markWhatsNewSeen,
         resetTours,
         refresh: fetchPrefs,
+        setTourStepHandler,
+        tourStepHandlerRef,
       }}
     >
       {children}

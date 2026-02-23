@@ -12,5 +12,5 @@ export function ActiveTourRunner() {
 
   if (!activeTourId || activeTourId === 'welcome') return null;
 
-  return <FeatureTour tourId={activeTourId as TourId} />;
+  return <FeatureTour key={activeTourId} tourId={activeTourId as TourId} />;
 }
