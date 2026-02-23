@@ -91,13 +91,23 @@ router.get('/connections', authenticateToken, apiLimiter, async (req: AuthReques
 
     const tenantId = profileResult.rows[0].tenant_id;
 
-    const result = await pool.query(
-      `SELECT * FROM public.vendor_connections WHERE tenant_id = $1 ORDER BY created_at DESC`,
-      [tenantId]
-    );
+    let rows: any[] = [];
+    try {
+      const result = await pool.query(
+        `SELECT * FROM public.vendor_connections WHERE tenant_id = $1 ORDER BY created_at DESC`,
+        [tenantId]
+      );
+      rows = result.rows;
+    } catch (err: any) {
+      if (err.code === '42P01') {
+        // vendor_connections table doesn't exist yet — return empty
+        return res.json({ connections: [] });
+      }
+      throw err;
+    }
 
     // Mask sensitive fields
-    const connections = result.rows.map(conn => ({
+    const connections = rows.map(conn => ({
       ...conn,
       vendor_api_key: conn.vendor_api_key ? '••••••••' : null,
       vendor_credentials: conn.vendor_credentials ? '••••••••' : null,

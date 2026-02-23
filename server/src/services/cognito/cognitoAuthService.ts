@@ -51,8 +51,17 @@ function computeSecretHash(username: string): string | undefined {
     .digest("base64");
 }
 
+/**
+ * Whether Cognito should handle email/password authentication (signin, MFA, password reset).
+ * Requires COGNITO_PASSWORD_AUTH=true in addition to the pool/client being configured.
+ * This is separate from SSO which uses the OAuth flows in cognitoService.ts.
+ */
 export function isCognitoAuthEnabled(): boolean {
-  return !!(getCognitoUserPoolId() && getCognitoClientId());
+  return !!(
+    getCognitoUserPoolId() &&
+    getCognitoClientId() &&
+    process.env.COGNITO_PASSWORD_AUTH === "true"
+  );
 }
 
 // --- Result types ---
@@ -214,12 +223,22 @@ export async function respondToNewPasswordChallenge(
 
 // --- User Management ---
 
+/**
+ * Create a user in Cognito.
+ * When sendInvite=true (default), Cognito emails the user a temporary password; password arg is ignored.
+ * On first login, Cognito returns NEW_PASSWORD_REQUIRED challenge.
+ * When sendInvite=false, password is required and set as permanent (no forced change, no email).
+ */
 export async function createUser(
   email: string,
-  password: string,
+  password?: string,
   fullName?: string,
+  sendInvite: boolean = true,
 ): Promise<CognitoCreateUserResult> {
   try {
+    if (!sendInvite && (password == null || password === "")) {
+      throw new Error("Password is required when not sending an invite");
+    }
     const userAttributes = [
       { Name: "email", Value: email },
       { Name: "email_verified", Value: "true" },
@@ -232,7 +251,11 @@ export async function createUser(
       UserPoolId: getCognitoUserPoolId(),
       Username: email,
       UserAttributes: userAttributes,
-      MessageAction: "SUPPRESS",
+      // When sending invite, Cognito emails a temp password.
+      // When not sending invite, we suppress the email and set password manually below.
+      ...(sendInvite
+        ? { DesiredDeliveryMediums: ["EMAIL"] }
+        : { MessageAction: "SUPPRESS" }),
     });
 
     const createResponse = await getClient().send(createCommand);
@@ -240,16 +263,21 @@ export async function createUser(
       (a) => a.Name === "sub",
     )!.Value!;
 
-    // Set permanent password immediately (skip force-change flow)
-    const setPasswordCommand = new AdminSetUserPasswordCommand({
-      UserPoolId: getCognitoUserPoolId(),
-      Username: email,
-      Password: password,
-      Permanent: true,
-    });
-    await getClient().send(setPasswordCommand);
+    if (!sendInvite && password) {
+      const setPasswordCommand = new AdminSetUserPasswordCommand({
+        UserPoolId: getCognitoUserPoolId(),
+        Username: email,
+        Password: password,
+        Permanent: true,
+      });
+      await getClient().send(setPasswordCommand);
+    }
 
-    logInfo("[CognitoAuth] User created", { email, cognitoSub });
+    logInfo("[CognitoAuth] User created", {
+      email,
+      cognitoSub,
+      invited: sendInvite,
+    });
     return { cognitoSub, username: email };
   } catch (error: any) {
     logError("[CognitoAuth] Create user failed", error, { email });

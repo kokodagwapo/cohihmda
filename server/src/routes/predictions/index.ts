@@ -69,10 +69,11 @@ router.post(
         estimated_closing_date, funding_date, closing_date, current_status_date, ctc_date, uw_final_approval_date, conditional_approval_date,
         loan_officer_id, loan_officer, loan_processor_id, processor, underwriter_id, underwriter, closer_id, closer,
         channel`;
+      const activeWhere = `current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)`;
       const activeLoansQuery = `
         SELECT ${baseCols}
         FROM public.loans
-        WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+        WHERE ${activeWhere}
         ORDER BY application_date DESC
         LIMIT 5000`;
       let activeLoans: any[];
@@ -80,7 +81,7 @@ router.post(
         const withAll = await tenantPool.query(
           `SELECT ${baseCols}, market_rate, market_rate_at_lock, market_change_delta
            FROM public.loans
-           WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+           WHERE ${activeWhere}
            ORDER BY application_date DESC
            LIMIT 5000`
         );
@@ -91,7 +92,7 @@ router.post(
             const withDelta = await tenantPool.query(
               `SELECT ${baseCols}, market_change_delta
                FROM public.loans
-               WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+               WHERE ${activeWhere}
                ORDER BY application_date DESC
                LIMIT 5000`
             );
@@ -220,6 +221,33 @@ router.post(
           );
         } catch (e: any) {
           if (e?.code !== "42703") logWarn("[Predict] Persist market_change_delta failed", { message: e?.message });
+        }
+      }
+
+      // Persist market_rate and market_rate_at_lock to loans (migration 043) so insights and other readers see market data.
+      const withRates = activeLoans.filter((l: any) => l.loan_id != null);
+      if (withRates.length > 0) {
+        try {
+          const todayStr = today.toISOString().split("T")[0];
+          const todayRate = await getMarketRateForDate(todayStr);
+          const loanIds = withRates.map((l: any) => l.loan_id);
+          const marketRates = withRates.map(
+            () => (todayRate != null && !isNaN(todayRate) ? todayRate : null)
+          );
+          const marketRatesAtLock = withRates.map((l: any) => {
+            const v = l.market_rate_at_lock;
+            return v != null && !isNaN(Number(v)) ? Number(v) : null;
+          });
+          await tenantPool.query(
+            `UPDATE public.loans AS l SET
+               market_rate = COALESCE(v.mr, l.market_rate),
+               market_rate_at_lock = COALESCE(v.mr_lock, l.market_rate_at_lock)
+             FROM (SELECT unnest($1::text[]) AS loan_id, unnest($2::decimal[]) AS mr, unnest($3::decimal[]) AS mr_lock) AS v
+             WHERE l.loan_id = v.loan_id`,
+            [loanIds, marketRates, marketRatesAtLock]
+          );
+        } catch (e: any) {
+          if (e?.code !== "42703") logWarn("[Predict] Persist market_rate / market_rate_at_lock failed", { message: e?.message });
         }
       }
 
@@ -786,17 +814,20 @@ router.get(
       LEFT JOIN public.loans l ON l.loan_id = lp.loan_id
     `;
 
+      const activeWhere = `l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND l.application_date::text != '' AND (l.is_archived IS DISTINCT FROM TRUE)`;
       if (dateRange) {
         query += `
-        WHERE l.current_loan_status = 'Active Loan'
-          AND l.application_date IS NOT NULL
-          AND l.application_date::text != ''
+        WHERE ${activeWhere}
           AND l.application_date >= $${paramIndex}::date
           AND l.application_date < $${paramIndex + 1}::date
       `;
         params.push(dateRange.startDate.toISOString().split("T")[0]);
         params.push(dateRange.endDate.toISOString().split("T")[0]);
         paramIndex += 2;
+      } else {
+        query += `
+        WHERE ${activeWhere}
+      `;
       }
 
       query += ` LIMIT $${paramIndex}`;

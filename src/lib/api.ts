@@ -886,6 +886,54 @@ export class ApiClient {
     });
   }
 
+  async getNewsDetails(article: {
+    title: string;
+    source: string;
+    link: string;
+  }) {
+    return this.request<{
+      articleParagraphs: string[];
+      fullArticleUrl: string;
+      fetchedAt: string;
+      error?: string;
+    }>("/api/news/details", {
+      method: "POST",
+      body: JSON.stringify(article),
+    });
+  }
+
+  async getDailyBriefNewsletterSubscription() {
+    return this.request<{
+      enabled: boolean;
+      email: string;
+    }>("/api/news/newsletter/subscription");
+  }
+
+  async updateDailyBriefNewsletterSubscription(payload: {
+    enabled: boolean;
+    email: string;
+  }) {
+    return this.request<{
+      success: boolean;
+      enabled: boolean;
+      email: string;
+    }>("/api/news/newsletter/subscription", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async sendDailyBriefPreviewEmail(payload?: { email?: string }) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      recipient: string;
+    }>("/api/news/newsletter/send-preview", {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
   // WebSocket connection helper (for Express backend WebSocket)
   // Always uses direct backend URL (bypasses CloudFront which doesn't support WebSocket)
   createBackendWebSocket(path: string): WebSocket {

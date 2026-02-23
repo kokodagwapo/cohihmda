@@ -14,7 +14,7 @@ interface ConnectionsSectionProps {
   tenantMetrics?: any;
   loadingMetrics?: boolean;
   onTestLos: (connectionId: string, tenantId?: string) => Promise<any>;
-  onSyncLos: (connectionId: string, tenantId?: string, clearDatabase?: boolean, testMode?: boolean, limit?: number) => Promise<any>;
+  onSyncLos: (connectionId: string, tenantId?: string, clearDatabase?: boolean, testMode?: boolean, limit?: number, fullSync?: boolean) => Promise<any>;
   onToggleLos: (connectionId: string, isActive: boolean) => Promise<any>;
   onCreateLos: (data: any, tenantId?: string) => Promise<any>;
   onUpdateLos?: (connectionId: string, updates: any, tenantId?: string) => Promise<any>;

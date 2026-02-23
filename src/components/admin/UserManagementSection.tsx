@@ -29,6 +29,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   Users,
   UserPlus,
@@ -47,7 +54,8 @@ import {
   Database,
   Clock,
   AlertCircle,
-  Unlink
+  Unlink,
+  MoreHorizontal
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
@@ -129,6 +137,24 @@ export function UserManagementSection() {
     tenant_slug: '',
   });
 
+  // When true, new users receive an email with sign-in instructions (no password field in form)
+  const [useInviteFlow, setUseInviteFlow] = useState(false);
+  const [inviteFlowKnown, setInviteFlowKnown] = useState(false);
+
+  const fetchInviteFlowConfig = useCallback(async () => {
+    try {
+      const data = await api.request<{ useInviteFlow?: boolean }>(
+        '/api/auth/cognito/config',
+        { headers: { 'Cache-Control': 'no-cache' } }
+      );
+      setUseInviteFlow(!!data?.useInviteFlow);
+      setInviteFlowKnown(true);
+    } catch {
+      setUseInviteFlow(false);
+      setInviteFlowKnown(true);
+    }
+  }, []);
+
   // Load LOS connections for Encompass user sync
   const loadLosConnections = useCallback(async () => {
     const tenantId = selectedTenantId || currentUser?.tenant_id;
@@ -163,6 +189,11 @@ export function UserManagementSection() {
     loadLosConnections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTenantAdmin, selectedTenantId]);
+
+  // Fetch invite flow config on mount so we know whether to show password or invite message
+  useEffect(() => {
+    fetchInviteFlowConfig();
+  }, [fetchInviteFlowConfig]);
 
   const loadData = async () => {
     setLoading(true);
@@ -243,6 +274,10 @@ export function UserManagementSection() {
   };
 
   const handleCreateUser = async () => {
+    if (!useInviteFlow && !formData.password?.trim()) {
+      toast({ title: 'Error', description: 'Please enter a password', variant: 'destructive' });
+      return;
+    }
     try {
       // Determine tenant ID:
       // 1. Tenant admins: always use their own tenant
@@ -265,20 +300,23 @@ export function UserManagementSection() {
         return;
       }
       
-      // Create user in tenant database
+      const body: Record<string, unknown> = {
+        email: formData.email,
+        full_name: formData.full_name,
+        role: formData.role || 'user',
+      };
+      if (!useInviteFlow && formData.password) body.password = formData.password;
+
       await api.request(`/api/admin/tenants/${tenantId}/users`, {
         method: 'POST',
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          full_name: formData.full_name,
-          role: formData.role || 'user',
-        }),
+        body: JSON.stringify(body),
       });
       
       toast({
         title: 'User Created',
-        description: `User ${formData.email} has been created successfully`
+        description: useInviteFlow
+          ? `An email with sign-in instructions has been sent to ${formData.email}`
+          : `User ${formData.email} has been created successfully`,
       });
       setCreateDialogOpen(false);
       resetForm();
@@ -324,21 +362,21 @@ export function UserManagementSection() {
   };
 
   const handleDeleteUser = async (user: UserDisplay) => {
-    if (!confirm(`Are you sure you want to delete ${user.email}?`)) return;
-    
+    const message = `Permanently delete ${user.email}? They will be removed from this organization and cannot sign in again. This cannot be undone.`;
+    if (!confirm(message)) return;
+
     try {
       await api.request(`/api/admin/tenants/${user.tenant_id}/users/${user.id}`, { method: 'DELETE' });
-      
       toast({
         title: 'User Deleted',
-        description: `User ${user.email} has been deleted`
+        description: `${user.email} has been permanently removed`,
       });
       await loadData();
     } catch (error: any) {
       toast({
         title: 'Error',
         description: error.message || 'Failed to delete user',
-        variant: 'destructive'
+        variant: 'destructive',
       });
     }
   };
@@ -698,35 +736,46 @@ export function UserManagementSection() {
                         <TableCell className="text-sm text-slate-500">
                           {formatDate(user.last_login_at)}
                     </TableCell>
-                        <TableCell className="text-right space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openLoanAccessDialog(user)}
-                          title="Loan Access Settings"
-                        >
-                            <Settings2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditDialog(user)}
-                          title="Edit User"
-                        >
-                            <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                            onClick={() => handleToggleActive(user)}
-                          title={user.is_active ? 'Deactivate User' : 'Activate User'}
-                          >
-                            {user.is_active ? (
-                              <XCircle className="h-4 w-4 text-slate-500" />
-                            ) : (
-                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                            )}
-                        </Button>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openLoanAccessDialog(user)}
+                              title="Loan Access Settings"
+                            >
+                              <Settings2 className="h-4 w-4" />
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" title="Actions">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openEditDialog(user)}>
+                                  <Edit2 className="h-4 w-4 mr-2" />
+                                  Edit user
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleToggleActive(user)}>
+                                  {user.is_active ? (
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                  ) : (
+                                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                                  )}
+                                  {user.is_active ? 'Deactivate' : 'Activate'}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleDeleteUser(user)}
+                                  className="text-rose-600 focus:text-rose-600 focus:bg-rose-50 dark:focus:bg-rose-950/30"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete user (frees email for reuse)
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                     </TableCell>
                   </TableRow>
                     );
@@ -778,7 +827,13 @@ export function UserManagementSection() {
       </Tabs>
 
       {/* Create User Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+      <Dialog
+        open={createDialogOpen}
+        onOpenChange={(open) => {
+          setCreateDialogOpen(open);
+          if (open) fetchInviteFlowConfig();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add User</DialogTitle>
@@ -838,15 +893,29 @@ export function UserManagementSection() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Password</Label>
-              <Input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                placeholder="••••••••"
-              />
-            </div>
+            {!inviteFlowKnown ? (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/60 border border-border text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                Checking sign-in method…
+              </div>
+            ) : useInviteFlow ? (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/60 border border-border">
+                <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <p className="text-sm text-muted-foreground">
+                  An email with sign-in instructions will be sent to this user. They will set their password on first login and can then set up two-factor authentication in account settings. You do not need to enter a password.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="••••••••"
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Role</Label>
@@ -872,8 +941,15 @@ export function UserManagementSection() {
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateUser}>
-                  Create User
+            <Button
+              onClick={handleCreateUser}
+              disabled={
+                !formData.email?.trim() ||
+                !inviteFlowKnown ||
+                (!useInviteFlow && !formData.password?.trim())
+              }
+            >
+              Create User
             </Button>
           </DialogFooter>
         </DialogContent>

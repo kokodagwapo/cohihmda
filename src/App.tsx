@@ -45,12 +45,16 @@ import WorkflowConversion from "./pages/WorkflowConversion";
 import { KnowledgeBaseEditor } from "./components/admin/KnowledgeBaseEditor";
 import { GlobalCohiChat } from "./components/cohi/GlobalCohiChat";
 import { CohiDemoExperience } from "./components/demo/CohiDemoExperience";
+import { TutorialProvider } from "@/contexts/TutorialContext";
+import { WelcomeTourTrigger } from "@/components/tutorial/WelcomeTourTrigger";
 // Workbench pages
 import SharedWithMe from "./pages/workbench/SharedWithMe";
 import TeamFolders from "./pages/workbench/TeamFolders";
 import Favorites from "./pages/workbench/Favorites";
 // Research Lab
 import ResearchAnalyst from "./pages/ResearchAnalyst";
+// Help Center
+import HelpCenter from "./pages/HelpCenter";
 
 const queryClient = new QueryClient();
 
@@ -98,6 +102,7 @@ const App = () => (
         <DebugModeProvider>
         <DebugModeIndicator />
         <UserSettingsProvider>
+        <TutorialProvider>
         <EditProvider>
           <TooltipProvider>
             <TimezoneInitializer />
@@ -258,14 +263,23 @@ const App = () => (
                 </ProtectedRoute>
               } />
               
+              {/* Help Center */}
+              <Route path="/help/*" element={
+                <ProtectedRoute>
+                  <HelpCenter />
+                </ProtectedRoute>
+              } />
+              
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
               <GlobalCohiChat />
               <CohiDemoExperience />
+              <WelcomeTourTrigger />
           </Router>
         </TooltipProvider>
       </EditProvider>
+    </TutorialProvider>
     </UserSettingsProvider>
     </DebugModeProvider>
     </AuthProvider>

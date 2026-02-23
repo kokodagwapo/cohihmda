@@ -1,5 +1,18 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
+import { format } from "date-fns";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 import {
   Newspaper,
   Building2,
@@ -14,6 +27,10 @@ import {
   Zap,
   ExternalLink,
   Loader2,
+  Mail,
+  Link2,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import {
   Dialog,
@@ -29,6 +46,202 @@ import {
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { ExportShareMenu } from "@/components/common/ExportShareMenu";
+
+// Sample data for Daily Morning Brief charts (from Markets & Economy brief)
+const FIXED_RATE_DATA = [
+  { week: "Jan 6", rate: 5.6 },
+  { week: "Jan 13", rate: 6.3 },
+  { week: "Jan 20", rate: 6.0 },
+  { week: "Jan 27", rate: 5.9 },
+  { week: "Feb 3", rate: 5.35 },
+  { week: "Feb 10", rate: 5.03 },
+  { week: "Feb 16", rate: 6.0 },
+];
+const TREASURY_DATA = [
+  { date: "Feb 6", yield: 4.15 },
+  { date: "Feb 9", yield: 4.0 },
+  { date: "Feb 10", yield: 4.0 },
+  { date: "Feb 12", yield: 4.05 },
+  { date: "Feb 14", yield: 4.09 },
+  { date: "Feb 16", yield: 4.0 },
+  { date: "Feb 17", yield: 4.0 },
+];
+const MBA_INDEX_DATA = [
+  { week: "Jan 10", purchase: 135, refi: 111 },
+  { week: "Jan 17", purchase: 130, refi: 122 },
+  { week: "Jan 24", purchase: 123, refi: 125 },
+  { week: "Jan 31", purchase: 127, refi: 126 },
+  { week: "Feb 7", purchase: 123, refi: 123 },
+];
+const NAHB_DATA = [
+  { month: "Feb", value: 40 },
+  { month: "Apr", value: 42 },
+  { month: "Jun", value: 33 },
+  { month: "Aug", value: 39 },
+  { month: "Dec", value: 37 },
+  { month: "Jan", value: 38 },
+];
+const RATE_SNAPSHOT_DATA = [
+  { product: "30-Yr Fixed", prior: 5.38, today: 5.39 },
+  { product: "15-Yr Fixed", prior: 5.73, today: 5.28 },
+  { product: "30-Yr FHA", prior: 5.55, today: 5.99 },
+  { product: "30-Yr Jumbo", prior: 6.39, today: 5.5 },
+];
+const EXISTING_HOME_SALES_DATA = [
+  { month: "Aug '25", value: 4.02 },
+  { month: "Sep '25", value: 4.14 },
+  { month: "Oct '25", value: 4.15 },
+  { month: "Nov '25", value: 4.0 },
+  { month: "Dec '25", value: 3.31 },
+  { month: "Jan '26", value: 3.91 },
+];
+
+type DrilldownRange = "mtd" | "qtr" | "ytd" | "3y";
+type DrilldownChartKey =
+  | "fixedRate"
+  | "treasury"
+  | "mba"
+  | "nahb"
+  | "rateSnapshot"
+  | "existingSales";
+
+const CHART_SOURCE_META: Record<
+  DrilldownChartKey,
+  { label: string; url: string }
+> = {
+  fixedRate: {
+    label: "Freddie Mac PMMS",
+    url: "https://www.freddiemac.com/pmms",
+  },
+  treasury: {
+    label: "U.S. Treasury",
+    url: "https://home.treasury.gov/",
+  },
+  mba: {
+    label: "MBA Weekly Applications Survey",
+    url: "https://www.mba.org/news-and-research/newsroom",
+  },
+  nahb: {
+    label: "NAHB Housing Market Index",
+    url: "https://www.nahb.org/news-and-economics/housing-economics/indices/housing-market-index",
+  },
+  rateSnapshot: {
+    label: "Optimal Blue OBMMI",
+    url: "https://www2.optimalblue.com/obmmi",
+  },
+  existingSales: {
+    label: "NAR Existing-Home Sales",
+    url: "https://www.nar.realtor/research-and-statistics/housing-statistics/existing-home-sales",
+  },
+};
+
+const DRILLDOWN_RANGE_LABELS: Record<DrilldownRange, string> = {
+  mtd: "MTD",
+  qtr: "QTR",
+  ytd: "YTD",
+  "3y": "Last 3 Years",
+};
+
+const CHART_DRILLDOWN_DATA: Record<
+  DrilldownChartKey,
+  Partial<Record<DrilldownRange, any[]>>
+> = {
+  fixedRate: {
+    mtd: FIXED_RATE_DATA.slice(-3),
+    qtr: FIXED_RATE_DATA,
+    ytd: FIXED_RATE_DATA,
+    "3y": [
+      { week: "2023", rate: 6.8 },
+      { week: "2024", rate: 6.4 },
+      { week: "2025", rate: 6.1 },
+      { week: "2026", rate: 5.9 },
+    ],
+  },
+  treasury: {
+    mtd: TREASURY_DATA.slice(-4),
+    qtr: TREASURY_DATA,
+    ytd: TREASURY_DATA,
+    "3y": [
+      { date: "2023", yield: 4.62 },
+      { date: "2024", yield: 4.25 },
+      { date: "2025", yield: 4.08 },
+      { date: "2026", yield: 4.0 },
+    ],
+  },
+  mba: {
+    mtd: MBA_INDEX_DATA.slice(-2),
+    qtr: MBA_INDEX_DATA,
+    ytd: MBA_INDEX_DATA,
+    "3y": [
+      { week: "2023", purchase: 118, refi: 92 },
+      { week: "2024", purchase: 122, refi: 97 },
+      { week: "2025", purchase: 128, refi: 112 },
+      { week: "2026", purchase: 130, refi: 120 },
+    ],
+  },
+  nahb: {
+    mtd: NAHB_DATA.slice(-2),
+    qtr: NAHB_DATA.slice(-4),
+    ytd: NAHB_DATA,
+    "3y": [
+      { month: "2023", value: 34 },
+      { month: "2024", value: 37 },
+      { month: "2025", value: 39 },
+      { month: "2026", value: 38 },
+    ],
+  },
+  rateSnapshot: {
+    mtd: RATE_SNAPSHOT_DATA,
+    qtr: RATE_SNAPSHOT_DATA,
+    ytd: RATE_SNAPSHOT_DATA,
+  },
+  existingSales: {
+    mtd: EXISTING_HOME_SALES_DATA.slice(-2),
+    qtr: EXISTING_HOME_SALES_DATA.slice(-4),
+    ytd: EXISTING_HOME_SALES_DATA,
+    "3y": [
+      { month: "2023", value: 4.28 },
+      { month: "2024", value: 4.11 },
+      { month: "2025", value: 4.05 },
+      { month: "2026", value: 3.91 },
+    ],
+  },
+};
+
+const HEADLINES_PER_PAGE = 6;
+const HEADLINES_ROTATE_MS = 15_000;
+const MAX_HEADLINE_AGE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const EXCERPT_PARAGRAPHS_PER_PAGE = 4;
+
+const isValidDate = (value: Date) => !Number.isNaN(value.getTime());
+
+const parseNewsReleaseDate = (item: any): Date | null => {
+  const directCandidates = [
+    item?.publishedAt,
+    item?.published_at,
+    item?.pubDate,
+    item?.published,
+    item?.dateTime,
+    item?.datetime,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      const parsed = new Date(candidate);
+      if (isValidDate(parsed)) return parsed;
+    }
+  }
+
+  if (typeof item?.date === "string" && item.date.trim()) {
+    const combined = `${item.date}${item.time ? ` ${item.time}` : ""}`;
+    const parsed = new Date(combined);
+    if (isValidDate(parsed)) return parsed;
+    const dateOnly = new Date(item.date);
+    if (isValidDate(dateOnly)) return dateOnly;
+  }
+
+  return null;
+};
 
 const OBMMI_WIDGET_URL = "https://www2.optimalblue.com/OBMMI/widgetConfig.php";
 
@@ -214,6 +427,7 @@ function MarketIntelligenceTicker() {
  */
 export const IndustryNewsCard = () => {
   const cardRef = useRef<HTMLDivElement>(null);
+  const warmedArticleLinksRef = useRef<Set<string>>(new Set());
   const [newsFeed, setNewsFeed] = useState<any[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError, setNewsError] = useState<string | null>(null);
@@ -236,12 +450,47 @@ export const IndustryNewsCard = () => {
     clientDataSummary?: string;
     error?: string;
   } | null>(null);
+  const [articleBriefLoading, setArticleBriefLoading] = useState(false);
+  const [articleBrief, setArticleBrief] = useState<{
+    articleParagraphs: string[];
+    fullArticleUrl: string;
+    fetchedAt: string;
+    error?: string;
+  } | null>(null);
+  
+  const [excerptPage, setExcerptPage] = useState(0);
+  const [showChartDrilldown, setShowChartDrilldown] = useState(false);
+  const [activeChart, setActiveChart] = useState<DrilldownChartKey | null>(null);
+  const [drilldownRange, setDrilldownRange] = useState<DrilldownRange>("mtd");
+  
   // Initialize with government/GSE sources enabled by default
   // RSS feed sources (National Mortgage News, etc.) are disabled by default
-  const defaultSources = ["MBA", "Fannie Mae", "Freddie Mac", "CFPB", "FHFA"];
+  const defaultSources = [
+    "MBA",
+    "Fannie Mae",
+    "Freddie Mac",
+    "CFPB",
+    "FHFA",
+    "Federal Reserve",
+    "Reuters",
+    "National Mortgage News",
+    "Mortgage News Daily",
+    "MND Rate Watch",
+  ];
   const [selectedSources, setSelectedSources] =
     useState<string[]>(defaultSources);
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
+  const [headlinePage, setHeadlinePage] = useState(0);
+  const [headlinesPaused, setHeadlinesPaused] = useState(false);
+  const [pinnedHeadlineId, setPinnedHeadlineId] = useState<string | null>(null);
+  const [copiedHeadlineId, setCopiedHeadlineId] = useState<string | null>(null);
+  const [showNewsletterModal, setShowNewsletterModal] = useState(false);
+  const [newsletterEnabled, setNewsletterEnabled] = useState(false);
+  const [newsletterEmail, setNewsletterEmail] = useState("");
+  const [newsletterLoading, setNewsletterLoading] = useState(false);
+  const [newsletterSaving, setNewsletterSaving] = useState(false);
+  const [newsletterSending, setNewsletterSending] = useState(false);
+  const [newsletterMessage, setNewsletterMessage] = useState<string | null>(null);
 
   // Load user preferences from database
   const loadUserPreferences = async () => {
@@ -377,6 +626,24 @@ export const IndustryNewsCard = () => {
         "The Federal Housing Finance Agency (FHFA) regulates Fannie Mae, Freddie Mac, and the Federal Home Loan Banks. Their policy updates affect mortgage lending standards.",
       items: [],
     },
+    {
+      source: "Federal Reserve",
+      icon: Activity,
+      color: "text-amber-600 dark:text-amber-400",
+      bg: "bg-amber-50 dark:bg-amber-950/20",
+      summary:
+        "Federal Reserve press releases and policy communications affecting rates, liquidity, and mortgage market conditions.",
+      items: [],
+    },
+    {
+      source: "Reuters",
+      icon: Newspaper,
+      color: "text-slate-700 dark:text-slate-300",
+      bg: "bg-slate-100 dark:bg-slate-800/40",
+      summary:
+        "National business news coverage with updates on lending, rate markets, and Federal Reserve developments.",
+      items: [],
+    },
     // RSS feed sources - disabled by default
     {
       source: "National Mortgage News",
@@ -500,12 +767,12 @@ export const IndustryNewsCard = () => {
     }
   };
 
-  // Fetch news on mount, when selected sources change, and every 30 minutes
+  // Fetch news on mount, when selected sources change, and every 5 minutes
   useEffect(() => {
     fetchNews();
     const interval = setInterval(() => {
       fetchNews();
-    }, 30 * 60 * 1000);
+    }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [selectedSources]);
 
@@ -529,6 +796,132 @@ export const IndustryNewsCard = () => {
     return filtered.length > 0 ? filtered : newsFeed;
   }, [newsFeed, selectedSources]);
 
+  const recentHeadlines = useMemo(() => {
+    const reputableHeadlineSources = [
+      "National Mortgage News",
+      "Mortgage News Daily",
+      "MND Rate Watch",
+      "MBA",
+      "Federal Reserve",
+      "Reuters",
+      "Fannie Mae",
+      "Freddie Mac",
+      "CFPB",
+      "FHFA",
+    ];
+
+    const sourcePool = newsFeed.length > 0 ? newsFeed : filteredNewsFeed;
+    const reputableFeed = sourcePool.filter((source: any) =>
+      reputableHeadlineSources.includes(source.source)
+    );
+    const feedForHeadlines =
+      reputableFeed.length > 0 ? reputableFeed : filteredNewsFeed;
+
+    const flattened = feedForHeadlines.flatMap((source: any) =>
+      (source.items || []).map((item: any) => {
+        const releaseDate = parseNewsReleaseDate(item);
+        return {
+          item,
+          source,
+          releaseDate,
+          relevanceScore: Number(item?.relevanceScore || 0),
+          releaseLabel: releaseDate
+            ? format(releaseDate, "MMM d, yyyy, h:mm a")
+            : `${item?.date || "Unknown date"}${item?.time ? `, ${item.time}` : ""}`,
+        };
+      })
+    );
+
+    return flattened
+      .filter(
+        (headline: any) =>
+          !!headline.item?.title &&
+          !headline.item.title.toLowerCase().startsWith("visit ") &&
+          !!headline.releaseDate &&
+          Date.now() - headline.releaseDate.getTime() <= MAX_HEADLINE_AGE_MS
+      )
+      .sort(
+        (a: any, b: any) =>
+          b.relevanceScore - a.relevanceScore ||
+          (b.releaseDate?.getTime() || 0) - (a.releaseDate?.getTime() || 0)
+      );
+  }, [newsFeed, filteredNewsFeed]);
+
+  const headlinePageCount = Math.max(
+    1,
+    Math.ceil(recentHeadlines.length / HEADLINES_PER_PAGE)
+  );
+
+  const getHeadlineId = useCallback(
+    (headline: any) =>
+      headline?.item?.link || `${headline?.source?.source}-${headline?.item?.title || "headline"}`,
+    []
+  );
+
+  const pinnedHeadline = useMemo(() => {
+    if (!pinnedHeadlineId) return null;
+    return recentHeadlines.find((headline: any) => getHeadlineId(headline) === pinnedHeadlineId) || null;
+  }, [recentHeadlines, pinnedHeadlineId, getHeadlineId]);
+
+  const visibleHeadlines = useMemo(() => {
+    const start = (headlinePage % headlinePageCount) * HEADLINES_PER_PAGE;
+    if (!pinnedHeadline) {
+      return recentHeadlines.slice(start, start + HEADLINES_PER_PAGE);
+    }
+    const pageItems = recentHeadlines
+      .slice(start, start + HEADLINES_PER_PAGE)
+      .filter((headline: any) => getHeadlineId(headline) !== getHeadlineId(pinnedHeadline));
+    return [pinnedHeadline, ...pageItems].slice(0, HEADLINES_PER_PAGE);
+  }, [recentHeadlines, headlinePage, headlinePageCount, pinnedHeadline, getHeadlineId]);
+
+  const selectedHeadlineId = useMemo(() => {
+    if (!selectedNewsItem) return null;
+    return getHeadlineId(selectedNewsItem);
+  }, [selectedNewsItem, getHeadlineId]);
+
+  useEffect(() => {
+    if (headlinePage >= headlinePageCount) {
+      setHeadlinePage(0);
+    }
+  }, [headlinePage, headlinePageCount]);
+
+  useEffect(() => {
+    if (headlinesPaused || !!pinnedHeadline || headlinePageCount <= 1) return;
+    const interval = setInterval(() => {
+      setHeadlinePage((prev) => (prev + 1) % headlinePageCount);
+    }, HEADLINES_ROTATE_MS);
+    return () => clearInterval(interval);
+  }, [headlinesPaused, pinnedHeadline, headlinePageCount]);
+
+  useEffect(() => {
+    if (pinnedHeadlineId && !pinnedHeadline) {
+      setPinnedHeadlineId(null);
+    }
+  }, [pinnedHeadlineId, pinnedHeadline]);
+
+  const handleHeadlineShareEmail = useCallback((headline: any) => {
+    const title = headline?.item?.title || "Industry headline";
+    const link = headline?.item?.link || "";
+    const subject = encodeURIComponent(title);
+    const body = encodeURIComponent(`Thought you might find this useful:\n\n${title}\n${link}`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  }, []);
+
+  const handleHeadlineCopyLink = useCallback(async (headline: any) => {
+    const link = headline?.item?.link;
+    if (!link) return;
+    const headlineId = getHeadlineId(headline);
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedHeadlineId(headlineId);
+      window.setTimeout(() => {
+        setCopiedHeadlineId((current) => (current === headlineId ? null : current));
+      }, 1500);
+    } catch (error) {
+      console.warn("Could not copy article link:", error);
+    }
+  }, [getHeadlineId]);
+
   // Handle source selection - Allow all sources to be selected
   const handleSourceToggle = (sourceName: string) => {
     setSelectedSources((prev) => {
@@ -548,6 +941,57 @@ export const IndustryNewsCard = () => {
       }
     });
   };
+
+  const loadNewsletterSubscription = useCallback(async () => {
+    setNewsletterLoading(true);
+    setNewsletterMessage(null);
+    try {
+      const pref = await api.getDailyBriefNewsletterSubscription();
+      setNewsletterEnabled(Boolean(pref.enabled));
+      setNewsletterEmail(pref.email || "");
+    } catch (error: any) {
+      setNewsletterMessage(error?.message || "Could not load newsletter settings.");
+    } finally {
+      setNewsletterLoading(false);
+    }
+  }, []);
+
+  const handleSaveNewsletterSubscription = useCallback(async () => {
+    setNewsletterSaving(true);
+    setNewsletterMessage(null);
+    try {
+      const email = newsletterEmail.trim();
+      const result = await api.updateDailyBriefNewsletterSubscription({
+        enabled: newsletterEnabled,
+        email,
+      });
+      setNewsletterEnabled(result.enabled);
+      setNewsletterEmail(result.email);
+      setNewsletterMessage(
+        result.enabled
+          ? "Subscribed. You will receive automated Daily Brief emails."
+          : "Newsletter subscription disabled."
+      );
+    } catch (error: any) {
+      setNewsletterMessage(error?.message || "Could not save newsletter settings.");
+    } finally {
+      setNewsletterSaving(false);
+    }
+  }, [newsletterEnabled, newsletterEmail]);
+
+  const handleSendNewsletterPreview = useCallback(async () => {
+    setNewsletterSending(true);
+    setNewsletterMessage(null);
+    try {
+      const email = newsletterEmail.trim();
+      const result = await api.sendDailyBriefPreviewEmail({ email });
+      setNewsletterMessage(`Preview sent to ${result.recipient}.`);
+    } catch (error: any) {
+      setNewsletterMessage(error?.message || "Could not send preview email.");
+    } finally {
+      setNewsletterSending(false);
+    }
+  }, [newsletterEmail]);
 
   // Re-fetch news when selected sources change (to ensure we have latest data)
   // The filtering is handled by filteredNewsFeed useMemo
@@ -580,6 +1024,33 @@ export const IndustryNewsCard = () => {
       });
     } finally {
       setInsightsLoading(false);
+    }
+  }, []);
+
+  const fetchArticleBrief = useCallback(async (item: any, source: any) => {
+    setArticleBriefLoading(true);
+    setArticleBrief(null);
+    try {
+      const result = await api.getNewsDetails({
+        title: item.title,
+        source: source.source,
+        link: item.link,
+      });
+      setArticleBrief(result);
+    } catch (error: any) {
+      console.error("[News] Failed to fetch article brief:", error);
+      setArticleBrief({
+        articleParagraphs: [
+          `We could not extract article body text for "${item.title}".`,
+          "Use the full-article view below to read the complete source content directly from the publisher.",
+          "Cohi insights are still shown below for quick executive context.",
+        ],
+        fullArticleUrl: item.link,
+        fetchedAt: new Date().toISOString(),
+        error: "Could not generate article brief",
+      });
+    } finally {
+      setArticleBriefLoading(false);
     }
   }, []);
 
@@ -669,7 +1140,96 @@ export const IndustryNewsCard = () => {
   const handleNewsItemClick = (item: any, source: any) => {
     setSelectedNewsItem({ item, source });
     fetchInsights(item, source);
+    fetchArticleBrief(item, source);
   };
+
+  const prewarmArticleLink = useCallback((link?: string) => {
+    if (!link || typeof document === "undefined") return;
+    if (warmedArticleLinksRef.current.has(link)) return;
+
+    try {
+      const url = new URL(link);
+      const head = document.head;
+
+      const dnsPrefetch = document.createElement("link");
+      dnsPrefetch.rel = "dns-prefetch";
+      dnsPrefetch.href = url.origin;
+      head.appendChild(dnsPrefetch);
+
+      const preconnect = document.createElement("link");
+      preconnect.rel = "preconnect";
+      preconnect.href = url.origin;
+      preconnect.crossOrigin = "anonymous";
+      head.appendChild(preconnect);
+
+      const prefetch = document.createElement("link");
+      prefetch.rel = "prefetch";
+      prefetch.as = "document";
+      prefetch.href = link;
+      head.appendChild(prefetch);
+
+      warmedArticleLinksRef.current.add(link);
+
+      // Remove hint elements later to avoid unbounded head growth.
+      window.setTimeout(() => {
+        dnsPrefetch.remove();
+        preconnect.remove();
+        prefetch.remove();
+      }, 60_000);
+    } catch {
+      // Ignore invalid/malformed URLs; full article can still open normally.
+    }
+  }, []);
+
+  useEffect(() => {
+    setExcerptPage(0);
+  }, [selectedNewsItem, articleBrief]);
+
+  const excerptParagraphs = articleBrief?.articleParagraphs || [];
+  const excerptPageCount = Math.max(
+    1,
+    Math.ceil(excerptParagraphs.length / EXCERPT_PARAGRAPHS_PER_PAGE)
+  );
+  const visibleExcerptParagraphs = excerptParagraphs.slice(
+    excerptPage * EXCERPT_PARAGRAPHS_PER_PAGE,
+    (excerptPage + 1) * EXCERPT_PARAGRAPHS_PER_PAGE
+  );
+
+  useEffect(() => {
+    if (excerptPage >= excerptPageCount) {
+      setExcerptPage(0);
+    }
+  }, [excerptPage, excerptPageCount]);
+
+  const openChartDrilldown = useCallback((chartKey: DrilldownChartKey) => {
+    setActiveChart(chartKey);
+    setDrilldownRange("mtd");
+    setShowChartDrilldown(true);
+  }, []);
+
+  const openDataSourceModal = useCallback((chartKey: DrilldownChartKey) => {
+    const source = CHART_SOURCE_META[chartKey];
+    if (!source) return;
+    window.open(source.url, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const availableDrilldownRanges = useMemo<DrilldownRange[]>(() => {
+    if (!activeChart) return [];
+    return (Object.keys(CHART_DRILLDOWN_DATA[activeChart]) as DrilldownRange[]).filter(
+      (range) => (CHART_DRILLDOWN_DATA[activeChart][range] || []).length > 0
+    );
+  }, [activeChart]);
+
+  useEffect(() => {
+    if (!showChartDrilldown || !activeChart) return;
+    if (!availableDrilldownRanges.includes(drilldownRange)) {
+      setDrilldownRange(availableDrilldownRanges[0] || "mtd");
+    }
+  }, [showChartDrilldown, activeChart, drilldownRange, availableDrilldownRanges]);
+
+  useEffect(() => {
+    prewarmArticleLink(selectedNewsItem?.item?.link);
+  }, [selectedNewsItem, prewarmArticleLink]);
 
   // Get color class for insight
   const getInsightColor = (color: string) => {
@@ -683,6 +1243,115 @@ export const IndustryNewsCard = () => {
     return colorMap[color] || "bg-slate-500";
   };
 
+  const chartTitles: Record<DrilldownChartKey, string> = {
+    fixedRate: "30-Yr Fixed Rate",
+    treasury: "10-Yr Treasury Yield",
+    mba: "MBA Application Index",
+    nahb: "NAHB Builder Confidence",
+    rateSnapshot: "Rate Snapshot by Product",
+    existingSales: "Existing Home Sales (SAAR)",
+  };
+
+  const renderDrilldownChart = () => {
+    if (!activeChart) return null;
+    const chartData = CHART_DRILLDOWN_DATA[activeChart][drilldownRange];
+    if (!chartData || chartData.length === 0) {
+      return (
+        <div className="h-full flex items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Data not available for this range yet.
+          </p>
+        </div>
+      );
+    }
+
+    if (activeChart === "fixedRate") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
+            <RechartsTooltip formatter={(v: number) => [`${v}%`, "Rate"]} />
+            <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2.5} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "treasury") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
+            <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} />
+            <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2.5} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "mba") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barCategoryGap="20%">
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} />
+            <RechartsTooltip />
+            <Legend />
+            <Bar dataKey="purchase" fill="rgb(59, 130, 246)" name="Purchase" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="refi" fill="rgb(249, 115, 22)" name="Refi" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "nahb") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 12 }} />
+            <RechartsTooltip />
+            <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    if (activeChart === "rateSnapshot") {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} layout="vertical" barCategoryGap="14%">
+            <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+            <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}%`} />
+            <YAxis type="category" dataKey="product" tick={{ fontSize: 12 }} width={120} />
+            <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} />
+            <Legend />
+            <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+          <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+          <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}M`} />
+          <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} />
+          <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  };
+
   return (
     <div className="mb-6 sm:mb-10">
       {/* Refined Preview Card - Enhanced Typography & Layout */}
@@ -693,27 +1362,21 @@ export const IndustryNewsCard = () => {
         transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         className="relative overflow-hidden rounded-xl sm:rounded-2xl md:rounded-3xl bg-white dark:bg-slate-900/95 p-4 sm:p-5 md:p-7 lg:p-9 shadow-[0_1px_3px_0_rgba(0,0,0,0.08),0_4px_12px_0_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.3),0_4px_12px_0_rgba(0,0,0,0.2)] border border-slate-200/60 dark:border-slate-700/50"
       >
-        {/* Enhanced Header - Mobile First */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 md:gap-4 lg:gap-5 mb-4 sm:mb-5 md:mb-6 lg:mb-7">
-          <div className="flex items-center gap-2.5 sm:gap-3 md:gap-4 lg:gap-5 flex-1 min-w-0">
-            <div className="relative flex-shrink-0">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.25)] dark:shadow-[0_4px_12px_rgba(59,130,246,0.15)]">
-                <Newspaper
-                  className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 lg:w-8 lg:h-8 text-white"
-                  strokeWidth={1.5}
-                />
-              </div>
+        {/* Daily Morning Brief Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5 md:mb-6">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg flex-shrink-0">
+              <Newspaper className="w-5 h-5 sm:w-6 sm:h-6 text-white" strokeWidth={1.5} />
             </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-lg sm:text-xl md:text-2xl lg:text-3xl xl:text-4xl font-extralight text-slate-900 dark:text-white mb-0.5 sm:mb-1 tracking-[-0.02em] leading-[1.05] truncate">
-                Industry News
+            <div>
+              <h3 className="text-xl sm:text-2xl md:text-3xl font-extralight text-slate-900 dark:text-white tracking-tight">
+                Cohi Daily Morning Brief
               </h3>
-              <p className="text-[10px] sm:text-xs md:text-sm lg:text-base text-slate-600 dark:text-slate-400 font-light tracking-tight truncate">
-                Market Intelligence Updates
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-light mt-0.5">
+                {format(new Date(), "EEEE, MMMM d, yyyy")} | Markets & Economy Update
               </p>
             </div>
           </div>
-          {/* Source Selector Button - Mobile First */}
           <div className="flex items-center gap-2">
             <ExportShareMenu
               title="Industry News"
@@ -721,81 +1384,485 @@ export const IndustryNewsCard = () => {
               shareTarget={{ type: "industry-news", label: "Industry News" }}
             />
             <button
-              onClick={() => setShowSourceSelector(true)}
-              className="flex items-center justify-center p-2 sm:p-2.5 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all duration-200 active:scale-95 border border-slate-200 dark:border-slate-700 touch-manipulation"
-              aria-label={`Select news sources (${selectedSources.length}/${availableSources.length})`}
-              title={`Sources (${selectedSources.length}/${availableSources.length})`}
+              onClick={() => {
+                setShowNewsletterModal(true);
+                void loadNewsletterSubscription();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-700 dark:text-slate-200"
+              aria-label="Subscribe to daily brief newsletter"
             >
-              <Settings
-                className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700 dark:text-slate-300"
-                strokeWidth={1.5}
-              />
+              <Mail className="w-4 h-4" strokeWidth={1.8} />
+              Newsletter
+            </button>
+            <button
+              onClick={() => setShowSourceSelector(true)}
+              className="flex items-center justify-center p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700"
+              aria-label="Select news sources"
+            >
+              <Settings className="w-5 h-5 text-slate-700 dark:text-slate-300" strokeWidth={1.5} />
             </button>
           </div>
         </div>
 
-        {/* Market Intelligence Ticker - Optimal Blue style */}
-        <MarketIntelligenceTicker />
+        {/* Market Intelligence Ticker - rate strip */}
+        <div className="mb-5 md:mb-6">
+          <MarketIntelligenceTicker />
+        </div>
 
-        {/* Enhanced Multi-column Layout - Display All Sources - Mobile First with Perfect Alignment */}
+        {/* Charts Grid - 2 rows x 3 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8">
+          {/* 30-Yr Fixed Rate */}
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("fixedRate")}
+          >
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">30-YR FIXED RATE</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Lowest in several years — now sub-6%</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("fixedRate");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: Freddie Mac PMMS
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={FIXED_RATE_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-slate-500" />
+                  <YAxis domain={["dataMin - 0.2", "dataMax + 0.2"]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}%`, "Rate"]} contentStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="rate" stroke="rgb(59, 130, 246)" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* 10-Yr Treasury */}
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("treasury")}
+          >
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">10-YR TREASURY YIELD</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">~65bps of Fed cuts priced for 2026</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("treasury");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: U.S. Treasury
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={TREASURY_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[3.9, 4.2]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}%`} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}%`, "Yield"]} contentStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="yield" stroke="rgb(249, 115, 22)" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* MBA Application Index */}
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("mba")}
+          >
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">MBA APPLICATION INDEX</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Refi share of total apps</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("mba");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: MBA Weekly Applications Survey
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={MBA_INDEX_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barCategoryGap="20%">
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="week" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} width={28} />
+                  <RechartsTooltip contentStyle={{ fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="purchase" fill="rgb(59, 130, 246)" name="Purchase" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="refi" fill="rgb(249, 115, 22)" name="Refi" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* NAHB Builder Confidence */}
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("nahb")}
+          >
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">NAHB BUILDER CONFIDENCE</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Feb forecast releasing 10am ET</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("nahb");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: NAHB HMI
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={NAHB_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 50]} tick={{ fontSize: 10 }} width={28} />
+                  <RechartsTooltip contentStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* Rate Snapshot by Product */}
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("rateSnapshot")}
+          >
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">RATE SNAPSHOT BY PRODUCT</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Prior week vs today</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("rateSnapshot");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: Optimal Blue OBMMI
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={RATE_SNAPSHOT_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} layout="vertical" barCategoryGap="12%">
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis type="number" domain={[4.5, 7]} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
+                  <YAxis type="category" dataKey="product" tick={{ fontSize: 10 }} width={70} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}%`, ""]} contentStyle={{ fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="prior" fill="rgb(148, 163, 184)" name="Prior Week" radius={[0, 2, 2, 0]} />
+                  <Bar dataKey="today" fill="rgb(59, 130, 246)" name="Today" radius={[0, 2, 2, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {/* Existing Home Sales */}
+          <div
+            className="rounded-xl bg-slate-50/80 dark:bg-slate-800/40 p-4 border border-slate-200/60 dark:border-slate-700/50 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            onClick={() => openChartDrilldown("existingSales")}
+          >
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">EXISTING HOME SALES (SAAR)</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Jan drops — weather impact muted</p>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openDataSourceModal("existingSales");
+              }}
+              className="mb-2 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Source: NAR Existing-Home Sales
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <div className="h-[140px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={EXISTING_HOME_SALES_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-600" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 5]} tick={{ fontSize: 10 }} width={28} tickFormatter={(v) => `${v}M`} />
+                  <RechartsTooltip formatter={(v: number) => [`${v}M`, "Units"]} contentStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="value" fill="rgb(59, 130, 246)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* TOP HEADLINES */}
         <div
-          className={`${
-            selectedSources.length >= 4
-              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-          } gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 xl:gap-8 items-start mt-[8.7mm]`}
+          className="border-t border-slate-200/60 dark:border-slate-700/50 pt-5 md:pt-6"
+          onMouseEnter={() => setHeadlinesPaused(true)}
+          onMouseLeave={() => setHeadlinesPaused(false)}
         >
-          {filteredNewsFeed.map((source: any, sourceIdx: number) => {
-            const SourceIcon = source.icon;
-            return (
-              <div
-                key={source.source}
-                className="min-w-0 w-full flex flex-col h-full"
-              >
-                {/* Header - Fixed height for alignment */}
-                <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3 mb-3 sm:mb-4 md:mb-5 h-8 sm:h-9 md:h-10 mt-[2mm]">
-                  <div
-                    className={`w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 lg:w-9 lg:h-9 rounded-lg sm:rounded-xl ${source.bg} flex items-center justify-center flex-shrink-0 shadow-sm border border-slate-200/40 dark:border-slate-700/40`}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mb-4">
+            <h4 className="text-lg font-medium text-slate-900 dark:text-white">TOP HEADLINES</h4>
+            <div className="flex flex-col sm:items-end text-xs text-slate-500 dark:text-slate-400">
+              <span>Click through for full articles</span>
+              <span className="mt-0.5">
+                {newsLoading
+                  ? "Refreshing..."
+                  : `Last fetched: ${
+                      lastNewsUpdate
+                        ? lastNewsUpdate.toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "N/A"
+                    }`}
+              </span>
+              <span className="mt-0.5">
+                {pinnedHeadline ? "Pinned in place • rotation paused" : "Auto-rotates every 15s when unpinned"}
+              </span>
+            </div>
+          </div>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {visibleHeadlines.map((headline: any, idx: number) => (
+              <li key={`${headline.source.source}-${headline.item.link || idx}`} className="h-full">
+                <div className="w-full h-full p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-800/35 hover:bg-slate-100 dark:hover:bg-slate-800/55 border border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 transition-all shadow-sm hover:shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => handleNewsItemClick(headline.item, headline.source)}
+                    className="w-full text-left group"
                   >
-                    <SourceIcon
-                      className={`w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-4.5 md:h-4.5 lg:w-5 lg:h-5 ${source.color}`}
-                      strokeWidth={1.5}
-                    />
-                  </div>
-                  <h4 className="text-xs sm:text-sm md:text-base lg:text-lg font-light text-slate-800 dark:text-slate-200 tracking-tight truncate flex-1 min-w-0 leading-tight">
-                    {source.source}
-                  </h4>
-                </div>
-                {/* News Items - Consistent spacing */}
-                <div className="space-y-2.5 sm:space-y-3 md:space-y-3.5 lg:space-y-4 xl:space-y-5 flex-1">
-                  {source.items?.slice(0, 2).map((item: any, idx: number) => (
-                    <div
-                      key={idx}
-                      onClick={() => handleNewsItemClick(item, source)}
-                      className="group cursor-pointer p-2.5 sm:p-3 md:p-4 lg:p-5 xl:p-6 rounded-md sm:rounded-lg md:rounded-xl lg:rounded-2xl bg-slate-50/50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800/50 transition-all duration-300 active:scale-[0.98] border border-slate-200/60 dark:border-slate-700/40 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md dark:hover:shadow-lg touch-manipulation w-full flex flex-col"
-                    >
-                      <p className="text-[11px] sm:text-xs md:text-sm lg:text-base xl:text-lg text-slate-900 dark:text-slate-100 leading-[1.4] sm:leading-[1.5] mb-1.5 sm:mb-2 md:mb-2.5 lg:mb-3 group-hover:text-slate-950 dark:group-hover:text-white transition-colors font-light tracking-tight line-clamp-2 break-words min-h-[2.8em] sm:min-h-[3em] md:min-h-[3.2em]">
-                        {item.title}
-                      </p>
-                      <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light flex-wrap mt-auto">
-                        <span className="truncate">{item.date}</span>
-                        <span className="text-slate-300 dark:text-slate-600 flex-shrink-0">
-                          •
-                        </span>
-                        <span className="whitespace-nowrap">{item.time}</span>
-                      </div>
-                    </div>
-                  )) || (
-                    <p className="text-[9px] sm:text-[10px] md:text-xs lg:text-sm text-slate-500 dark:text-slate-400 font-light">
-                      Loading news...
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2">
+                      {headline.item.title}
                     </p>
-                  )}
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 line-clamp-3">
+                      {headline.item.excerpt ||
+                        headline.item.description ||
+                        headline.item.summary ||
+                        "Read more"}
+                    </p>
+                  </button>
+
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      [{headline.source.source}] • {headline.releaseLabel}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleHeadlineShareEmail(headline);
+                        }}
+                        className="w-7 h-7 rounded-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        aria-label="Share by email"
+                        title="Share by email"
+                      >
+                        <Mail className="w-3.5 h-3.5" strokeWidth={1.8} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleHeadlineCopyLink(headline);
+                        }}
+                        className="w-7 h-7 rounded-md border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        aria-label="Copy article link"
+                        title={copiedHeadlineId === getHeadlineId(headline) ? "Copied" : "Copy link"}
+                      >
+                        <Link2 className="w-3.5 h-3.5" strokeWidth={1.8} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const headlineId = getHeadlineId(headline);
+                          setPinnedHeadlineId((current) => (current === headlineId ? null : headlineId));
+                        }}
+                        className={`w-7 h-7 rounded-md border flex items-center justify-center ${
+                          pinnedHeadlineId === getHeadlineId(headline)
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
+                            : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        }`}
+                        aria-label={pinnedHeadlineId === getHeadlineId(headline) ? "Unpin headline" : "Pin headline in place"}
+                        title={pinnedHeadlineId === getHeadlineId(headline) ? "Unpin" : "Pin in place"}
+                      >
+                        {pinnedHeadlineId === getHeadlineId(headline) ? (
+                          <PinOff className="w-3.5 h-3.5" strokeWidth={1.8} />
+                        ) : (
+                          <Pin className="w-3.5 h-3.5" strokeWidth={1.8} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              </li>
+            ))}
+          </ul>
+          {headlinePageCount > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-1.5">
+              {Array.from({ length: headlinePageCount }).map((_, idx) => (
+                <span
+                  key={`headline-page-${idx}`}
+                  className={`h-1.5 rounded-full transition-all ${
+                    idx === headlinePage ? "w-5 bg-blue-500" : "w-1.5 bg-slate-300 dark:bg-slate-600"
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+          {recentHeadlines.length === 0 && !newsLoading && (
+            <p className="text-sm text-slate-500 dark:text-slate-400 py-4">
+              No recent lending headlines are available right now. Try refreshing in a moment.
+            </p>
+          )}
         </div>
       </motion.div>
+
+      <Dialog
+        open={showChartDrilldown}
+        onOpenChange={(open) => {
+          setShowChartDrilldown(open);
+          if (!open) setActiveChart(null);
+        }}
+      >
+        <DialogContent className="left-0 top-0 translate-x-0 translate-y-0 w-screen max-w-none h-[100dvh] max-h-[100dvh] rounded-none p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 border-0 shadow-none [&>button]:hidden">
+          <div className="h-full flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/60 dark:border-slate-700/50">
+              <div>
+                <DialogTitle className="text-base sm:text-lg font-medium text-slate-900 dark:text-slate-100">
+                  {activeChart ? `${chartTitles[activeChart]} Drilldown` : "Chart Drilldown"}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  MTD, QTR, YTD, and 3-year views (when available)
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChartDrilldown(false);
+                  setActiveChart(null);
+                }}
+                className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Close chart drilldown"
+              >
+                <X className="w-4 h-4 text-slate-500 dark:text-slate-400" strokeWidth={1.8} />
+              </button>
+            </div>
+
+            <div className="px-4 pt-3 pb-2 border-b border-slate-200/60 dark:border-slate-700/50 flex items-center gap-2 overflow-x-auto">
+              {(Object.keys(DRILLDOWN_RANGE_LABELS) as DrilldownRange[]).map((range) => {
+                const hasData = availableDrilldownRanges.includes(range);
+                return (
+                  <button
+                    key={range}
+                    type="button"
+                    disabled={!hasData}
+                    onClick={() => setDrilldownRange(range)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
+                      drilldownRange === range
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : hasData
+                        ? "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700 cursor-not-allowed"
+                    }`}
+                  >
+                    {DRILLDOWN_RANGE_LABELS[range]}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex-1 p-4 sm:p-6">
+              <div className="h-full min-h-[420px] rounded-xl border border-slate-200/60 dark:border-slate-700/50 bg-slate-50/40 dark:bg-slate-800/30 p-3 sm:p-4">
+                {renderDrilldownChart()}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showNewsletterModal}
+        onOpenChange={(open) => {
+          setShowNewsletterModal(open);
+          if (!open) {
+            setNewsletterMessage(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-xl w-[95vw] rounded-2xl border border-slate-200/60 dark:border-slate-700/50 bg-white dark:bg-slate-900">
+          <DialogTitle className="text-lg font-medium text-slate-900 dark:text-slate-100">
+            Subscribe to Cohi Daily Brief
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-500 dark:text-slate-400">
+            Receive automated email snapshots with charts and top headlines only (no sensitive data).
+          </DialogDescription>
+
+          <div className="mt-3 space-y-4">
+            <label className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2.5">
+              <span className="text-sm text-slate-700 dark:text-slate-300">Enable newsletter delivery</span>
+              <input
+                type="checkbox"
+                checked={newsletterEnabled}
+                onChange={(event) => setNewsletterEnabled(event.target.checked)}
+                className="h-4 w-4 accent-blue-600"
+              />
+            </label>
+
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+                Recipient email
+              </label>
+              <input
+                type="email"
+                value={newsletterEmail}
+                onChange={(event) => setNewsletterEmail(event.target.value)}
+                placeholder="you@company.com"
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Automated sends run on the Daily Brief schedule (5AM, 8AM, 10AM, 2PM, 4PM, 6PM).
+            </p>
+
+            {newsletterMessage ? (
+              <p className="text-xs text-blue-600 dark:text-blue-400">{newsletterMessage}</p>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowNewsletterModal(false)}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSendNewsletterPreview()}
+                disabled={newsletterLoading || newsletterSending || !newsletterEmail.trim()}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
+              >
+                {newsletterSending ? "Sending..." : "Send Preview"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveNewsletterSubscription()}
+                disabled={newsletterLoading || newsletterSaving || !newsletterEmail.trim()}
+                className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+              >
+                {newsletterSaving ? "Saving..." : "Save Subscription"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Source Selector Dialog */}
       <Dialog open={showSourceSelector} onOpenChange={setShowSourceSelector}>
@@ -892,35 +1959,31 @@ export const IndustryNewsCard = () => {
 
       <Dialog
         open={!!selectedNewsItem}
-        onOpenChange={(open) => !open && setSelectedNewsItem(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedNewsItem(null);
+          }
+        }}
       >
         <DialogContent
           className="
-            /* Mobile: true fullscreen, perfectly aligned */
+            /* Fullscreen on all breakpoints */
             inset-0 top-0 bottom-0 left-0 right-0
             translate-x-0 translate-y-0
             w-screen max-w-none
             h-[100dvh] max-h-none
             rounded-none
-
-            /* Desktop/tablet: centered modal */
-            sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto
-            sm:w-[min(95vw,42rem)] sm:max-w-2xl
-            sm:h-auto sm:max-h-[90vh]
-            sm:translate-x-[-50%] sm:translate-y-[-50%]
-            sm:rounded-2xl
-
             p-0 gap-0
             overflow-hidden
             bg-white dark:bg-slate-900
-            border-0 sm:border border-slate-200/60 dark:border-slate-700/50
-            shadow-none sm:shadow-[0_20px_60px_rgba(0,0,0,0.15)] dark:sm:shadow-[0_20px_60px_rgba(0,0,0,0.5)]
+            border-0
+            shadow-none
             [&>button]:hidden
             safe-area-inset
           "
         >
           {selectedNewsItem && (
-            <div className="flex flex-col h-full sm:max-h-[90vh] md:max-h-[85vh]">
+            <div className="flex flex-col h-full">
               {/* Enhanced Header - Sticky with safe area */}
               <div
                 className="
@@ -968,31 +2031,73 @@ export const IndustryNewsCard = () => {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedNewsItem(null)}
-                  className="
-                    min-w-[44px] min-h-[44px] w-11 h-11 sm:w-9 sm:h-9
-                    rounded-full 
-                    bg-white/90 dark:bg-slate-800/90 
-                    border border-slate-200 dark:border-slate-700 
-                    shadow-sm 
-                    hover:bg-slate-50 dark:hover:bg-slate-700 
-                    active:bg-slate-100 dark:active:bg-slate-600
-                    backdrop-blur-sm 
-                    flex items-center justify-center 
-                    transition-all duration-200 
-                    flex-shrink-0 
-                    ml-3 
-                    focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1
-                    touch-manipulation
-                  "
-                  aria-label="Close"
-                >
-                  <X
-                    className="w-5 h-5 sm:w-4 sm:h-4 text-slate-500 dark:text-slate-400"
-                    strokeWidth={1.5}
-                  />
-                </button>
+                <div className="flex items-center gap-1.5 ml-3">
+                  <button
+                    type="button"
+                    onClick={() => handleHeadlineShareEmail(selectedNewsItem)}
+                    className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    aria-label="Share by email"
+                    title="Share by email"
+                  >
+                    <Mail className="w-4 h-4" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleHeadlineCopyLink(selectedNewsItem)}
+                    className="w-9 h-9 rounded-full border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    aria-label="Copy article link"
+                    title={copiedHeadlineId === selectedHeadlineId ? "Copied" : "Copy link"}
+                  >
+                    <Link2 className="w-4 h-4" strokeWidth={1.8} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPinnedHeadlineId((current) =>
+                        current === selectedHeadlineId ? null : selectedHeadlineId
+                      )
+                    }
+                    className={`w-9 h-9 rounded-full border flex items-center justify-center ${
+                      pinnedHeadlineId === selectedHeadlineId
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
+                        : "border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    }`}
+                    aria-label={pinnedHeadlineId === selectedHeadlineId ? "Unpin headline" : "Pin headline in place"}
+                    title={pinnedHeadlineId === selectedHeadlineId ? "Unpin" : "Pin in place"}
+                  >
+                    {pinnedHeadlineId === selectedHeadlineId ? (
+                      <PinOff className="w-4 h-4" strokeWidth={1.8} />
+                    ) : (
+                      <Pin className="w-4 h-4" strokeWidth={1.8} />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedNewsItem(null);
+                    }}
+                    className="
+                      min-w-[44px] min-h-[44px] w-11 h-11 sm:w-9 sm:h-9
+                      rounded-full 
+                      bg-white/90 dark:bg-slate-800/90 
+                      border border-slate-200 dark:border-slate-700 
+                      shadow-sm 
+                      hover:bg-slate-50 dark:hover:bg-slate-700 
+                      active:bg-slate-100 dark:active:bg-slate-600
+                      backdrop-blur-sm 
+                      flex items-center justify-center 
+                      transition-all duration-200 
+                      flex-shrink-0 
+                      focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1
+                      touch-manipulation
+                    "
+                    aria-label="Close"
+                  >
+                    <X
+                      className="w-5 h-5 sm:w-4 sm:h-4 text-slate-500 dark:text-slate-400"
+                      strokeWidth={1.5}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Enhanced Content - Scrollable with safe area */}
@@ -1022,19 +2127,60 @@ export const IndustryNewsCard = () => {
                   {selectedNewsItem.item.title}
                 </h1>
 
-                {/* Brief Summary */}
-                <p
-                  className="
-                    text-[0.9375rem] leading-[1.6] sm:text-base sm:leading-[1.6] md:text-base md:leading-[1.6] 
-                    text-slate-700 dark:text-slate-300 
-                    mb-5 sm:mb-5 md:mb-6 
-                    font-light 
-                    tracking-tight
-                    break-words
-                  "
-                >
-                  {selectedNewsItem.source.summary}
-                </p>
+                {/* Article Content (full extracted excerpt with pagination) */}
+                <div className="mb-5 sm:mb-5 md:mb-6">
+                  <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                    Article Excerpt
+                  </p>
+                  {articleBriefLoading ? (
+                    <div className="space-y-2.5">
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-11/12" />
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-10/12" />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {visibleExcerptParagraphs.map((paragraph, idx) => (
+                        <p
+                          key={`excerpt-${excerptPage}-${idx}`}
+                          className="text-[0.9375rem] leading-[1.7] sm:text-base sm:leading-[1.7] text-slate-700 dark:text-slate-300 font-light tracking-tight break-words"
+                        >
+                          {paragraph}
+                        </p>
+                      ))}
+
+                      {excerptPageCount > 1 && (
+                        <div className="pt-2 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExcerptPage((prev) =>
+                                prev === 0 ? excerptPageCount - 1 : prev - 1
+                              )
+                            }
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            Previous
+                          </button>
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            Page {excerptPage + 1} of {excerptPageCount}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExcerptPage((prev) =>
+                                prev >= excerptPageCount - 1 ? 0 : prev + 1
+                              )
+                            }
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Enhanced Cohi Executive Insights - AI Powered */}
                 <div
@@ -1091,109 +2237,32 @@ export const IndustryNewsCard = () => {
                   <div className="space-y-3 sm:space-y-3 md:space-y-3.5">
                     {insightsLoading ? (
                       // Loading state
-                      <>
-                        <div className="flex items-start gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-3/4" />
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-2/3" />
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-5/6" />
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 mt-[0.5rem] flex-shrink-0 animate-pulse" />
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-1/2" />
-                            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-4/5" />
-                          </div>
-                        </div>
-                      </>
-                    ) : insights?.insights && insights.insights.length > 0 ? (
-                      // AI-generated insights
-                      <>
-                        {insights.insights.map((insight, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-start gap-3 sm:gap-3"
-                          >
-                            <div
-                              className={`w-1.5 h-1.5 rounded-full ${getInsightColor(
-                                insight.color
-                              )} mt-[0.5rem] flex-shrink-0`}
-                            />
-                            <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                              <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                {insight.label}:
-                              </span>{" "}
-                              {insight.content}
-                            </p>
-                          </div>
-                        ))}
-                        {/* Client data summary if available */}
-                        {insights.clientDataSummary && (
-                          <div className="mt-3 pt-3 border-t border-slate-200/50 dark:border-slate-700/40">
-                            <p className="text-[0.8125rem] sm:text-xs md:text-sm text-blue-700 dark:text-blue-300 font-light tracking-tight">
-                              <span className="font-medium">Your Data:</span>{" "}
-                              {insights.clientDataSummary}
-                            </p>
-                          </div>
-                        )}
-                      </>
+                      <div className="space-y-2">
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-full" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-11/12" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse w-10/12" />
+                      </div>
                     ) : (
-                      // Fallback default insights
-                      <>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Market Signal:
-                            </span>{" "}
-                            This development may indicate broader industry
-                            trends worth monitoring.
-                          </p>
-                        </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Strategic Fit:
-                            </span>{" "}
-                            Consider how this aligns with your market
-                            positioning.
-                          </p>
-                        </div>
-                        <div className="flex items-start gap-3 sm:gap-3">
-                          <div className="w-1.5 h-1.5 rounded-full bg-violet-500 mt-[0.5rem] flex-shrink-0" />
-                          <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.6] sm:leading-[1.6] font-light tracking-tight break-words">
-                            <span className="font-semibold text-slate-800 dark:text-slate-200">
-                              Next Steps:
-                            </span>{" "}
-                            Read the full article for more details.
-                          </p>
-                        </div>
-                      </>
+                      <p className="text-[0.9375rem] sm:text-sm md:text-base text-slate-700 dark:text-slate-300 leading-[1.7] font-light tracking-tight break-words">
+                        {insights?.insights && insights.insights.length > 0
+                          ? insights.insights
+                              .map((insight) => `${insight.label}: ${insight.content}`)
+                              .join(" ")
+                          : "This development may indicate broader market and operational implications across lending. Read the full article for complete context."}
+                        {insights?.clientDataSummary
+                          ? ` Your Data: ${insights.clientDataSummary}`
+                          : ""}
+                      </p>
                     )}
                   </div>
                 </div>
 
-                {/* Enhanced Read Full Article CTA */}
+                {/* Open full article in new tab */}
                 <a
-                  href={selectedNewsItem.item.link}
+                  href={selectedNewsItem?.item?.link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => {
-                    sessionStorage.setItem("returnToAdmin", "true");
-                    sessionStorage.setItem(
-                      "dashboardUrl",
-                      window.location.href
-                    );
-                  }}
+                  onMouseEnter={() => prewarmArticleLink(selectedNewsItem?.item?.link)}
                   className="
                     flex items-center justify-center gap-2.5 
                     w-full 
@@ -1222,13 +2291,14 @@ export const IndustryNewsCard = () => {
                     className="w-5 h-5 sm:w-5 sm:h-5"
                     strokeWidth={2}
                   />
-                  <span>Read Full Article</span>
+                  <span>View Full Article</span>
                 </a>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
     </div>
   );
 };

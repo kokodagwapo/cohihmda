@@ -35,6 +35,7 @@ import researchRoutes from "./research.js";
 import trackedInsightRoutes from "./trackedInsights.js";
 import onboardingRoutes from "./onboarding.js";
 import jobsRoutes from "./jobs.js";
+import helpContentRoutes from "./helpContent.js";
 import { pool, resetPool } from "../config/database.js";
 import { setupMockLosApi } from "../services/mockLosApi.js";
 import { getVersionInfo } from "../services/versionService.js";
@@ -96,6 +97,7 @@ export function setupRoutes(app: Express) {
   app.use("/api/insights/tracked", trackedInsightRoutes); // Tracked insights watchlist
   app.use("/api/onboarding", onboardingRoutes); // Onboarding analysis agent
   app.use("/api/jobs", jobsRoutes); // Async job status polling
+  app.use("/api/help", helpContentRoutes); // Help content RAG seeding
 
   // Health check handler (shared by both /health and /api/health)
   const healthCheckHandler = async (req: any, res: any) => {
