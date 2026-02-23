@@ -203,6 +203,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (response.refreshToken) {
         localStorage.setItem(REFRESH_TOKEN_KEY, response.refreshToken);
       }
+      if ((response as any).cognitoAccessToken) {
+        localStorage.setItem('cognito_access_token', (response as any).cognitoAccessToken);
+      }
       
       if (response.user) {
         setUser(response.user);
@@ -233,6 +236,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user: AuthUser;
         token: string;
         refreshToken?: string;
+        cognitoAccessToken?: string;
       }>('/api/auth/mfa/verify', {
         method: 'POST',
         body: JSON.stringify({ email, session, code, tenantSlug }),
@@ -244,6 +248,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       if (response.refreshToken) {
         localStorage.setItem(REFRESH_TOKEN_KEY, response.refreshToken);
+      }
+      if (response.cognitoAccessToken) {
+        localStorage.setItem('cognito_access_token', response.cognitoAccessToken);
       }
 
       setUser(response.user);
@@ -273,6 +280,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       localStorage.removeItem(AUTH_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
       localStorage.removeItem(IMPERSONATION_KEY);
+      localStorage.removeItem('cognito_access_token');
       
       // Clear API client state (token and cache)
       api.clearToken();

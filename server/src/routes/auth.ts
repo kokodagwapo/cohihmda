@@ -478,6 +478,7 @@ router.post("/signin", authLimiter, async (req, res) => {
           user: buildUserResponse(found.user, found.isSuperAdmin),
           token,
           refreshToken: result.refreshToken,
+          cognitoAccessToken: result.accessToken,
         });
       } catch (cognitoError: any) {
         await logFailedLogin({
@@ -661,6 +662,7 @@ router.post("/new-password", authLimiter, async (req, res) => {
       user: buildUserResponse(found.user, found.isSuperAdmin),
       token,
       refreshToken: result.refreshToken,
+      cognitoAccessToken: result.accessToken,
       mfaSetupRecommended,
     });
   } catch (error: any) {
@@ -721,6 +723,7 @@ router.post("/mfa/verify", authLimiter, async (req, res) => {
       user: buildUserResponse(found.user, found.isSuperAdmin),
       token,
       refreshToken: result.refreshToken,
+      cognitoAccessToken: result.accessToken,
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
