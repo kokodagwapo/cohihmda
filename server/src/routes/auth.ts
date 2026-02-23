@@ -647,10 +647,21 @@ router.post("/new-password", authLimiter, async (req, res) => {
 
     const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
 
+    // With OPTIONAL MFA, Cognito won't challenge for setup.
+    // Check if user has MFA configured and recommend setup if not.
+    let mfaSetupRecommended = false;
+    try {
+      const userInfo = await cognitoAuth.getUser(email);
+      if (!userInfo.mfaEnabled) {
+        mfaSetupRecommended = true;
+      }
+    } catch {}
+
     return res.json({
       user: buildUserResponse(found.user, found.isSuperAdmin),
       token,
       refreshToken: result.refreshToken,
+      mfaSetupRecommended,
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {

@@ -17,7 +17,7 @@
           "aws:SourceAccount": "339712788893"
         },
         "ArnLike": {
-          "aws:SourceArn": "arn:aws:cognito-idp:us-east-2:339712788893:userpool/us-east-2_lArr8IsFK"
+          "aws:SourceArn": "arn:aws:cognito-idp:us-east-2:339712788893:userpool/*"
         }
       }
     }
