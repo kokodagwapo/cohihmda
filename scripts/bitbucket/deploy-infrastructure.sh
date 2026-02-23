@@ -186,7 +186,8 @@ get_stack_parameters_for_template() {
     local first=true
     for key in $template_keys; do
         # Only pass UsePreviousValue for keys that exist in the current stack
-        if echo "$stack_keys" | grep -qE "(^| )${key}( |$)"; then
+        # -w matches whole words, -F treats key as a fixed string (not regex)
+        if echo "$stack_keys" | grep -qwF "${key}"; then
             if [ "$first" = true ]; then
                 first=false
             else
