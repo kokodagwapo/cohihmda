@@ -286,6 +286,7 @@ export const Login = () => {
         refreshToken?: string;
         mfaRequired?: boolean;
         mfaSetupRequired?: boolean;
+        mfaSetupRecommended?: boolean;
         challengeName?: string;
         session?: string;
       }>('/api/auth/new-password', {
@@ -320,6 +321,14 @@ export const Login = () => {
         if (response.refreshToken) {
           localStorage.setItem('refresh_token', response.refreshToken);
         }
+      }
+
+      // With OPTIONAL MFA, Cognito authenticates but MFA may not be set up yet.
+      // Prompt the user to set up MFA on first login.
+      if (response.mfaSetupRecommended) {
+        setStep('mfa-setup');
+        toast({ title: 'Password Updated', description: 'Set up two-factor authentication to secure your account.' });
+        return;
       }
 
       toast({ title: 'Welcome!', description: 'Password set successfully. You are now signed in.' });
@@ -563,7 +572,7 @@ export const Login = () => {
             </form>
           )}
 
-          {/* ── MFA Setup (after first password change, if MFA required) */}
+          {/* ── MFA Setup (after first password change) */}
           {step === 'mfa-setup' && (
             <div className="space-y-6">
               <div className="flex flex-col items-center space-y-3">
@@ -571,21 +580,30 @@ export const Login = () => {
                   <ShieldCheck className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div className="text-center space-y-2">
+                  <p className="font-medium text-sm">Secure your account</p>
                   <p className="text-sm text-muted-foreground">
-                    Your account requires two-factor authentication.
-                    Please complete this setup in your account settings after signing in.
+                    We recommend setting up two-factor authentication (MFA) using an authenticator app. This adds an extra layer of security to your account.
                   </p>
                 </div>
               </div>
               <Button
                 className="w-full"
                 onClick={() => {
-                  const returnTo = '/settings?tab=account&setup-mfa=true';
-                  navigate(returnTo);
+                  navigate('/settings?tab=account&setup-mfa=true');
                 }}
               >
                 <ShieldCheck className="mr-2 h-4 w-4" />
-                Continue to MFA Setup
+                Set Up MFA Now
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full text-muted-foreground"
+                onClick={() => {
+                  const returnTo = new URLSearchParams(window.location.search).get('returnTo') || '/insights';
+                  navigate(returnTo);
+                }}
+              >
+                Skip for Now
               </Button>
             </div>
           )}

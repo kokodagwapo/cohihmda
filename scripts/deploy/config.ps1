@@ -73,11 +73,16 @@ $COGNITO_CLIENT_ID_DEV = "3b3ntlo09hcc46gec2esd6iii5"
 $COGNITO_CLIENT_SECRET_DEV = "rgf0qcvtbuhuvdsrd28tanenke7u70duq4r6l7j35gc0bk8amrb"
 $COGNITO_DOMAIN_DEV = "us-east-2larr8isfk.auth.us-east-2.amazoncognito.com"
 
-# Prod Cognito Configuration
+# Prod Cognito Configuration (user pool: coheus-prod, us-east-2_hhOr4kNDX)
 $COGNITO_USER_POOL_ID_PROD = "us-east-2_hhOr4kNDX"
 $COGNITO_CLIENT_ID_PROD = "1snnpc5vrr0epd68qacu3apmub"
 $COGNITO_CLIENT_SECRET_PROD = "cg180ks433ffdb8gcue8b71p1kdc5v3m9v01pg5sked0s7hj5ee"
 $COGNITO_DOMAIN_PROD = "coheus-prod.auth.us-east-2.amazoncognito.com"
+
+# Cognito password/invite flow (create user without password; Cognito emails temp password)
+# Set to "true" to enable invite flow in admin UI for this environment.
+$COGNITO_PASSWORD_AUTH_DEV = "true"
+$COGNITO_PASSWORD_AUTH_PROD = "false"   # Set to "true" when you want invite flow in prod
 
 # Select Cognito config based on environment
 if ($ENVIRONMENT -eq "prod") {
@@ -85,6 +90,7 @@ if ($ENVIRONMENT -eq "prod") {
     $COGNITO_CLIENT_ID = $COGNITO_CLIENT_ID_PROD
     $COGNITO_CLIENT_SECRET = $COGNITO_CLIENT_SECRET_PROD
     $COGNITO_DOMAIN = $COGNITO_DOMAIN_PROD
+    $COGNITO_PASSWORD_AUTH = $COGNITO_PASSWORD_AUTH_PROD
     $COGNITO_FRONTEND_URL = "https://cohi.coheus1.com"  # Prod frontend
     $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "CoheusEntraID")  # Platform SSO via Entra ID
 } else {
@@ -92,6 +98,7 @@ if ($ENVIRONMENT -eq "prod") {
     $COGNITO_CLIENT_ID = $COGNITO_CLIENT_ID_DEV
     $COGNITO_CLIENT_SECRET = $COGNITO_CLIENT_SECRET_DEV
     $COGNITO_DOMAIN = $COGNITO_DOMAIN_DEV
+    $COGNITO_PASSWORD_AUTH = $COGNITO_PASSWORD_AUTH_DEV
     $COGNITO_FRONTEND_URL = "https://cohi-dev.coheus1.com"  # Dev frontend
     $COGNITO_IDENTITY_PROVIDERS = @("COGNITO", "TestAccCognito")  # Include your test IdP
 }
