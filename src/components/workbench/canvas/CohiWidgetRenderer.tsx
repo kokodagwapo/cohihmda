@@ -374,8 +374,15 @@ function isIdentifierColumn(key: string): boolean {
   return ID_COLUMN_PATTERN.test(key);
 }
 
+function displayValue(val: any): string {
+  if (val == null) return '-';
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
 function formatTableCell(val: any, colKey: string): string {
   if (val == null) return '-';
+  if (typeof val === 'object') return JSON.stringify(val);
   if (typeof val === 'number') {
     if (isIdentifierColumn(colKey)) return val.toLocaleString('en-US', { useGrouping: false });
     return formatNumber(val);
@@ -414,7 +421,7 @@ function SortableTable({ columns, data, cap = TABLE_RENDER_CAP }: {
       if (typeof av === 'number' && typeof bv === 'number') {
         return sortDir === 'asc' ? av - bv : bv - av;
       }
-      const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+      const cmp = displayValue(av).localeCompare(displayValue(bv), undefined, { numeric: true, sensitivity: 'base' });
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }, [data, sortKey, sortDir]);

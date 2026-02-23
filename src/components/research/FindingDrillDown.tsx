@@ -141,6 +141,7 @@ function inferFormatFromValue(key: string, value: string | number, agentFormat?:
  */
 function formatValue(value: any, format: FieldFormat): string {
   if (value == null || value === "") return "-";
+  if (typeof value === "object") return JSON.stringify(value);
   const strVal = String(value);
 
   switch (format) {
@@ -320,7 +321,9 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
       rows = rows.filter((row) =>
         evidence.fields.some((f) => {
           const val = row[f];
-          return val != null && String(val).toLowerCase().includes(lowerFilter);
+          if (val == null) return false;
+          const text = typeof val === 'object' ? JSON.stringify(val) : String(val);
+          return text.toLowerCase().includes(lowerFilter);
         })
       );
     }
@@ -333,12 +336,14 @@ function EvidenceTable({ evidence, index, findingTitle, sessionId, onSaveToWorkb
         if (aVal == null) return 1;
         if (bVal == null) return -1;
 
-        const aNum = parseFloat(String(aVal).replace(/[$,%]/g, ""));
-        const bNum = parseFloat(String(bVal).replace(/[$,%]/g, ""));
+        const aStr = typeof aVal === 'object' ? JSON.stringify(aVal) : String(aVal);
+        const bStr = typeof bVal === 'object' ? JSON.stringify(bVal) : String(bVal);
+        const aNum = parseFloat(aStr.replace(/[$,%]/g, ""));
+        const bNum = parseFloat(bStr.replace(/[$,%]/g, ""));
         if (!isNaN(aNum) && !isNaN(bNum)) {
           return sort.direction === "asc" ? aNum - bNum : bNum - aNum;
         }
-        const cmp = String(aVal).localeCompare(String(bVal));
+        const cmp = aStr.localeCompare(bStr);
         return sort.direction === "asc" ? cmp : -cmp;
       });
     }
@@ -800,10 +805,14 @@ export function AutoChart({ evidence, findingTitle, sessionId, onSaveToWorkbench
   const agentFmts = evidence.columnFormats || {};
   const bestFormat = agentFormatToFieldFormat(agentFmts[bestField]) || inferFormat(bestField);
 
-  const chartData = rows.slice(0, 20).map((row) => ({
-    name: truncateLabel(String(row[labelField] || "N/A")),
-    value: parseFloat(String(row[bestField] || 0).replace(/[$,%]/g, "")),
-  }));
+  const chartData = rows.slice(0, 20).map((row) => {
+    const labelRaw = row[labelField];
+    const valueRaw = row[bestField];
+    return {
+      name: truncateLabel(typeof labelRaw === 'object' && labelRaw !== null ? JSON.stringify(labelRaw) : String(labelRaw || "N/A")),
+      value: parseFloat((typeof valueRaw === 'object' && valueRaw !== null ? JSON.stringify(valueRaw) : String(valueRaw || 0)).replace(/[$,%]/g, "")),
+    };
+  });
 
   // Final guard: if all chart labels are identical after building, skip
   const uniqueLabels = new Set(chartData.map((d) => d.name));
