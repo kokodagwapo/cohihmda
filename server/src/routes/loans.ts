@@ -802,6 +802,7 @@ router.get(
             WHEN l.current_loan_status = 'Active Loan' 
             AND l.application_date IS NOT NULL 
             AND l.application_date::text != ''
+            AND (l.is_archived IS DISTINCT FROM TRUE)
             THEN l.loan_amount ELSE 0 END) as active_volume,
           SUM(CASE WHEN l.funding_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as closed_volume,
           SUM(CASE WHEN l.lock_date IS NOT NULL THEN l.loan_amount ELSE 0 END) as locked_volume
@@ -911,15 +912,16 @@ router.get(
 
 /**
  * GET /api/loans/active-loans-count
- * Get active loans count with optional date filtering on application_date
+ * Get active loans count with optional date and channel filtering.
  *
  * Query params:
  *   - startDate: ISO date string (optional) - filter application_date >= startDate
  *   - endDate: ISO date string (optional) - filter application_date < endDate
  *   - period: string (optional) - rolling period shorthand (rolling_3_months, rolling_6_months, etc.)
+ *   - consolidated_channel: string (optional) - filter by channel (Retail, TPO, 99-missing, or specific channel). Omit or "All" for no filter. Matches Executive Dashboard / metrics.
  *
  * Active loan definition (matches METRICS_CATALOG.active_loans):
- *   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
+ *   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != '' AND (is_archived IS DISTINCT FROM TRUE)
  */
 router.get(
   "/active-loans-count",
@@ -1009,7 +1011,27 @@ router.get(
         paramIdx++;
       }
 
-      // Query active loans count with date filter
+      // Optional channel filter - same logic as metrics POST /query (consolidated_channel)
+      // When provided, active count matches Executive Dashboard Active Loans card
+      let channelClause = "";
+      const consolidatedChannel = (req.query.consolidated_channel as string)?.trim();
+      if (consolidatedChannel) {
+        const cc = consolidatedChannel.toLowerCase();
+        const tpoPat = `(l.channel ILIKE '%broker%' OR l.channel ILIKE '%brokered%' OR l.channel ILIKE '%wholesale%' OR l.channel ILIKE '%correspondent%' OR l.channel ILIKE '%corresp%' OR l.channel ILIKE '%tpo%')`;
+        if (cc === "retail") {
+          channelClause = ` AND ((l.channel ILIKE '%retail%') OR (${tpoPat} AND (l.account_executive IS NULL OR TRIM(l.account_executive) = '')))`;
+        } else if (cc === "tpo") {
+          channelClause = ` AND (${tpoPat} AND l.account_executive IS NOT NULL AND TRIM(l.account_executive) != '')`;
+        } else if (cc === "99-missing") {
+          channelClause = ` AND (l.channel IS NULL OR TRIM(l.channel) = '')`;
+        } else if (cc !== "all" && cc !== "*") {
+          channelClause = ` AND LOWER(TRIM(l.channel)) = LOWER($${paramIdx})`;
+          params.push(consolidatedChannel);
+          paramIdx++;
+        }
+      }
+
+      // Query active loans count with date and optional channel filter
       // This is the EXACT same definition as METRICS_CATALOG.active_loans
       const result = await tenantPool.query(
         `
@@ -1020,8 +1042,10 @@ router.get(
         WHERE l.current_loan_status = 'Active Loan'
           AND l.application_date IS NOT NULL
           AND l.application_date::text != ''
+          AND (l.is_archived IS DISTINCT FROM TRUE)
           ${accessClause}
           ${dateClause}
+          ${channelClause}
         `,
         params,
       );
@@ -6870,7 +6894,7 @@ router.post(
       // Fetch ONLY active loans with essential columns for processing
       // Column names from tenant migrations (see migrations/tenant/)
       // Use EXACT same criteria as metricsService.ts active_loans definition:
-      //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != ''
+      //   current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND application_date::text != '' AND (is_archived IS DISTINCT FROM TRUE)
       const activeLoansQuery = `
       SELECT 
         loan_id, guid, loan_number, loan_amount, interest_rate, loan_type,
@@ -6884,6 +6908,7 @@ router.post(
       WHERE current_loan_status = 'Active Loan'
         AND application_date IS NOT NULL
         AND application_date::text != ''
+        AND (is_archived IS DISTINCT FROM TRUE)
         ${cutoffDate ? `AND application_date >= $1` : ""}
       ORDER BY application_date DESC
       LIMIT ${Math.min(limit, 2000)}
@@ -7310,6 +7335,51 @@ router.post(
       res.status(500).json({
         error: error.message || "Failed to sync market rates from FRED API",
       });
+    }
+  },
+);
+
+/**
+ * GET /api/loans/market-rates/current
+ * Returns current market rate data for the OBMMI ticker display.
+ * Uses cached FRED OBMMIC30YF data from the management database.
+ */
+router.get(
+  "/market-rates/current",
+  authenticateToken,
+  async (_req: AuthRequest, res) => {
+    try {
+      const {
+        getMostRecentMarketRate,
+        getMarketRateForDate,
+        initializeMarketRateCache,
+      } = await import("../services/dashboard/marketRateService.js");
+
+      await initializeMarketRateCache();
+      const currentRate = await getMostRecentMarketRate();
+
+      if (currentRate === null) {
+        return res.json({ available: false, rates: [] });
+      }
+
+      const today = new Date();
+      const fmt = (d: Date) => d.toISOString().split("T")[0];
+      const d1 = new Date(today);
+      d1.setDate(d1.getDate() - 1);
+      const yesterdayRate = await getMarketRateForDate(fmt(d1));
+      const delta = yesterdayRate !== null ? currentRate - yesterdayRate : 0;
+
+      return res.json({
+        available: true,
+        conforming30yr: {
+          rate: currentRate,
+          delta: Math.round(delta * 1000) / 1000,
+          trend: delta > 0.001 ? "up" : delta < -0.001 ? "down" : "flat",
+        },
+      });
+    } catch (error: any) {
+      logError("Error fetching current market rates", error);
+      return res.status(500).json({ error: "Failed to fetch market rates" });
     }
   },
 );

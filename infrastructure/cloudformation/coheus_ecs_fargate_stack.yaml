@@ -170,6 +170,12 @@ Parameters:
     Default: ""
     Description: Cognito domain (e.g., your-app.auth.us-east-2.amazoncognito.com)
 
+  CognitoPasswordAuth:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Cognito for email/password auth (requires ALLOW_ADMIN_USER_PASSWORD_AUTH on app client)
+
   # FRED API (market rates)
   FredApiKey:
     Type: String
@@ -658,6 +664,23 @@ Resources:
                   - logs:DescribeLogStreams
                   - logs:PutLogEvents
                 Resource: "*"
+              - !If
+                - HasCognito
+                - Effect: Allow
+                  Action:
+                    - cognito-idp:AdminInitiateAuth
+                    - cognito-idp:AdminRespondToAuthChallenge
+                    - cognito-idp:AdminCreateUser
+                    - cognito-idp:AdminDeleteUser
+                    - cognito-idp:AdminSetUserPassword
+                    - cognito-idp:AdminSetUserMFAPreference
+                    - cognito-idp:AdminGetUser
+                    - cognito-idp:AssociateSoftwareToken
+                    - cognito-idp:VerifySoftwareToken
+                    - cognito-idp:ForgotPassword
+                    - cognito-idp:ConfirmForgotPassword
+                  Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+                - !Ref "AWS::NoValue"
 
   ECSTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -718,6 +741,8 @@ Resources:
               Value: !If [HasCognito, !Ref AWS::Region, ""]
             - Name: COGNITO_DOMAIN
               Value: !If [HasCognito, !Ref CognitoDomain, ""]
+            - Name: COGNITO_PASSWORD_AUTH
+              Value: !If [HasCognito, !Ref CognitoPasswordAuth, "false"]
             # FRED API for market rate data
             - Name: FRED_API_KEY
               Value: !Ref FredApiKey

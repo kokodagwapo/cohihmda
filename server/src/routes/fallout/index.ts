@@ -209,7 +209,7 @@ router.post('/recompute', async (req: AuthRequest, res) => {
              estimated_closing_date, funding_date, closing_date, current_status_date, ctc_date, uw_final_approval_date, conditional_approval_date,
              loan_officer_id, loan_officer, loan_processor_id, processor, underwriter_id, underwriter, closer_id, closer
       FROM public.loans
-      WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+      WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)
       LIMIT 5000
     `);
     const activeLoans = activeResult.rows as any[];

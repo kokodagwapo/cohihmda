@@ -316,6 +316,9 @@ const startServer = () => {
     if (envValid) {
       console.log("✅ Environment variables validated");
     }
+    const cognitoPasswordAuth = process.env.COGNITO_PASSWORD_AUTH === "true";
+    const cognitoSso = !!(process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_DOMAIN);
+    console.log(`🔐 Auth: SSO=${cognitoSso ? "cognito" : "off"}, Password=${cognitoPasswordAuth ? "cognito" : "bcrypt"}`);
   });
 };
 
@@ -336,6 +339,17 @@ if (SKIP_DB) {
           console.warn("⚠️ Failed to start LOS sync scheduler:", error);
         }
 
+        if (process.env.ENCOMPASS_WEBHOOK_SCHEDULER_ENABLED !== "false") {
+          try {
+            const { startEncompassWebhookScheduler } = await import(
+              "./services/encompassWebhookScheduler.js"
+            );
+            startEncompassWebhookScheduler();
+          } catch (error) {
+            console.warn("⚠️ Failed to start Encompass webhook scheduler:", error);
+          }
+        }
+
         // Register post-sync hooks (insight generation + tracked insight evaluation)
         try {
           const { registerInsightHooks } =
@@ -349,6 +363,16 @@ if (SKIP_DB) {
         // When vendor outbound integrations (accounting, capital markets, servicing) are needed,
         // re-enable and fix to use tenant-specific database pools instead of management pool.
         // See: server/src/services/vendorSyncScheduler.ts
+
+        // Refresh industry news cache daily at 5:00 AM
+        try {
+          const { startNewsRefreshScheduler } = await import(
+            "./services/newsRefreshScheduler.js"
+          );
+          startNewsRefreshScheduler();
+        } catch (error) {
+          console.warn("⚠️ Failed to start news refresh scheduler:", error);
+        }
       }
     })
     .catch((error) => {

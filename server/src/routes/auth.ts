@@ -21,6 +21,7 @@ import {
 } from "../services/auditLogger.js";
 import { logError, logWarn, logInfo, logDebug } from "../services/logger.js";
 import crypto from "crypto";
+import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
 
 const { Pool } = pg;
 const router = Router();
@@ -313,7 +314,101 @@ async function findTenantUser(
 }
 
 /**
+ * Find a user in the DB by email (for post-Cognito auth lookup).
+ * Returns user + isSuperAdmin flag.
+ */
+async function findUserByEmail(
+  email: string,
+  tenantSlug?: string,
+): Promise<{ user: AuthUser; isSuperAdmin: boolean } | null> {
+  if (!tenantSlug) {
+    const superAdmin = await findSuperAdmin(email);
+    if (superAdmin && superAdmin.is_active) {
+      return { user: superAdmin, isSuperAdmin: true };
+    }
+  }
+
+  const tenantUser = await findTenantUser(email, tenantSlug);
+  if (tenantUser && tenantUser.is_active) {
+    return { user: tenantUser, isSuperAdmin: false };
+  }
+
+  return null;
+}
+
+/**
+ * Issue an app JWT and create a session for the given user.
+ */
+async function issueAppToken(
+  user: AuthUser,
+  isSuperAdmin: boolean,
+  req: any,
+): Promise<{ token: string; refreshToken?: string }> {
+  const jwtPayload: JwtPayload = {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    isSuperAdmin,
+  };
+
+  if (!isSuperAdmin && "tenant_id" in user) {
+    jwtPayload.tenantId = user.tenant_id;
+    jwtPayload.tenantSlug = user.tenant_slug;
+  }
+
+  const token = jwt.sign(jwtPayload, getJwtSecret(), { expiresIn: "1h" });
+
+  // Update last login (non-critical)
+  try {
+    if (isSuperAdmin) {
+      const mgmtPool = getManagementPool();
+      await mgmtPool.query(
+        `UPDATE coheus_users SET last_login_at = NOW(), failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
+        [user.id],
+      );
+    } else if ("tenant_slug" in user) {
+      const tenantPool = await getTenantPool(user.tenant_slug);
+      if (tenantPool) {
+        await tenantPool.query(
+          `UPDATE users SET last_login_at = NOW(), failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
+          [user.id],
+        );
+      }
+    }
+  } catch {}
+
+  // Create session record (non-critical)
+  try {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    await createSession({
+      userId: user.id,
+      tenantId: "tenant_id" in user ? user.tenant_id : null,
+      tokenHash,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+  } catch {}
+
+  await auditLog({
+    userId: user.id,
+    userEmail: user.email,
+    userRole: user.role,
+    tenantId: "tenant_id" in user ? user.tenant_id : null,
+    action: "login",
+    resource: "auth",
+    description: `User logged in successfully${isSuperAdmin ? " (super admin)" : ""}`,
+    status: "success",
+    ipAddress: req.ip,
+    userAgent: req.get("user-agent"),
+  }).catch(() => {});
+
+  return { token };
+}
+
+/**
  * Sign In
+ * Uses Cognito when configured, falls back to bcrypt for local dev.
  */
 router.post("/signin", authLimiter, async (req, res) => {
   try {
@@ -322,32 +417,98 @@ router.post("/signin", authLimiter, async (req, res) => {
     logInfo("[Auth] Sign in attempt", {
       email,
       tenantSlug: tenantSlug || "auto-detect",
+      useCognito: cognitoAuth.isCognitoAuthEnabled(),
     });
 
+    // --- Cognito auth path ---
+    if (cognitoAuth.isCognitoAuthEnabled()) {
+      try {
+        const result = await cognitoAuth.signIn(email, password);
+
+        if (!result.authenticated && result.challengeName) {
+          if (
+            result.challengeName === "SOFTWARE_TOKEN_MFA" ||
+            result.challengeName === "MFA_SETUP"
+          ) {
+            return res.json({
+              mfaRequired: true,
+              challengeName: result.challengeName,
+              session: result.session,
+              email,
+            });
+          }
+          if (result.challengeName === "NEW_PASSWORD_REQUIRED") {
+            return res.json({
+              newPasswordRequired: true,
+              session: result.session,
+              email,
+            });
+          }
+          return res
+            .status(400)
+            .json({ error: `Unsupported challenge: ${result.challengeName}` });
+        }
+
+        // Cognito auth succeeded -- find user in DB
+        const found = await findUserByEmail(email, tenantSlug);
+        if (!found) {
+          return res
+            .status(401)
+            .json({ error: "User not found in application" });
+        }
+
+        // Store cognito_sub if not already linked
+        if (result.cognitoSub) {
+          await linkCognitoSub(
+            found.user,
+            found.isSuperAdmin,
+            result.cognitoSub,
+          ).catch(() => {});
+        }
+
+        const { token } = await issueAppToken(
+          found.user,
+          found.isSuperAdmin,
+          req,
+        );
+
+        logInfo("[Auth] Cognito sign in successful", { email });
+
+        return res.json({
+          user: buildUserResponse(found.user, found.isSuperAdmin),
+          token,
+          refreshToken: result.refreshToken,
+        });
+      } catch (cognitoError: any) {
+        await logFailedLogin({
+          email,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          failureReason: cognitoError.code || "cognito_error",
+        }).catch(() => {});
+
+        const statusCode = cognitoError.statusCode || 401;
+        return res
+          .status(statusCode)
+          .json({ error: cognitoError.message || "Authentication failed" });
+      }
+    }
+
+    // --- Legacy bcrypt auth path (local dev fallback) ---
     let user: AuthUser | null = null;
     let isSuperAdmin = false;
 
-    // Strategy: Check super admin first (unless tenant slug is explicitly provided)
     if (!tenantSlug) {
       user = await findSuperAdmin(email);
       if (user) {
         isSuperAdmin = true;
-        logDebug("[Auth] Found super admin", { email });
       }
     }
 
-    // If not a super admin, check tenant users
     if (!user) {
       user = await findTenantUser(email, tenantSlug);
-      if (user) {
-        logDebug("[Auth] Found tenant user", {
-          email,
-          tenant: (user as TenantUser).tenant_slug,
-        });
-      }
     }
 
-    // User not found
     if (!user) {
       await logFailedLogin({
         email,
@@ -355,87 +516,49 @@ router.post("/signin", authLimiter, async (req, res) => {
         userAgent: req.get("user-agent"),
         failureReason: "user_not_found",
       }).catch(() => {});
-
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Check if account is locked
     if (isAccountLocked(user.locked_until)) {
       const remainingMinutes = getRemainingLockoutMinutes(user.locked_until!);
-      await logFailedLogin({
-        email,
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent"),
-        failureReason: "account_locked",
-      }).catch(() => {});
-
-      logWarn("[Auth] Login attempt on locked account", {
-        email,
-        remainingMinutes,
-      });
       return res.status(401).json({
-        error: `Account is locked due to too many failed attempts. Please try again in ${remainingMinutes} minutes.`,
+        error: `Account is locked. Please try again in ${remainingMinutes} minutes.`,
         locked: true,
-        lockedUntil: user.locked_until,
         remainingMinutes,
       });
     }
 
-    // Check if user is active
     if (!user.is_active) {
-      await logFailedLogin({
-        email,
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent"),
-        failureReason: "user_inactive",
-      }).catch(() => {});
-
-      return res.status(401).json({
-        error: "Account is disabled. Please contact your administrator.",
-      });
+      return res
+        .status(401)
+        .json({ error: "Account is disabled. Please contact your administrator." });
     }
 
-    // Verify password
     const isValidPassword = await bcrypt.compare(
       password,
-      user.encrypted_password
+      user.encrypted_password,
     );
     if (!isValidPassword) {
-      // Increment failed login attempts
       const newFailedAttempts = (user.failed_login_attempts || 0) + 1;
       const shouldLock = newFailedAttempts >= MAX_FAILED_ATTEMPTS;
       const lockoutEnd = shouldLock ? calculateLockoutEnd() : null;
 
-      // Update failed attempts in database
       try {
         if (isSuperAdmin) {
-          const mgmtPool = getManagementPool();
-          await mgmtPool.query(
-            `UPDATE coheus_users SET 
-              failed_login_attempts = $1, 
-              locked_until = $2 
-             WHERE id = $3`,
-            [newFailedAttempts, lockoutEnd, user.id]
+          await getManagementPool().query(
+            `UPDATE coheus_users SET failed_login_attempts = $1, locked_until = $2 WHERE id = $3`,
+            [newFailedAttempts, lockoutEnd, user.id],
           );
         } else if ("tenant_slug" in user) {
           const tenantPool = await getTenantPool(user.tenant_slug);
           if (tenantPool) {
             await tenantPool.query(
-              `UPDATE users SET 
-                failed_login_attempts = $1, 
-                locked_until = $2 
-               WHERE id = $3`,
-              [newFailedAttempts, lockoutEnd, user.id]
+              `UPDATE users SET failed_login_attempts = $1, locked_until = $2 WHERE id = $3`,
+              [newFailedAttempts, lockoutEnd, user.id],
             );
           }
         }
-      } catch (updateError) {
-        logError(
-          "[Auth] Failed to update login attempts",
-          updateError as Error,
-          { email }
-        );
-      }
+      } catch {}
 
       await logFailedLogin({
         email,
@@ -445,147 +568,286 @@ router.post("/signin", authLimiter, async (req, res) => {
       }).catch(() => {});
 
       if (shouldLock) {
-        logWarn("[Auth] Account locked due to failed attempts", {
-          email,
-          attempts: newFailedAttempts,
-        });
         return res.status(401).json({
           error: `Account locked due to too many failed attempts. Please try again in ${LOCKOUT_DURATION_MINUTES} minutes.`,
           locked: true,
-          lockedUntil: lockoutEnd,
           remainingMinutes: LOCKOUT_DURATION_MINUTES,
         });
       }
 
       const attemptsRemaining = MAX_FAILED_ATTEMPTS - newFailedAttempts;
       return res.status(401).json({
-        error: `Invalid email or password. ${attemptsRemaining} attempt${
-          attemptsRemaining === 1 ? "" : "s"
-        } remaining before account lockout.`,
+        error: `Invalid email or password. ${attemptsRemaining} attempt${attemptsRemaining === 1 ? "" : "s"} remaining.`,
         attemptsRemaining,
       });
     }
 
-    // Successful login - reset failed attempts
-    try {
-      if (isSuperAdmin) {
-        const mgmtPool = getManagementPool();
-        await mgmtPool.query(
-          `UPDATE coheus_users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
-          [user.id]
-        );
-      } else if ("tenant_slug" in user) {
-        const tenantPool = await getTenantPool(user.tenant_slug);
-        if (tenantPool) {
-          await tenantPool.query(
-            `UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1`,
-            [user.id]
-          );
-        }
-      }
-    } catch (resetError) {
-      // Non-critical, don't fail login
-      logDebug("[Auth] Failed to reset login attempts", {
-        error: (resetError as Error).message,
-      });
-    }
+    const { token } = await issueAppToken(user, isSuperAdmin, req);
 
-    // Generate JWT token
-    const jwtPayload: JwtPayload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      isSuperAdmin,
-    };
-
-    if (!isSuperAdmin && "tenant_id" in user) {
-      jwtPayload.tenantId = user.tenant_id;
-      jwtPayload.tenantSlug = user.tenant_slug;
-    }
-
-    const token = jwt.sign(jwtPayload, getJwtSecret(), { expiresIn: "7d" });
-
-    // Update last login
-    try {
-      if (isSuperAdmin) {
-        const mgmtPool = getManagementPool();
-        await mgmtPool.query(
-          `UPDATE coheus_users SET last_login_at = NOW() WHERE id = $1`,
-          [user.id]
-        );
-      } else if ("tenant_slug" in user) {
-        const tenantPool = await getTenantPool(user.tenant_slug);
-        if (tenantPool) {
-          await tenantPool.query(
-            `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
-            [user.id]
-          );
-        }
-      }
-    } catch (error) {
-      // Non-critical, don't fail login
-    }
-
-    // Create session record
-    try {
-      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-      await createSession({
-        userId: user.id,
-        tenantId: "tenant_id" in user ? user.tenant_id : null,
-        tokenHash,
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent"),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      });
-    } catch (error) {
-      // Non-critical
-    }
-
-    // Audit log
-    await auditLog({
-      userId: user.id,
-      userEmail: user.email,
-      userRole: user.role,
-      tenantId: "tenant_id" in user ? user.tenant_id : null,
-      action: "login",
-      resource: "auth",
-      description: `User logged in successfully${
-        isSuperAdmin ? " (super admin)" : ""
-      }`,
-      status: "success",
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
-    }).catch(() => {});
-
-    logInfo("[Auth] Sign in successful", {
+    logInfo("[Auth] Sign in successful (bcrypt fallback)", {
       email,
-      role: user.role,
       isSuperAdmin,
-      tenant: "tenant_slug" in user ? user.tenant_slug : null,
     });
 
-    // Return user info (without password)
-    const responseUser = {
-      id: user.id,
-      email: user.email,
-      full_name: user.full_name,
-      role: user.role,
-      is_super_admin: isSuperAdmin,
-      tenant_id: "tenant_id" in user ? user.tenant_id : null,
-      tenant_name: "tenant_name" in user ? user.tenant_name : null,
-      tenant_slug: "tenant_slug" in user ? user.tenant_slug : null,
-    };
-
-    return res.json({ user: responseUser, token });
+    return res.json({
+      user: buildUserResponse(user, isSuperAdmin),
+      token,
+    });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
-
     logError("[Auth] Sign in error", error, { email: req.body?.email });
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+/**
+ * Set new password during first login (NEW_PASSWORD_REQUIRED challenge).
+ * After Cognito accepts the new password it may return another challenge (MFA_SETUP)
+ * or authenticate the user directly.
+ */
+router.post("/new-password", authLimiter, async (req, res) => {
+  try {
+    const { email, session, newPassword, tenantSlug } = z
+      .object({
+        email: z.string().email(),
+        session: z.string().min(1),
+        newPassword: z.string().min(10, "Password must be at least 10 characters"),
+        tenantSlug: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const result = await cognitoAuth.respondToNewPasswordChallenge(
+      email,
+      session,
+      newPassword,
+    );
+
+    // Cognito may return another challenge (e.g. MFA_SETUP) after the password is set
+    if (!result.authenticated && result.challengeName) {
+      return res.json({
+        mfaRequired: result.challengeName === "SOFTWARE_TOKEN_MFA",
+        mfaSetupRequired: result.challengeName === "MFA_SETUP",
+        challengeName: result.challengeName,
+        session: result.session,
+        email,
+      });
+    }
+
+    // Fully authenticated
+    const found = await findUserByEmail(email, tenantSlug);
+    if (!found) {
+      return res.status(401).json({ error: "User not found in application" });
+    }
+
+    if (result.cognitoSub) {
+      await linkCognitoSub(found.user, found.isSuperAdmin, result.cognitoSub).catch(() => {});
+    }
+
+    const { token } = await issueAppToken(found.user, found.isSuperAdmin, req);
+
+    return res.json({
+      user: buildUserResponse(found.user, found.isSuperAdmin),
+      token,
+      refreshToken: result.refreshToken,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    const statusCode = error.statusCode || 400;
+    return res.status(statusCode).json({ error: error.message || "Failed to set new password" });
+  }
+});
+
+/**
+ * Verify MFA code during sign-in
+ */
+router.post("/mfa/verify", authLimiter, async (req, res) => {
+  try {
+    const { email, session, code, tenantSlug } = z
+      .object({
+        email: z.string().email(),
+        session: z.string().min(1),
+        code: z.string().length(6),
+        tenantSlug: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const result = await cognitoAuth.respondToMfaChallenge(
+      email,
+      session,
+      code,
+    );
+
+    if (!result.authenticated) {
+      return res.status(401).json({ error: "MFA verification failed" });
+    }
+
+    const found = await findUserByEmail(email, tenantSlug);
+    if (!found) {
+      return res.status(401).json({ error: "User not found in application" });
+    }
+
+    if (result.cognitoSub) {
+      await linkCognitoSub(
+        found.user,
+        found.isSuperAdmin,
+        result.cognitoSub,
+      ).catch(() => {});
+    }
+
+    const { token } = await issueAppToken(
+      found.user,
+      found.isSuperAdmin,
+      req,
+    );
+
+    logInfo("[Auth] MFA verification successful", { email });
+
+    return res.json({
+      user: buildUserResponse(found.user, found.isSuperAdmin),
+      token,
+      refreshToken: result.refreshToken,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    const statusCode = error.statusCode || 401;
+    return res
+      .status(statusCode)
+      .json({ error: error.message || "MFA verification failed" });
+  }
+});
+
+/**
+ * Refresh app token using Cognito refresh token
+ */
+router.post("/refresh", async (req, res) => {
+  try {
+    const { refreshToken } = z
+      .object({ refreshToken: z.string().min(1) })
+      .parse(req.body);
+
+    if (!cognitoAuth.isCognitoAuthEnabled()) {
+      return res
+        .status(400)
+        .json({ error: "Token refresh not available in local dev mode" });
+    }
+
+    const result = await cognitoAuth.refreshTokens(refreshToken);
+
+    // Decode sub to find user
+    const found = await findUserByCognitoSub(result.cognitoSub);
+    if (!found) {
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    const { token } = await issueAppToken(
+      found.user,
+      found.isSuperAdmin,
+      req,
+    );
+
+    return res.json({ token });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors[0].message });
+    }
+    return res.status(401).json({ error: "Token refresh failed" });
+  }
+});
+
+// --- Helper functions for Cognito integration ---
+
+function buildUserResponse(user: AuthUser, isSuperAdmin: boolean) {
+  return {
+    id: user.id,
+    email: user.email,
+    full_name: user.full_name,
+    role: user.role,
+    is_super_admin: isSuperAdmin,
+    tenant_id: "tenant_id" in user ? user.tenant_id : null,
+    tenant_name: "tenant_name" in user ? user.tenant_name : null,
+    tenant_slug: "tenant_slug" in user ? user.tenant_slug : null,
+  };
+}
+
+async function linkCognitoSub(
+  user: AuthUser,
+  isSuperAdmin: boolean,
+  cognitoSub: string,
+): Promise<void> {
+  try {
+    if (isSuperAdmin) {
+      await getManagementPool().query(
+        `UPDATE coheus_users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub IS NULL`,
+        [cognitoSub, user.id],
+      );
+    } else if ("tenant_slug" in user) {
+      const tenantPool = await getTenantPool(user.tenant_slug);
+      if (tenantPool) {
+        await tenantPool.query(
+          `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub IS NULL`,
+          [cognitoSub, user.id],
+        );
+      }
+    }
+  } catch (error: any) {
+    logDebug("[Auth] Failed to link cognito_sub", { error: error.message });
+  }
+}
+
+async function findUserByCognitoSub(
+  cognitoSub: string,
+): Promise<{ user: AuthUser; isSuperAdmin: boolean } | null> {
+  // Check management DB first
+  try {
+    const mgmtPool = getManagementPool();
+    const result = await mgmtPool.query(
+      `SELECT id, email, encrypted_password, full_name, role, is_active, failed_login_attempts, locked_until
+       FROM coheus_users WHERE cognito_sub = $1`,
+      [cognitoSub],
+    );
+    if (result.rows.length > 0 && result.rows[0].is_active) {
+      return { user: result.rows[0], isSuperAdmin: true };
+    }
+  } catch {}
+
+  // Check all active tenants
+  try {
+    const mgmtPool = getManagementPool();
+    const tenants = await mgmtPool.query(
+      `SELECT id, slug, name FROM coheus_tenants WHERE status = 'active'`,
+    );
+    for (const tenant of tenants.rows) {
+      const tenantPool = await getTenantPool(tenant.slug);
+      if (!tenantPool) continue;
+      try {
+        const result = await tenantPool.query(
+          `SELECT id, email, encrypted_password, full_name, role, is_active, failed_login_attempts, locked_until
+           FROM users WHERE cognito_sub = $1`,
+          [cognitoSub],
+        );
+        if (result.rows.length > 0 && result.rows[0].is_active) {
+          return {
+            user: {
+              ...result.rows[0],
+              tenant_id: tenant.id,
+              tenant_name: tenant.name,
+              tenant_slug: tenant.slug,
+            },
+            isSuperAdmin: false,
+          };
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return null;
+}
 
 /**
  * Get Current User
@@ -787,26 +1049,32 @@ async function consumeResetToken(
 
 /**
  * Request Password Reset
+ * Uses Cognito ForgotPassword when configured, falls back to custom email flow.
  */
 router.post("/password-reset/request", authLimiter, async (req, res) => {
   try {
     const { email, tenantSlug } = passwordResetRequestSchema.parse(req.body);
-
     logInfo("[Auth] Password reset requested", { email, tenantSlug });
 
-    // Find user (don't reveal if user exists)
+    const successMsg =
+      "If an account exists with this email, you will receive a password reset code.";
+
+    if (cognitoAuth.isCognitoAuthEnabled()) {
+      await cognitoAuth.forgotPassword(email);
+      return res.json({
+        message: successMsg,
+        useCognito: true,
+      });
+    }
+
+    // --- Legacy custom token flow ---
     let user: AuthUser | null = null;
     let foundTenantSlug: string | undefined;
 
-    // Check super admin first
     if (!tenantSlug) {
       const superAdmin = await findSuperAdmin(email);
-      if (superAdmin) {
-        user = superAdmin;
-      }
+      if (superAdmin) user = superAdmin;
     }
-
-    // Check tenant users if not found
     if (!user) {
       const tenantUser = await findTenantUser(email, tenantSlug);
       if (tenantUser) {
@@ -815,18 +1083,11 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       }
     }
 
-    // Always return success (don't reveal if user exists)
     if (!user || !user.is_active) {
-      logDebug("[Auth] Password reset for unknown/inactive user", { email });
-      return res.json({
-        message:
-          "If an account exists with this email, you will receive a password reset link.",
-      });
+      return res.json({ message: successMsg });
     }
 
-    // Generate reset token and store in database
     const token = crypto.randomBytes(32).toString("hex");
-
     try {
       await storeResetToken(token, user.email, foundTenantSlug);
     } catch (storeError: any) {
@@ -834,8 +1095,11 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       return res.status(500).json({ error: "Internal server error" });
     }
 
-    // Send reset email
-    const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:5173").split(",")[0].trim();
+    const frontendUrl = (
+      process.env.FRONTEND_URL || "http://localhost:5173"
+    )
+      .split(",")[0]
+      .trim();
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {
@@ -845,20 +1109,11 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
       await sendPasswordResetEmail(
         user.email,
         resetUrl,
-        user.full_name || undefined
+        user.full_name || undefined,
       );
-      logInfo("[Auth] Password reset email sent", { email });
-    } catch (emailError: any) {
-      logError("[Auth] Failed to send password reset email", emailError, {
-        email,
-      });
-      // Still return success to user
-    }
+    } catch {}
 
-    return res.json({
-      message:
-        "If an account exists with this email, you will receive a password reset link.",
-    });
+    return res.json({ message: successMsg });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
@@ -870,45 +1125,73 @@ router.post("/password-reset/request", authLimiter, async (req, res) => {
 
 /**
  * Confirm Password Reset
+ * Supports both Cognito (email + code + newPassword) and legacy (token + newPassword).
  */
 router.post("/password-reset/confirm", authLimiter, async (req, res) => {
   try {
-    const { token, newPassword } = passwordResetConfirmSchema.parse(req.body);
+    // Accept both Cognito-style (email + code) and legacy (token) params
+    const body = req.body;
 
-    // Validate and consume token (atomic -- marks as used in the same query)
+    if (cognitoAuth.isCognitoAuthEnabled() && body.email && body.code) {
+      const { email, code, newPassword } = z
+        .object({
+          email: z.string().email(),
+          code: z.string().min(1),
+          newPassword: z
+            .string()
+            .min(10, "Password must be at least 10 characters"),
+        })
+        .parse(body);
+
+      await cognitoAuth.confirmForgotPassword(email, code, newPassword);
+
+      await auditLog({
+        userId: null,
+        userEmail: email,
+        userRole: null,
+        tenantId: null,
+        action: "password_reset",
+        resource: "auth",
+        description: "Password reset completed via Cognito",
+        status: "success",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent"),
+      }).catch(() => {});
+
+      return res.json({
+        message:
+          "Password reset successful. You can now log in with your new password.",
+      });
+    }
+
+    // --- Legacy token-based flow ---
+    const { token, newPassword } = passwordResetConfirmSchema.parse(body);
+
     const resetData = await consumeResetToken(token);
     if (!resetData) {
       return res.status(400).json({ error: "Invalid or expired reset token" });
     }
 
-    // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-    // Update password
     let updated = false;
 
-    // Try super admin first
     const mgmtPool = getManagementPool();
     const superAdminResult = await mgmtPool.query(
       `UPDATE coheus_users SET encrypted_password = $1, failed_login_attempts = 0, locked_until = NULL
-       WHERE email = $2 AND is_active = true
-       RETURNING id`,
-      [hashedPassword, resetData.email]
+       WHERE email = $2 AND is_active = true RETURNING id`,
+      [hashedPassword, resetData.email],
     );
-
     if (superAdminResult.rowCount && superAdminResult.rowCount > 0) {
       updated = true;
     }
 
-    // Try tenant user if not found in super admins
     if (!updated && resetData.tenantSlug) {
       const tenantPool = await getTenantPool(resetData.tenantSlug);
       if (tenantPool) {
         const tenantResult = await tenantPool.query(
           `UPDATE users SET encrypted_password = $1, failed_login_attempts = 0, locked_until = NULL
-           WHERE email = $2 AND is_active = true
-           RETURNING id`,
-          [hashedPassword, resetData.email]
+           WHERE email = $2 AND is_active = true RETURNING id`,
+          [hashedPassword, resetData.email],
         );
         if (tenantResult.rowCount && tenantResult.rowCount > 0) {
           updated = true;
@@ -922,7 +1205,6 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
         .json({ error: "Failed to update password. Please try again." });
     }
 
-    // Audit log
     await auditLog({
       userId: null,
       userEmail: resetData.email,
@@ -936,8 +1218,6 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
       userAgent: req.get("user-agent"),
     }).catch(() => {});
 
-    logInfo("[Auth] Password reset successful", { email: resetData.email });
-
     return res.json({
       message:
         "Password reset successful. You can now log in with your new password.",
@@ -946,8 +1226,10 @@ router.post("/password-reset/confirm", authLimiter, async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
-    logError("[Auth] Password reset confirm error", error, {});
-    return res.status(500).json({ error: "Internal server error" });
+    const statusCode = error.statusCode || 500;
+    return res
+      .status(statusCode)
+      .json({ error: error.message || "Internal server error" });
   }
 });
 

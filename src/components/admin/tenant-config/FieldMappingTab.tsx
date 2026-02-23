@@ -9,11 +9,12 @@
  * - Population Stats: Data completeness metrics for all loan fields
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -24,14 +25,17 @@ import {
 import { 
   Link2, 
   AlertCircle,
-  CheckCircle2,
   Clock,
   Loader2,
   Settings2,
   PlusCircle,
   Database,
   Sparkles,
-  Zap
+  Zap,
+  Save,
+  RefreshCw,
+  CheckCircle2 as CheckIcon,
+  AlertTriangle as AlertIcon
 } from 'lucide-react';
 import { EncompassFieldMapping } from '@/components/encompass/EncompassFieldMapping';
 import { FieldMappingWizardDialog } from '@/components/encompass/FieldMappingWizard';
@@ -40,10 +44,25 @@ import { FieldPopulationStats } from '@/components/admin/FieldPopulationStats';
 import { OnboardingPanel } from '@/components/onboarding/OnboardingPanel';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminTenant } from '@/contexts/AdminTenantContext';
+import { api } from '@/lib/api';
 
 interface FieldMappingTabProps {
   losConnections: any[];
   onRefresh: () => void;
+}
+
+interface WebhookConfig {
+  id: string;
+  webhook_enabled: boolean;
+  webhook_mode: 'priority_only' | 'all_changes';
+  webhook_priority_field_ids: string[] | null;
+  webhook_priority_field_limit: number | null;
+  webhook_reconciliation_enabled: boolean;
+}
+
+interface WebhookStatsResponse {
+  queue: Array<{ status: string; count: number }>;
+  events24h: Array<{ status: string; count: number }>;
 }
 
 export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabProps) {
@@ -57,6 +76,15 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
   const [activeSubTab, setActiveSubTab] = useState<'default' | 'additional' | 'population'>('default');
   const [showWizard, setShowWizard] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | null>(null);
+  const [webhookFieldText, setWebhookFieldText] = useState('');
+  const [loadingWebhookConfig, setLoadingWebhookConfig] = useState(false);
+  const [savingWebhookConfig, setSavingWebhookConfig] = useState(false);
+  const [webhookStats, setWebhookStats] = useState<WebhookStatsResponse | null>(null);
+  const [loadingWebhookStats, setLoadingWebhookStats] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [readinessResult, setReadinessResult] = useState<any | null>(null);
 
   // Get the selected connection
   const selectedConnection = losConnections.find(c => c.id === selectedConnectionId);
@@ -64,6 +92,164 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
   // Filter to only show Encompass connections (field mapping is specific to Encompass currently)
   const encompassConnections = losConnections.filter(c => c.los_type === 'encompass');
 
+  useEffect(() => {
+    if (encompassConnections.length === 0) {
+      setSelectedConnectionId(null);
+      return;
+    }
+    const hasSelectedEncompass = encompassConnections.some(c => c.id === selectedConnectionId);
+    if (!hasSelectedEncompass) {
+      setSelectedConnectionId(encompassConnections[0].id);
+    }
+  }, [encompassConnections, selectedConnectionId]);
+
+  const tenantQuery = selectedTenantId ? `?tenant_id=${encodeURIComponent(selectedTenantId)}` : '';
+
+  const loadWebhookConfig = useCallback(async () => {
+    if (!selectedConnectionId) return;
+    setLoadingWebhookConfig(true);
+    try {
+      const response = await api.request<WebhookConfig>(
+        `/api/encompass/webhook-config/${selectedConnectionId}${tenantQuery}`
+      );
+      setWebhookConfig(response);
+      const ids = Array.isArray(response.webhook_priority_field_ids)
+        ? response.webhook_priority_field_ids
+        : [];
+      setWebhookFieldText(ids.join(', '));
+    } catch (error: any) {
+      setWebhookConfig(null);
+      setWebhookFieldText('');
+      toast({
+        title: 'Webhook Config Unavailable',
+        description: error.message || 'Failed to load webhook config',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingWebhookConfig(false);
+    }
+  }, [selectedConnectionId, tenantQuery, toast]);
+
+  const loadWebhookStats = useCallback(async () => {
+    if (!selectedConnectionId) return;
+    setLoadingWebhookStats(true);
+    try {
+      const response = await api.request<WebhookStatsResponse>(
+        `/api/encompass/webhook-stats/${selectedConnectionId}${tenantQuery}`
+      );
+      setWebhookStats(response);
+    } catch (error: any) {
+      toast({
+        title: 'Stats Unavailable',
+        description: error.message || 'Failed to load webhook stats',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingWebhookStats(false);
+    }
+  }, [selectedConnectionId, tenantQuery, toast]);
+
+  useEffect(() => {
+    if (!selectedConnectionId || !selectedTenantId) {
+      setWebhookConfig(null);
+      setWebhookStats(null);
+      return;
+    }
+    loadWebhookConfig();
+    loadWebhookStats();
+  }, [selectedConnectionId, selectedTenantId, loadWebhookConfig, loadWebhookStats]);
+
+  const handleSaveWebhookConfig = async () => {
+    if (!selectedConnectionId || !webhookConfig) return;
+    const ids = webhookFieldText
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    setSavingWebhookConfig(true);
+    try {
+      const payload = {
+        webhook_enabled: webhookConfig.webhook_enabled,
+        webhook_mode: webhookConfig.webhook_mode,
+        webhook_priority_field_limit: webhookConfig.webhook_priority_field_limit || 20,
+        webhook_reconciliation_enabled: webhookConfig.webhook_reconciliation_enabled,
+        webhook_priority_field_ids: ids,
+      };
+      const response = await api.request<{ success: boolean; config: WebhookConfig }>(
+        `/api/encompass/webhook-config/${selectedConnectionId}${tenantQuery}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        }
+      );
+      setWebhookConfig(response.config);
+      toast({
+        title: 'Saved',
+        description: 'Webhook priority field configuration updated.',
+      });
+      await loadWebhookStats();
+    } catch (error: any) {
+      toast({
+        title: 'Save Failed',
+        description: error.message || 'Failed to save webhook config',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingWebhookConfig(false);
+    }
+  };
+
+  const handleRunReconciliation = async () => {
+    if (!selectedConnectionId) return;
+    setReconciling(true);
+    try {
+      await api.request(`/api/encompass/reconcile/${selectedConnectionId}${tenantQuery}`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      toast({
+        title: 'Reconciliation Started',
+        description: 'Incremental reconciliation completed for this connection.',
+      });
+      await loadWebhookStats();
+    } catch (error: any) {
+      toast({
+        title: 'Reconciliation Failed',
+        description: error.message || 'Failed to run reconciliation',
+        variant: 'destructive',
+      });
+    } finally {
+      setReconciling(false);
+    }
+  };
+
+  const handleRunReadiness = async () => {
+    if (!selectedConnectionId) return;
+    setReadinessLoading(true);
+    try {
+      const result = await api.request<any>(
+        `/api/encompass/v3-readiness/${selectedConnectionId}${tenantQuery}`
+      );
+      setReadinessResult(result);
+      const hasErrors = result?.errors && Object.keys(result.errors).length > 0;
+      toast({
+        title: hasErrors ? 'V3 Readiness (Partial)' : 'V3 Readiness Passed',
+        description: hasErrors
+          ? `Some checks failed: ${Object.entries(result.errors).map(([k, v]) => `${k}: ${v}`).join('; ')}`
+          : `Fields ${result?.readiness?.fields ?? 0}, Loans ${result?.readiness?.sampleLoans ?? 0}, Users ${result?.readiness?.users ?? 0}`,
+        ...(hasErrors ? { variant: 'destructive' as const } : {}),
+      });
+    } catch (error: any) {
+      setReadinessResult(null);
+      toast({
+        title: 'V3 Readiness Failed',
+        description: error.message || 'Readiness check failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setReadinessLoading(false);
+    }
+  };
 
   const getSyncStatusBadge = (connection: any) => {
     if (!connection.last_sync_status) return null;
@@ -72,7 +258,7 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
       case 'success':
         return (
           <Badge variant="outline" className="text-emerald-600 border-emerald-300">
-            <CheckCircle2 className="h-3 w-3 mr-1" />
+            <CheckIcon className="h-3 w-3 mr-1" />
             Synced
           </Badge>
         );
@@ -196,6 +382,235 @@ export function FieldMappingTab({ losConnections, onRefresh }: FieldMappingTabPr
                     Setup Wizard
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {/* Webhook Priority Field Configuration */}
+            {selectedConnection && selectedConnection.los_type === 'encompass' && (
+              <div className="p-4 border rounded-lg bg-slate-50/60 dark:bg-slate-900/20 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-slate-900 dark:text-white">
+                      Webhook Priority Field Configuration
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Configure high-value fieldchange subscriptions (start with 20 fields, tenant-configurable).
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadWebhookStats}
+                      disabled={loadingWebhookStats}
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${loadingWebhookStats ? 'animate-spin' : ''}`} />
+                      Refresh Stats
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRunReadiness}
+                      disabled={readinessLoading}
+                    >
+                      {readinessLoading ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckIcon className="h-4 w-4 mr-2" />
+                      )}
+                      V3 Readiness
+                    </Button>
+                  </div>
+                </div>
+
+                {loadingWebhookConfig ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading webhook configuration...
+                  </div>
+                ) : webhookConfig ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-600 dark:text-slate-400">Webhook Enabled</label>
+                        <Select
+                          value={webhookConfig.webhook_enabled ? 'enabled' : 'disabled'}
+                          onValueChange={(value) =>
+                            setWebhookConfig({
+                              ...webhookConfig,
+                              webhook_enabled: value === 'enabled',
+                            })
+                          }
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="enabled">Enabled</SelectItem>
+                            <SelectItem value="disabled">Disabled</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-600 dark:text-slate-400">Webhook Mode</label>
+                        <Select
+                          value={webhookConfig.webhook_mode}
+                          onValueChange={(value) =>
+                            setWebhookConfig({
+                              ...webhookConfig,
+                              webhook_mode: value as 'priority_only' | 'all_changes',
+                            })
+                          }
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="priority_only">Priority Only</SelectItem>
+                            <SelectItem value="all_changes">All Changes</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-600 dark:text-slate-400">Priority Field Limit (1-50)</label>
+                        <Input
+                          className="mt-1"
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={webhookConfig.webhook_priority_field_limit || 20}
+                          onChange={(e) =>
+                            setWebhookConfig({
+                              ...webhookConfig,
+                              webhook_priority_field_limit: Number(e.target.value || 20),
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-600 dark:text-slate-400">Reconciliation</label>
+                        <Select
+                          value={webhookConfig.webhook_reconciliation_enabled ? 'enabled' : 'disabled'}
+                          onValueChange={(value) =>
+                            setWebhookConfig({
+                              ...webhookConfig,
+                              webhook_reconciliation_enabled: value === 'enabled',
+                            })
+                          }
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="enabled">Enabled</SelectItem>
+                            <SelectItem value="disabled">Disabled</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-slate-600 dark:text-slate-400">
+                        Priority Field IDs (comma-separated)
+                      </label>
+                      <Input
+                        className="mt-1"
+                        value={webhookFieldText}
+                        onChange={(e) => setWebhookFieldText(e.target.value)}
+                        placeholder="2, 3, 4, 19, 364, 748, 761..."
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Used for `fieldchange` acceleration. Non-priority fields are still covered by reconciliation polling.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button onClick={handleSaveWebhookConfig} disabled={savingWebhookConfig}>
+                        {savingWebhookConfig ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        Save Webhook Config
+                      </Button>
+                      <Button variant="outline" onClick={handleRunReconciliation} disabled={reconciling}>
+                        {reconciling ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Run Reconciliation
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="p-3 rounded border bg-white dark:bg-slate-900">
+                        <p className="text-xs text-slate-500 mb-2">Queue Status</p>
+                        {webhookStats?.queue?.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {webhookStats.queue.map((row) => (
+                              <Badge key={row.status} variant="outline">
+                                {row.status}: {row.count}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">No queue data yet</p>
+                        )}
+                      </div>
+                      <div className="p-3 rounded border bg-white dark:bg-slate-900">
+                        <p className="text-xs text-slate-500 mb-2">Events (last 24h)</p>
+                        {webhookStats?.events24h?.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {webhookStats.events24h.map((row) => (
+                              <Badge key={row.status} variant="outline">
+                                {row.status}: {row.count}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400">No event data yet</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {readinessResult && (
+                      <div className={`p-3 rounded border ${readinessResult.success ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'}`}>
+                        <div className="flex items-center gap-2">
+                          {readinessResult.success ? (
+                            <CheckIcon className="h-4 w-4 text-emerald-600" />
+                          ) : (
+                            <AlertIcon className="h-4 w-4 text-amber-600" />
+                          )}
+                          <span className={`text-sm font-medium ${readinessResult.success ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                            V3 readiness check {readinessResult.success ? 'passed' : 'partial'}
+                          </span>
+                          <span className="text-xs text-slate-500">{readinessResult.elapsedMs}ms</span>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                          Fields: {readinessResult?.readiness?.fields ?? 0}, Custom Fields: {readinessResult?.readiness?.customFields ?? 0}, Users: {readinessResult?.readiness?.users ?? 0}, Sample Loans: {readinessResult?.readiness?.sampleLoans ?? 0}, Folders: {readinessResult?.readiness?.folders ?? 0}.
+                        </p>
+                        {readinessResult.errors && Object.keys(readinessResult.errors).length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {Object.entries(readinessResult.errors).map(([key, msg]) => (
+                              <p key={key} className="text-xs text-red-600 dark:text-red-400">
+                                {key}: {String(msg)}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300">
+                    <AlertIcon className="h-4 w-4" />
+                    Webhook config not available for this connection.
+                  </div>
+                )}
               </div>
             )}
 

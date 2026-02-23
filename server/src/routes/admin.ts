@@ -18,6 +18,8 @@ import { tenantDbManager } from "../config/tenantDatabaseManager.js";
 import { listTenants } from "../services/tenantProvisioningService.js";
 import { createEncompassUserSyncService } from "../services/encompassUserSyncService.js";
 import ssoConfigRoutes from "./admin/ssoConfig.js";
+import * as cognitoAuth from "../services/cognito/cognitoAuthService.js";
+import { requestEmailVerification } from "../services/sesVerificationService.js";
 
 const router = Router();
 
@@ -78,7 +80,7 @@ async function resolveTenantContext(
 // Validation schemas
 const createUserSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(6).optional(),
   full_name: z.string().optional(),
   tenant_id: z.string().uuid().optional(),
   role: z
@@ -421,23 +423,80 @@ router.post(
       });
     }
 
-    const hashedPassword = await bcrypt.hash(validated.password, 10);
-    
+    const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
+    if (!useCognitoInvite && !validated.password) {
+      return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });
+    }
+
+    const hashedPassword = validated.password
+      ? await bcrypt.hash(validated.password, 10)
+      : await bcrypt.hash("", 10); // placeholder when Cognito invite is used
+
+    let cognitoSub: string | null = null;
+    if (useCognitoInvite) {
+      const existingPlatform = await managementPool.query(
+        "SELECT id FROM coheus_users WHERE LOWER(email) = LOWER($1)",
+        [validated.email],
+      );
+      if (existingPlatform.rows.length > 0) {
+        return res.status(409).json({ error: "User with this email already exists" });
+      }
+
+      const sendInvite = !validated.password;
+      if (sendInvite) {
+        await requestEmailVerification(validated.email);
+      }
+      try {
+        let cognitoResult = await cognitoAuth.createUser(
+          validated.email,
+          validated.password ?? undefined,
+          validated.full_name,
+          sendInvite,
+        );
+        cognitoSub = cognitoResult.cognitoSub;
+      } catch (cognitoError: any) {
+        if (cognitoError.code === "USER_EXISTS") {
+          try {
+            await cognitoAuth.deleteUser(validated.email);
+            logInfo("Removed orphan Cognito user for retry", { email: validated.email });
+            const sendInvite = !validated.password;
+            const cognitoResult = await cognitoAuth.createUser(
+              validated.email,
+              validated.password ?? undefined,
+              validated.full_name,
+              sendInvite,
+            );
+            cognitoSub = cognitoResult.cognitoSub;
+          } catch (retryError: any) {
+            logError("Failed to create Cognito user after orphan cleanup", retryError, { email: validated.email });
+            return res.status(retryError.statusCode || 500).json({
+              error: retryError.message || "Failed to create user in identity provider",
+            });
+          }
+        } else {
+          logError("Failed to create Cognito user", cognitoError, { email: validated.email });
+          return res.status(cognitoError.statusCode || 500).json({
+            error: cognitoError.message || "Failed to create user in identity provider",
+          });
+        }
+      }
+    }
+
     const result = await managementPool.query(
-      `INSERT INTO coheus_users (email, encrypted_password, full_name, role, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
+      `INSERT INTO coheus_users (email, encrypted_password, full_name, role, cognito_sub, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        RETURNING id, email, full_name, role, created_at`,
         [
           validated.email,
           hashedPassword,
           validated.full_name || null,
           validated.role,
+          cognitoSub,
         ],
     );
     
     const newUser = result.rows[0];
     
-    // If tenant_id provided, create tenant mapping
     if (validated.tenant_id) {
       await managementPool.query(
         `INSERT INTO user_tenant_mappings (user_id, tenant_id, role, created_at, updated_at)
@@ -574,7 +633,8 @@ router.put(
 
 /**
  * DELETE /api/admin/users/:id
- * Delete a user (admin only)
+ * Permanently delete a platform user (platform staff only).
+ * Removes user_tenant_mappings, then coheus_users, then Cognito.
  */
 router.delete(
   "/users/:id",
@@ -583,21 +643,31 @@ router.delete(
   async (req: AuthRequest, res) => {
   try {
     const id = req.params.id as string;
-    
+
     // Don't allow deleting yourself
     if (id === req.userId) {
         return res
           .status(400)
           .json({ error: "Cannot delete your own account" });
     }
-    
+
+    // Remove tenant mappings first (FK from user_tenant_mappings to coheus_users)
+    await managementPool.query("DELETE FROM user_tenant_mappings WHERE user_id = $1", [id]);
+
     const result = await managementPool.query(
-        "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email",
+        "DELETE FROM coheus_users WHERE id = $1 RETURNING id, email, cognito_sub",
         [id],
     );
-    
+
     if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
+    }
+
+    // Remove from Cognito if linked
+    if (cognitoAuth.isCognitoAuthEnabled() && result.rows[0].email) {
+      await cognitoAuth.deleteUser(result.rows[0].email).catch((err: any) => {
+        logWarn("Failed to delete user from Cognito", { email: result.rows[0].email, error: err.message });
+      });
     }
     
     auditLog({
@@ -947,7 +1017,7 @@ router.post(
 
     const schema = z.object({
       email: z.string().email(),
-      password: z.string().min(6),
+      password: z.string().min(6).optional(),
       full_name: z.string().optional(),
         role: z
           .enum([
@@ -962,15 +1032,71 @@ router.post(
     });
     
     const validated = schema.parse(req.body);
-    const hashedPassword = await bcrypt.hash(validated.password, 10);
-    
-    // Get tenant pool
+    const useCognitoInvite = cognitoAuth.isCognitoAuthEnabled();
+    if (!useCognitoInvite && !validated.password) {
+      return res.status(400).json({ error: "Password is required when Cognito password auth is not enabled" });
+    }
+    const hashedPassword = validated.password
+      ? await bcrypt.hash(validated.password, 10)
+      : await bcrypt.hash("", 10);
+
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
-    
-      const result = await tenantPool.query(
+    let cognitoSub: string | null = null;
+    if (useCognitoInvite) {
+      const existingInTenant = await tenantPool.query(
+        "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
+        [validated.email],
+      );
+      if (existingInTenant.rows.length > 0) {
+        return res.status(409).json({
+          error: "User with this email already exists in this tenant",
+        });
+      }
+
+      const sendInvite = !validated.password;
+      if (sendInvite) {
+        await requestEmailVerification(validated.email);
+      }
+      try {
+        const cognitoResult = await cognitoAuth.createUser(
+          validated.email,
+          validated.password ?? undefined,
+          validated.full_name,
+          sendInvite,
+        );
+        cognitoSub = cognitoResult.cognitoSub;
+      } catch (cognitoError: any) {
+        if (cognitoError.code === "USER_EXISTS") {
+          try {
+            await cognitoAuth.deleteUser(validated.email);
+            logInfo("Removed orphan Cognito user for retry", { email: validated.email });
+            const sendInvite = !validated.password;
+            const cognitoResult = await cognitoAuth.createUser(
+              validated.email,
+              validated.password ?? undefined,
+              validated.full_name,
+              sendInvite,
+            );
+            cognitoSub = cognitoResult.cognitoSub;
+          } catch (retryError: any) {
+            logError("Failed to create Cognito user for tenant after orphan cleanup", retryError, { email: validated.email });
+            return res.status(retryError.statusCode || 500).json({
+              error: retryError.message || "Failed to create user in identity provider",
+            });
+          }
+        } else {
+          logError("Failed to create Cognito user for tenant", cognitoError, { email: validated.email });
+          return res.status(cognitoError.statusCode || 500).json({
+            error: cognitoError.message || "Failed to create user in identity provider",
+          });
+        }
+      }
+    }
+
+    const result = await tenantPool.query(
         `
-      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode)
-      VALUES ($1, $2, $3, $4, true, 'full_access')
+      INSERT INTO users (email, encrypted_password, full_name, role, is_active, loan_access_mode, cognito_sub)
+      VALUES ($1, $2, $3, $4, true, 'full_access', $5)
       RETURNING id, email, full_name, role, is_active, created_at
     `,
         [
@@ -978,10 +1104,10 @@ router.post(
           hashedPassword,
           validated.full_name || null,
           validated.role,
+          cognitoSub,
         ],
       );
     
-    // Get tenant info for logging
     const tenantInfo = await managementPool.query(
         "SELECT name FROM coheus_tenants WHERE id = $1",
         [tenantId],
@@ -1134,7 +1260,8 @@ router.put(
 
 /**
  * DELETE /api/admin/tenants/:tenantId/users/:userId
- * Delete a user from a specific tenant
+ * Permanently delete a tenant user. Removes from tenant DB and Cognito so the email can be reused.
+ * Allowed: platform staff; tenant admins for their own tenant only.
  */
 router.delete(
   "/tenants/:tenantId/users/:userId",
@@ -1144,24 +1271,30 @@ router.delete(
   try {
     const tenantId = req.params.tenantId as string;
     const userId = req.params.userId as string;
-    
-    // Tenant admins can only delete users in their own tenant
-      if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
-      return res.status(403).json({ 
-          error: "Forbidden",
-          message: "You can only delete users in your own organization",
+
+    if (req.userRole === "tenant_admin" && req.tenantId !== tenantId) {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "You can only delete users in your own organization",
       });
     }
     
     const tenantPool = await tenantDbManager.getTenantPool(tenantId);
     
     const result = await tenantPool.query(
-        "DELETE FROM users WHERE id = $1 RETURNING id, email",
+        "DELETE FROM users WHERE id = $1 RETURNING id, email, cognito_sub",
         [userId],
     );
     
     if (result.rows.length === 0) {
         return res.status(404).json({ error: "User not found" });
+      }
+
+      // Remove from Cognito if linked
+      if (cognitoAuth.isCognitoAuthEnabled() && result.rows[0].email) {
+        await cognitoAuth.deleteUser(result.rows[0].email).catch((err: any) => {
+          logWarn("Failed to delete tenant user from Cognito", { email: result.rows[0].email, error: err.message });
+        });
       }
 
       logInfo("Tenant user deleted", {
@@ -2190,7 +2323,7 @@ router.get(
           const connectionsResult = await tenantPool.query(
             `SELECT id, name, los_type, connection_method, sync_enabled, sync_frequency,
                     last_synced_at, last_sync_status, last_sync_error, last_loan_modified_at,
-                    is_active, created_at, updated_at
+                    is_active, insights_auto_enabled, created_at, updated_at
              FROM public.los_connections
              ORDER BY name`
           );
@@ -2262,7 +2395,7 @@ router.put(
   async (req: AuthRequest, res) => {
     try {
       const connectionId = req.params.connectionId as string;
-      const { tenant_id, sync_enabled, sync_frequency } = req.body;
+      const { tenant_id, sync_enabled, sync_frequency, insights_auto_enabled } = req.body;
 
       if (!tenant_id) {
         return res.status(400).json({ error: "tenant_id is required" });
@@ -2293,6 +2426,11 @@ router.put(
         values.push(sync_frequency);
       }
 
+      if (typeof insights_auto_enabled === "boolean") {
+        updates.push(`insights_auto_enabled = $${paramIndex++}`);
+        values.push(insights_auto_enabled);
+      }
+
       if (updates.length === 0) {
         return res.status(400).json({ error: "No valid fields to update" });
       }
@@ -2304,7 +2442,7 @@ router.put(
         `UPDATE public.los_connections 
          SET ${updates.join(", ")} 
          WHERE id = $${paramIndex} 
-         RETURNING id, name, sync_enabled, sync_frequency, last_synced_at, last_sync_status`,
+         RETURNING id, name, sync_enabled, sync_frequency, insights_auto_enabled, last_synced_at, last_sync_status`,
         values
       );
 
@@ -2322,6 +2460,7 @@ router.put(
           tenant_id,
           sync_enabled,
           sync_frequency,
+          insights_auto_enabled,
         },
       }).catch(() => {});
 
@@ -2331,6 +2470,7 @@ router.put(
         tenant_id,
         sync_enabled,
         sync_frequency,
+        insights_auto_enabled,
       });
 
       return res.json({ connection: result.rows[0] });
@@ -2357,13 +2497,14 @@ router.post(
   async (req: AuthRequest, res) => {
     try {
       const connectionId = req.params.connectionId as string;
-      const { tenant_id } = req.body;
+      const { tenant_id, fullSync: requestFullSync } = req.body;
 
       if (!tenant_id) {
         return res.status(400).json({ error: "tenant_id is required" });
       }
 
       const tenantId = tenant_id as string;
+      const fullSync = requestFullSync === true || requestFullSync === "true";
       const tenantPool = await tenantDbManager.getTenantPool(tenantId);
 
       // Get full connection details (need sync state for incremental sync)
@@ -2388,6 +2529,7 @@ router.post(
         const etlService = new EncompassEtlService(tenantPool);
 
         // Determine modifiedFrom for incremental sync (same logic as manual sync in los.ts)
+        // When fullSync is requested (e.g. after adding new field mappings), skip date filter to re-fetch all loans
         let modifiedFrom: Date | undefined;
         const lastLoanModifiedAt = conn.last_loan_modified_at;
         const lastSyncedAt = conn.last_synced_at;
@@ -2403,10 +2545,10 @@ router.post(
           // loans table may not exist
         }
 
-        if (lastLoanModifiedAt && loansCount > 0) {
+        if (!fullSync && lastLoanModifiedAt && loansCount > 0) {
           // Best case: use last_loan_modified_at from a previous successful sync
           modifiedFrom = new Date(lastLoanModifiedAt);
-        } else if (loansCount > 0) {
+        } else if (!fullSync && loansCount > 0) {
           // Fallback: query MAX(last_modified_date) directly from loans table.
           // This handles the case where a previous sync was interrupted before
           // last_loan_modified_at could be written, but loans were already loaded.
@@ -2421,7 +2563,7 @@ router.post(
             // will do full sync
           }
         }
-        // If no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
+        // If fullSync requested, or no modifiedFrom and no existing loans, full sync (modifiedFrom stays undefined)
 
         // Set loanStartDate to 36 months ago (matching Qlik's vLoanStartDate)
         const threeYearsAgo = new Date();
@@ -2444,6 +2586,7 @@ router.post(
         logInfo("Admin trigger sync", {
           connectionId,
           tenantId,
+          fullSync,
           modifiedFrom: modifiedFrom?.toISOString() || "full sync",
           loansCount,
           folders: selectedFolders.length,
@@ -2452,7 +2595,7 @@ router.post(
         // Run sync asynchronously
         etlService
           .syncLoans(tenantId, connectionId, {
-            fullSync: false,
+            fullSync,
             modifiedFrom,
             loanStartDate: threeYearsAgo,
             loanStartDateField: "Fields.Log.MS.Date.Started",
@@ -2468,9 +2611,11 @@ router.post(
 
         return res.json({
           success: true,
-          message: modifiedFrom
-            ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
-            : "Full sync started (no previous sync data)",
+          message: fullSync
+            ? "Full sync started (re-fetching all loans)"
+            : modifiedFrom
+              ? `Incremental sync started (changes since ${modifiedFrom.toISOString()})`
+              : "Full sync started (no previous sync data)",
         });
       } else if (conn.connection_method === "api") {
         const { syncLoansFromAPI } = await import(

@@ -144,7 +144,9 @@ export async function runInsightInvestigator(
   metricDefinitions: string,
   tenantPool: pg.Pool,
   apiKey: string,
-  onStep?: OnInvestigatorStep
+  onStep?: OnInvestigatorStep,
+  marketContext?: string,
+  industryNewsContext?: string
 ): Promise<InsightFinding> {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -157,12 +159,27 @@ export async function runInsightInvestigator(
     `Today: ${todayStr}. Current year: ${now.getFullYear()}.`,
     `\n## Database Schema\n${schemaContext}`,
     `\n## Metric Definitions\n${metricDefinitions}`,
+  ];
+
+  if (marketContext) {
+    userContentParts.push(
+      `\n## Market Rate Context (OBMMIC30YF — 30-Year Fixed Conforming)\n${marketContext}`
+    );
+  }
+
+  if (industryNewsContext) {
+    userContentParts.push(
+      `\n## Industry News Context\n${industryNewsContext}`
+    );
+  }
+
+  userContentParts.push(
     `\n## Investigation Question`,
     `Topic: ${question.topic}`,
     `Hypothesis: ${question.hypothesis}`,
     `Suggested Approach: ${question.approach}`,
-    `\nBegin your investigation. Think about what data you need first.`,
-  ];
+    `\nBegin your investigation. Think about what data you need first.`
+  );
 
   const conversation: LLMMessage[] = [
     { role: "system", content: INVESTIGATOR_PROMPT },

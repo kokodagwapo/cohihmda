@@ -15,6 +15,7 @@ import {
 } from "../../middleware/tenantContext.js";
 import { apiLimiter } from "../../middleware/rateLimiter.js";
 import { logError, logWarn, logInfo, logDebug } from "../../services/logger.js";
+import { createJob, updateProgress, completeJob, failJob } from "../../services/jobManager.js";
 import {
   getHistoricalFalloutRates,
   runFalloutSequencer,
@@ -48,9 +49,13 @@ router.post(
   attachTenantContext,
   apiLimiter,
   async (req: AuthRequest, res) => {
-    const startMs = Date.now();
     const tenantContext = getTenantContext(req);
     const tenantId = tenantContext.tenantId;
+    const job = createJob("predictions", req.userId!, tenantId);
+    res.status(202).json({ jobId: job.id, status: "processing" });
+
+    setImmediate(async () => {
+    const startMs = Date.now();
     logInfo("[Predict] POST /api/predictions started", { tenantId });
     try {
       const tenantPool = tenantContext.tenantPool;
@@ -64,10 +69,11 @@ router.post(
         estimated_closing_date, funding_date, closing_date, current_status_date, ctc_date, uw_final_approval_date, conditional_approval_date,
         loan_officer_id, loan_officer, loan_processor_id, processor, underwriter_id, underwriter, closer_id, closer,
         channel`;
+      const activeWhere = `current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)`;
       const activeLoansQuery = `
         SELECT ${baseCols}
         FROM public.loans
-        WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+        WHERE ${activeWhere}
         ORDER BY application_date DESC
         LIMIT 5000`;
       let activeLoans: any[];
@@ -75,7 +81,7 @@ router.post(
         const withAll = await tenantPool.query(
           `SELECT ${baseCols}, market_rate, market_rate_at_lock, market_change_delta
            FROM public.loans
-           WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+           WHERE ${activeWhere}
            ORDER BY application_date DESC
            LIMIT 5000`
         );
@@ -86,7 +92,7 @@ router.post(
             const withDelta = await tenantPool.query(
               `SELECT ${baseCols}, market_change_delta
                FROM public.loans
-               WHERE current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+               WHERE ${activeWhere}
                ORDER BY application_date DESC
                LIMIT 5000`
             );
@@ -109,8 +115,10 @@ router.post(
         activeLoans = activeLoans.filter((l: any) => loanIdSet.has(l.loan_id));
       }
 
+      updateProgress(job.id, 20, "Loading active loans...");
+
       if (activeLoans.length === 0) {
-        return res.json({
+        return completeJob(job.id, {
           predictions: [],
           bucketedLoans: [],
           bucketSummary: { high: 0, medium: 0, low: 0 },
@@ -129,8 +137,7 @@ router.post(
         });
       }
 
-      // Numeric outcome profiles: ensure current and prior year are computed (reuses 2023/2024 if present).
-      // TODO: Job scheduling for numeric outcome profile derivation still needs to be done (e.g. nightly refresh).
+      updateProgress(job.id, 30, "Computing outcome profiles...");
       await runNumericOutcomeProfileDerivation(tenantPool).catch((e) => {
         logError("Numeric outcome profile derivation failed in Predict", e, {});
       });
@@ -217,6 +224,33 @@ router.post(
         }
       }
 
+      // Persist market_rate and market_rate_at_lock to loans (migration 043) so insights and other readers see market data.
+      const withRates = activeLoans.filter((l: any) => l.loan_id != null);
+      if (withRates.length > 0) {
+        try {
+          const todayStr = today.toISOString().split("T")[0];
+          const todayRate = await getMarketRateForDate(todayStr);
+          const loanIds = withRates.map((l: any) => l.loan_id);
+          const marketRates = withRates.map(
+            () => (todayRate != null && !isNaN(todayRate) ? todayRate : null)
+          );
+          const marketRatesAtLock = withRates.map((l: any) => {
+            const v = l.market_rate_at_lock;
+            return v != null && !isNaN(Number(v)) ? Number(v) : null;
+          });
+          await tenantPool.query(
+            `UPDATE public.loans AS l SET
+               market_rate = COALESCE(v.mr, l.market_rate),
+               market_rate_at_lock = COALESCE(v.mr_lock, l.market_rate_at_lock)
+             FROM (SELECT unnest($1::text[]) AS loan_id, unnest($2::decimal[]) AS mr, unnest($3::decimal[]) AS mr_lock) AS v
+             WHERE l.loan_id = v.loan_id`,
+            [loanIds, marketRates, marketRatesAtLock]
+          );
+        } catch (e: any) {
+          if (e?.code !== "42703") logWarn("[Predict] Persist market_rate / market_rate_at_lock failed", { message: e?.message });
+        }
+      }
+
       // LO pullthrough % by role (from historical loans) so MLO Fallout Prone and LO Pullthrough show on cards.
       let loPullthroughPctByRole = new Map<string, number>();
       try {
@@ -243,13 +277,13 @@ router.post(
 
       const rates = await getHistoricalFalloutRates(tenantPool);
 
-      // Job D: Sequential scoring (blended numeric similarity) and persist to loan_predictions
+      updateProgress(job.id, 60, "Running fallout sequencer...");
       const seq = await runFalloutSequencer(tenantPool, activeLoans, {
         historicalDeniedRate: rates.deniedRate,
         historicalWithdrawnRate: rates.withdrawnRate,
       });
 
-      // Read back from loan_predictions to build API response (include reason_codes for risk score)
+      updateProgress(job.id, 80, "Building prediction results...");
       const loanIdsArr = activeLoans.map((l: any) => l.loan_id);
       const predResult = await tenantPool.query(
         `SELECT loan_id, predicted_outcome, confidence, projected_status, reason_codes
@@ -596,19 +630,12 @@ router.post(
         },
       };
 
-      res.setHeader("Content-Type", "application/json");
-      res.json(slimResult);
+      completeJob(job.id, slimResult);
     } catch (error: any) {
       logError("Error running prediction pipeline", error, { userId: req.userId });
-
-      if (handleDatabaseError(error, res, "Failed to predict loan outcomes")) {
-        return;
-      }
-
-      res
-        .status(500)
-        .json({ error: error.message || "Failed to predict loan outcomes" });
+      failJob(job.id, error.message || "Failed to predict loan outcomes");
     }
+    }); // end setImmediate
   }
 );
 
@@ -787,17 +814,20 @@ router.get(
       LEFT JOIN public.loans l ON l.loan_id = lp.loan_id
     `;
 
+      const activeWhere = `l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND l.application_date::text != '' AND (l.is_archived IS DISTINCT FROM TRUE)`;
       if (dateRange) {
         query += `
-        WHERE l.current_loan_status = 'Active Loan'
-          AND l.application_date IS NOT NULL
-          AND l.application_date::text != ''
+        WHERE ${activeWhere}
           AND l.application_date >= $${paramIndex}::date
           AND l.application_date < $${paramIndex + 1}::date
       `;
         params.push(dateRange.startDate.toISOString().split("T")[0]);
         params.push(dateRange.endDate.toISOString().split("T")[0]);
         paramIndex += 2;
+      } else {
+        query += `
+        WHERE ${activeWhere}
+      `;
       }
 
       query += ` LIMIT $${paramIndex}`;

@@ -78,14 +78,15 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
     id: "active_loans",
     name: "Active Loans",
     description:
-      "Count of loans where current_loan_status = 'Active Loan' and application_date is not empty. This is the current snapshot, not filtered by date range.",
+      "Count of loans where current_loan_status = 'Active Loan', application_date is not empty, and not archived. This is the current snapshot, not filtered by date range.",
     category: "status",
     formula:
-      "current_loan_status = 'Active Loan' AND application_date IS NOT NULL",
+      "current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE)",
     sqlQuery: `COUNT(CASE 
       WHEN l.current_loan_status = 'Active Loan' 
       AND l.application_date IS NOT NULL 
       AND l.application_date::text != ''
+      AND (l.is_archived IS DISTINCT FROM TRUE)
       THEN 1 
     END)`,
     dependencies: [],
@@ -250,6 +251,7 @@ export const METRICS_CATALOG: Record<string, MetricDefinition> = {
       WHEN l.current_loan_status = 'Active Loan' 
       AND l.application_date IS NOT NULL 
       AND l.application_date::text != ''
+      AND (l.is_archived IS DISTINCT FROM TRUE)
       THEN COALESCE(l.loan_amount, 0) 
       ELSE 0
     END)`,
@@ -1520,10 +1522,10 @@ function buildWhereClause(
   }
 
   // KPI-specific filters - match exact logic from METRICS_CATALOG
-  // Active Loans: current_loan_status = 'Active Loan' AND application_date IS NOT NULL
+  // Active Loans: current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND not archived
   if (filters.active_loan_filter) {
     clauses.push(
-      `(l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND l.application_date::text != '')`
+      `(l.current_loan_status = 'Active Loan' AND l.application_date IS NOT NULL AND l.application_date::text != '' AND (l.is_archived IS DISTINCT FROM TRUE))`
     );
   }
 
@@ -1668,7 +1670,7 @@ export async function queryMetric(
           COUNT(CASE WHEN current_loan_status IS NOT NULL THEN 1 END) as loans_with_current_status,
           COUNT(CASE WHEN current_loan_status = 'Active Loan' THEN 1 END) as loans_with_active_loan_status,
           COUNT(CASE WHEN application_date IS NOT NULL THEN 1 END) as loans_with_application_date,
-          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL THEN 1 END) as active_loans_matching,
+          COUNT(CASE WHEN current_loan_status = 'Active Loan' AND application_date IS NOT NULL AND (is_archived IS DISTINCT FROM TRUE) THEN 1 END) as active_loans_matching,
           COUNT(DISTINCT current_loan_status) as distinct_statuses,
           array_agg(DISTINCT current_loan_status) FILTER (WHERE current_loan_status IS NOT NULL) as all_status_values
           FROM public.loans`;

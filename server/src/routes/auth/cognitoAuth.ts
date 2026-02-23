@@ -18,6 +18,7 @@ import {
   getCognitoConfig,
   type CognitoUserInfo,
 } from "../../services/cognito/cognitoService.js";
+import { isCognitoAuthEnabled } from "../../services/cognito/cognitoAuthService.js";
 import { auditLog, createSession } from "../../services/auditLogger.js";
 import { logError, logInfo, logDebug, logWarn } from "../../services/logger.js";
 import { authLimiter } from "../../middleware/rateLimiter.js";
@@ -120,6 +121,8 @@ router.get("/config", (req, res) => {
     isConfigured: config.isConfigured,
     domain: config.domain,
     region: config.region,
+    /** When true, admin user creation should not ask for a password; user receives an email with sign-in instructions. */
+    useInviteFlow: isCognitoAuthEnabled(),
   });
 });
 
@@ -341,67 +344,75 @@ router.get("/lookup-tenant", authLimiter, async (req, res) => {
       return res.status(400).json({ error: "Invalid email format" });
     }
 
-    const mgmtPool = getManagementPool();
-
-    // Check tenant identity providers for matching email domain
-    const result = await mgmtPool.query(
-      `
-      SELECT 
-        t.id as tenant_id,
-        t.slug as tenant_slug,
-        t.name as tenant_name,
-        t.auth_config,
-        tip.provider_type,
-        tip.cognito_idp_name,
-        tip.idp_type
-      FROM coheus_tenants t
-      JOIN tenant_identity_providers tip ON tip.tenant_id = t.id
-      WHERE t.status = 'active'
-        AND tip.is_enabled = true
-        AND $1 = ANY(tip.email_domains)
-      ORDER BY tip.is_primary DESC
-      LIMIT 1
-    `,
-      [domain],
-    );
-
-    if (result.rows.length === 0) {
-      // No tenant-level SSO — check if this is a platform SSO domain
-      if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
-        const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
-        logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
-        return res.json({
-          sso_available: true,
-          tenant_slug: null,
-          tenant_name: "Cohi Platform",
-          idp_name: platformIdpName || undefined, // If not set, Cognito shows hosted UI with all IdPs
-          allow_password: true, // Platform users can also use password
-          auth_mode: "hybrid",
-        });
-      }
-
-      // No SSO configured for this domain, allow email/password
-      return res.json({
-        sso_available: false,
-        allow_password: true,
+    // Try DB lookup, but fall back gracefully if DB is unreachable
+    let dbResult: any = null;
+    try {
+      const mgmtPool = getManagementPool();
+      dbResult = await mgmtPool.query(
+        `
+        SELECT 
+          t.id as tenant_id,
+          t.slug as tenant_slug,
+          t.name as tenant_name,
+          t.auth_config,
+          tip.provider_type,
+          tip.cognito_idp_name,
+          tip.idp_type
+        FROM coheus_tenants t
+        JOIN tenant_identity_providers tip ON tip.tenant_id = t.id
+        WHERE t.status = 'active'
+          AND tip.is_enabled = true
+          AND $1 = ANY(tip.email_domains)
+        ORDER BY tip.is_primary DESC
+        LIMIT 1
+      `,
+        [domain],
+      );
+    } catch (dbError: any) {
+      logWarn("[CognitoAuth] DB unavailable during lookup-tenant, falling back to domain check", {
+        domain,
+        error: dbError.message,
       });
     }
 
-    const row = result.rows[0];
-    const authConfig = row.auth_config || { mode: "hybrid" };
+    // If DB returned a tenant match, use it
+    if (dbResult && dbResult.rows.length > 0) {
+      const row = dbResult.rows[0];
+      const authConfig = row.auth_config || { mode: "hybrid" };
 
+      return res.json({
+        tenant_id: row.tenant_id,
+        tenant_slug: row.tenant_slug,
+        tenant_name: row.tenant_name,
+        sso_available: true,
+        sso_method: row.provider_type,
+        idp_name: row.cognito_idp_name,
+        idp_type: row.idp_type,
+        allow_password:
+          authConfig.mode !== "sso_only" &&
+          authConfig.allow_email_password !== false,
+        auth_mode: authConfig.mode,
+      });
+    }
+
+    // No tenant-level SSO (or DB unavailable) — check platform JIT domains
+    if (PLATFORM_JIT_DOMAINS.includes(domain) && isCognitoConfigured()) {
+      const platformIdpName = process.env.PLATFORM_SSO_IDP_NAME || "";
+      logInfo("[CognitoAuth] Platform SSO domain detected", { domain, platformIdpName });
+      return res.json({
+        sso_available: true,
+        tenant_slug: null,
+        tenant_name: "Cohi Platform",
+        idp_name: platformIdpName || undefined,
+        allow_password: true,
+        auth_mode: "hybrid",
+      });
+    }
+
+    // No SSO configured for this domain
     return res.json({
-      tenant_id: row.tenant_id,
-      tenant_slug: row.tenant_slug,
-      tenant_name: row.tenant_name,
-      sso_available: true,
-      sso_method: row.provider_type,
-      idp_name: row.cognito_idp_name,
-      idp_type: row.idp_type,
-      allow_password:
-        authConfig.mode !== "sso_only" &&
-        authConfig.allow_email_password !== false,
-      auth_mode: authConfig.mode,
+      sso_available: false,
+      allow_password: true,
     });
   } catch (error: any) {
     logError("[CognitoAuth] Lookup tenant error", error, {});
@@ -507,17 +518,17 @@ async function findOrCreateSsoUser(
     if (PLATFORM_JIT_DOMAINS.includes(emailDomain)) {
       logInfo("[CognitoAuth] JIT provisioning new platform user as super_admin", { email, domain: emailDomain });
       
-      // Create new platform user with 'super_admin' role - full access to all tenants and features
       const newPlatformUser = await mgmtPool.query(
-        `INSERT INTO coheus_users (email, full_name, role, is_active, encrypted_password, last_login_at)
-         VALUES ($1, $2, 'super_admin', true, $3, NOW())
+        `INSERT INTO coheus_users (email, full_name, role, is_active, encrypted_password, cognito_sub, last_login_at)
+         VALUES ($1, $2, 'super_admin', true, $3, $4, NOW())
          RETURNING id, email, full_name, role, is_active`,
         [
           email,
           userInfo.fullName ||
             `${userInfo.firstName || ""} ${userInfo.lastName || ""}`.trim() ||
             email.split("@")[0],
-          crypto.randomBytes(32).toString("hex"), // Random password (not usable - SSO only)
+          crypto.randomBytes(32).toString("hex"),
+          userInfo.sub || null,
         ],
       );
 
@@ -562,10 +573,9 @@ async function findOrCreateSsoUser(
         return { user: null, tenantSlug: null, isSuperAdmin: false };
       }
 
-      // Update last login and SSO info
       await tenantPool.query(
-        `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
-        [user.id],
+        `UPDATE users SET last_login_at = NOW(), cognito_sub = COALESCE(cognito_sub, $2) WHERE id = $1`,
+        [user.id, userInfo.sub || null],
       );
 
       await tenantPool.end();
@@ -584,8 +594,8 @@ async function findOrCreateSsoUser(
     // JIT provisioning - create new user
     const newUserResult = await tenantPool.query(
       `
-      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id)
-      VALUES ($1, $2, $3, $4, true, $5)
+      INSERT INTO users (email, full_name, role, encrypted_password, is_active, encompass_user_id, cognito_sub)
+      VALUES ($1, $2, $3, $4, true, $5, $6)
       RETURNING id, email, full_name, role, is_active, encompass_user_id
     `,
       [
@@ -593,9 +603,10 @@ async function findOrCreateSsoUser(
         userInfo.fullName ||
           `${userInfo.firstName || ""} ${userInfo.lastName || ""}`.trim() ||
           null,
-        userInfo.role || "user", // Default role from IdP or 'user'
-        crypto.randomBytes(32).toString("hex"), // Random password (not usable)
+        userInfo.role || "user",
+        crypto.randomBytes(32).toString("hex"),
         userInfo.encompassUserId || null,
+        userInfo.sub || null,
       ],
     );
 

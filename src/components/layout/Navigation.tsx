@@ -3,7 +3,7 @@ import { CoheusLogo } from "@/components/ui/CoheusLogo";
 import { ThemeIconToggle } from "@/components/theme-icon-toggle";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3, FlaskConical } from "lucide-react";
+import { Menu, X, TrendingUp, LayoutGrid, LayoutPanelLeft, ChevronDown, Zap, Newspaper, Trophy, Target, BarChart3, Filter, ClipboardList, ArrowLeftRight, Users, Settings, Calculator, LineChart, Shield, Building2, Grid3X3, FlaskConical, HelpCircle } from "lucide-react";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,6 +13,7 @@ import { ChannelSelector } from "@/components/dashboard/ChannelSelector";
 import { TenantSelector } from "@/components/dashboard/TenantSelector";
 import { useChannelStore } from "@/stores/channelStore";
 import { useTenantStore } from "@/stores/tenantStore";
+import { WhatsNewButton } from "@/components/tutorial/WhatsNewButton";
 
 export interface NavigationProps {
   onMenuToggle?: () => void;
@@ -1069,6 +1070,22 @@ export function Navigation({ onMenuToggle, menuOpen, onSectionClick }: Navigatio
                   compact={true}
                   useChannelGroups={true}
                 />
+              </div>
+            )}
+
+            {/* Help & What's New */}
+            {isAuthenticated && (
+              <div className="hidden lg:flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg"
+                  onClick={() => navigate('/help')}
+                  aria-label="Help center"
+                >
+                  <HelpCircle className="h-4 w-4" />
+                </Button>
+                <WhatsNewButton />
               </div>
             )}
 
