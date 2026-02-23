@@ -1435,23 +1435,14 @@ function formatDateValue(value: string | Date): string {
     const date = value instanceof Date ? value : new Date(value);
     if (isNaN(date.getTime())) return String(value);
 
-    const day = date.getDate();
-    const month = date.toLocaleDateString("en-US", { month: "short" });
-    const year = date.getFullYear();
+    const day = date.getUTCDate();
+    const month = date.toLocaleDateString("en-US", {
+      month: "short",
+      timeZone: "UTC",
+    });
+    const year = date.getUTCFullYear();
 
-    const dayOfWeek = date.getDay();
-    const isLikelyWeekStart =
-      (dayOfWeek === 0 || dayOfWeek === 1) &&
-      [1, 2, 7, 8, 14, 15, 21, 22, 28, 29].includes(day);
-    const isFirstOfMonth = day === 1;
-
-    if (isFirstOfMonth) {
-      return `${month} ${year}`;
-    } else if (isLikelyWeekStart) {
-      return `Week of ${month} ${day}`;
-    } else {
-      return `${month} ${day}`;
-    }
+    return `${month} ${day}, ${year}`;
   } catch {
     return String(value);
   }
