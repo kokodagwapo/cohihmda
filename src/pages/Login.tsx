@@ -284,6 +284,7 @@ export const Login = () => {
         user?: any;
         token?: string;
         refreshToken?: string;
+        cognitoAccessToken?: string;
         mfaRequired?: boolean;
         mfaSetupRequired?: boolean;
         mfaSetupRecommended?: boolean;
@@ -321,6 +322,9 @@ export const Login = () => {
         if (response.refreshToken) {
           localStorage.setItem('refresh_token', response.refreshToken);
         }
+      }
+      if (response.cognitoAccessToken) {
+        localStorage.setItem('cognito_access_token', response.cognitoAccessToken);
       }
 
       // With OPTIONAL MFA, Cognito authenticates but MFA may not be set up yet.
