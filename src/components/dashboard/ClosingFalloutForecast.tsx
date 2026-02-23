@@ -938,6 +938,7 @@ export const ClosingFalloutForecast = ({
   const { user } = useAuth();
   const isPlatformAdmin = user?.role === "super_admin" || user?.role === "platform_admin";
   const forecastRef = useRef<HTMLDivElement>(null);
+  const criticalLoansSectionRef = useRef<HTMLElement>(null);
   // ============================================================================
   // TESTING FLAG: Signal Strength Buckets Table
   // Set to true to display the loan signal strength buckets table
@@ -2535,6 +2536,12 @@ export const ClosingFalloutForecast = ({
     if (criticalOutcomeFilter === "all") return criticalLoanCards;
     return criticalLoanCards.filter((loan) => {
       switch (criticalOutcomeFilter) {
+        case "high-risk": {
+          const score = loan.riskScore ?? 0;
+          if (score < 80) return false;
+          const outcome = loan.riskSummary?.predictedOutcome;
+          return outcome === "withdraw" || outcome === "deny";
+        }
         case "likely-withdraw":
           if (loan.riskSummary?.predictedOutcome === "withdraw") return true;
           return criticalPredictionMap.get(loan.id) === "withdraw";
@@ -2590,6 +2597,12 @@ export const ClosingFalloutForecast = ({
   const criticalTabCounts = useMemo(() => {
     return {
       all: criticalLoanCards.length,
+      "high-risk": criticalLoanCards.filter((l) => {
+        const score = l.riskScore ?? 0;
+        if (score < 80) return false;
+        const outcome = l.riskSummary?.predictedOutcome;
+        return outcome === "withdraw" || outcome === "deny";
+      }).length,
       "likely-withdraw": criticalLoanCards.filter((l) => {
         if (l.riskSummary?.predictedOutcome === "withdraw") return true;
         return criticalPredictionMap.get(l.id) === "withdraw";
@@ -3310,24 +3323,36 @@ export const ClosingFalloutForecast = ({
     return aggregateLoanOfficers(cards);
   }, [loansRaw, deferredPeriod]);
 
-  const handleMetricClick = async (label: string) => {
-    await ensureLoansLoaded(); // Load full set if needed before opening modal
+  const scrollToCriticalLoans = (tab: TabType) => {
+    setInsightsTab("critical");
+    setCriticalOutcomeFilter(tab);
+    requestAnimationFrame(() => {
+      criticalLoansSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
 
-    // Outcome list modals - show predicted loans
+  const handleMetricClick = async (label: string) => {
+    await ensureLoansLoaded();
+
     if (label === "Predicted Fallout") {
-      setOutcomeModalType("fallout");
+      scrollToCriticalLoans("all");
+      return;
+    }
+    if (label === "High Risk") {
+      scrollToCriticalLoans("high-risk");
       return;
     }
     if (label === "Likely Withdraw") {
-      setOutcomeModalType("withdraw");
+      scrollToCriticalLoans("likely-withdraw");
       return;
     }
     if (label === "Likely Decline") {
-      setOutcomeModalType("decline");
+      scrollToCriticalLoans("likely-decline");
       return;
     }
     if (label === "Likely Close Late") {
-      return; // No modal for Likely Close Late
+      scrollToCriticalLoans("likely-close-late");
+      return;
     }
 
     // Metric drilldown modal
@@ -4120,6 +4145,7 @@ export const ClosingFalloutForecast = ({
 
         {/* Critical Loans and Top Loan Officers Section - width constrained so table tab cannot expand */}
         <section
+          ref={criticalLoansSectionRef}
           className={`mt-6 md:mt-12 md:rounded-2xl md:border overflow-hidden lg:min-h-[480px] min-w-0 max-w-full w-full box-border ${
             isDarkMode
               ? "bg-transparent md:bg-slate-900/50 md:border-white/10"
@@ -4235,6 +4261,12 @@ export const ClosingFalloutForecast = ({
                           id: "all",
                           label: "All Loans",
                           shortLabel: "All",
+                          color: "darkred",
+                        },
+                        {
+                          id: "high-risk",
+                          label: "High Risk",
+                          shortLabel: "High Risk",
                           color: "darkred",
                         },
                         {

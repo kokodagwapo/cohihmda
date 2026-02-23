@@ -1,20 +1,21 @@
 /**
  * Sentry Error Tracking Setup
- * Initialize Sentry for error monitoring and performance tracking
+ * Initialize Sentry for error monitoring and performance tracking.
+ * Uses Sentry v8+ API: expressIntegration() and setupExpressErrorHandler().
  */
 
-// @ts-nocheck
 import * as Sentry from '@sentry/node';
-import { Request, Response, NextFunction } from 'express';
+import type { Express } from 'express';
 
 let sentryInitialized = false;
 
 /**
- * Initialize Sentry if DSN is configured
+ * Initialize Sentry if DSN is configured.
+ * Call this before any other app setup.
  */
-export function initSentry() {
+export function initSentry(): void {
   const dsn = process.env.SENTRY_DSN;
-  
+
   if (!dsn) {
     console.log('ℹ️  Sentry DSN not configured, error tracking disabled');
     return;
@@ -24,12 +25,9 @@ export function initSentry() {
     Sentry.init({
       dsn,
       environment: process.env.NODE_ENV || 'development',
-      tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0, // 10% in prod, 100% in dev
+      integrations: [Sentry.expressIntegration()],
+      tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
       profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-      integrations: (() => {
-        const HttpIntegration = (Sentry as any).Integrations?.Http;
-        return HttpIntegration ? [new HttpIntegration({ tracing: true })] : [];
-      })(),
     });
 
     sentryInitialized = true;
@@ -40,46 +38,25 @@ export function initSentry() {
 }
 
 /**
- * Sentry request handler middleware
- * Must be added before other middleware
+ * Register the Sentry Express error handler. Call this after all routes are set up,
+ * but before any other error-handling middleware.
+ * Skips 4xx client errors (only 5xx and unhandled are sent to Sentry).
  */
-export function sentryRequestHandler(req: Request, res: Response, next: NextFunction) {
-  if (sentryInitialized && Sentry.Handlers) {
-    return Sentry.Handlers.requestHandler()(req, res, next);
+export function setupSentryErrorHandler(app: Express): void {
+  if (!sentryInitialized) {
+    return;
   }
-  next();
-}
 
-/**
- * Sentry tracing handler middleware
- * Must be added before routes
- */
-export function sentryTracingHandler(req: Request, res: Response, next: NextFunction) {
-  if (sentryInitialized && Sentry.Handlers && Sentry.Handlers.tracingHandler) {
-    const handler = Sentry.Handlers.tracingHandler();
-    if (handler) {
-      return handler(req, res, next);
-    }
-  }
-  next();
+  Sentry.setupExpressErrorHandler(app, {
+    shouldHandleError(error) {
+      const status =
+        error.status ?? error.statusCode ?? error.status_code;
+      const code = status != null ? Number(status) : 500;
+      // Don't track 4xx client errors
+      if (code >= 400 && code < 500) {
+        return false;
+      }
+      return true;
+    },
+  });
 }
-
-/**
- * Sentry error handler middleware
- * Must be added after routes but before error handlers
- */
-export function sentryErrorHandler(error: any, req: Request, res: Response, next: NextFunction) {
-  if (sentryInitialized && Sentry.Handlers) {
-    return Sentry.Handlers.errorHandler({
-      shouldHandleError(error) {
-        // Don't track 4xx errors (client errors)
-        if (error.status && error.status >= 400 && error.status < 500) {
-          return false;
-        }
-        return true;
-      },
-    })(error, req, res, next);
-  }
-  next(error);
-}
-

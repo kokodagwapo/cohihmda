@@ -543,8 +543,8 @@ router.post(
           interestLockVsMarketSignalStrength: calcInterestLockVsMarketSignal(loan) ?? undefined,
           marketChangeDeltaSignal: calcMarketChangeDeltaSignal(marketChangeDelta) ?? undefined,
           activeDays: activeDays ?? undefined,
-          market_rate: loan.market_rate ?? undefined,
-          market_rate_at_lock: loan.market_rate_at_lock ?? undefined,
+          market_rate: loan.market_rate != null ? Number(loan.market_rate) : undefined,
+          market_rate_at_lock: loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock) : undefined,
           lockMarketRate: loan.market_rate_at_lock != null ? Number(loan.market_rate_at_lock) : loan.interest_rate != null ? Number(loan.interest_rate) : undefined,
           marketChangeDelta: marketChangeDelta != null ? marketChangeDelta : null,
           riskSummary: {
@@ -1331,13 +1331,13 @@ router.get(
             mergedLoanData.processorPullthroughSignalStrength ?? null,
           loPullthroughSignal:
             mergedLoanData.loPullthroughSignal ?? loPullthroughSignal,
-          market_rate: mergedLoanData.market_rate ?? null,
-          market_rate_at_lock: mergedLoanData.market_rate_at_lock ?? null,
+          market_rate: mergedLoanData.market_rate != null ? Number(mergedLoanData.market_rate) : null,
+          market_rate_at_lock: mergedLoanData.market_rate_at_lock != null ? Number(mergedLoanData.market_rate_at_lock) : null,
           rateReferenceType: mergedLoanData.rateReferenceType ??
             ((mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null ? "lock" : "application"),
-          rateAtApplicationDate: mergedLoanData.rateAtApplicationDate ?? null,
+          rateAtApplicationDate: mergedLoanData.rateAtApplicationDate != null ? Number(mergedLoanData.rateAtApplicationDate) : null,
           lockMarketRate:
-            mergedLoanData.lockMarketRate ??
+            mergedLoanData.lockMarketRate != null ? Number(mergedLoanData.lockMarketRate) :
             ((mergedLoanData.lock_date ?? mergedLoanData.lockDate) != null
               ? (mergedLoanData.market_rate_at_lock != null
                   ? Number(mergedLoanData.market_rate_at_lock)
@@ -1346,10 +1346,10 @@ router.get(
                   ? Number(mergedLoanData.rateAtApplicationDate)
                   : null)),
           marketChangeDelta:
-            mergedLoanData.marketChangeDelta ?? calculateMarketChangeDelta(mergedLoanData),
+            mergedLoanData.marketChangeDelta != null ? Number(mergedLoanData.marketChangeDelta) : calculateMarketChangeDelta(mergedLoanData),
           marketChangeDeltaSignal:
             mergedLoanData.marketChangeDeltaSignal ??
-            calculateMarketChangeDeltaSignal(mergedLoanData.marketChangeDelta ?? calculateMarketChangeDelta(mergedLoanData)),
+            calculateMarketChangeDeltaSignal(mergedLoanData.marketChangeDelta != null ? Number(mergedLoanData.marketChangeDelta) : calculateMarketChangeDelta(mergedLoanData)),
           bucket: riskBucket,
           riskSummary: storedRiskSummary,
           closeOnTimeProbability: mergedLoanData.closeOnTimeProbability ?? null,

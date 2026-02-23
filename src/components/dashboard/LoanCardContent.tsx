@@ -554,13 +554,13 @@ export const LoanCardContent = memo(
                     {loan.rateReferenceType === "application" ? "Rate at application" : "Market rate at lock"}
                   </p>
                   {loan.lockMarketRate != null &&
-                  !Number.isNaN(loan.lockMarketRate) ? (
+                  !Number.isNaN(Number(loan.lockMarketRate)) ? (
                     <p
                       className={`font-medium text-sm ${
                         isDarkMode ? "text-slate-100" : "text-slate-900"
                       }`}
                     >
-                      {loan.lockMarketRate.toFixed(3)}%
+                      {Number(loan.lockMarketRate).toFixed(3)}%
                     </p>
                   ) : (
                     <p
@@ -572,7 +572,9 @@ export const LoanCardContent = memo(
                     </p>
                   )}
                 </div>
-                {loan.marketRate != null && loan.marketRate !== undefined && (
+                {loan.marketRate != null &&
+                  loan.marketRate !== undefined &&
+                  !Number.isNaN(Number(loan.marketRate)) && (
                   <div>
                     <p
                       className={`text-[9px] uppercase tracking-wider mb-1 ${
@@ -586,7 +588,7 @@ export const LoanCardContent = memo(
                         isDarkMode ? "text-slate-100" : "text-slate-900"
                       }`}
                     >
-                      {loan.marketRate.toFixed(3)}%
+                      {Number(loan.marketRate).toFixed(3)}%
                     </p>
                   </div>
                 )}
@@ -600,20 +602,20 @@ export const LoanCardContent = memo(
                   </p>
                   {loan.marketChangeDelta != null &&
                   loan.marketChangeDelta !== undefined &&
-                  !Number.isNaN(loan.marketChangeDelta) ? (
+                  !Number.isNaN(Number(loan.marketChangeDelta)) ? (
                     <p
                       className={`font-medium text-sm ${
-                        loan.marketChangeDelta > 0.2
+                        Number(loan.marketChangeDelta) > 0.2
                           ? "text-rose-600 dark:text-rose-400"
-                          : loan.marketChangeDelta < -0.1
+                          : Number(loan.marketChangeDelta) < -0.1
                           ? "text-emerald-600 dark:text-emerald-400"
                           : isDarkMode
                           ? "text-slate-100"
                           : "text-slate-900"
                       }`}
                     >
-                      {loan.marketChangeDelta > 0 ? "+" : ""}
-                      {loan.marketChangeDelta.toFixed(3)}%
+                      {Number(loan.marketChangeDelta) > 0 ? "+" : ""}
+                      {Number(loan.marketChangeDelta).toFixed(3)}%
                     </p>
                   ) : (
                     <p

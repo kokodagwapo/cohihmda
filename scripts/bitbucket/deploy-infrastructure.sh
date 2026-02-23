@@ -9,6 +9,10 @@
 #   - AWS_REGION               - AWS region (repository variable, e.g., us-east-2)
 #   - CF_STACK_BACKEND         - CloudFormation stack name for backend (e.g., coheus-dev-backend)
 #
+# Optional (defaults shown):
+#   - CF_STACK_WAF_CLOUDFRONT  - WAF/CloudFront stack (e.g., coheus-dev-waf-cloudfront)
+#   - CF_STACK_MONITORING      - Monitoring stack (e.g., coheus-dev-monitoring)
+#
 # OIDC Environment (set by pipeline setup-oidc script):
 #   - AWS_WEB_IDENTITY_TOKEN_FILE - Path to OIDC token
 #   - AWS_ROLE_SESSION_NAME    - Session name for assume role
@@ -150,6 +154,47 @@ get_stack_parameters() {
             result+=","
         fi
         result+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
+    done
+    result+="]"
+    echo "$result"
+}
+
+# Get stack parameters but only for keys that exist in the template.
+# Use this when the template may have been updated (e.g. parameter renamed)
+# so we do not pass obsolete parameter names (e.g. SlackWebhookUrl -> TeamsWebhookUrl).
+get_stack_parameters_for_template() {
+    local stack_name=$1
+    local template_file=$2
+    
+    echo "Getting parameters from stack $stack_name (only keys present in template)..." >&2
+    
+    local template_keys
+    template_keys=$(aws cloudformation get-template-summary \
+        --template-body "file://$template_file" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || { echo "[]"; return; }
+    
+    local stack_keys
+    stack_keys=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || { echo "[]"; return; }
+    
+    local result="["
+    local first=true
+    for key in $template_keys; do
+        # Only pass UsePreviousValue for keys that exist in the current stack
+        # -w matches whole words, -F treats key as a fixed string (not regex)
+        if echo "$stack_keys" | grep -qwF "${key}"; then
+            if [ "$first" = true ]; then
+                first=false
+            else
+                result+=","
+            fi
+            result+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
+        fi
     done
     result+="]"
     echo "$result"
@@ -454,10 +499,130 @@ deploy_waf_cloudfront_stack() {
 }
 
 # ============================================================================
+# Deploy Monitoring Stack (CloudWatch, alarms, SNS, Teams webhook Lambda)
+# ============================================================================
+deploy_monitoring_stack() {
+    echo ""
+    echo "========================================="
+    echo "Deploying Monitoring CloudFormation Stack"
+    echo "========================================="
+
+    local stack_name="${CF_STACK_MONITORING:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-monitoring}"
+    local template_file="infrastructure/cloudformation/coheus_monitoring_stack.yaml"
+
+    echo "Stack name: $stack_name"
+    echo "Template: $template_file"
+    echo "Region: $AWS_DEFAULT_REGION"
+    echo ""
+
+    if ! aws cloudformation describe-stacks --stack-name "$stack_name" --region "$AWS_DEFAULT_REGION" > /dev/null 2>&1; then
+        echo "WARNING: Monitoring stack '$stack_name' does not exist."
+        echo "Skipping monitoring deployment. For initial creation, run scripts/deploy/04-deploy-monitoring.ps1"
+        return 0
+    fi
+
+    STACK_STATUS=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].StackStatus' \
+        --output text)
+
+    echo "Current stack status: $STACK_STATUS"
+
+    if [[ ! "$STACK_STATUS" =~ ^(CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)$ ]]; then
+        echo "WARNING: Monitoring stack is not in a stable state ($STACK_STATUS). Skipping."
+        return 0
+    fi
+
+    CHANGE_SET_NAME="pipeline-monitoring-$(date +%Y%m%d%H%M%S)"
+    echo "Creating change set: $CHANGE_SET_NAME"
+
+    aws cloudformation create-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --template-body "file://$template_file" \
+        --no-use-previous-template \
+        --capabilities CAPABILITY_NAMED_IAM \
+        --parameters "$(get_stack_parameters_for_template "$stack_name" "$template_file")" \
+        --region "$AWS_DEFAULT_REGION" \
+        --output json > /dev/null
+
+    echo "Waiting for change set to be created..."
+    aws cloudformation wait change-set-create-complete \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION" 2>/dev/null || true
+
+    CHANGE_SET_STATUS=$(aws cloudformation describe-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Status' \
+        --output text)
+
+    echo "Change set status: $CHANGE_SET_STATUS"
+
+    if [ "$CHANGE_SET_STATUS" == "FAILED" ]; then
+        CHANGE_SET_REASON=$(aws cloudformation describe-change-set \
+            --stack-name "$stack_name" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_DEFAULT_REGION" \
+            --query 'StatusReason' \
+            --output text)
+
+        if [[ "$CHANGE_SET_REASON" == *"didn't contain changes"* ]] || [[ "$CHANGE_SET_REASON" == *"No updates"* ]]; then
+            echo "No monitoring stack changes detected - stack is up to date."
+            aws cloudformation delete-change-set \
+                --stack-name "$stack_name" \
+                --change-set-name "$CHANGE_SET_NAME" \
+                --region "$AWS_DEFAULT_REGION" || true
+            return 0
+        else
+            echo "ERROR: Monitoring change set creation failed: $CHANGE_SET_REASON"
+            exit 1
+        fi
+    fi
+
+    echo ""
+    echo "Changes to be applied:"
+    aws cloudformation describe-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Changes[*].{Action:ResourceChange.Action,Resource:ResourceChange.LogicalResourceId,Type:ResourceChange.ResourceType}' \
+        --output table
+    echo ""
+
+    echo "Executing change set..."
+    aws cloudformation execute-change-set \
+        --stack-name "$stack_name" \
+        --change-set-name "$CHANGE_SET_NAME" \
+        --region "$AWS_DEFAULT_REGION"
+
+    echo "Waiting for monitoring stack update to complete..."
+    if aws cloudformation wait stack-update-complete \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION"; then
+        echo ""
+        echo "✓ Monitoring stack update completed successfully!"
+    else
+        echo ""
+        echo "ERROR: Monitoring stack update failed or timed out."
+        aws cloudformation describe-stack-events \
+            --stack-name "$stack_name" \
+            --region "$AWS_DEFAULT_REGION" \
+            --query 'StackEvents[0:10].{Time:Timestamp,Status:ResourceStatus,Resource:LogicalResourceId,Reason:ResourceStatusReason}' \
+            --output table
+        exit 1
+    fi
+}
+
+# ============================================================================
 # Display Summary
 # ============================================================================
 display_summary() {
-    local stack_name="${CF_STACK_BACKEND:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-backend}"
+    local backend_stack="${CF_STACK_BACKEND:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-backend}"
+    local monitoring_stack="${CF_STACK_MONITORING:-coheus-${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-dev}-monitoring}"
     
     echo ""
     echo "========================================="
@@ -465,13 +630,20 @@ display_summary() {
     echo "========================================="
     echo ""
     
-    # Get final stack status
     echo "Backend Stack Status:"
     aws cloudformation describe-stacks \
-        --stack-name "$stack_name" \
+        --stack-name "$backend_stack" \
         --region "$AWS_DEFAULT_REGION" \
         --query 'Stacks[0].{StackName:StackName,Status:StackStatus,LastUpdated:LastUpdatedTime}' \
         --output table 2>/dev/null || echo "(Stack not found in $AWS_DEFAULT_REGION)"
+    
+    echo ""
+    echo "Monitoring Stack Status:"
+    aws cloudformation describe-stacks \
+        --stack-name "$monitoring_stack" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].{StackName:StackName,Status:StackStatus,LastUpdated:LastUpdatedTime}' \
+        --output table 2>/dev/null || echo "(Stack not found or not deployed)"
     
     echo ""
     echo "Deployment Environment: ${BITBUCKET_DEPLOYMENT_ENVIRONMENT:-unknown}"
@@ -489,6 +661,7 @@ main() {
     validate_templates
     deploy_backend_stack
     deploy_waf_cloudfront_stack
+    deploy_monitoring_stack
     display_summary
     
     echo "Infrastructure deployment completed."

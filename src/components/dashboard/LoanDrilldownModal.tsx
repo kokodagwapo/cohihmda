@@ -178,9 +178,9 @@ function buildEmailBody(loan: LoanData): string {
   if (loan.lockDate != null || loan.lockMarketRate != null || loan.marketRate != null || loan.lockExpirationDate != null) {
     body += `${sep}\nRATE & MARKET\n${sep}\n`;
     const rateLabel = loan.rateReferenceType === "application" ? "Rate at application" : "Market rate at lock";
-    body += `${rateLabel}: ${loan.lockMarketRate != null && !Number.isNaN(loan.lockMarketRate) ? loan.lockMarketRate.toFixed(3) + '%' : '—'}\n`;
-    body += `Market rate today: ${loan.marketRate != null ? loan.marketRate.toFixed(3) + '%' : '—'}\n`;
-    body += `Market Delta: ${loan.marketChangeDelta != null && !Number.isNaN(loan.marketChangeDelta) ? (loan.marketChangeDelta > 0 ? '+' : '') + loan.marketChangeDelta.toFixed(3) + '%' : '—'}\n`;
+    body += `${rateLabel}: ${loan.lockMarketRate != null && !Number.isNaN(Number(loan.lockMarketRate)) ? Number(loan.lockMarketRate).toFixed(3) + '%' : '—'}\n`;
+    body += `Market rate today: ${loan.marketRate != null && !Number.isNaN(Number(loan.marketRate)) ? Number(loan.marketRate).toFixed(3) + '%' : '—'}\n`;
+    body += `Market Delta: ${loan.marketChangeDelta != null && !Number.isNaN(Number(loan.marketChangeDelta)) ? (Number(loan.marketChangeDelta) > 0 ? '+' : '') + Number(loan.marketChangeDelta).toFixed(3) + '%' : '—'}\n`;
     body += `Lock Status: ${(loan.lockDate != null && loan.lockDate !== '') ? (loan.lockExpirationDate ? formatLockExpirationForEmail(loan.lockExpirationDate) : '—') : 'Locked: No'}\n\n`;
   }
 
