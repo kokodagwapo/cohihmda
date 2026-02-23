@@ -54,11 +54,11 @@ Parameters:
     Default: ''
     Description: Email address for alert notifications (optional)
 
-  SlackWebhookUrl:
+  TeamsWebhookUrl:
     Type: String
     Default: ''
     NoEcho: true
-    Description: Slack webhook URL for notifications (optional)
+    Description: Microsoft Teams incoming webhook URL for notifications (optional)
 
   EnableDetailedMonitoring:
     Type: String
@@ -68,13 +68,31 @@ Parameters:
       - 'false'
     Description: Enable detailed 1-minute metrics (additional cost)
 
+  ECSLogGroupName:
+    Type: String
+    Default: ''
+    Description: CloudWatch Log Group for ECS task logs (e.g. /ecs/coheus-dev). Leave empty to disable backend error log alerting.
+
+  HealthCheckDomain:
+    Type: String
+    Default: ''
+    Description: FQDN for synthetic uptime check (e.g. cohi-dev-api.coheus1.com). Leave empty to disable Route 53 health check.
+
+  RDSClusterIdentifier:
+    Type: String
+    Default: ''
+    Description: Aurora Serverless v2 cluster identifier for ACU monitoring (e.g. coheus-dev-management). Leave empty to skip.
+
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
-  HasSlackWebhook: !Not [!Equals [!Ref SlackWebhookUrl, '']]
+  HasTeamsWebhook: !Not [!Equals [!Ref TeamsWebhookUrl, '']]
   HasCloudFront: !Not [!Equals [!Ref CloudFrontDistributionId, '']]
   HasALB: !And
     - !Not [!Equals [!Ref ALBFullName, '']]
     - !Not [!Equals [!Ref TargetGroupFullName, '']]
+  HasECSLogGroup: !Not [!Equals [!Ref ECSLogGroupName, '']]
+  HasHealthCheckDomain: !Not [!Equals [!Ref HealthCheckDomain, '']]
+  HasRDSCluster: !Not [!Equals [!Ref RDSClusterIdentifier, '']]
 
 Resources:
   # ============================================================================
@@ -133,6 +151,115 @@ Resources:
       TopicArn: !Ref WarningAlertsTopic
       Protocol: email
       Endpoint: !Ref AlertEmail
+
+  # ============================================================================
+  # SNS to Microsoft Teams Lambda (when TeamsWebhookUrl is set)
+  # ============================================================================
+
+  SnsToTeamsLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasTeamsWebhook
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-sns-to-teams'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+
+  SnsToTeamsLambdaRolePolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasTeamsWebhook
+    Properties:
+      PolicyName: logs
+      Roles: [!Ref SnsToTeamsLambdaRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+
+  SnsToTeamsLambda:
+    Type: AWS::Lambda::Function
+    Condition: HasTeamsWebhook
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-sns-to-teams'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt SnsToTeamsLambdaRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          TEAMS_WEBHOOK_URL: !Ref TeamsWebhookUrl
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            const webhook = process.env.TEAMS_WEBHOOK_URL;
+            if (!webhook) return {};
+            for (const r of event.Records || []) {
+              try {
+                const msg = JSON.parse(r.Sns.Message);
+                const state = msg.NewStateValue || 'UNKNOWN';
+                const themeColor = state === 'ALARM' ? 'FF0000' : state === 'OK' ? '00CC00' : 'FFA500';
+                const reason = msg.NewStateReason || state;
+                const metric = msg.Trigger ? (msg.Trigger.MetricName || '') + ' (' + (msg.Trigger.Namespace || '') + ')' : '';
+                const card = {
+                  '@type': 'MessageCard',
+                  '@context': 'https://schema.org/extensions',
+                  themeColor: themeColor,
+                  summary: (msg.AlarmName || 'Alarm') + ' - ' + state,
+                  sections: [{
+                    activityTitle: (msg.AlarmName || 'Alarm') + ' -> ' + state,
+                    facts: [
+                      { name: 'State', value: state },
+                      { name: 'Region', value: msg.Region || '' },
+                      { name: 'Time', value: msg.StateChangeTime || '' }
+                    ].filter(f => f.value),
+                    text: [reason, metric].filter(Boolean).join('\n\n')
+                  }]
+                };
+                const res = await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(card) });
+                if (!res.ok) console.error('Teams webhook failed:', res.status, await res.text());
+              } catch (e) { console.error(e); }
+            }
+            return {};
+          };
+
+  SnsToTeamsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasTeamsWebhook
+    Properties:
+      FunctionName: !Ref SnsToTeamsLambda
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref CriticalAlertsTopic
+
+  SnsToTeamsLambdaPermissionWarning:
+    Type: AWS::Lambda::Permission
+    Condition: HasTeamsWebhook
+    Properties:
+      FunctionName: !Ref SnsToTeamsLambda
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref WarningAlertsTopic
+
+  CriticalTeamsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasTeamsWebhook
+    Properties:
+      TopicArn: !Ref CriticalAlertsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt SnsToTeamsLambda.Arn
+
+  WarningTeamsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasTeamsWebhook
+    Properties:
+      TopicArn: !Ref WarningAlertsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt SnsToTeamsLambda.Arn
 
   # ============================================================================
   # Critical Alarms
@@ -257,6 +384,78 @@ Resources:
         - !Ref InfoAlertsTopic
       TreatMissingData: notBreaching
 
+  # ALB ELB 5xx - errors from load balancer (502/503/504)
+  ALBELB5xxCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasALB
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-alb-elb-5xx-critical'
+      AlarmDescription: 'CRITICAL: ELB-generated 5xx errors (502/503/504)'
+      MetricName: HTTPCode_ELB_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # Unhealthy hosts - any target failing health checks
+  ALBUnhealthyHostCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasALB
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-alb-unhealthy-host-critical'
+      AlarmDescription: 'CRITICAL: One or more targets failing ALB health checks'
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+        - Name: TargetGroup
+          Value: !Ref TargetGroupFullName
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # ECS running task count - no tasks available (uses Container Insights metric)
+  ECSRunningTaskCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ecs-running-task-critical'
+      AlarmDescription: 'CRITICAL: No ECS tasks running (service down or scaling to zero)'
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSClusterName
+        - Name: ServiceName
+          Value: !Ref ECSServiceName
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
   # Database Storage Critical
   DBStorageCriticalAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -278,6 +477,98 @@ Resources:
       OKActions:
         - !Ref InfoAlertsTopic
       TreatMissingData: notBreaching
+
+  # Backend application errors (from ECS task logs)
+  BackendErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Condition: HasECSLogGroup
+    Properties:
+      LogGroupName: !Ref ECSLogGroupName
+      FilterPattern: '[ERROR]'
+      MetricTransformations:
+        - MetricNamespace: !Sub '${ProjectName}/${Environment}/Application'
+          MetricName: BackendErrorCount
+          MetricValue: '1'
+          DefaultValue: 0
+
+  BackendErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasECSLogGroup
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-backend-errors'
+      AlarmDescription: 'CRITICAL: Backend application errors detected in logs'
+      MetricName: BackendErrorCount
+      Namespace: !Sub '${ProjectName}/${Environment}/Application'
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  BackendErrorWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasECSLogGroup
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-backend-errors-warning'
+      AlarmDescription: 'WARNING: Backend application errors detected in logs'
+      MetricName: BackendErrorCount
+      Namespace: !Sub '${ProjectName}/${Environment}/Application'
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
+  # ============================================================================
+  # Synthetic Uptime Monitoring (Route 53 Health Check)
+  # ============================================================================
+
+  UptimeHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Condition: HasHealthCheckDomain
+    Properties:
+      HealthCheckConfig:
+        Type: HTTPS
+        FullyQualifiedDomainName: !Ref HealthCheckDomain
+        Port: 443
+        ResourcePath: /api/health
+        RequestInterval: 30
+        FailureThreshold: 3
+      HealthCheckTags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-api-uptime'
+
+  UptimeHealthCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasHealthCheckDomain
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-uptime-health-check'
+      AlarmDescription: 'CRITICAL: API health check failing (site may be down)'
+      Namespace: AWS/Route53
+      MetricName: HealthCheckStatus
+      Dimensions:
+        - Name: HealthCheckId
+          Value: !Ref UptimeHealthCheck
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref CriticalAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: breaching
 
   # ============================================================================
   # Warning Alarms
@@ -353,6 +644,31 @@ Resources:
         - !Ref InfoAlertsTopic
       TreatMissingData: notBreaching
 
+  # ALB 4xx spike - client errors / auth or API contract issues
+  ALB4xxWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasALB
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-alb-4xx-warning'
+      AlarmDescription: 'WARNING: High rate of 4xx errors (auth/API issues)'
+      MetricName: HTTPCode_Target_4XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref ALBFullName
+        - Name: TargetGroup
+          Value: !Ref TargetGroupFullName
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
   # ALB Latency Warning (replaces EB ApplicationLatencyP99)
   ALBLatencyWarningAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -422,20 +738,50 @@ Resources:
         - !Ref InfoAlertsTopic
       TreatMissingData: notBreaching
 
+  # Aurora Serverless v2 ACU usage (high capacity = scaling)
+  AuroraCapacityWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRDSCluster
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-aurora-capacity-warning'
+      AlarmDescription: 'WARNING: Aurora Serverless v2 capacity at or above 8 ACU'
+      MetricName: ServerlessDatabaseCapacity
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 8
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: DBClusterIdentifier
+          Value: !Ref RDSClusterIdentifier
+      AlarmActions:
+        - !Ref WarningAlertsTopic
+      OKActions:
+        - !Ref InfoAlertsTopic
+      TreatMissingData: notBreaching
+
   # ============================================================================
   # Composite Alarms
   # ============================================================================
 
   # Overall System Health Composite Alarm
+  # UptimeHealthCheckAlarm (when enabled) notifies CriticalAlertsTopic directly; not included in composite to avoid complex conditional refs.
   SystemHealthCompositeAlarm:
     Type: AWS::CloudWatch::CompositeAlarm
     Properties:
       AlarmName: !Sub '${ProjectName}-${Environment}-system-health'
       AlarmDescription: 'Overall system health - triggered when any critical component fails'
       AlarmRule: !If
-        - HasALB
-        - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${ALB5xxCriticalAlarm})'
-        - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm})'
+        - HasECSLogGroup
+        - !If
+          - HasALB
+          - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${ALB5xxCriticalAlarm}) OR ALARM(${ALBELB5xxCriticalAlarm}) OR ALARM(${ALBUnhealthyHostCriticalAlarm}) OR ALARM(${ECSRunningTaskCriticalAlarm}) OR ALARM(${BackendErrorAlarm})'
+          - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${ECSRunningTaskCriticalAlarm}) OR ALARM(${BackendErrorAlarm})'
+        - !If
+          - HasALB
+          - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${ALB5xxCriticalAlarm}) OR ALARM(${ALBELB5xxCriticalAlarm}) OR ALARM(${ALBUnhealthyHostCriticalAlarm}) OR ALARM(${ECSRunningTaskCriticalAlarm})'
+          - !Sub 'ALARM(${ECSCPUCriticalAlarm}) OR ALARM(${ECSMemoryCriticalAlarm}) OR ALARM(${DBCPUCriticalAlarm}) OR ALARM(${DBConnectionsCriticalAlarm}) OR ALARM(${ECSRunningTaskCriticalAlarm})'
       AlarmActions:
         - !Ref CriticalAlertsTopic
       OKActions:
@@ -472,7 +818,10 @@ Resources:
                 {"type":"metric","x":16,"y":19,"width":8,"height":6,"properties":{"title":"Database Storage","metrics":[["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (5GB)","value":5000000000,"color":"#ff7f0e"},{"label":"Critical (1GB)","value":1000000000,"color":"#d62728"}]}}},
                 {"type":"metric","x":0,"y":25,"width":8,"height":6,"properties":{"title":"Database Freeable Memory","metrics":[["AWS/RDS","FreeableMemory","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
                 {"type":"metric","x":8,"y":25,"width":8,"height":6,"properties":{"title":"Database Read/Write IOPS","metrics":[["AWS/RDS","ReadIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read IOPS"}],["AWS/RDS","WriteIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write IOPS"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
-                {"type":"metric","x":16,"y":25,"width":8,"height":6,"properties":{"title":"Database Latency","metrics":[["AWS/RDS","ReadLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read Latency"}],["AWS/RDS","WriteLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write Latency"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}}
+                {"type":"metric","x":16,"y":25,"width":8,"height":6,"properties":{"title":"Database Latency","metrics":[["AWS/RDS","ReadLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read Latency"}],["AWS/RDS","WriteLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write Latency"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"text","x":0,"y":31,"width":24,"height":1,"properties":{"markdown":"## Application logs (errors)"}},
+                {"type":"log","x":0,"y":32,"width":12,"height":6,"properties":{"title":"Recent application errors (last 1h)","query":"SOURCE '/ecs/${ProjectName}-${Environment}' | filter @message like /[ERROR]/ \n| sort @timestamp desc \n| limit 50","region":"${AWS::Region}","view":"table"}},
+                {"type":"log","x":12,"y":32,"width":12,"height":6,"properties":{"title":"Top error messages by frequency","query":"SOURCE '/ecs/${ProjectName}-${Environment}' | filter @message like /[ERROR]/ \n| stats count() as cnt by @message \n| sort cnt desc \n| limit 10","region":"${AWS::Region}","view":"table"}}
               ]
             }
         # ---- Reduced dashboard WITHOUT ALB widgets ----
@@ -492,7 +841,10 @@ Resources:
                 {"type":"metric","x":16,"y":13,"width":8,"height":6,"properties":{"title":"Database Storage","metrics":[["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Average","annotations":{"horizontal":[{"label":"Warning (5GB)","value":5000000000,"color":"#ff7f0e"},{"label":"Critical (1GB)","value":1000000000,"color":"#d62728"}]}}},
                 {"type":"metric","x":0,"y":19,"width":8,"height":6,"properties":{"title":"Database Freeable Memory","metrics":[["AWS/RDS","FreeableMemory","DBInstanceIdentifier","${RDSInstanceIdentifier}"]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
                 {"type":"metric","x":8,"y":19,"width":8,"height":6,"properties":{"title":"Database Read/Write IOPS","metrics":[["AWS/RDS","ReadIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read IOPS"}],["AWS/RDS","WriteIOPS","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write IOPS"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
-                {"type":"metric","x":16,"y":19,"width":8,"height":6,"properties":{"title":"Database Latency","metrics":[["AWS/RDS","ReadLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read Latency"}],["AWS/RDS","WriteLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write Latency"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}}
+                {"type":"metric","x":16,"y":19,"width":8,"height":6,"properties":{"title":"Database Latency","metrics":[["AWS/RDS","ReadLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Read Latency"}],["AWS/RDS","WriteLatency","DBInstanceIdentifier","${RDSInstanceIdentifier}",{"label":"Write Latency"}]],"view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average"}},
+                {"type":"text","x":0,"y":25,"width":24,"height":1,"properties":{"markdown":"## Application logs (errors)"}},
+                {"type":"log","x":0,"y":26,"width":12,"height":6,"properties":{"title":"Recent application errors (last 1h)","query":"SOURCE '/ecs/${ProjectName}-${Environment}' | filter @message like /[ERROR]/ \n| sort @timestamp desc \n| limit 50","region":"${AWS::Region}","view":"table"}},
+                {"type":"log","x":12,"y":26,"width":12,"height":6,"properties":{"title":"Top error messages by frequency","query":"SOURCE '/ecs/${ProjectName}-${Environment}' | filter @message like /[ERROR]/ \n| stats count() as cnt by @message \n| sort cnt desc \n| limit 10","region":"${AWS::Region}","view":"table"}}
               ]
             }
 
