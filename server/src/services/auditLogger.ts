@@ -4,7 +4,7 @@
  */
 
 import { pool } from "../config/database.js";
-import { logError, logInfo } from "./logger.js";
+import { logError, logInfo, logWarn } from "./logger.js";
 
 export interface AuditLogEntry {
   // Who
@@ -64,12 +64,20 @@ export async function auditLog(entry: AuditLogEntry): Promise<void> {
         entry.requestId || null,
       ]
     );
-  } catch (error) {
+  } catch (error: any) {
     // Don't throw - audit logging should never break the main flow
-    logError("Audit log error", error, {
-      action: entry.action,
-      resource: entry.resource,
-    });
+    const isTimeout = error?.message?.includes("timeout") || error?.code === "ETIMEDOUT";
+    if (isTimeout) {
+      logWarn("Audit log skipped (connection timeout)", {
+        action: entry.action,
+        resource: entry.resource,
+      });
+    } else {
+      logError("Audit log error", error, {
+        action: entry.action,
+        resource: entry.resource,
+      });
+    }
   }
 }
 
