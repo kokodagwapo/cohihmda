@@ -159,6 +159,46 @@ get_stack_parameters() {
     echo "$result"
 }
 
+# Get stack parameters but only for keys that exist in the template.
+# Use this when the template may have been updated (e.g. parameter renamed)
+# so we do not pass obsolete parameter names (e.g. SlackWebhookUrl -> TeamsWebhookUrl).
+get_stack_parameters_for_template() {
+    local stack_name=$1
+    local template_file=$2
+    
+    echo "Getting parameters from stack $stack_name (only keys present in template)..." >&2
+    
+    local template_keys
+    template_keys=$(aws cloudformation get-template-summary \
+        --template-body "file://$template_file" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || { echo "[]"; return; }
+    
+    local stack_keys
+    stack_keys=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$AWS_DEFAULT_REGION" \
+        --query 'Stacks[0].Parameters[*].ParameterKey' \
+        --output text 2>/dev/null) || { echo "[]"; return; }
+    
+    local result="["
+    local first=true
+    for key in $template_keys; do
+        # Only pass UsePreviousValue for keys that exist in the current stack
+        if echo "$stack_keys" | grep -qE "(^| )${key}( |$)"; then
+            if [ "$first" = true ]; then
+                first=false
+            else
+                result+=","
+            fi
+            result+="{\"ParameterKey\":\"$key\",\"UsePreviousValue\":true}"
+        fi
+    done
+    result+="]"
+    echo "$result"
+}
+
 # ============================================================================
 # Deploy Backend Stack
 # ============================================================================
@@ -502,7 +542,7 @@ deploy_monitoring_stack() {
         --template-body "file://$template_file" \
         --no-use-previous-template \
         --capabilities CAPABILITY_NAMED_IAM \
-        --parameters "$(get_stack_parameters "$stack_name")" \
+        --parameters "$(get_stack_parameters_for_template "$stack_name" "$template_file")" \
         --region "$AWS_DEFAULT_REGION" \
         --output json > /dev/null
 
