@@ -25,6 +25,9 @@ export interface NewsItem {
   time: string;
   date: string;
   link: string;
+  publishedAt?: string;
+  excerpt?: string;
+  relevanceScore?: number;
 }
 
 export interface NewsSource {
@@ -236,6 +239,7 @@ async function scrapeMBA(): Promise<NewsSource | null> {
               year: "numeric",
             }),
             link,
+            publishedAt: pubDate.toISOString(),
           });
         }
       });
@@ -308,6 +312,7 @@ async function scrapeMBA(): Promise<NewsSource | null> {
               year: "numeric",
             }),
             link,
+            publishedAt: pubDate.toISOString(),
           });
         }
       });
@@ -393,6 +398,7 @@ async function scrapeFannieMae(): Promise<NewsSource | null> {
             year: "numeric",
           }),
           link,
+          publishedAt: pubDate.toISOString(),
         });
       }
     });
@@ -472,6 +478,7 @@ async function scrapeFreddieMac(): Promise<NewsSource | null> {
             year: "numeric",
           }),
           link: href,
+          publishedAt: pubDate.toISOString(),
         });
       }
     });
@@ -553,6 +560,7 @@ async function scrapeCFPB(): Promise<NewsSource | null> {
             year: "numeric",
           }),
           link,
+          publishedAt: pubDate.toISOString(),
         });
       }
     });
@@ -635,6 +643,7 @@ async function scrapeFHFA(): Promise<NewsSource | null> {
             year: "numeric",
           }),
           link,
+          publishedAt: pubDate.toISOString(),
         });
       }
     });
@@ -682,13 +691,18 @@ async function fetchNationalMortgageNews(): Promise<NewsSource | null> {
       const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
       return {
         title: (item.title || "Untitled").trim(),
-        time: getTimeAgo(pubDate),
+        time: pubDate.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
         date: pubDate.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
         }),
         link: item.link || "https://www.nationalmortgagenews.com/",
+        publishedAt: pubDate.toISOString(),
+        excerpt: (item.contentSnippet || "").trim(),
       };
     });
 
@@ -733,13 +747,18 @@ async function fetchMortgageNewsDaily(): Promise<NewsSource | null> {
       const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
       return {
         title: (item.title || "Untitled").trim(),
-        time: getTimeAgo(pubDate),
+        time: pubDate.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
         date: pubDate.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
         }),
         link: item.link || "https://www.mortgagenewsdaily.com/",
+        publishedAt: pubDate.toISOString(),
+        excerpt: (item.contentSnippet || "").trim(),
       };
     });
 
@@ -784,13 +803,18 @@ async function fetchMNDRateWatch(): Promise<NewsSource | null> {
       const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
       return {
         title: (item.title || "Untitled").trim(),
-        time: getTimeAgo(pubDate),
+        time: pubDate.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
         date: pubDate.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
         }),
         link: item.link || "https://www.mortgagenewsdaily.com/mortgage-rates/",
+        publishedAt: pubDate.toISOString(),
+        excerpt: (item.contentSnippet || "").trim(),
       };
     });
 
@@ -812,6 +836,132 @@ async function fetchMNDRateWatch(): Promise<NewsSource | null> {
     };
   } catch (error: any) {
     console.error("[NewsService] MND Rate Watch RSS failed:", error.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch Federal Reserve press releases (policy/rates/macroeconomic context)
+ */
+async function fetchFederalReserveNews(): Promise<NewsSource | null> {
+  try {
+    console.log("[NewsService] Fetching Federal Reserve RSS...");
+    const feed = await rssParser.parseURL(
+      "https://www.federalreserve.gov/feeds/press_all.xml"
+    );
+
+    if (!feed?.items?.length) return null;
+
+    const items: NewsItem[] = feed.items.slice(0, 4).map((item: any) => {
+      const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
+      return {
+        title: (item.title || "Untitled").trim(),
+        time: pubDate.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        date: pubDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+        link: item.link || "https://www.federalreserve.gov/newsevents.htm",
+        publishedAt: pubDate.toISOString(),
+        excerpt: (item.contentSnippet || "").trim(),
+      };
+    });
+
+    console.log(
+      `[NewsService] Federal Reserve: ${
+        items.length
+      } items. First: "${items[0]?.title?.substring(0, 50)}..."`
+    );
+
+    return {
+      source: "Federal Reserve",
+      icon: "Activity",
+      color: "text-amber-600 dark:text-amber-400",
+      bg: "bg-amber-50 dark:bg-amber-950/20",
+      summary:
+        "Federal Reserve press releases and policy communications relevant to rates, liquidity, and mortgage market conditions.",
+      items: items.slice(0, 2),
+      enabledByDefault: true,
+    };
+  } catch (error: any) {
+    console.error("[NewsService] Federal Reserve RSS failed:", error.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch Reuters business feed and filter for lending/mortgage/Fed topics
+ */
+async function fetchReutersLendingNews(): Promise<NewsSource | null> {
+  try {
+    console.log("[NewsService] Fetching Reuters business RSS...");
+    const feed = await rssParser.parseURL(
+      "https://feeds.reuters.com/reuters/businessNews"
+    );
+
+    if (!feed?.items?.length) return null;
+
+    const keywords = [
+      "mortgage",
+      "lending",
+      "loan",
+      "federal reserve",
+      "fed",
+      "treasury",
+      "housing",
+      "real estate",
+      "refinance",
+      "rates",
+    ];
+
+    const filteredItems = feed.items.filter((item: any) => {
+      const haystack = `${item?.title || ""} ${item?.contentSnippet || ""}`.toLowerCase();
+      return keywords.some((keyword) => haystack.includes(keyword));
+    });
+
+    if (!filteredItems.length) return null;
+
+    const items: NewsItem[] = filteredItems.slice(0, 4).map((item: any) => {
+      const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
+      return {
+        title: (item.title || "Untitled").trim(),
+        time: pubDate.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        date: pubDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }),
+        link: item.link || "https://www.reuters.com/business/",
+        publishedAt: pubDate.toISOString(),
+        excerpt: (item.contentSnippet || "").trim(),
+      };
+    });
+
+    console.log(
+      `[NewsService] Reuters Lending: ${
+        items.length
+      } items. First: "${items[0]?.title?.substring(0, 50)}..."`
+    );
+
+    return {
+      source: "Reuters",
+      icon: "Newspaper",
+      color: "text-slate-700 dark:text-slate-300",
+      bg: "bg-slate-100 dark:bg-slate-800/40",
+      summary:
+        "National business coverage filtered for mortgage, lending, Federal Reserve, and rates-related breaking developments.",
+      items: items.slice(0, 2),
+      enabledByDefault: true,
+    };
+  } catch (error: any) {
+    console.error("[NewsService] Reuters business RSS failed:", error.message);
     return null;
   }
 }
@@ -841,10 +991,144 @@ function getDefaultForSource(
         time: "Now",
         date: today,
         link: url,
+        excerpt: "",
+        relevanceScore: 0,
       },
     ],
     enabledByDefault: config.enabledByDefault ?? true,
   };
+}
+
+const EXEC_KEYWORDS = [
+  "mortgage",
+  "lending",
+  "loan",
+  "bank",
+  "banking",
+  "fintech",
+  "federal reserve",
+  "fed",
+  "rates",
+  "treasury",
+  "mbs",
+  "housing",
+  "compliance",
+  "regulation",
+  "servicing",
+  "origination",
+];
+
+function heuristicRelevanceScore(title: string, source: string, date?: string): number {
+  const haystack = `${title} ${source}`.toLowerCase();
+  let score = 10;
+  for (const keyword of EXEC_KEYWORDS) {
+    if (haystack.includes(keyword)) score += 7;
+  }
+
+  // Slight recency bonus for "today" headlines.
+  if (date) {
+    const parsed = parseDate(date);
+    const ageDays = Math.max(
+      0,
+      Math.floor((Date.now() - parsed.getTime()) / (24 * 60 * 60 * 1000))
+    );
+    score += Math.max(0, 12 - ageDays * 2);
+  }
+
+  return Math.min(100, score);
+}
+
+async function rankHeadlinesForExecutives(results: NewsSource[]): Promise<void> {
+  const allItems: Array<{
+    id: string;
+    source: string;
+    title: string;
+    date: string;
+    itemRef: NewsItem;
+  }> = [];
+
+  results.forEach((source, sourceIdx) => {
+    source.items.forEach((item, itemIdx) => {
+      const id = `${sourceIdx}-${itemIdx}`;
+      allItems.push({
+        id,
+        source: source.source,
+        title: item.title,
+        date: item.date,
+        itemRef: item,
+      });
+    });
+  });
+
+  if (!allItems.length) return;
+
+  // Start with heuristic score.
+  allItems.forEach((entry) => {
+    entry.itemRef.relevanceScore = heuristicRelevanceScore(
+      entry.title,
+      entry.source,
+      entry.date
+    );
+  });
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return;
+
+  try {
+    const payload = allItems
+      .map((entry) => `${entry.id} | ${entry.source} | ${entry.date} | ${entry.title}`)
+      .join("\n");
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 600,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are ranking news for C-suite lending executives. Prioritize mortgage banking, lending, Federal Reserve policy, banking/fintech disruption, compliance and macro risk. Return JSON: {\"rankings\":[{\"id\":\"...\",\"score\":0-100}]}.",
+          },
+          {
+            role: "user",
+            content: `Rank these headlines by relevance:\n${payload}`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) return;
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return;
+    const parsed = JSON.parse(content) as {
+      rankings?: Array<{ id: string; score: number }>;
+    };
+
+    const rankMap = new Map<string, number>();
+    (parsed.rankings || []).forEach((r) => rankMap.set(r.id, r.score));
+
+    allItems.forEach((entry) => {
+      const aiScore = rankMap.get(entry.id);
+      if (typeof aiScore === "number") {
+        entry.itemRef.relevanceScore = Math.max(
+          entry.itemRef.relevanceScore || 0,
+          Math.min(100, aiScore)
+        );
+      }
+    });
+  } catch (error: any) {
+    console.warn("[NewsService] AI ranking failed:", error.message);
+  }
 }
 
 /**
@@ -933,10 +1217,12 @@ async function fetchAllNews(): Promise<NewsSource[]> {
   );
 
   // Fetch RSS sources in parallel
-  const [nmn, mnd, mndRates] = await Promise.all([
+  const [nmn, mnd, mndRates, fed, reuters] = await Promise.all([
     fetchNationalMortgageNews(),
     fetchMortgageNewsDaily(),
     fetchMNDRateWatch(),
+    fetchFederalReserveNews(),
+    fetchReutersLendingNews(),
   ]);
 
   if (nmn) results.push(nmn);
@@ -988,9 +1274,53 @@ async function fetchAllNews(): Promise<NewsSource[]> {
       )
     );
 
+  if (fed) results.push(fed);
+  else
+    results.push(
+      getDefaultForSource(
+        "Federal Reserve",
+        "https://www.federalreserve.gov/newsevents.htm",
+        {
+          icon: "Activity",
+          color: "text-amber-600 dark:text-amber-400",
+          bg: "bg-amber-50 dark:bg-amber-950/20",
+          summary:
+            "Federal Reserve policy and press updates relevant to lending and mortgage markets.",
+          enabledByDefault: true,
+        }
+      )
+    );
+
+  if (reuters) results.push(reuters);
+  else
+    results.push(
+      getDefaultForSource("Reuters", "https://www.reuters.com/business/", {
+        icon: "Newspaper",
+        color: "text-slate-700 dark:text-slate-300",
+        bg: "bg-slate-100 dark:bg-slate-800/40",
+        summary:
+          "National business coverage relevant to lending, rates, and Federal Reserve developments.",
+        enabledByDefault: true,
+      })
+    );
+
   const successCount = results.filter(
     (r) => r.items.length > 0 && !r.items[0].title.includes("Visit ")
   ).length;
+
+  await rankHeadlinesForExecutives(results);
+
+  // Sort each source by executive relevance + recency.
+  results.forEach((source) => {
+    source.items.sort((a, b) => {
+      const scoreDiff = (b.relevanceScore || 0) - (a.relevanceScore || 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      const aDate = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+      const bDate = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      return bDate - aDate;
+    });
+  });
+
   console.log(
     `[NewsService] Completed: ${successCount}/${results.length} sources with real articles`
   );
@@ -1057,6 +1387,67 @@ export async function getIndustryNews(): Promise<{
 export function clearNewsCache(): void {
   newsCache = null;
   console.log("[NewsService] Cache cleared");
+}
+
+export interface NewsDetailRequest {
+  title: string;
+  source: string;
+  link: string;
+}
+
+export interface NewsDetailResponse {
+  articleParagraphs: string[];
+  fullArticleUrl: string;
+  fetchedAt: string;
+  error?: string;
+}
+
+async function extractArticleParagraphs(url: string): Promise<string[]> {
+  const response = await axios.get(url, axiosConfig);
+  const $ = cheerio.load(response.data);
+  $("script, style, nav, footer, header, aside, form, noscript").remove();
+
+  const paragraphs: string[] = [];
+  $("article p, main p, p").each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, " ").trim();
+    if (text.length < 80 || text.length > 800) return;
+    if (!paragraphs.includes(text)) paragraphs.push(text);
+  });
+
+  // Keep a larger slice so we can show most of the article in-app.
+  return paragraphs.slice(0, 60);
+}
+
+function fallbackArticleParagraphs(title: string, source: string): string[] {
+  return [
+    `We could not extract article body text from ${source} for "${title}".`,
+    "Use the full article view below to read the complete source content directly from the publisher.",
+    "Cohi insights remain available to help summarize likely implications for lending operations and market strategy.",
+  ];
+}
+
+export async function generateNewsDetails(
+  article: NewsDetailRequest
+): Promise<NewsDetailResponse> {
+  try {
+    const paragraphs = await extractArticleParagraphs(article.link);
+    return {
+      articleParagraphs:
+        paragraphs.length >= 1
+          ? paragraphs
+          : fallbackArticleParagraphs(article.title, article.source),
+      fullArticleUrl: article.link,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error: any) {
+    console.error("[NewsDetails] Failed to generate details:", error.message);
+    return {
+      articleParagraphs: fallbackArticleParagraphs(article.title, article.source),
+      fullArticleUrl: article.link,
+      fetchedAt: new Date().toISOString(),
+      error: "Could not load article details",
+    };
+  }
 }
 
 // ============================================================================
