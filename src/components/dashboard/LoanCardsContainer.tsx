@@ -89,7 +89,7 @@ interface LoanCardsContainerProps {
   onActiveTabChange?: (tab: TabType) => void;
 }
 
-export type TabType = "all" | "likely-withdraw" | "likely-decline" | "past-est-closing" | "likely-close-late" | "favorites";
+export type TabType = "all" | "high-risk" | "likely-withdraw" | "likely-decline" | "past-est-closing" | "likely-close-late" | "favorites";
 type SortType = "risk" | "amount" | "loan" | "officer";
 
 const ITEMS_PER_PAGE_OPTIONS = [6, 10, 20, 50, 100] as const;
@@ -262,6 +262,12 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
       if (activeTab !== "all") {
         result = result.filter((loan) => {
           switch (activeTab) {
+            case "high-risk": {
+              const score = loan.riskScore ?? 0;
+              if (score < 80) return false;
+              const outcome = loan.riskSummary?.predictedOutcome;
+              return outcome === "withdraw" || outcome === "deny";
+            }
             case "likely-withdraw":
               if (loan.riskSummary?.predictedOutcome === "withdraw") return true;
               return (
@@ -385,6 +391,12 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
       });
       return {
         all: loans.length,
+        "high-risk": loans.filter((l) => {
+          const score = l.riskScore ?? 0;
+          if (score < 80) return false;
+          const outcome = l.riskSummary?.predictedOutcome;
+          return outcome === "withdraw" || outcome === "deny";
+        }).length,
         "likely-withdraw": loans.filter((l) => {
           if (l.riskSummary?.predictedOutcome === "withdraw") return true;
           return predictionMapForCounts.get(l.id)?.predictedOutcome === "withdraw";
@@ -434,6 +446,12 @@ export const LoanCardsContainer: React.FC<LoanCardsContainerProps> = memo(
       color: string;
     }[] = [
       { id: "all", label: "All Loans", shortLabel: "All", color: "darkred" },
+      {
+        id: "high-risk",
+        label: "High Risk",
+        shortLabel: "High Risk",
+        color: "darkred",
+      },
       {
         id: "likely-withdraw",
         label: "Likely Withdrawal",
