@@ -1457,6 +1457,8 @@ function formatDataRows(rows: any[]): any[] {
     for (const [key, value] of Object.entries(row)) {
       if (value === null || value === undefined) {
         formatted[key] = null;
+      } else if (typeof value === "object" && !(value instanceof Date)) {
+        formatted[key] = JSON.stringify(value);
       } else if (isISODateString(value)) {
         formatted[key] = formatDateValue(value as string);
       } else if (isNumericString(value)) {

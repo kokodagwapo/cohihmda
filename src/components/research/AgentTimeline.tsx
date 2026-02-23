@@ -456,7 +456,7 @@ function FindingDetail({ finding }: { finding: any }) {
           {Object.entries(finding.keyMetrics).map(([key, value]) => (
             <div key={key} className="bg-background rounded px-2 py-1 text-xs">
               <span className="text-muted-foreground">{key}:</span>{" "}
-              <span className="font-medium">{String(value)}</span>
+              <span className="font-medium">{typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}</span>
             </div>
           ))}
         </div>
@@ -485,7 +485,7 @@ function QueryResultTable({ fields, rows }: { fields: string[]; rows: Record<str
             <tr key={i} className="border-b last:border-b-0">
               {fields.map((f) => (
                 <td key={f} className="px-2 py-1 whitespace-nowrap max-w-[200px] truncate">
-                  {row[f] == null ? <span className="text-muted-foreground">NULL</span> : String(row[f])}
+                  {row[f] == null ? <span className="text-muted-foreground">NULL</span> : typeof row[f] === 'object' ? JSON.stringify(row[f]) : String(row[f])}
                 </td>
               ))}
             </tr>
