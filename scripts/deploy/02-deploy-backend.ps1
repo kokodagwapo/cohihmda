@@ -89,6 +89,7 @@ if ($COGNITO_USER_POOL_ID) {
     $params += "ParameterKey=CognitoClientId,ParameterValue=$COGNITO_CLIENT_ID"
     $params += "ParameterKey=CognitoClientSecret,ParameterValue=$COGNITO_CLIENT_SECRET"
     $params += "ParameterKey=CognitoDomain,ParameterValue=$COGNITO_DOMAIN"
+    $params += "ParameterKey=CognitoPasswordAuth,ParameterValue=$COGNITO_PASSWORD_AUTH"
 } else {
     Write-Status "Cognito SSO not configured for $ENVIRONMENT - skipping" "Yellow"
 }
