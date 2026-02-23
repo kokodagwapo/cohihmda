@@ -1,9 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const html = fs.readFileSync(path.join(__dirname, '..', 'tmp_invite_email.html'), 'utf8').replace(/\r\n/g, '\n').trim();
 
 const poolId = process.argv[2] || 'us-east-2_lArr8IsFK';
-const sesSourceArn = process.argv[3] || 'arn:aws:ses:us-east-2:339712788893:identity/coheus1.com';
+const siteUrl = process.argv[3] || 'cohi-dev.coheus1.com';
+const sesSourceArn = process.argv[4] || 'arn:aws:ses:us-east-2:339712788893:identity/coheus1.com';
+
+const html = fs.readFileSync(path.join(__dirname, '..', 'tmp_invite_email.html'), 'utf8')
+  .replace(/\r\n/g, '\n')
+  .trim()
+  .replace(/\{\{SITE_URL\}\}/g, siteUrl);
 
 const obj = {
   UserPoolId: poolId,
@@ -11,7 +16,7 @@ const obj = {
     AllowAdminCreateUserOnly: false,
     UnusedAccountValidityDays: 7,
     InviteMessageTemplate: {
-      EmailSubject: "You're invited to Coheus \u2013 sign in with your temporary password",
+      EmailSubject: "You're invited to Coheus - sign in with your temporary password",
       EmailMessage: html
     }
   },
